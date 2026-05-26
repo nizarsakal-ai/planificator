@@ -1,0 +1,152 @@
+import type { Metadata } from "next"
+import { auth } from "@/auth"
+import { redirect } from "next/navigation"
+import { prisma } from "@/lib/prisma"
+import { Badge } from "@/components/ui/badge"
+import { Card, CardContent } from "@/components/ui/card"
+import { HardHat, MapPin, Clock, CalendarDays } from "lucide-react"
+
+export const metadata: Metadata = { title: "Mon Planning" }
+
+const STATUS_STYLE: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  CONFIRMED: { label: "Confirmé",   variant: "default" },
+  PENDING:   { label: "En attente", variant: "secondary" },
+  REFUSED:   { label: "Refusé",     variant: "destructive" },
+}
+
+function formatDay(d: Date) {
+  return new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }).format(d)
+}
+
+function isUpcoming(d: Date) {
+  const today = new Date(); today.setHours(0,0,0,0)
+  return d >= today
+}
+
+export default async function MonPlanningPage() {
+  const session = await auth()
+  if (!session?.user) redirect("/login")
+
+  // Trouver l'employé lié à cet utilisateur
+  const employee = await prisma.employee.findFirst({
+    where: { userId: session.user.id },
+    select: { id: true, firstName: true, lastName: true },
+  })
+
+  if (!employee) {
+    return (
+      <div className="space-y-6">
+        <h1 className="text-2xl font-bold text-slate-900">Mon Planning</h1>
+        <Card>
+          <CardContent className="py-16 text-center">
+            <CalendarDays className="h-10 w-10 text-slate-200 mx-auto mb-3" />
+            <p className="text-slate-400 font-medium">Profil employé introuvable.</p>
+            <p className="text-slate-400 text-sm mt-1">Contactez votre administrateur.</p>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Récupérer les affectations des 30 derniers jours + 60 jours à venir
+  const from = new Date(); from.setDate(from.getDate() - 30); from.setHours(0,0,0,0)
+  const to   = new Date(); to.setDate(to.getDate() + 60);   to.setHours(23,59,59,999)
+
+  const assignments = await prisma.employeeAssignment.findMany({
+    where: {
+      employeeId: employee.id,
+      date: { gte: from, lte: to },
+    },
+    include: {
+      assignment: {
+        include: {
+          worksite: { select: { id: true, name: true, address: true, dailyHours: true } },
+          team:     { select: { name: true } },
+        },
+      },
+    },
+    orderBy: { date: "asc" },
+  })
+
+  const upcoming = assignments.filter((a) => isUpcoming(a.date))
+  const past     = assignments.filter((a) => !isUpcoming(a.date))
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">Mon Planning</h1>
+        <p className="text-sm text-slate-500 mt-1">
+          {employee.firstName} {employee.lastName} · {upcoming.length} affectation{upcoming.length > 1 ? "s" : ""} à venir
+        </p>
+      </div>
+
+      {/* À venir */}
+      <div className="space-y-3">
+        <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">À venir</h2>
+        {upcoming.length === 0 ? (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <CalendarDays className="h-8 w-8 text-slate-200 mx-auto mb-2" />
+              <p className="text-slate-400 text-sm">Aucune affectation prévue.</p>
+            </CardContent>
+          </Card>
+        ) : (
+          upcoming.map((ea) => {
+            const a  = ea.assignment
+            const st = STATUS_STYLE[a.status] ?? { label: a.status, variant: "secondary" as const }
+            return (
+              <Card key={ea.id} className="border-l-4 border-l-[#0f3460]">
+                <CardContent className="p-4 flex items-start justify-between gap-4">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <HardHat className="h-4 w-4 text-[#0f3460]" />
+                      <p className="font-semibold text-slate-800 text-sm">{a.worksite.name}</p>
+                    </div>
+                    <p className="text-xs text-slate-500 font-medium capitalize">{formatDay(ea.date)}</p>
+                    {a.worksite.address && (
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                        <MapPin className="h-3.5 w-3.5 shrink-0" />
+                        {a.worksite.address}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                      <Clock className="h-3.5 w-3.5 shrink-0" />
+                      {a.worksite.dailyHours}h · Équipe : {a.team.name}
+                    </div>
+                  </div>
+                  <Badge variant={st.variant} className="shrink-0 text-xs">{st.label}</Badge>
+                </CardContent>
+              </Card>
+            )
+          })
+        )}
+      </div>
+
+      {/* Passé */}
+      {past.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide">Passé</h2>
+          {past.reverse().map((ea) => {
+            const a  = ea.assignment
+            const st = STATUS_STYLE[a.status] ?? { label: a.status, variant: "secondary" as const }
+            return (
+              <Card key={ea.id} className="opacity-60">
+                <CardContent className="p-4 flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <HardHat className="h-4 w-4 text-slate-400" />
+                      <p className="font-medium text-slate-600 text-sm">{a.worksite.name}</p>
+                    </div>
+                    <p className="text-xs text-slate-400 capitalize">{formatDay(ea.date)}</p>
+                    <p className="text-xs text-slate-400">Équipe : {a.team.name}</p>
+                  </div>
+                  <Badge variant={st.variant} className="shrink-0 text-xs">{st.label}</Badge>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}

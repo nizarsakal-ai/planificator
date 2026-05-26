@@ -1,0 +1,557 @@
+// prisma/schema.prisma
+// Planificator — Schéma de base de données V1
+// Modèle multi-tenant SaaS : isolation par companyId sur toutes les tables métier
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ENUMS
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum Role {
+  SUPER_ADMIN  // Accès global, gère toutes les entreprises
+  ADMIN        // Gère son entreprise uniquement
+  TEAM_LEADER  // Consulte et confirme/refuse les affectations de son équipe
+  EMPLOYEE     // Consulte son propre planning
+  CLIENT       // Consulte ses chantiers et le planning associé
+}
+
+enum WorksiteStatus {
+  PLANNED      // Planifié, pas encore commencé
+  IN_PROGRESS  // En cours
+  COMPLETED    // Terminé — archivage automatique après 48h
+  ARCHIVED     // Archivé définitivement
+  EXTENDED     // Prolongé au-delà de la date de fin initiale
+}
+
+enum AssignmentStatus {
+  PENDING    // En attente de confirmation par le chef d'équipe
+  CONFIRMED  // Confirmé
+  REFUSED    // Refusé avec raison obligatoire
+}
+
+enum DocumentType {
+  PLAN      // Plan de chantier
+  PHOTO     // Photo de chantier
+  DOCUMENT  // Document administratif ou technique
+}
+
+enum InvitationStatus {
+  PENDING    // Invitation envoyée, non encore acceptée
+  ACCEPTED   // Compte créé via le lien d'invitation
+  EXPIRED    // Délai d'expiration dépassé
+  CANCELLED  // Annulée manuellement par un admin
+}
+
+enum AbsenceType {
+  VACATION  // Congés payés
+  SICK      // Arrêt maladie
+  UNPAID    // Congé sans solde
+  TRAINING  // Formation
+  OTHER     // Autre motif
+}
+
+enum AbsenceStatus {
+  PENDING   // En attente de validation
+  APPROVED  // Validée
+  REJECTED  // Refusée
+}
+
+enum NotificationType {
+  ASSIGNMENT_CREATED    // Nouvelle affectation créée
+  ASSIGNMENT_CONFIRMED  // Affectation confirmée
+  ASSIGNMENT_REFUSED    // Affectation refusée
+  WORKSITE_UPDATED      // Chantier modifié
+  WORKSITE_ARCHIVED     // Chantier archivé
+  WORKSITE_EXTENDED     // Chantier prolongé
+  INVITATION_SENT       // Invitation envoyée
+  ABSENCE_REQUESTED     // Absence soumise
+  ABSENCE_APPROVED      // Absence validée
+  ABSENCE_REJECTED      // Absence refusée
+}
+
+enum HistoryAction {
+  CREATED        // Entité créée
+  UPDATED        // Entité modifiée
+  DELETED        // Entité supprimée
+  ASSIGNED       // Équipe ou employé affecté
+  UNASSIGNED     // Affectation supprimée
+  CONFIRMED      // Affectation confirmée
+  REFUSED        // Affectation refusée
+  EXTENDED       // Chantier prolongé
+  ARCHIVED       // Chantier archivé
+  COMPLETED      // Chantier marqué terminé
+  INVITED        // Invitation envoyée
+  STATUS_CHANGED // Changement de statut
+  MEMBER_ADDED   // Membre ajouté à une équipe
+  MEMBER_REMOVED // Membre retiré d'une équipe
+  LEADER_CHANGED // Chef d'équipe changé
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPANY — Tenant racine
+// Toutes les données métier sont isolées par companyId
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique // prévu pour les sous-domaines futurs (ex: acme.planificator.fr)
+  logoUrl   String?
+  address   String?
+  phone     String?
+  email     String?
+  siret     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  users          User[]
+  employees      Employee[]
+  teams          Team[]
+  clients        Client[]
+  worksites      Worksite[]
+  invitations    Invitation[]
+  notifications  Notification[]
+  historyLogs    HistoryLog[]
+  absences       Absence[]
+  settings       CompanySettings?
+
+  @@map("companies")
+}
+
+// Paramètres de l'entreprise — extensible sans toucher au schéma principal
+model CompanySettings {
+  id                    String @id @default(cuid())
+  companyId             String @unique
+  defaultDailyHours     Float  @default(10)   // heures travaillées par journée
+  archiveDelayHours     Int    @default(48)   // délai avant archivage auto après COMPLETED
+  invitationExpiryHours Int    @default(24)   // durée de validité des liens d'invitation
+  timezone              String @default("Europe/Paris")
+  primaryColor          String @default("#0f3460")
+
+  // Relations
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("company_settings")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// USER — Compte de connexion uniquement
+// Séparé volontairement de Employee (fiche métier)
+// companyId est null uniquement pour le SUPER_ADMIN
+// ═══════════════════════════════════════════════════════════════════════════
+
+model User {
+  id          String    @id @default(cuid())
+  email       String    @unique
+  name        String?
+  password    String    // bcrypt hash
+  role        Role      @default(EMPLOYEE)
+  active      Boolean   @default(true)
+  companyId   String?   // null uniquement pour SUPER_ADMIN
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  company         Company?        @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  employeeProfile Employee?       // présent pour ADMIN, TEAM_LEADER, EMPLOYEE
+  clientProfile   ClientProfile?  // présent pour CLIENT uniquement
+  sentInvitations Invitation[]    @relation("InvitedBy")
+  passwordResets  PasswordReset[]
+  notifications   Notification[]
+  historyLogs     HistoryLog[]    @relation("HistoryActor")
+
+  @@index([companyId])
+  @@index([email])
+  @@map("users")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EMPLOYEE — Fiche métier de l'employé
+// Séparée de User pour permettre une gestion RH indépendante du compte
+// Les affectations pointent vers Employee, pas vers User
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Employee {
+  id        String    @id @default(cuid())
+  userId    String    @unique // lien 1-to-1 vers le compte de connexion
+  companyId String
+  firstName String
+  lastName  String
+  phone     String?
+  avatarUrl String?
+  jobTitle  String?
+  active    Boolean   @default(true)
+  hiredAt   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // Relations
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company             Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  teamMemberships     TeamMember[]
+  ledTeams            Team[]               @relation("TeamLeader")
+  employeeAssignments EmployeeAssignment[]
+  absences            Absence[]
+
+  @@index([companyId])
+  @@index([userId])
+  @@map("employees")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TEAM — Équipe de travail
+// Chef d'équipe obligatoire (leaderId non nullable)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  color     String?  // couleur hex pour le calendrier ex: #FF5733
+  companyId String
+  leaderId  String   // employeeId — chef d'équipe obligatoire
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  company     Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leader      Employee     @relation("TeamLeader", fields: [leaderId], references: [id])
+  members     TeamMember[]
+  assignments Assignment[]
+
+  @@unique([name, companyId]) // pas de doublon de nom d'équipe dans la même entreprise
+  @@index([companyId])
+  @@index([leaderId])
+  @@map("teams")
+}
+
+// Table pivot Équipe ↔ Employé avec historique des appartenances
+model TeamMember {
+  id         String    @id @default(cuid())
+  teamId     String
+  employeeId String
+  joinedAt   DateTime  @default(now())
+  leftAt     DateTime? // null = membre actif, renseigné = membre parti
+
+  // Relations
+  team     Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, employeeId])
+  @@index([teamId])
+  @@index([employeeId])
+  @@map("team_members")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CLIENT
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Client {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  address   String?
+  notes     String?
+  companyId String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  worksites     Worksite[]
+  clientProfile ClientProfile?
+
+  @@index([companyId])
+  @@map("clients")
+}
+
+// Lien entre un Client et son compte User pour l'accès au portail client
+model ClientProfile {
+  id       String @id @default(cuid())
+  clientId String @unique
+  userId   String @unique
+
+  // Relations
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("client_profiles")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORKSITE — Chantier
+// completedAt et archivedAt gèrent l'archivage automatique 48h
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Worksite {
+  id          String         @id @default(cuid())
+  name        String
+  description String?
+  address     String?
+  latitude    Float?         // prévu pour une carte future
+  longitude   Float?
+  status      WorksiteStatus @default(PLANNED)
+  startDate   DateTime
+  endDate     DateTime
+  dailyHours  Float          @default(10)   // heures de travail par journée
+  clientId    String
+  companyId   String
+  createdById String         // userId de l'admin qui a créé le chantier
+  completedAt DateTime?      // date de passage au statut COMPLETED
+  archivedAt  DateTime?      // date d'archivage effectif
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  // Relations
+  client      Client       @relation(fields: [clientId], references: [id])
+  company     Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  documents   Document[]
+  assignments Assignment[]
+  extensions  Extension[]
+  historyLogs HistoryLog[]
+
+  @@index([companyId])
+  @@index([clientId])
+  @@index([status])
+  @@index([createdById])
+  @@map("worksites")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DOCUMENT — Fichier attaché à un chantier (plan, photo, document)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Document {
+  id         String       @id @default(cuid())
+  worksiteId String
+  name       String
+  url        String
+  size       Int?         // taille en octets
+  mimeType   String?
+  type       DocumentType @default(DOCUMENT)
+  uploadedAt DateTime     @default(now())
+
+  // Relations
+  worksite Worksite @relation(fields: [worksiteId], references: [id], onDelete: Cascade)
+
+  @@index([worksiteId])
+  @@map("documents")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ASSIGNMENT — Affectation d'une équipe à un chantier pour une journée
+// CONTRAINTE CLÉ : @@unique([teamId, date]) → 1 équipe = 1 chantier par jour max
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Assignment {
+  id            String           @id @default(cuid())
+  worksiteId    String
+  teamId        String
+  date          DateTime         @db.Date  // journée complète — pas d'heure
+  status        AssignmentStatus @default(PENDING)
+  refusalReason String?          // obligatoire si status = REFUSED
+  notes         String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  // Relations
+  worksite            Worksite             @relation(fields: [worksiteId], references: [id], onDelete: Cascade)
+  team                Team                 @relation(fields: [teamId], references: [id])
+  employeeAssignments EmployeeAssignment[]
+
+  @@unique([teamId, date]) // CONTRAINTE MÉTIER : 1 équipe ne peut pas être sur 2 chantiers le même jour
+  @@index([worksiteId])
+  @@index([teamId])
+  @@index([date])
+  @@index([status])
+  @@map("assignments")
+}
+
+// Affectation individuelle d'un employé pour une journée donnée
+// CONTRAINTE CLÉ : @@unique([employeeId, date]) → 1 employé = 1 chantier par jour max
+model EmployeeAssignment {
+  id           String   @id @default(cuid())
+  assignmentId String
+  employeeId   String   // pointe vers Employee (pas User)
+  date         DateTime @db.Date  // dupliqué depuis Assignment pour la contrainte unique
+  createdAt    DateTime @default(now())
+
+  // Relations
+  assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  employee   Employee   @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, date]) // CONTRAINTE MÉTIER : 1 employé ne peut pas être sur 2 chantiers le même jour
+  @@index([employeeId])
+  @@index([assignmentId])
+  @@index([date])
+  @@map("employee_assignments")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EXTENSION — Trace chaque prolongation d'un chantier
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Extension {
+  id              String   @id @default(cuid())
+  worksiteId      String
+  previousEndDate DateTime // date de fin avant prolongation
+  newEndDate      DateTime // nouvelle date de fin après prolongation
+  reason          String?
+  createdById     String   // userId de celui qui a prolongé
+  createdAt       DateTime @default(now())
+
+  // Relations
+  worksite Worksite @relation(fields: [worksiteId], references: [id], onDelete: Cascade)
+
+  @@index([worksiteId])
+  @@map("extensions")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ABSENCE — Gestion des absences employé (V1 optionnel, prévu pour V2)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Absence {
+  id           String        @id @default(cuid())
+  employeeId   String
+  companyId    String
+  createdById  String?
+  type         AbsenceType   @default(OTHER)
+  status       AbsenceStatus @default(PENDING)
+  startDate    DateTime      @db.Date
+  endDate      DateTime      @db.Date
+  reason       String?
+  refusalNote  String?
+  approvedById String?       // userId du validateur
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  // Relations
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  company  Company  @relation(fields: [companyId],  references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@index([companyId])
+  @@index([startDate])
+  @@index([status])
+  @@map("absences")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HISTORY LOG — Audit trail complet de toutes les actions importantes
+// oldValue / newValue en JSON pour tracer les diffs avant/après
+// ═══════════════════════════════════════════════════════════════════════════
+
+model HistoryLog {
+  id         String        @id @default(cuid())
+  companyId  String?
+  worksiteId String?
+  actorId    String        // userId de celui qui a effectué l'action
+  action     HistoryAction
+  entityType String?       // "Worksite" | "Team" | "Assignment" | "Employee" | ...
+  entityId   String?       // id de l'entité concernée
+  detail     String?       // description lisible humainement
+  oldValue   Json?         // état de l'entité avant modification
+  newValue   Json?         // état de l'entité après modification
+  createdAt  DateTime      @default(now())
+
+  // Relations
+  company  Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  worksite Worksite? @relation(fields: [worksiteId], references: [id], onDelete: SetNull)
+  actor    User      @relation("HistoryActor", fields: [actorId], references: [id])
+
+  @@index([companyId])
+  @@index([worksiteId])
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("history_logs")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTIFICATION — Notifications internes in-app
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  companyId String?
+  type      NotificationType
+  title     String
+  message   String
+  read      Boolean          @default(false)
+  readAt    DateTime?
+  link      String?          // URL relative vers la ressource concernée
+  metadata  Json?            // données contextuelles (ids, noms, etc.)
+  createdAt DateTime         @default(now())
+
+  // Relations
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([read])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INVITATION — Invitation par email (pas d'inscription libre)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Invitation {
+  id          String           @id @default(cuid())
+  email       String
+  role        Role
+  companyId   String
+  invitedById String           // userId de l'admin qui a invité
+  token       String           @unique @default(cuid())
+  status      InvitationStatus @default(PENDING)
+  expiresAt   DateTime         // calculé à la création (ex: now + 24h)
+  acceptedAt  DateTime?        // renseigné quand le compte est créé
+  createdAt   DateTime         @default(now())
+
+  // Relations
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invitedBy User    @relation("InvitedBy", fields: [invitedById], references: [id])
+
+  @@index([email])
+  @@index([token])
+  @@index([companyId])
+  @@index([status])
+  @@map("invitations")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PASSWORD RESET — Réinitialisation sécurisée du mot de passe
+// ═══════════════════════════════════════════════════════════════════════════
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String
+  token     String    @unique @default(cuid())
+  expiresAt DateTime  // durée de validité courte recommandée (15-30 min)
+  usedAt    DateTime? // renseigné une fois le mot de passe réinitialisé
+  createdAt DateTime  @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@map("password_resets")
+}
