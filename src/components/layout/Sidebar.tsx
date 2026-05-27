@@ -16,6 +16,7 @@ import {
   LogOut,
   ChevronRight,
   User,
+  GanttChart,
 } from "lucide-react"
 import { cn, getInitials } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -62,16 +63,9 @@ function getNavItems(role: Role): NavItem[] {
         { label: "Équipes",   href: "/equipes",   icon: Layers },
         { label: "Clients",   href: "/clients",   icon: UserCheck },
         { label: "Chantiers", href: "/chantiers", icon: HardHat },
-        {
-          label: "Planning",
-          href: "/planning",
-          icon: Calendar,
-        },
-        {
-          label: "Absences",
-          href: "/absences",
-          icon: CalendarOff,
-        },
+        { label: "Planning",    href: "/planning",       icon: Calendar },
+        { label: "Gantt",       href: "/planning/gantt", icon: GanttChart },
+        { label: "Absences",    href: "/absences",       icon: CalendarOff },
         { label: "Mon profil", href: "/profil", icon: User },
         { label: "Paramètres", href: "/parametres", icon: Settings },
       ]
