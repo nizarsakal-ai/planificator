@@ -5,7 +5,6 @@ import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 import { Check, X, Trash2, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import {
   Dialog,
@@ -98,12 +97,12 @@ export function AbsenceActions({ absenceId, status }: Props) {
           <div className="space-y-3 mt-2">
             <div className="space-y-1.5">
               <Label className="text-sm">Expliquez la raison du refus *</Label>
-              <Textarea
+              <textarea
                 value={refusalNote}
                 onChange={(e) => setRefusalNote(e.target.value)}
                 placeholder="Ex : Trop d'absences déjà prévues cette semaine…"
                 rows={3}
-                className="resize-none text-sm"
+                className="w-full resize-none rounded-md border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0f3460]/30"
               />
             </div>
             <div className="flex gap-2">
