@@ -38,11 +38,10 @@ export async function inviterMembre(formData: FormData) {
   const existing = await prisma.user.findUnique({ where: { email: parsed.data.email } })
   if (existing) return { error: "Un compte existe déjà avec cet email." }
 
-  // Vérifier qu'il n'y a pas déjà une invitation en attente
-  const pendingInvite = await prisma.invitation.findFirst({
+  // Supprimer toute invitation en attente existante pour cet email
+  await prisma.invitation.deleteMany({
     where: { email: parsed.data.email, status: "PENDING" },
   })
-  if (pendingInvite) return { error: "Une invitation est déjà en attente pour cet email." }
 
   const company = await prisma.company.findUnique({
     where: { id: user.companyId! },
