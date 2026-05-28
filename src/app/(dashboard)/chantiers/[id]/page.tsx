@@ -4,7 +4,7 @@ import { redirect, notFound } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { MapPin, Calendar, Clock, Users, HardHat, FileText } from "lucide-react"
+import { MapPin, Calendar, Clock, Users, HardHat, FileText, Download } from "lucide-react"
 import { ChantierStatusActions } from "@/components/chantiers/ChantierStatusActions"
 import { AffecterEquipeForm } from "@/components/chantiers/AffecterEquipeForm"
 import { DocumentsSection } from "@/components/chantiers/DocumentsSection"
@@ -73,7 +73,18 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
             <p className="text-sm text-slate-500">{chantier.client.name}</p>
           </div>
         </div>
-        <Badge variant={status.variant} className="text-sm px-3 py-1">{status.label}</Badge>
+        <div className="flex items-center gap-2">
+          <a
+            href={`/api/pdf/chantier/${chantier.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+          >
+            <Download className="h-4 w-4" />
+            Export PDF
+          </a>
+          <Badge variant={status.variant} className="text-sm px-3 py-1">{status.label}</Badge>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
