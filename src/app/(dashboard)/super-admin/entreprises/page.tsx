@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { Building2, Users, HardHat, Calendar, CheckCircle2, XCircle } from "lucide-react"
+import { CreateCompanyDialog } from "@/components/super-admin/CreateCompanyDialog"
 
 export const metadata: Metadata = { title: "Super Admin — Entreprises" }
 
@@ -43,9 +44,12 @@ export default async function SuperAdminEntreprisesPage() {
             {actives} active{actives > 1 ? "s" : ""} · {totalUsr} utilisateur{totalUsr > 1 ? "s" : ""} au total
           </p>
         </div>
-        <Badge className="bg-red-100 text-red-700 border-red-200 text-xs px-3 py-1">
-          Super Admin
-        </Badge>
+        <div className="flex items-center gap-3">
+          <CreateCompanyDialog />
+          <Badge className="bg-red-100 text-red-700 border-red-200 text-xs px-3 py-1">
+            Super Admin
+          </Badge>
+        </div>
       </div>
 
       {/* Stats globales */}

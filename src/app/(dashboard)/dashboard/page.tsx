@@ -18,6 +18,7 @@ import {
   HardHat,
   TrendingUp,
   AlertCircle,
+  ArrowRight,
 } from "lucide-react"
 import { formatDate } from "@/lib/utils"
 import { AssignmentsChart } from "@/components/dashboard/AssignmentsChart"
@@ -210,18 +211,20 @@ async function AdminDashboard({ companyId }: { companyId: string }) {
         </Card>
       </div>
 
-      {/* Conseils si données manquantes */}
-      {(employeesCount === 0 || teamsCount === 0 || clientsCount === 0) && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-semibold">Prochaines étapes</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1.5 text-sm text-slate-600">
-            {employeesCount === 0 && <p>→ Commencez par créer vos <span className="font-medium">employés</span>.</p>}
-            {teamsCount === 0 && <p>→ Créez vos <span className="font-medium">équipes</span>.</p>}
-            {clientsCount === 0 && <p>→ Ajoutez vos <span className="font-medium">clients</span>.</p>}
-          </CardContent>
-        </Card>
+      {/* Bannière onboarding si l'entreprise est vide */}
+      {employeesCount === 0 && clientsCount === 0 && (
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-[#0f3460]/20 bg-[#0f3460]/5 px-5 py-4">
+          <div>
+            <p className="text-sm font-semibold text-[#0f3460]">Configurez votre espace</p>
+            <p className="text-xs text-slate-500 mt-0.5">Suivez le guide de démarrage pour créer vos équipes et chantiers.</p>
+          </div>
+          <a
+            href="/onboarding"
+            className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-[#0f3460] px-4 py-2 text-xs font-semibold text-white hover:bg-[#0f3460]/90 transition-colors"
+          >
+            Démarrer <ArrowRight className="h-3.5 w-3.5" />
+          </a>
+        </div>
       )}
     </div>
   )

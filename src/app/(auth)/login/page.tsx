@@ -32,7 +32,10 @@ export default function LoginPage() {
       </div>
 
       <p className="text-center text-xs text-slate-400 mt-6">
-        Accès sur invitation uniquement. ·{" "}
+        <Link href="/inscription" className="text-[#0f3460] underline font-medium">
+          Créer mon entreprise
+        </Link>
+        {" "}·{" "}
         <Link href="/mot-de-passe-oublie" className="text-[#0f3460] underline">
           Mot de passe oublié ?
         </Link>
