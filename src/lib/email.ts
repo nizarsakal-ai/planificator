@@ -176,6 +176,55 @@ export async function sendAssignmentConfirmedEmail({
   })
 }
 
+// ─── Absence approuvée → employé ─────────────────────────────────────────────
+
+export async function sendAbsenceApprovedEmail({
+  to, employeeName, typeLabel, startDate, endDate,
+}: {
+  to: string; employeeName: string; typeLabel: string; startDate: string; endDate: string
+}) {
+  await resend.emails.send({
+    from: FROM, to,
+    subject: `Absence approuvée — ${typeLabel}`,
+    html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px;">
+      ${header()}
+      <h2 style="color:#16a34a;margin-bottom:8px;">✓ Absence approuvée</h2>
+      <p style="color:#64748b;line-height:1.6;">
+        Bonjour <strong>${employeeName}</strong>,<br><br>
+        Votre demande d'absence (<strong>${typeLabel}</strong>) du <strong>${startDate}</strong> au <strong>${endDate}</strong>
+        a été <strong>approuvée</strong>.
+      </p>
+      ${footer()}
+    </div>`,
+  })
+}
+
+// ─── Absence refusée → employé ────────────────────────────────────────────────
+
+export async function sendAbsenceRejectedEmail({
+  to, employeeName, typeLabel, startDate, endDate, refusalNote,
+}: {
+  to: string; employeeName: string; typeLabel: string; startDate: string; endDate: string; refusalNote?: string
+}) {
+  await resend.emails.send({
+    from: FROM, to,
+    subject: `Absence refusée — ${typeLabel}`,
+    html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px;">
+      ${header()}
+      <h2 style="color:#dc2626;margin-bottom:8px;">✗ Absence refusée</h2>
+      <p style="color:#64748b;line-height:1.6;">
+        Bonjour <strong>${employeeName}</strong>,<br><br>
+        Votre demande d'absence (<strong>${typeLabel}</strong>) du <strong>${startDate}</strong> au <strong>${endDate}</strong>
+        a été <strong>refusée</strong>.
+      </p>
+      ${refusalNote ? `<div style="background:#fef2f2;border-left:3px solid #dc2626;padding:12px 16px;border-radius:4px;margin:16px 0;">
+        <p style="margin:0;color:#7f1d1d;font-size:13px;"><strong>Motif :</strong> ${refusalNote}</p>
+      </div>` : ""}
+      ${footer()}
+    </div>`,
+  })
+}
+
 // ─── Affectation refusée → admins ─────────────────────────────────────────────
 
 export async function sendAssignmentRefusedEmail({

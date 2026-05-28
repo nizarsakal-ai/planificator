@@ -77,13 +77,15 @@ function getNavItems(role: Role): NavItem[] {
         { label: "Dashboard",      href: "/dashboard",        icon: LayoutDashboard },
         { label: "Mon équipe",     href: "/planning/equipe",  icon: ClipboardList },
         { label: "Mon planning",   href: "/planning/moi",     icon: Calendar },
+        { label: "Mes absences",   href: "/mes-absences",     icon: CalendarOff },
         { label: "Mon profil",     href: "/profil",           icon: User },
       ]
 
     case "EMPLOYEE":
       return [
-        { label: "Dashboard",   href: "/dashboard",    icon: LayoutDashboard },
-        { label: "Mon Planning", href: "/planning/moi", icon: Calendar },
+        { label: "Dashboard",    href: "/dashboard",    icon: LayoutDashboard },
+        { label: "Mon planning", href: "/planning/moi", icon: Calendar },
+        { label: "Mes absences", href: "/mes-absences", icon: CalendarOff },
         { label: "Mon profil",   href: "/profil",       icon: User },
       ]
 

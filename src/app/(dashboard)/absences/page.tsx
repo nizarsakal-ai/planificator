@@ -2,11 +2,10 @@ import type { Metadata } from "next"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
-import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
-import { CalendarOff } from "lucide-react"
+import { CalendarOff, CheckCircle2, Clock3, XCircle } from "lucide-react"
 import { NouvelleAbsenceDialog } from "@/components/absences/NouvelleAbsenceDialog"
-import { AbsenceActions } from "@/components/absences/AbsenceActions"
+import { AbsenceFilters } from "@/components/absences/AbsenceFilters"
 
 export const metadata: Metadata = { title: "Absences" }
 
@@ -18,33 +17,21 @@ const TYPE_LABELS: Record<string, string> = {
   OTHER:    "Autre",
 }
 
-const STATUS_STYLE: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  PENDING:  { label: "En attente", variant: "secondary" },
-  APPROVED: { label: "Approuvé",   variant: "default" },
-  REJECTED: { label: "Refusé",     variant: "destructive" },
-}
-
-function formatDate(d: Date) {
-  return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", year: "numeric" }).format(d)
-}
-
-function diffDays(start: Date, end: Date) {
-  return Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1
-}
-
 export default async function AbsencesPage() {
   const session = await auth()
   if (!session?.user) redirect("/login")
   if (!["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) redirect("/dashboard")
 
+  const companyId = session.user.companyId!
+
   const [absences, employees] = await Promise.all([
     prisma.absence.findMany({
-      where: { companyId: session.user.companyId! },
+      where: { companyId },
       include: { employee: { select: { firstName: true, lastName: true } } },
       orderBy: { startDate: "desc" },
     }),
     prisma.employee.findMany({
-      where: { companyId: session.user.companyId!, active: true },
+      where: { companyId, active: true },
       select: { id: true, firstName: true, lastName: true },
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
     }),
@@ -52,6 +39,18 @@ export default async function AbsencesPage() {
 
   const pending  = absences.filter((a) => a.status === "PENDING").length
   const approved = absences.filter((a) => a.status === "APPROVED").length
+  const rejected = absences.filter((a) => a.status === "REJECTED").length
+
+  // Stats : jours approuvés par type (année en cours)
+  const yearStart = new Date(new Date().getFullYear(), 0, 1)
+  const approvedThisYear = absences.filter(
+    (a) => a.status === "APPROVED" && a.startDate >= yearStart
+  )
+  const daysByType: Record<string, number> = {}
+  for (const a of approvedThisYear) {
+    const days = Math.round((a.endDate.getTime() - a.startDate.getTime()) / 86_400_000) + 1
+    daysByType[a.type] = (daysByType[a.type] ?? 0) + days
+  }
 
   return (
     <div className="space-y-6">
@@ -60,56 +59,71 @@ export default async function AbsencesPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Absences</h1>
           <p className="text-sm text-slate-500 mt-1">
-            {pending} en attente · {approved} approuvée{approved > 1 ? "s" : ""}
+            {pending} en attente · {approved} approuvée{approved > 1 ? "s" : ""} · {rejected} refusée{rejected > 1 ? "s" : ""}
           </p>
         </div>
         <NouvelleAbsenceDialog employees={employees} />
       </div>
 
-      {/* Liste */}
-      {absences.length === 0 ? (
+      {/* KPIs */}
+      <div className="grid grid-cols-3 gap-4">
         <Card>
-          <CardContent className="py-16 text-center">
-            <CalendarOff className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-            <p className="text-slate-400 font-medium">Aucune absence enregistrée.</p>
-            <p className="text-slate-400 text-sm mt-1">Cliquez sur &quot;Nouvelle absence&quot; pour commencer.</p>
+          <CardContent className="p-4 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-amber-50 flex items-center justify-center shrink-0">
+              <Clock3 className="h-5 w-5 text-amber-500" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-slate-900">{pending}</p>
+              <p className="text-xs text-slate-500">En attente</p>
+            </div>
           </CardContent>
         </Card>
-      ) : (
         <Card>
-          <CardContent className="p-0">
-            <div className="divide-y divide-slate-50">
-              {absences.map((absence) => {
-                const st = STATUS_STYLE[absence.status] ?? { label: absence.status, variant: "secondary" as const }
-                const days = diffDays(absence.startDate, absence.endDate)
-                return (
-                  <div key={absence.id} className="flex items-center justify-between px-5 py-3 hover:bg-slate-50 transition-colors">
-                    <div className="flex items-center gap-4">
-                      {/* Avatar */}
-                      <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-600 shrink-0">
-                        {absence.employee.firstName[0]}{absence.employee.lastName[0]}
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-slate-800">
-                          {absence.employee.firstName} {absence.employee.lastName}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          {TYPE_LABELS[absence.type] ?? absence.type} · {formatDate(absence.startDate)} → {formatDate(absence.endDate)} ({days}j)
-                        </p>
-                        {absence.reason && <p className="text-xs text-slate-400 mt-0.5 italic">{absence.reason}</p>}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Badge variant={st.variant} className="text-xs">{st.label}</Badge>
-                      <AbsenceActions absenceId={absence.id} status={absence.status} />
-                    </div>
-                  </div>
-                )
-              })}
+          <CardContent className="p-4 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-green-50 flex items-center justify-center shrink-0">
+              <CheckCircle2 className="h-5 w-5 text-green-500" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-slate-900">{approved}</p>
+              <p className="text-xs text-slate-500">Approuvées</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-red-50 flex items-center justify-center shrink-0">
+              <XCircle className="h-5 w-5 text-red-400" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-slate-900">{rejected}</p>
+              <p className="text-xs text-slate-500">Refusées</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Stats par type (année en cours) */}
+      {Object.keys(daysByType).length > 0 && (
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs font-semibold text-slate-500 mb-3 uppercase tracking-wide">
+              Jours approuvés — {new Date().getFullYear()}
+            </p>
+            <div className="flex flex-wrap gap-3">
+              {Object.entries(daysByType).map(([type, days]) => (
+                <div key={type} className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2">
+                  <CalendarOff className="h-3.5 w-3.5 text-slate-400" />
+                  <span className="text-xs text-slate-600 font-medium">{TYPE_LABELS[type] ?? type}</span>
+                  <span className="text-xs font-bold text-slate-800">{days}j</span>
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
       )}
+
+      {/* Liste filtrée */}
+      <AbsenceFilters absences={absences} employees={employees} />
     </div>
   )
 }
