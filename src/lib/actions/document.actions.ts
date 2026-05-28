@@ -6,11 +6,7 @@ import { revalidatePath } from "next/cache"
 import { v2 as cloudinary } from "cloudinary"
 import { DocumentType } from "@prisma/client"
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key:    process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-})
+// Le SDK lit CLOUDINARY_URL automatiquement
 
 export async function uploadDocument(formData: FormData) {
   const session = await auth()
