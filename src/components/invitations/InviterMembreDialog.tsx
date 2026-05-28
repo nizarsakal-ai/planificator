@@ -19,8 +19,8 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>
 
 export function InviterMembreDialog() {
-  const [open, setOpen]         = useState(false)
-  const [devLink, setDevLink]   = useState<string | null>(null)
+  const [open, setOpen]             = useState(false)
+  const [invitationUrl, setInvitationUrl] = useState<string | null>(null)
 
   const {
     register,
@@ -40,22 +40,15 @@ export function InviterMembreDialog() {
 
     if (result?.error) { toast.error(result.error); return }
 
-    // En dev (sans RESEND_API_KEY), on affiche le lien directement
-    if (result.token) {
-      setDevLink(`${window.location.origin}/invitation?token=${result.token}`)
-    } else {
-      toast.success("Invitation envoyée par email !")
-      reset()
-      setOpen(false)
-    }
+    setInvitationUrl(result.invitationUrl)
   }
 
   const copyLink = () => {
-    if (devLink) { navigator.clipboard.writeText(devLink); toast.success("Lien copié !") }
+    if (invitationUrl) { navigator.clipboard.writeText(invitationUrl); toast.success("Lien copié !") }
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { reset(); setDevLink(null) } }}>
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { reset(); setInvitationUrl(null) } }}>
       <DialogTrigger asChild>
         <Button variant="outline" className="border-[#0f3460] text-[#0f3460] hover:bg-[#0f3460] hover:text-white">
           <UserPlus className="h-4 w-4 mr-2" /> Inviter un membre
@@ -66,19 +59,19 @@ export function InviterMembreDialog() {
           <DialogTitle>Inviter un membre</DialogTitle>
         </DialogHeader>
 
-        {devLink ? (
+        {invitationUrl ? (
           <div className="space-y-4">
-            <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 text-sm text-amber-800">
-              <p className="font-semibold mb-1">Mode développement</p>
-              <p className="text-xs">RESEND_API_KEY non configuré. Utilisez ce lien pour accepter l&apos;invitation :</p>
+            <div className="rounded-lg bg-green-50 border border-green-200 p-4 text-sm text-green-800">
+              <p className="font-semibold mb-1">Invitation créée ✓</p>
+              <p className="text-xs">Un email a été envoyé. Si la personne ne le reçoit pas, copiez ce lien et envoyez-le par SMS ou WhatsApp :</p>
             </div>
             <div className="flex gap-2">
-              <Input value={devLink} readOnly className="text-xs" />
+              <Input value={invitationUrl} readOnly className="text-xs" />
               <Button size="icon" variant="outline" onClick={copyLink}>
                 <Copy className="h-4 w-4" />
               </Button>
             </div>
-            <Button className="w-full bg-[#0f3460] hover:bg-[#0a2540]" onClick={() => { setOpen(false); reset(); setDevLink(null) }}>
+            <Button className="w-full bg-[#0f3460] hover:bg-[#0a2540]" onClick={() => { setOpen(false); reset(); setInvitationUrl(null) }}>
               Fermer
             </Button>
           </div>

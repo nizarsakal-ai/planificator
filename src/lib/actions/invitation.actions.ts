@@ -75,8 +75,11 @@ export async function inviterMembre(formData: FormData) {
     })
   }
 
+  const appUrl = process.env.NEXTAUTH_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
+  const invitationUrl = `${appUrl}/invitation?token=${token}`
+
   revalidatePath("/employes")
-  return { success: true, token: !process.env.RESEND_API_KEY ? token : undefined }
+  return { success: true, invitationUrl }
 }
 
 // ─── Accepter une invitation ──────────────────────────────────────────────────
