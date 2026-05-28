@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
 import { createChantierSchema, extendChantierSchema } from "@/lib/validations/chantier"
+import { sendAssignmentCreatedEmail, sendAssignmentConfirmedEmail, sendAssignmentRefusedEmail } from "@/lib/email"
 
 async function requireAdmin() {
   const session = await auth()
@@ -235,6 +236,22 @@ export async function affecterEquipe(formData: FormData) {
           link:      `/planning`,
         },
       })
+
+      // Email au chef d'équipe
+      const leaderUser = await tx.user.findUnique({
+        where: { id: team.leader.userId },
+        select: { email: true, name: true },
+      })
+      if (leaderUser?.email) {
+        const company = await tx.company.findUnique({ where: { id: user.companyId! }, select: { name: true } })
+        sendAssignmentCreatedEmail({
+          to:             leaderUser.email,
+          teamLeaderName: leaderUser.name ?? leaderUser.email,
+          worksiteName:   worksite.name,
+          dateLabel,
+          companyName:    company?.name ?? "",
+        }).catch(() => {})
+      }
     }
   })
 
@@ -264,16 +281,20 @@ export async function updateAssignmentStatus(
     include: {
       worksite: { select: { id: true, name: true, companyId: true } },
       team:     { select: { name: true } },
+      // date needed for email label
     },
   })
 
   // Notifier les admins de l'entreprise
   const admins = await prisma.user.findMany({
     where: { companyId: assignment.worksite.companyId, role: { in: ["ADMIN", "SUPER_ADMIN"] } },
-    select: { id: true },
+    select: { id: true, email: true },
   })
+
+  const isConfirmed = status === "CONFIRMED"
+  const dateLabel   = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "2-digit", month: "long" }).format(assignment.date)
+
   if (admins.length > 0) {
-    const isConfirmed = status === "CONFIRMED"
     await prisma.notification.createMany({
       data: admins.map((admin) => ({
         userId:    admin.id,
@@ -288,6 +309,24 @@ export async function updateAssignmentStatus(
         link: `/chantiers/${assignment.worksite.id}`,
       })),
     })
+
+    // Emails aux admins
+    for (const admin of admins) {
+      if (!admin.email) continue
+      if (isConfirmed) {
+        sendAssignmentConfirmedEmail({
+          to: admin.email, teamName: assignment.team.name,
+          worksiteName: assignment.worksite.name, dateLabel,
+          worksiteId: assignment.worksite.id,
+        }).catch(() => {})
+      } else {
+        sendAssignmentRefusedEmail({
+          to: admin.email, teamName: assignment.team.name,
+          worksiteName: assignment.worksite.name, dateLabel,
+          refusalReason, worksiteId: assignment.worksite.id,
+        }).catch(() => {})
+      }
+    }
   }
 
   revalidatePath("/chantiers")
