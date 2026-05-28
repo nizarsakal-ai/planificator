@@ -177,6 +177,7 @@ export async function affecterEquipe(formData: FormData) {
         where: { leftAt: null },
         select: { employeeId: true },
       },
+      leader: { select: { userId: true } },
     },
   })
   if (!team) return { error: "Équipe introuvable." }
@@ -220,6 +221,21 @@ export async function affecterEquipe(formData: FormData) {
         data: { status: "IN_PROGRESS" },
       })
     }
+
+    // Notifier le chef d'équipe
+    if (team.leader?.userId) {
+      const dateLabel = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "2-digit", month: "long" }).format(date)
+      await tx.notification.create({
+        data: {
+          userId:    team.leader.userId,
+          companyId: user.companyId!,
+          type:      "ASSIGNMENT_CREATED",
+          title:     `Nouvelle affectation — ${worksite.name}`,
+          message:   `Votre équipe est affectée le ${dateLabel}. Confirmez ou refusez.`,
+          link:      `/planning`,
+        },
+      })
+    }
   })
 
   revalidatePath("/chantiers")
@@ -242,10 +258,37 @@ export async function updateAssignmentStatus(
     return { error: "La raison du refus est obligatoire." }
   }
 
-  await prisma.assignment.update({
+  const assignment = await prisma.assignment.update({
     where: { id: assignmentId },
     data: { status, refusalReason: refusalReason || null },
+    include: {
+      worksite: { select: { id: true, name: true, companyId: true } },
+      team:     { select: { name: true } },
+    },
   })
+
+  // Notifier les admins de l'entreprise
+  const admins = await prisma.user.findMany({
+    where: { companyId: assignment.worksite.companyId, role: { in: ["ADMIN", "SUPER_ADMIN"] } },
+    select: { id: true },
+  })
+  if (admins.length > 0) {
+    const isConfirmed = status === "CONFIRMED"
+    await prisma.notification.createMany({
+      data: admins.map((admin) => ({
+        userId:    admin.id,
+        companyId: assignment.worksite.companyId,
+        type:      isConfirmed ? ("ASSIGNMENT_CONFIRMED" as const) : ("ASSIGNMENT_REFUSED" as const),
+        title:     isConfirmed
+          ? `Affectation confirmée — ${assignment.worksite.name}`
+          : `Affectation refusée — ${assignment.worksite.name}`,
+        message: isConfirmed
+          ? `L'équipe ${assignment.team.name} a confirmé l'affectation.`
+          : `L'équipe ${assignment.team.name} a refusé l'affectation.${refusalReason ? ` Raison : ${refusalReason}` : ""}`,
+        link: `/chantiers/${assignment.worksite.id}`,
+      })),
+    })
+  }
 
   revalidatePath("/chantiers")
   revalidatePath("/planning")
