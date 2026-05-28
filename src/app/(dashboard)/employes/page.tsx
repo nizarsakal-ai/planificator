@@ -4,9 +4,10 @@ import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Users, Phone, Briefcase } from "lucide-react"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Users, Phone, Briefcase, ChevronRight } from "lucide-react"
 import { getInitials } from "@/lib/utils"
+import Link from "next/link"
 import { NouvelEmployeDialog } from "@/components/employes/NouvelEmployeDialog"
 import { EmployeActions } from "@/components/employes/EmployeActions"
 import { InviterMembreDialog } from "@/components/invitations/InviterMembreDialog"
@@ -21,7 +22,7 @@ export default async function EmployesPage() {
   const employees = await prisma.employee.findMany({
     where: { companyId: session.user.companyId! },
     include: {
-      user: { select: { email: true, active: true } },
+      user: { select: { email: true, active: true, name: true } },
       teamMemberships: {
         where: { leftAt: null },
         include: { team: { select: { name: true, color: true } } },
@@ -75,24 +76,30 @@ export default async function EmployesPage() {
                 <CardContent className="p-5">
                   {/* Header carte */}
                   <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-11 w-11">
+                    <Link href={`/employes/${emp.id}`} className="flex items-center gap-3 flex-1 min-w-0">
+                      <Avatar className="h-11 w-11 shrink-0">
+                        {emp.avatarUrl && <AvatarImage src={emp.avatarUrl} alt={fullName} />}
                         <AvatarFallback className="bg-[#0f3460] text-white font-semibold text-sm">
                           {getInitials(fullName)}
                         </AvatarFallback>
                       </Avatar>
-                      <div>
-                        <p className="font-semibold text-slate-900 text-sm leading-tight">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-slate-900 text-sm leading-tight hover:text-[#0f3460] transition-colors">
                           {fullName}
                         </p>
-                        <p className="text-xs text-slate-400 mt-0.5">
+                        <p className="text-xs text-slate-400 mt-0.5 truncate">
                           {emp.user.email}
                         </p>
                       </div>
+                    </Link>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Badge variant={emp.active ? "default" : "secondary"} className="text-xs">
+                        {emp.active ? "Actif" : "Inactif"}
+                      </Badge>
+                      <Link href={`/employes/${emp.id}`} className="text-slate-400 hover:text-[#0f3460] transition-colors">
+                        <ChevronRight className="h-4 w-4" />
+                      </Link>
                     </div>
-                    <Badge variant={emp.active ? "default" : "secondary"} className="text-xs shrink-0">
-                      {emp.active ? "Actif" : "Inactif"}
-                    </Badge>
                   </div>
 
                   {/* Infos */}

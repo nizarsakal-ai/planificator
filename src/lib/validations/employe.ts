@@ -18,6 +18,7 @@ export const updateEmployeSchema = z.object({
   lastName: z.string().min(1, "Le nom est requis").max(50),
   jobTitle: z.string().optional(),
   phone: z.string().optional(),
+  hiredAt: z.string().optional(),
 })
 
 export type CreateEmployeInput = z.infer<typeof createEmployeSchema>

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import bcrypt from "bcryptjs"
+import { v2 as cloudinary } from "cloudinary"
 import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
 import { createEmployeSchema, updateEmployeSchema } from "@/lib/validations/employe"
@@ -101,15 +102,58 @@ export async function updateEmploye(employeeId: string, formData: FormData) {
     where: { id: employeeId },
     data: {
       firstName: parsed.data.firstName,
-      lastName: parsed.data.lastName,
-      jobTitle: parsed.data.jobTitle || null,
-      phone: parsed.data.phone || null,
+      lastName:  parsed.data.lastName,
+      jobTitle:  parsed.data.jobTitle || null,
+      phone:     parsed.data.phone    || null,
+      hiredAt:   parsed.data.hiredAt  ? new Date(parsed.data.hiredAt) : null,
     },
   })
 
   revalidatePath("/employes")
   revalidatePath(`/employes/${employeeId}`)
   return { success: true }
+}
+
+// ─── Mettre à jour l'avatar ───────────────────────────────────────────────────
+
+export async function updateEmployeAvatar(employeeId: string, formData: FormData) {
+  const user = await requireAdmin()
+
+  const file = formData.get("file") as File | null
+  if (!file || file.size === 0) return { error: "Aucun fichier sélectionné." }
+
+  const employee = await prisma.employee.findFirst({
+    where: { id: employeeId, companyId: user.companyId! },
+  })
+  if (!employee) return { error: "Employé introuvable." }
+
+  const arrayBuffer = await file.arrayBuffer()
+  const buffer      = Buffer.from(arrayBuffer)
+
+  const result = await new Promise<{ secure_url: string }>((resolve, reject) => {
+    cloudinary.uploader.upload_stream(
+      {
+        folder:          `planificator/${user.companyId}/avatars`,
+        resource_type:   "image",
+        transformation:  [{ width: 300, height: 300, crop: "fill", gravity: "face" }],
+        public_id:       `employee-${employeeId}`,
+        overwrite:       true,
+      },
+      (err, res) => {
+        if (err || !res) return reject(err)
+        resolve(res)
+      }
+    ).end(buffer)
+  })
+
+  await prisma.employee.update({
+    where: { id: employeeId },
+    data:  { avatarUrl: result.secure_url },
+  })
+
+  revalidatePath("/employes")
+  revalidatePath(`/employes/${employeeId}`)
+  return { success: true, avatarUrl: result.secure_url }
 }
 
 // ─── Désactiver un employé ───────────────────────────────────────────────────
