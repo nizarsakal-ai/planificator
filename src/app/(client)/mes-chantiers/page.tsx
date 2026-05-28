@@ -4,7 +4,8 @@ import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
-import { HardHat, MapPin, Calendar, Users, Clock } from "lucide-react"
+import { HardHat, MapPin, Calendar, Users, Clock, ChevronRight } from "lucide-react"
+import Link from "next/link"
 
 export const metadata: Metadata = { title: "Mes chantiers" }
 
@@ -85,7 +86,8 @@ export default async function MesChantiersPage() {
               (a) => new Date(a.date) >= new Date() && a.status !== "REFUSED"
             )
             return (
-              <Card key={w.id}>
+              <Link key={w.id} href={`/mes-chantiers/${w.id}`}>
+              <Card className="hover:shadow-md transition-shadow cursor-pointer">
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex items-center gap-3">
@@ -101,7 +103,10 @@ export default async function MesChantiersPage() {
                         )}
                       </div>
                     </div>
-                    <Badge variant={st.variant} className="text-xs">{st.label}</Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={st.variant} className="text-xs">{st.label}</Badge>
+                      <ChevronRight className="h-4 w-4 text-slate-400" />
+                    </div>
                   </div>
 
                   {/* Dates + heures */}
@@ -148,6 +153,7 @@ export default async function MesChantiersPage() {
                   )}
                 </CardContent>
               </Card>
+              </Link>
             )
           })}
         </div>
