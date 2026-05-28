@@ -17,6 +17,7 @@ import {
   ChevronRight,
   User,
   GanttChart,
+  ClipboardList,
 } from "lucide-react"
 import { cn, getInitials } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -72,9 +73,10 @@ function getNavItems(role: Role): NavItem[] {
 
     case "TEAM_LEADER":
       return [
-        { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-        { label: "Planning",  href: "/planning",  icon: Calendar },
-        { label: "Mon profil", href: "/profil",   icon: User },
+        { label: "Dashboard",      href: "/dashboard",        icon: LayoutDashboard },
+        { label: "Mon équipe",     href: "/planning/equipe",  icon: ClipboardList },
+        { label: "Mon planning",   href: "/planning/moi",     icon: Calendar },
+        { label: "Mon profil",     href: "/profil",           icon: User },
       ]
 
     case "EMPLOYEE":
