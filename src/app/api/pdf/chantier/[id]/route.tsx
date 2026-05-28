@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { renderToBuffer, Document, Page, Text, View, StyleSheet, Font } from "@react-pdf/renderer"
+import { renderToBuffer, Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer"
+
+export const runtime = "nodejs"
 
 const statusLabels: Record<string, string> = {
   PLANNED:     "Planifié",
@@ -77,7 +79,6 @@ const styles = StyleSheet.create({
   infoGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
   },
   infoBox: {
     width: "48%",
@@ -333,12 +334,12 @@ export async function GET(
           <Text style={{ fontSize: 9, fontFamily: "Helvetica-Bold", color: "white", marginBottom: 6 }}>
             Résumé
           </Text>
-          <View style={{ flexDirection: "row", gap: 16 }}>
-            <Text style={{ fontSize: 9, color: "#93c5fd" }}>
-              ✓ {confirmedAssignments.length} jours confirmés
+          <View style={{ flexDirection: "row" }}>
+            <Text style={{ fontSize: 9, color: "#93c5fd", marginRight: 16 }}>
+              {confirmedAssignments.length} jours confirmes
             </Text>
-            <Text style={{ fontSize: 9, color: "#93c5fd" }}>
-              ○ {pendingAssignments.length} jours en attente
+            <Text style={{ fontSize: 9, color: "#93c5fd", marginRight: 16 }}>
+              {pendingAssignments.length} jours en attente
             </Text>
             <Text style={{ fontSize: 9, color: "#93c5fd" }}>
               {chantier.documents.length} document{chantier.documents.length > 1 ? "s" : ""}
@@ -355,12 +356,16 @@ export async function GET(
     </Document>
   )
 
-  const buffer = await renderToBuffer(doc)
-
-  return new NextResponse(buffer, {
-    headers: {
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="chantier-${chantier.name.replace(/\s+/g, "-")}.pdf"`,
-    },
-  })
+  try {
+    const buffer = await renderToBuffer(doc)
+    return new NextResponse(buffer, {
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="chantier-${chantier.name.replace(/\s+/g, "-")}.pdf"`,
+      },
+    })
+  } catch (err) {
+    console.error("[PDF ERROR]", err)
+    return new NextResponse(`Erreur PDF: ${String(err)}`, { status: 500 })
+  }
 }
