@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Download, Filter } from "lucide-react"
 
 interface Team     { id: string; name: string }
@@ -73,31 +72,29 @@ export function RapportFilters({ teams, chantiers }: Props) {
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs text-slate-600">Équipe</Label>
-            <Select value={teamId} onValueChange={setTeamId}>
-              <SelectTrigger className="h-9 text-sm">
-                <SelectValue placeholder="Toutes" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Toutes les équipes</SelectItem>
-                {teams.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <select
+              value={teamId}
+              onChange={(e) => setTeamId(e.target.value)}
+              className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+            >
+              <option value="all">Toutes les équipes</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs text-slate-600">Chantier</Label>
-            <Select value={chantierId} onValueChange={setChantierId}>
-              <SelectTrigger className="h-9 text-sm">
-                <SelectValue placeholder="Tous" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tous les chantiers</SelectItem>
-                {chantiers.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <select
+              value={chantierId}
+              onChange={(e) => setChantierId(e.target.value)}
+              className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+            >
+              <option value="all">Tous les chantiers</option>
+              {chantiers.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
           </div>
         </div>
 
