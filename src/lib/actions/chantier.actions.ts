@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
-import { createChantierSchema, extendChantierSchema } from "@/lib/validations/chantier"
+import { createChantierSchema, updateChantierSchema, extendChantierSchema } from "@/lib/validations/chantier"
 import { sendAssignmentCreatedEmail, sendAssignmentConfirmedEmail, sendAssignmentRefusedEmail } from "@/lib/email"
 
 async function requireAdmin() {
@@ -75,6 +75,52 @@ export async function createChantier(formData: FormData) {
   })
 
   revalidatePath("/chantiers")
+  return { success: true }
+}
+
+// ─── Modifier un chantier ────────────────────────────────────────────────────
+
+export async function updateChantier(worksiteId: string, formData: FormData) {
+  const user = await requireAdmin()
+
+  const raw = {
+    name:        formData.get("name")        as string,
+    description: formData.get("description") as string,
+    address:     formData.get("address")     as string,
+    clientId:    formData.get("clientId")    as string,
+    startDate:   formData.get("startDate")   as string,
+    endDate:     formData.get("endDate")     as string,
+    dailyHours:  formData.get("dailyHours")  as string,
+  }
+
+  const parsed = updateChantierSchema.safeParse(raw)
+  if (!parsed.success) return { error: parsed.error.errors[0].message }
+
+  const worksite = await prisma.worksite.findFirst({
+    where: { id: worksiteId, companyId: user.companyId! },
+  })
+  if (!worksite) return { error: "Chantier introuvable." }
+
+  const client = await prisma.client.findFirst({
+    where: { id: parsed.data.clientId, companyId: user.companyId! },
+  })
+  if (!client) return { error: "Client introuvable." }
+
+  await prisma.worksite.update({
+    where: { id: worksiteId },
+    data: {
+      name:        parsed.data.name,
+      description: parsed.data.description || null,
+      address:     parsed.data.address     || null,
+      clientId:    parsed.data.clientId,
+      startDate:   new Date(parsed.data.startDate),
+      endDate:     new Date(parsed.data.endDate),
+      dailyHours:  parsed.data.dailyHours,
+    },
+  })
+
+  revalidatePath("/chantiers")
+  revalidatePath(`/chantiers/${worksiteId}`)
   return { success: true }
 }
 

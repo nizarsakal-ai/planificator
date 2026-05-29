@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { MapPin, Calendar, Clock, Users, HardHat, FileText, Download } from "lucide-react"
 import { ChantierStatusActions } from "@/components/chantiers/ChantierStatusActions"
+import { ChantierEditForm } from "@/components/chantiers/ChantierEditForm"
 import { AffecterEquipeForm } from "@/components/chantiers/AffecterEquipeForm"
 import { DocumentsSection } from "@/components/chantiers/DocumentsSection"
 
@@ -29,7 +30,7 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
   if (!session?.user) redirect("/login")
   if (!["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) redirect("/dashboard")
 
-  const [chantier, teams] = await Promise.all([
+  const [chantier, teams, clients] = await Promise.all([
     prisma.worksite.findFirst({
       where: { id, companyId: session.user.companyId! },
       include: {
@@ -50,6 +51,11 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
       },
     }),
     prisma.team.findMany({
+      where: { companyId: session.user.companyId!, active: true },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+    prisma.client.findMany({
       where: { companyId: session.user.companyId!, active: true },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
@@ -93,7 +99,22 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
           {/* Infos générales */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-semibold text-slate-700">Informations</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-semibold text-slate-700">Informations</CardTitle>
+                <ChantierEditForm
+                  worksiteId={chantier.id}
+                  clients={clients}
+                  defaultValues={{
+                    name:        chantier.name,
+                    description: chantier.description ?? "",
+                    address:     chantier.address     ?? "",
+                    clientId:    chantier.clientId,
+                    startDate:   chantier.startDate.toISOString().split("T")[0],
+                    endDate:     chantier.endDate.toISOString().split("T")[0],
+                    dailyHours:  chantier.dailyHours,
+                  }}
+                />
+              </div>
             </CardHeader>
             <CardContent className="space-y-3">
               {chantier.address && (
