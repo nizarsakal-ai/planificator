@@ -4,6 +4,7 @@ import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { Card, CardContent } from "@/components/ui/card"
 import { Receipt } from "lucide-react"
+import Image from "next/image"
 import { ExpenseActions } from "@/components/expenses/ExpenseActions"
 
 export const metadata: Metadata = { title: "Notes de frais" }
@@ -58,7 +59,19 @@ export default async function NotesDeFraisPage() {
         <Card>
           <CardContent className="p-0 divide-y divide-slate-50">
             {expenses.map((e) => (
-              <div key={e.id} className="flex items-center gap-3 px-4 py-3">
+              <div key={e.id} className="flex items-start gap-3 px-4 py-3">
+                {e.receiptUrl && (
+                  <a href={e.receiptUrl} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                    <Image
+                      src={e.receiptUrl}
+                      alt="Justificatif"
+                      width={48}
+                      height={48}
+                      className="w-12 h-12 rounded-lg object-cover border border-slate-200 hover:opacity-80 transition-opacity"
+                      unoptimized
+                    />
+                  </a>
+                )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-semibold text-slate-800">{e.amount.toFixed(2)} €</p>

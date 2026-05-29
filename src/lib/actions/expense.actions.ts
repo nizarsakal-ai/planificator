@@ -4,6 +4,13 @@ import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
 import { z } from "zod"
+import { v2 as cloudinary } from "cloudinary"
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key:    process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+})
 
 const createSchema = z.object({
   date:        z.string().min(1, "La date est requise"),
@@ -33,6 +40,25 @@ export async function createExpenseReport(formData: FormData) {
   const parsed = createSchema.safeParse(raw)
   if (!parsed.success) return { error: parsed.error.errors[0].message }
 
+  // Upload justificatif (optionnel)
+  let receiptUrl: string | null = null
+  const receiptFile = formData.get("receipt") as File | null
+  if (receiptFile && receiptFile.size > 0) {
+    try {
+      const arrayBuffer = await receiptFile.arrayBuffer()
+      const buffer = Buffer.from(arrayBuffer)
+      const uploadResult = await new Promise<{ secure_url: string }>((resolve, reject) => {
+        cloudinary.uploader.upload_stream(
+          { folder: `planificator/${session.user.companyId}/receipts`, resource_type: "image" },
+          (err, res) => { if (err || !res) return reject(err); resolve(res) }
+        ).end(buffer)
+      })
+      receiptUrl = uploadResult.secure_url
+    } catch {
+      // Upload échoué, on continue sans justificatif
+    }
+  }
+
   await prisma.expenseReport.create({
     data: {
       employeeId:  employee.id,
@@ -41,6 +67,7 @@ export async function createExpenseReport(formData: FormData) {
       amount:      parsed.data.amount,
       category:    parsed.data.category,
       description: parsed.data.description,
+      receiptUrl,
     },
   })
 

@@ -587,6 +587,7 @@ model ExpenseReport {
   amount         Float
   category       ExpenseCategory
   description    String
+  receiptUrl     String?
   status         ExpenseStatus   @default(PENDING)
   rejectionNote  String?
   approvedById   String?
