@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Briefcase, Calendar, ClipboardList } from "lucide-react"
+import { Briefcase, Calendar, ClipboardList, Receipt } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { EmployeEditForm } from "@/components/employes/EmployeEditForm"
 
@@ -27,6 +27,10 @@ interface Assignment {
   id: string; date: Date | string
   assignment: { worksite: { name: string } }
 }
+interface Expense {
+  id: string; date: Date | string; amount: number
+  category: string; description: string; status: string
+}
 interface DefaultValues {
   firstName: string; lastName: string; email: string
   jobTitle: string; phone: string; hiredAt: string
@@ -37,15 +41,22 @@ interface Props {
   defaultValues: DefaultValues
   absences: Absence[]
   assignments: Assignment[]
+  expenses: Expense[]
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  TRANSPORT:   "Transport", REPAS: "Repas", HEBERGEMENT: "Hébergement",
+  MATERIEL:    "Matériel",  OTHER: "Autre",
 }
 
 const TABS = [
-  { id: "modifier",     label: "Modifier",     icon: Briefcase   },
-  { id: "absences",     label: "Absences",     icon: Calendar    },
-  { id: "affectations", label: "Affectations", icon: ClipboardList },
+  { id: "modifier",        label: "Modifier",        icon: Briefcase    },
+  { id: "absences",        label: "Absences",        icon: Calendar     },
+  { id: "affectations",   label: "Affectations",    icon: ClipboardList },
+  { id: "notes-de-frais", label: "Notes de frais",  icon: Receipt      },
 ]
 
-export function EmployeeProfileTabs({ employeeId, defaultValues, absences, assignments }: Props) {
+export function EmployeeProfileTabs({ employeeId, defaultValues, absences, assignments, expenses }: Props) {
   const [active, setActive] = useState("modifier")
 
   return (
@@ -122,6 +133,36 @@ export function EmployeeProfileTabs({ employeeId, defaultValues, absences, assig
                   <div key={ea.id} className="flex items-center justify-between py-2">
                     <p className="text-sm text-slate-700">{ea.assignment.worksite.name}</p>
                     <p className="text-xs text-slate-400">{fmt(ea.date)}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {active === "notes-de-frais" && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-semibold">Notes de frais</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {expenses.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center py-6">Aucune note de frais.</p>
+            ) : (
+              <div className="divide-y divide-slate-50">
+                {expenses.map((e) => (
+                  <div key={e.id} className="flex items-center justify-between py-2.5">
+                    <div>
+                      <p className="text-xs font-medium text-slate-700">
+                        {e.amount.toFixed(2)} € · {CATEGORY_LABELS[e.category] ?? e.category}
+                      </p>
+                      <p className="text-[11px] text-slate-400">{e.description}</p>
+                      <p className="text-[11px] text-slate-300">{fmt(e.date)}</p>
+                    </div>
+                    <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${STATUS_STYLE[e.status] ?? ""}`}>
+                      {e.status === "APPROVED" ? "Approuvée" : e.status === "REJECTED" ? "Refusée" : "En attente"}
+                    </span>
                   </div>
                 ))}
               </div>

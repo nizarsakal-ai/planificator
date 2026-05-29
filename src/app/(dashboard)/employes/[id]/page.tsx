@@ -58,6 +58,10 @@ export default async function EmployeDetailPage({
         orderBy: { date: "desc" },
         take: 5,
       },
+      expenseReports: {
+        orderBy: { createdAt: "desc" },
+        take: 10,
+      },
     },
   })
 
@@ -158,6 +162,7 @@ export default async function EmployeDetailPage({
         }}
         absences={employee.absences}
         assignments={employee.employeeAssignments}
+        expenses={employee.expenseReports}
       />
     </div>
   )
