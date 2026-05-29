@@ -40,7 +40,7 @@ export function InviterMembreDialog() {
 
     if (result?.error) { toast.error(result.error); return }
 
-    setInvitationUrl(result.invitationUrl)
+    setInvitationUrl(result.invitationUrl ?? null)
   }
 
   const copyLink = () => {
