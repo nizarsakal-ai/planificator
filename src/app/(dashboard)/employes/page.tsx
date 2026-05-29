@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Users, Phone, Briefcase, Camera } from "lucide-react"
+import { Users } from "lucide-react"
 import { getInitials } from "@/lib/utils"
 import Link from "next/link"
 import { NouvelEmployeDialog } from "@/components/employes/NouvelEmployeDialog"
@@ -61,88 +61,46 @@ export default async function EmployesPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
           {employees.map((emp) => {
             const fullName = `${emp.firstName} ${emp.lastName}`
             const team     = emp.teamMemberships[0]?.team
 
             return (
-              <div key={emp.id} className={`relative group ${!emp.active ? "opacity-60" : ""}`}>
-                {/* Lien invisible couvrant toute la carte */}
+              <div key={emp.id} className={`relative group ${!emp.active ? "opacity-50" : ""}`}>
                 <Link
                   href={`/employes/${emp.id}`}
                   className="absolute inset-0 z-0 rounded-xl"
                   aria-label={`Voir le profil de ${fullName}`}
                 />
+                <Card className="hover:shadow-md hover:border-[#0f3460]/30 transition-all border border-slate-100">
+                  <CardContent className="p-3 flex flex-col items-center text-center gap-2">
+                    <Avatar className="h-11 w-11 mt-1">
+                      {emp.avatarUrl && <AvatarImage src={emp.avatarUrl} alt={fullName} />}
+                      <AvatarFallback className="bg-[#0f3460] text-white font-semibold text-xs">
+                        {getInitials(fullName)}
+                      </AvatarFallback>
+                    </Avatar>
 
-                <Card className="hover:shadow-md hover:border-[#0f3460]/30 transition-all border-2 border-transparent">
-                  <CardContent className="p-5">
-                    {/* Header */}
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        {/* Avatar */}
-                        <div className="relative">
-                          <Avatar className="h-12 w-12">
-                            {emp.avatarUrl && <AvatarImage src={emp.avatarUrl} alt={fullName} />}
-                            <AvatarFallback className="bg-[#0f3460] text-white font-semibold text-sm">
-                              {getInitials(fullName)}
-                            </AvatarFallback>
-                          </Avatar>
-                          {/* Indice photo */}
-                          <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-white border border-slate-200 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Camera className="h-2.5 w-2.5 text-slate-400" />
-                          </div>
-                        </div>
-
-                        <div>
-                          <p className="font-semibold text-slate-900 text-sm leading-tight group-hover:text-[#0f3460] transition-colors">
-                            {fullName}
-                          </p>
-                          <p className="text-xs text-slate-400 mt-0.5 truncate max-w-[160px]">
-                            {emp.user.email}
-                          </p>
-                        </div>
-                      </div>
-                      <Badge variant={emp.active ? "default" : "secondary"} className="text-xs shrink-0 relative z-10">
-                        {emp.active ? "Actif" : "Inactif"}
-                      </Badge>
-                    </div>
-
-                    {/* Infos */}
-                    <div className="space-y-1.5 mb-4">
+                    <div className="w-full min-w-0">
+                      <p className="font-semibold text-slate-900 text-xs leading-tight truncate group-hover:text-[#0f3460] transition-colors">
+                        {fullName}
+                      </p>
                       {emp.jobTitle && (
-                        <div className="flex items-center gap-2 text-xs text-slate-500">
-                          <Briefcase className="h-3.5 w-3.5 shrink-0" />
-                          {emp.jobTitle}
-                        </div>
-                      )}
-                      {emp.phone && (
-                        <div className="flex items-center gap-2 text-xs text-slate-500">
-                          <Phone className="h-3.5 w-3.5 shrink-0" />
-                          {emp.phone}
-                        </div>
+                        <p className="text-[11px] text-slate-400 truncate mt-0.5">{emp.jobTitle}</p>
                       )}
                       {team ? (
-                        <div className="flex items-center gap-2 text-xs">
-                          <span
-                            className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
-                            style={{ backgroundColor: team.color ?? "#0f3460" }}
-                          />
-                          <span className="text-slate-600">{team.name}</span>
+                        <div className="flex items-center justify-center gap-1 mt-1">
+                          <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: team.color ?? "#0f3460" }} />
+                          <span className="text-[11px] text-slate-500 truncate">{team.name}</span>
                         </div>
                       ) : (
-                        <p className="text-xs text-slate-400 italic">Non assigné à une équipe</p>
+                        <p className="text-[10px] text-slate-300 mt-0.5">Sans équipe</p>
                       )}
                     </div>
 
-                    {/* Footer : actions + hint */}
-                    <div className="border-t border-slate-100 pt-3 flex items-center justify-between">
-                      <span className="text-xs text-[#0f3460] font-medium opacity-0 group-hover:opacity-100 transition-opacity">
-                        Voir le profil →
-                      </span>
-                      <div className="relative z-10">
-                        <EmployeActions employeeId={emp.id} active={emp.active} />
-                      </div>
+                    <div className="relative z-10 w-full border-t border-slate-50 pt-2">
+                      <EmployeActions employeeId={emp.id} active={emp.active} />
                     </div>
                   </CardContent>
                 </Card>
