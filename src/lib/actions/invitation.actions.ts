@@ -34,11 +34,18 @@ export async function inviterMembre(formData: FormData) {
   const parsed = inviteSchema.safeParse(raw)
   if (!parsed.success) return { error: parsed.error.errors[0].message }
 
-  // Vérifier que l'utilisateur n'appartient pas déjà à cette entreprise
+  // Vérifier que l'utilisateur n'appartient pas déjà à cette entreprise avec un profil actif
   const existing = await prisma.user.findFirst({
     where: { email: parsed.data.email, companyId: user.companyId! },
+    include: { employee: { select: { id: true, active: true } } },
   })
-  if (existing) return { error: "Cet employé fait déjà partie de votre entreprise." }
+  if (existing) {
+    if (existing.employee?.active) {
+      return { error: "Cet employé fait déjà partie de votre entreprise." }
+    }
+    // Compte fantôme (sans profil employé actif) → on le supprime pour permettre la réinvitation
+    await prisma.user.delete({ where: { id: existing.id } })
+  }
 
   // Supprimer toute invitation en attente existante pour cet email
   await prisma.invitation.deleteMany({
