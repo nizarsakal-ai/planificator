@@ -33,7 +33,6 @@ export default async function EmployeDetailPage({
 }) {
   const session = await auth()
   if (!session?.user) redirect("/login")
-  if (!["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) redirect("/dashboard")
 
   const { id } = await params
 
