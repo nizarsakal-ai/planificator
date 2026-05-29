@@ -63,15 +63,19 @@ export async function inviterMembre(formData: FormData) {
     },
   })
 
-  // Envoyer l'email si RESEND_API_KEY est configuré
+  // Envoyer l'email (erreur non bloquante)
   if (process.env.RESEND_API_KEY) {
-    await sendInvitationEmail({
-      to:            parsed.data.email,
-      token,
-      companyName:   company?.name ?? "votre entreprise",
-      invitedByName: user.name ?? user.email ?? "Admin",
-      role:          parsed.data.role,
-    })
+    try {
+      await sendInvitationEmail({
+        to:            parsed.data.email,
+        token,
+        companyName:   company?.name ?? "votre entreprise",
+        invitedByName: user.name ?? user.email ?? "Admin",
+        role:          parsed.data.role,
+      })
+    } catch (e) {
+      console.error("Erreur envoi email invitation:", e)
+    }
   }
 
   const appUrl = process.env.NEXTAUTH_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
