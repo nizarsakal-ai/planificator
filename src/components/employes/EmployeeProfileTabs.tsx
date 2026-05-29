@@ -28,7 +28,7 @@ interface Assignment {
   assignment: { worksite: { name: string } }
 }
 interface DefaultValues {
-  firstName: string; lastName: string
+  firstName: string; lastName: string; email: string
   jobTitle: string; phone: string; hiredAt: string
 }
 

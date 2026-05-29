@@ -83,8 +83,10 @@ export async function updateEmploye(employeeId: string, formData: FormData) {
   const raw = {
     firstName: formData.get("firstName") as string,
     lastName: formData.get("lastName") as string,
+    email: formData.get("email") as string,
     jobTitle: formData.get("jobTitle") as string,
     phone: formData.get("phone") as string,
+    hiredAt: formData.get("hiredAt") as string,
   }
 
   const parsed = updateEmployeSchema.safeParse(raw)
@@ -98,16 +100,28 @@ export async function updateEmploye(employeeId: string, formData: FormData) {
   })
   if (!employee) return { error: "Employé introuvable." }
 
-  await prisma.employee.update({
-    where: { id: employeeId },
-    data: {
-      firstName: parsed.data.firstName,
-      lastName:  parsed.data.lastName,
-      jobTitle:  parsed.data.jobTitle || null,
-      phone:     parsed.data.phone    || null,
-      hiredAt:   parsed.data.hiredAt  ? new Date(parsed.data.hiredAt) : null,
-    },
+  // Vérifier que le nouvel email n'est pas déjà utilisé par un autre compte
+  const existingUser = await prisma.user.findFirst({
+    where: { email: parsed.data.email, id: { not: employee.userId } },
   })
+  if (existingUser) return { error: "Cet email est déjà utilisé par un autre compte." }
+
+  await prisma.$transaction([
+    prisma.employee.update({
+      where: { id: employeeId },
+      data: {
+        firstName: parsed.data.firstName,
+        lastName:  parsed.data.lastName,
+        jobTitle:  parsed.data.jobTitle || null,
+        phone:     parsed.data.phone    || null,
+        hiredAt:   parsed.data.hiredAt  ? new Date(parsed.data.hiredAt) : null,
+      },
+    }),
+    prisma.user.update({
+      where: { id: employee.userId },
+      data: { email: parsed.data.email },
+    }),
+  ])
 
   revalidatePath("/employes")
   revalidatePath(`/employes/${employeeId}`)

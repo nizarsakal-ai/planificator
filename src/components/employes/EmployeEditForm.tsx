@@ -14,6 +14,7 @@ interface Props {
   defaultValues: {
     firstName: string
     lastName:  string
+    email:     string
     jobTitle:  string
     phone:     string
     hiredAt:   string
@@ -49,6 +50,11 @@ export function EmployeEditForm({ employeeId, defaultValues }: Props) {
           <Label className="text-xs text-slate-600">Nom *</Label>
           <Input name="lastName" defaultValue={defaultValues.lastName} required className="h-9 text-sm" />
         </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs text-slate-600">Email *</Label>
+        <Input name="email" type="email" defaultValue={defaultValues.email} required className="h-9 text-sm" />
       </div>
 
       <div className="space-y-1.5">

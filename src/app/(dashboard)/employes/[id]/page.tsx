@@ -95,13 +95,13 @@ export default async function EmployeDetailPage({
             <p className="text-slate-500 text-sm mt-0.5">{employee.jobTitle}</p>
           )}
           <div className="flex flex-wrap gap-4 mt-3">
-            <span className="flex items-center gap-1.5 text-xs text-slate-500">
+            <a href={`mailto:${employee.user.email}`} className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-[#0f3460] transition-colors">
               <Mail className="h-3.5 w-3.5" /> {employee.user.email}
-            </span>
+            </a>
             {employee.phone && (
-              <span className="flex items-center gap-1.5 text-xs text-slate-500">
+              <a href={`tel:${employee.phone}`} className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-[#0f3460] transition-colors">
                 <Phone className="h-3.5 w-3.5" /> {employee.phone}
-              </span>
+              </a>
             )}
             {team && (
               <span className="flex items-center gap-1.5 text-xs text-slate-500">
@@ -151,6 +151,7 @@ export default async function EmployeDetailPage({
         defaultValues={{
           firstName: employee.firstName,
           lastName:  employee.lastName,
+          email:     employee.user.email,
           jobTitle:  employee.jobTitle ?? "",
           phone:     employee.phone    ?? "",
           hiredAt:   employee.hiredAt  ? employee.hiredAt.toISOString().split("T")[0] : "",
