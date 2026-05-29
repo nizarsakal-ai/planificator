@@ -17,7 +17,7 @@ export const authConfig: NextAuthConfig = {
       const pathname = nextUrl.pathname
 
       // ── Routes publiques ────────────────────────────────────────────────
-      if (pathname.startsWith("/login") || pathname.startsWith("/inscription")) {
+      if (pathname.startsWith("/login") || pathname.startsWith("/inscription") || pathname.startsWith("/invitation") || pathname.startsWith("/reinitialiser") || pathname.startsWith("/mot-de-passe-oublie")) {
         // Si déjà connecté, rediriger vers le bon dashboard
         if (isLoggedIn) {
           const destination =
