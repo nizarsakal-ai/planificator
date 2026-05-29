@@ -78,6 +78,8 @@ enum NotificationType {
   EXPENSE_SUBMITTED     // Note de frais soumise
   EXPENSE_APPROVED      // Note de frais approuvée
   EXPENSE_REJECTED      // Note de frais refusée
+  TIMECLOCK_IN          // Pointage arrivée
+  TIMECLOCK_OUT         // Pointage départ
 }
 
 enum ExpenseCategory {
@@ -141,6 +143,7 @@ model Company {
   historyLogs    HistoryLog[]
   absences       Absence[]
   expenseReports ExpenseReport[]
+  timeclocks     Timeclock[]
   settings       CompanySettings?
 
   @@map("companies")
@@ -222,6 +225,7 @@ model Employee {
   employeeAssignments EmployeeAssignment[]
   absences            Absence[]
   expenseReports      ExpenseReport[]
+  timeclocks          Timeclock[]
 
   @@index([companyId])
   @@index([userId])
@@ -342,6 +346,7 @@ model Worksite {
   assignments Assignment[]
   extensions  Extension[]
   historyLogs HistoryLog[]
+  timeclocks  Timeclock[]
 
   @@index([companyId])
   @@index([clientId])
@@ -601,4 +606,35 @@ model ExpenseReport {
   @@index([companyId])
   @@index([status])
   @@map("expense_reports")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TIMECLOCK — Pointage géolocalisé (arrivée / départ)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Timeclock {
+  id           String    @id @default(cuid())
+  employeeId   String
+  companyId    String
+  worksiteId   String?   // chantier associé (détecté par proximité ou choisi)
+  date         DateTime  @db.Date
+  checkInAt    DateTime?
+  checkInLat   Float?
+  checkInLng   Float?
+  checkOutAt   DateTime?
+  checkOutLat  Float?
+  checkOutLng  Float?
+  note         String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  worksite  Worksite? @relation(fields: [worksiteId], references: [id], onDelete: SetNull)
+
+  @@unique([employeeId, date])
+  @@index([employeeId])
+  @@index([companyId])
+  @@index([date])
+  @@map("timeclocks")
 }

@@ -19,6 +19,7 @@ import {
   GanttChart,
   ClipboardList,
   Receipt,
+  MapPin,
 } from "lucide-react"
 import { cn, getInitials } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -69,6 +70,7 @@ function getNavItems(role: Role): NavItem[] {
         { label: "Gantt",       href: "/planning/gantt", icon: GanttChart },
         { label: "Absences",         href: "/absences",         icon: CalendarOff },
         { label: "Notes de frais",   href: "/notes-de-frais",   icon: Receipt },
+        { label: "Pointages",        href: "/pointages",        icon: MapPin },
         { label: "Rapports",         href: "/rapports",         icon: ClipboardList },
         { label: "Mon profil",       href: "/profil",           icon: User },
         { label: "Paramètres",       href: "/parametres",       icon: Settings },
@@ -81,6 +83,7 @@ function getNavItems(role: Role): NavItem[] {
         { label: "Mon planning",       href: "/planning/moi",           icon: Calendar },
         { label: "Mes absences",       href: "/mes-absences",           icon: CalendarOff },
         { label: "Notes de frais",     href: "/mes-notes-de-frais",     icon: Receipt },
+        { label: "Pointage",           href: "/pointage",               icon: MapPin },
         { label: "Mon profil",         href: "/profil",                 icon: User },
       ]
 
@@ -90,6 +93,7 @@ function getNavItems(role: Role): NavItem[] {
         { label: "Mon planning",   href: "/planning/moi",       icon: Calendar },
         { label: "Mes absences",   href: "/mes-absences",       icon: CalendarOff },
         { label: "Notes de frais", href: "/mes-notes-de-frais", icon: Receipt },
+        { label: "Pointage",       href: "/pointage",           icon: MapPin },
         { label: "Mon profil",     href: "/profil",             icon: User },
       ]
 
