@@ -4,13 +4,13 @@ import { redirect } from "next/navigation"
 import { notFound } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import Link from "next/link"
-import { ArrowLeft, Mail, Phone, Briefcase, Calendar, Users } from "lucide-react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ArrowLeft, Mail, Phone, Calendar, Users } from "lucide-react"
+import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { getInitials } from "@/lib/utils"
-import { EmployeEditForm } from "@/components/employes/EmployeEditForm"
 import { AvatarUpload } from "@/components/employes/AvatarUpload"
 import { EmployeActions } from "@/components/employes/EmployeActions"
+import { EmployeeProfileTabs } from "@/components/employes/EmployeeProfileTabs"
 
 export const metadata: Metadata = { title: "Profil employé" }
 
@@ -146,77 +146,18 @@ export default async function EmployeDetailPage({
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Formulaire de modification */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <Briefcase className="h-4 w-4" /> Informations
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <EmployeEditForm
-              employeeId={employee.id}
-              defaultValues={{
-                firstName: employee.firstName,
-                lastName:  employee.lastName,
-                jobTitle:  employee.jobTitle ?? "",
-                phone:     employee.phone    ?? "",
-                hiredAt:   employee.hiredAt  ? employee.hiredAt.toISOString().split("T")[0] : "",
-              }}
-            />
-          </CardContent>
-        </Card>
-
-        {/* Absences récentes */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <Calendar className="h-4 w-4" /> Absences ({new Date().getFullYear()})
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {employee.absences.length === 0 ? (
-              <p className="text-xs text-slate-400 text-center py-4">Aucune absence cette année.</p>
-            ) : (
-              <div className="space-y-2">
-                {employee.absences.map((a) => (
-                  <div key={a.id} className="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
-                    <div>
-                      <p className="text-xs font-medium text-slate-700">{TYPE_LABELS[a.type] ?? a.type}</p>
-                      <p className="text-[11px] text-slate-400">{fmt(a.startDate)} → {fmt(a.endDate)}</p>
-                    </div>
-                    <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${STATUS_STYLE[a.status] ?? ""}`}>
-                      {a.status === "APPROVED" ? "Approuvé" : a.status === "REJECTED" ? "Refusé" : "En attente"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Affectations récentes */}
-      {employee.employeeAssignments.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <Calendar className="h-4 w-4" /> Affectations ce mois
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="divide-y divide-slate-50">
-              {employee.employeeAssignments.map((ea) => (
-                <div key={ea.id} className="flex items-center justify-between py-2">
-                  <p className="text-sm text-slate-700">{ea.assignment.worksite.name}</p>
-                  <p className="text-xs text-slate-400">{fmt(ea.date)}</p>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <EmployeeProfileTabs
+        employeeId={employee.id}
+        defaultValues={{
+          firstName: employee.firstName,
+          lastName:  employee.lastName,
+          jobTitle:  employee.jobTitle ?? "",
+          phone:     employee.phone    ?? "",
+          hiredAt:   employee.hiredAt  ? employee.hiredAt.toISOString().split("T")[0] : "",
+        }}
+        absences={employee.absences}
+        assignments={employee.employeeAssignments}
+      />
     </div>
   )
 }
