@@ -34,9 +34,11 @@ export async function inviterMembre(formData: FormData) {
   const parsed = inviteSchema.safeParse(raw)
   if (!parsed.success) return { error: parsed.error.errors[0].message }
 
-  // Vérifier que l'utilisateur n'existe pas déjà
-  const existing = await prisma.user.findUnique({ where: { email: parsed.data.email } })
-  if (existing) return { error: "Un compte existe déjà avec cet email." }
+  // Vérifier que l'utilisateur n'appartient pas déjà à cette entreprise
+  const existing = await prisma.user.findFirst({
+    where: { email: parsed.data.email, companyId: user.companyId! },
+  })
+  if (existing) return { error: "Cet employé fait déjà partie de votre entreprise." }
 
   // Supprimer toute invitation en attente existante pour cet email
   await prisma.invitation.deleteMany({
