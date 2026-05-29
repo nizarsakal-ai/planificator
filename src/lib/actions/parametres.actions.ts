@@ -30,11 +30,11 @@ export async function updateCompanyInfo(formData: FormData) {
   const user = await requireAdmin()
 
   const raw = {
-    name:    formData.get("name")    as string,
-    email:   formData.get("email")   as string,
-    phone:   formData.get("phone")   as string,
-    address: formData.get("address") as string,
-    siret:   formData.get("siret")   as string,
+    name:    (formData.get("name")    as string) || "",
+    email:   (formData.get("email")   as string) || "",
+    phone:   (formData.get("phone")   as string) || "",
+    address: (formData.get("address") as string) || "",
+    siret:   (formData.get("siret")   as string) || "",
   }
 
   const parsed = updateCompanySchema.safeParse(raw)
