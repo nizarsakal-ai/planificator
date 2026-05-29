@@ -18,6 +18,7 @@ import {
   User,
   GanttChart,
   ClipboardList,
+  Receipt,
 } from "lucide-react"
 import { cn, getInitials } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -66,27 +67,30 @@ function getNavItems(role: Role): NavItem[] {
         { label: "Chantiers", href: "/chantiers", icon: HardHat },
         { label: "Planning",    href: "/planning",       icon: Calendar },
         { label: "Gantt",       href: "/planning/gantt", icon: GanttChart },
-        { label: "Absences",    href: "/absences",       icon: CalendarOff },
-        { label: "Rapports",    href: "/rapports",       icon: ClipboardList },
-        { label: "Mon profil", href: "/profil", icon: User },
-        { label: "Paramètres", href: "/parametres", icon: Settings },
+        { label: "Absences",         href: "/absences",         icon: CalendarOff },
+        { label: "Notes de frais",   href: "/notes-de-frais",   icon: Receipt },
+        { label: "Rapports",         href: "/rapports",         icon: ClipboardList },
+        { label: "Mon profil",       href: "/profil",           icon: User },
+        { label: "Paramètres",       href: "/parametres",       icon: Settings },
       ]
 
     case "TEAM_LEADER":
       return [
-        { label: "Dashboard",      href: "/dashboard",        icon: LayoutDashboard },
-        { label: "Mon équipe",     href: "/planning/equipe",  icon: ClipboardList },
-        { label: "Mon planning",   href: "/planning/moi",     icon: Calendar },
-        { label: "Mes absences",   href: "/mes-absences",     icon: CalendarOff },
-        { label: "Mon profil",     href: "/profil",           icon: User },
+        { label: "Dashboard",          href: "/dashboard",              icon: LayoutDashboard },
+        { label: "Mon équipe",         href: "/planning/equipe",        icon: ClipboardList },
+        { label: "Mon planning",       href: "/planning/moi",           icon: Calendar },
+        { label: "Mes absences",       href: "/mes-absences",           icon: CalendarOff },
+        { label: "Notes de frais",     href: "/mes-notes-de-frais",     icon: Receipt },
+        { label: "Mon profil",         href: "/profil",                 icon: User },
       ]
 
     case "EMPLOYEE":
       return [
-        { label: "Dashboard",    href: "/dashboard",    icon: LayoutDashboard },
-        { label: "Mon planning", href: "/planning/moi", icon: Calendar },
-        { label: "Mes absences", href: "/mes-absences", icon: CalendarOff },
-        { label: "Mon profil",   href: "/profil",       icon: User },
+        { label: "Dashboard",      href: "/dashboard",          icon: LayoutDashboard },
+        { label: "Mon planning",   href: "/planning/moi",       icon: Calendar },
+        { label: "Mes absences",   href: "/mes-absences",       icon: CalendarOff },
+        { label: "Notes de frais", href: "/mes-notes-de-frais", icon: Receipt },
+        { label: "Mon profil",     href: "/profil",             icon: User },
       ]
 
     default:

@@ -75,6 +75,23 @@ enum NotificationType {
   ABSENCE_REQUESTED     // Absence soumise
   ABSENCE_APPROVED      // Absence validée
   ABSENCE_REJECTED      // Absence refusée
+  EXPENSE_SUBMITTED     // Note de frais soumise
+  EXPENSE_APPROVED      // Note de frais approuvée
+  EXPENSE_REJECTED      // Note de frais refusée
+}
+
+enum ExpenseCategory {
+  TRANSPORT     // Transport / carburant / péage
+  REPAS         // Repas / restauration
+  HEBERGEMENT   // Hébergement
+  MATERIEL      // Matériel / fournitures
+  OTHER         // Autre
+}
+
+enum ExpenseStatus {
+  PENDING   // En attente de validation
+  APPROVED  // Validée
+  REJECTED  // Refusée
 }
 
 enum HistoryAction {
@@ -123,6 +140,7 @@ model Company {
   notifications  Notification[]
   historyLogs    HistoryLog[]
   absences       Absence[]
+  expenseReports ExpenseReport[]
   settings       CompanySettings?
 
   @@map("companies")
@@ -203,6 +221,7 @@ model Employee {
   ledTeams            Team[]               @relation("TeamLeader")
   employeeAssignments EmployeeAssignment[]
   absences            Absence[]
+  expenseReports      ExpenseReport[]
 
   @@index([companyId])
   @@index([userId])
@@ -554,4 +573,31 @@ model PasswordReset {
   @@index([token])
   @@index([userId])
   @@map("password_resets")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EXPENSE REPORT — Notes de frais
+// ═══════════════════════════════════════════════════════════════════════════
+
+model ExpenseReport {
+  id             String          @id @default(cuid())
+  employeeId     String
+  companyId      String
+  date           DateTime        @db.Date
+  amount         Float
+  category       ExpenseCategory
+  description    String
+  status         ExpenseStatus   @default(PENDING)
+  rejectionNote  String?
+  approvedById   String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@index([companyId])
+  @@index([status])
+  @@map("expense_reports")
 }
