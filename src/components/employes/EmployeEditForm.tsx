@@ -59,7 +59,14 @@ export function EmployeEditForm({ employeeId, defaultValues }: Props) {
 
       <div className="space-y-1.5">
         <Label className="text-xs text-slate-600">Poste / Métier</Label>
-        <Input name="jobTitle" defaultValue={defaultValues.jobTitle} placeholder="Ex: Maçon, Électricien…" className="h-9 text-sm" />
+        <Input name="jobTitle" list="jobTitle-edit-options" defaultValue={defaultValues.jobTitle} placeholder="Chef d'équipe, Technicien monteur…" className="h-9 text-sm" />
+        <datalist id="jobTitle-edit-options">
+          <option value="Chef d'équipe" />
+          <option value="Technicien monteur" />
+          <option value="Cariste" />
+          <option value="Assistant responsable" />
+          <option value="Électricien" />
+        </datalist>
       </div>
 
       <div className="space-y-1.5">

@@ -97,10 +97,18 @@ export function EmployeForm({ onSuccess }: EmployeFormProps) {
         <Label htmlFor="jobTitle">Poste</Label>
         <Input
           id="jobTitle"
-          placeholder="Technicien, Maçon, Chef de chantier..."
+          list="jobTitle-options"
+          placeholder="Chef d'équipe, Technicien monteur..."
           disabled={isSubmitting}
           {...register("jobTitle")}
         />
+        <datalist id="jobTitle-options">
+          <option value="Chef d'équipe" />
+          <option value="Technicien monteur" />
+          <option value="Cariste" />
+          <option value="Assistant responsable" />
+          <option value="Électricien" />
+        </datalist>
       </div>
 
       {/* Téléphone */}
