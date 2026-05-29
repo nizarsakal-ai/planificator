@@ -173,7 +173,65 @@ export async function removeMembre(teamId: string, employeeId: string) {
   return { success: true }
 }
 
-// ─── Archiver une équipe ─────────────────────────────────────────────────────
+// ─── Modifier une équipe ─────────────────────────────────────────────────────
+
+export async function updateEquipe(teamId: string, formData: FormData) {
+  const user = await requireAdmin()
+
+  const raw = {
+    name:     formData.get("name")     as string,
+    color:    formData.get("color")    as string,
+    leaderId: formData.get("leaderId") as string,
+  }
+
+  const parsed = updateEquipeSchema.safeParse(raw)
+  if (!parsed.success) return { error: parsed.error.errors[0].message }
+
+  const team = await prisma.team.findFirst({
+    where: { id: teamId, companyId: user.companyId! },
+    include: { leader: true },
+  })
+  if (!team) return { error: "Équipe introuvable." }
+
+  // Vérifier doublon de nom (sauf pour cette équipe)
+  const duplicate = await prisma.team.findFirst({
+    where: { name: parsed.data.name, companyId: user.companyId!, id: { not: teamId } },
+  })
+  if (duplicate) return { error: "Une équipe avec ce nom existe déjà." }
+
+  const newLeader = await prisma.employee.findFirst({
+    where: { id: parsed.data.leaderId, companyId: user.companyId! },
+  })
+  if (!newLeader) return { error: "Chef d'équipe introuvable." }
+
+  const leaderChanged = team.leaderId !== parsed.data.leaderId
+
+  await prisma.$transaction(async (tx) => {
+    if (leaderChanged) {
+      // Nouveau chef → TEAM_LEADER
+      await tx.user.update({ where: { id: newLeader.userId }, data: { role: "TEAM_LEADER" } })
+      // Ancien chef → EMPLOYEE
+      await tx.user.update({ where: { id: team.leader.userId }, data: { role: "EMPLOYEE" } })
+      // S'assurer que le nouveau chef est membre actif
+      const existing = await tx.teamMember.findFirst({ where: { teamId, employeeId: parsed.data.leaderId } })
+      if (existing) {
+        await tx.teamMember.update({ where: { id: existing.id }, data: { leftAt: null } })
+      } else {
+        await tx.teamMember.create({ data: { teamId, employeeId: parsed.data.leaderId } })
+      }
+    }
+    await tx.team.update({
+      where: { id: teamId },
+      data: { name: parsed.data.name, color: parsed.data.color || "#0f3460", leaderId: parsed.data.leaderId },
+    })
+  })
+
+  revalidatePath("/equipes")
+  revalidatePath(`/equipes/${teamId}`)
+  return { success: true }
+}
+
+// ─── Archiver / Désarchiver une équipe ───────────────────────────────────────
 
 export async function archiveEquipe(teamId: string) {
   const user = await requireAdmin()
@@ -189,5 +247,24 @@ export async function archiveEquipe(teamId: string) {
   })
 
   revalidatePath("/equipes")
+  revalidatePath(`/equipes/${teamId}`)
+  return { success: true }
+}
+
+export async function unarchiveEquipe(teamId: string) {
+  const user = await requireAdmin()
+
+  const team = await prisma.team.findFirst({
+    where: { id: teamId, companyId: user.companyId! },
+  })
+  if (!team) return { error: "Équipe introuvable." }
+
+  await prisma.team.update({
+    where: { id: teamId },
+    data: { active: true },
+  })
+
+  revalidatePath("/equipes")
+  revalidatePath(`/equipes/${teamId}`)
   return { success: true }
 }

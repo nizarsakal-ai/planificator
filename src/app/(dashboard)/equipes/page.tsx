@@ -2,10 +2,11 @@ import type { Metadata } from "next"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
+import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Layers, Crown, Users } from "lucide-react"
+import { Layers, Crown, Users, ChevronRight } from "lucide-react"
 import { getInitials } from "@/lib/utils"
 import { NouvelleEquipeDialog } from "@/components/equipes/NouvelleEquipeDialog"
 import { MembreActions } from "@/components/equipes/MembreActions"
@@ -80,8 +81,8 @@ export default async function EquipesPage() {
                 />
 
                 <CardContent className="p-5">
-                  {/* Header */}
-                  <div className="flex items-start justify-between mb-4">
+                  {/* Header cliquable */}
+                  <Link href={`/equipes/${team.id}`} className="flex items-start justify-between mb-4 group">
                     <div className="flex items-center gap-3">
                       <div
                         className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm shrink-0"
@@ -90,17 +91,20 @@ export default async function EquipesPage() {
                         {team.name.charAt(0).toUpperCase()}
                       </div>
                       <div>
-                        <h3 className="font-semibold text-slate-900">{team.name}</h3>
+                        <h3 className="font-semibold text-slate-900 group-hover:text-[#0f3460] transition-colors">{team.name}</h3>
                         <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
                           <Users className="h-3 w-3" />
                           {membresActifs.length} membre{membresActifs.length > 1 ? "s" : ""}
                         </p>
                       </div>
                     </div>
-                    <Badge variant={team.active ? "default" : "secondary"}>
-                      {team.active ? "Active" : "Archivée"}
-                    </Badge>
-                  </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={team.active ? "default" : "secondary"}>
+                        {team.active ? "Active" : "Archivée"}
+                      </Badge>
+                      <ChevronRight className="h-4 w-4 text-slate-400 group-hover:text-[#0f3460] transition-colors" />
+                    </div>
+                  </Link>
 
                   {/* Chef d'équipe */}
                   <div className="flex items-center gap-2 p-2.5 bg-amber-50 rounded-lg mb-4">
