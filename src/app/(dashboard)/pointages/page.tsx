@@ -47,7 +47,12 @@ export default async function PointagesPage({ searchParams }: PageProps) {
   const next = new Date(selectedDate); next.setDate(next.getDate() + 1)
   const isToday = selectedDate.toDateString() === new Date().toDateString()
 
-  function toISO(d: Date) { return d.toISOString().split("T")[0] }
+  function toISO(d: Date) {
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, "0")
+    const day = String(d.getDate()).padStart(2, "0")
+    return `${y}-${m}-${day}`
+  }
 
   return (
     <div className="space-y-6">
@@ -66,7 +71,7 @@ export default async function PointagesPage({ searchParams }: PageProps) {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-4 flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center">

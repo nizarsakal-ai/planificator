@@ -147,7 +147,7 @@ export function Sidebar({ user }: { user: SidebarUser }) {
   const navItems = getNavItems(user.role)
 
   return (
-    <aside className="w-64 shrink-0 bg-[#0f3460] flex flex-col h-screen">
+    <aside className="hidden md:flex w-64 shrink-0 bg-[#0f3460] flex-col h-screen">
       {/* Logo */}
       <div className="px-5 py-5 border-b border-white/10">
         <div className="flex items-center gap-3">

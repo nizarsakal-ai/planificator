@@ -53,7 +53,7 @@ export default async function SuperAdminEntreprisesPage() {
       </div>
 
       {/* Stats globales */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-4 flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center">
