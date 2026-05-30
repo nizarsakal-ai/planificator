@@ -1,4 +1,4 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { Inter } from "next/font/google"
 import { SessionProvider } from "next-auth/react"
 import { Toaster } from "sonner"
@@ -14,6 +14,31 @@ export const metadata: Metadata = {
     template: "%s | Planificator",
   },
   description: "Gestion de planning d'équipes et de chantiers",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Planificator",
+    startupImage: "/apple-touch-icon.png",
+  },
+  icons: {
+    icon: [
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icons/icon-192x192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: [
+      { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
+}
+
+export const viewport: Viewport = {
+  themeColor: "#0f3460",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
 }
 
 export default async function RootLayout({
@@ -25,6 +50,13 @@ export default async function RootLayout({
 
   return (
     <html lang="fr">
+      <head>
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="Planificator" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+      </head>
       <body className={inter.className}>
         <SessionProvider session={session}>
           {children}
