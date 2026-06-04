@@ -17,16 +17,16 @@ interface Team {
 interface Props {
   worksiteId: string
   teams: Team[]
+  worksiteStartDate: string // "YYYY-MM-DD"
+  worksiteEndDate: string   // "YYYY-MM-DD"
 }
 
-export function AffecterEquipeForm({ worksiteId, teams }: Props) {
+export function AffecterEquipeForm({ worksiteId, teams, worksiteStartDate, worksiteEndDate }: Props) {
   const router = useRouter()
   const [teamId, setTeamId] = useState("")
-  const [dateFrom, setDateFrom] = useState("")
+  const [dateFrom, setDateFrom] = useState(worksiteStartDate)
   const [dateTo, setDateTo] = useState("")
   const [loading, setLoading] = useState(false)
-
-  const today = new Date().toISOString().split("T")[0]
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -88,11 +88,11 @@ export function AffecterEquipeForm({ worksiteId, teams }: Props) {
           <Label className="text-xs text-slate-500">Date de début</Label>
           <Input
             type="date"
-            min={today}
+            min={worksiteStartDate}
+            max={worksiteEndDate}
             value={dateFrom}
             onChange={(e) => {
               setDateFrom(e.target.value)
-              // Si date de fin avant date de début → on la reset
               if (dateTo && e.target.value > dateTo) setDateTo("")
             }}
           />
@@ -103,7 +103,8 @@ export function AffecterEquipeForm({ worksiteId, teams }: Props) {
           <Label className="text-xs text-slate-500">Date de fin <span className="text-slate-400">(optionnelle)</span></Label>
           <Input
             type="date"
-            min={dateFrom || today}
+            min={dateFrom || worksiteStartDate}
+            max={worksiteEndDate}
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
             disabled={!dateFrom}

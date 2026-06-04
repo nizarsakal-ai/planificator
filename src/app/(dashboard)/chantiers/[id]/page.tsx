@@ -155,7 +155,12 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
                 <CardTitle className="text-sm font-semibold text-slate-700">Affecter une équipe</CardTitle>
               </CardHeader>
               <CardContent>
-                <AffecterEquipeForm worksiteId={chantier.id} teams={teams} />
+                <AffecterEquipeForm
+                  worksiteId={chantier.id}
+                  teams={teams}
+                  worksiteStartDate={chantier.startDate.toISOString().split("T")[0]}
+                  worksiteEndDate={chantier.endDate.toISOString().split("T")[0]}
+                />
               </CardContent>
             </Card>
           )}
