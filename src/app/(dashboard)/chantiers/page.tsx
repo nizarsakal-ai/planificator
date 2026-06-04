@@ -20,6 +20,21 @@ export default async function ChantiersPage() {
       include: {
         client: { select: { name: true } },
         _count: { select: { assignments: true } },
+        assignments: {
+          select: {
+            teamId: true,
+            team: {
+              select: {
+                id: true,
+                name: true,
+                color: true,
+                leader: { select: { firstName: true, lastName: true } },
+              },
+            },
+          },
+          orderBy: { date: "desc" },
+          take: 30,
+        },
       },
       orderBy: { createdAt: "desc" },
     }),
