@@ -13,11 +13,12 @@ import { DocumentsSection } from "@/components/chantiers/DocumentsSection"
 export const metadata: Metadata = { title: "Détail chantier" }
 
 const statusLabels: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  PLANNED:     { label: "Planifié",    variant: "secondary" },
-  IN_PROGRESS: { label: "En cours",   variant: "default" },
-  EXTENDED:    { label: "Prolongé",   variant: "outline" },
-  COMPLETED:   { label: "Terminé",    variant: "secondary" },
-  ARCHIVED:    { label: "Archivé",    variant: "secondary" },
+  PLANNED:     { label: "Planifié",       variant: "secondary" },
+  IN_PROGRESS: { label: "En cours",      variant: "default" },
+  EXTENDED:    { label: "Prolongé",      variant: "outline" },
+  COMPLETED:   { label: "Terminé",       variant: "secondary" },
+  ARCHIVED:    { label: "Archivé",       variant: "secondary" },
+  DELAYED:     { label: "Décalé",        variant: "destructive" },
 }
 
 function formatDate(date: Date) {

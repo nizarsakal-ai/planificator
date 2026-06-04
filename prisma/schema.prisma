@@ -29,6 +29,7 @@ enum WorksiteStatus {
   COMPLETED    // Terminé — archivage automatique après 48h
   ARCHIVED     // Archivé définitivement
   EXTENDED     // Prolongé au-delà de la date de fin initiale
+  DELAYED      // Décalé — démarrage repoussé à une date ultérieure
 }
 
 enum AssignmentStatus {
@@ -336,6 +337,7 @@ model Worksite {
   createdById String         // userId de l'admin qui a créé le chantier
   completedAt DateTime?      // date de passage au statut COMPLETED
   archivedAt  DateTime?      // date d'archivage effectif
+  delayedUntil DateTime?     // date de décalage (statut DELAYED)
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 

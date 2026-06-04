@@ -324,6 +324,32 @@ export async function affecterEquipe(formData: FormData) {
   return { success: true, count: dates.length }
 }
 
+// ─── Décaler un chantier ────────────────────────────────────────────────────
+
+export async function decalerChantier(worksiteId: string, formData: FormData) {
+  const user = await requireAdmin()
+
+  const delayedUntilStr = formData.get("delayedUntil") as string
+  if (!delayedUntilStr) return { error: "Veuillez saisir une date de décalage." }
+
+  const worksite = await prisma.worksite.findFirst({
+    where: { id: worksiteId, companyId: user.companyId! },
+  })
+  if (!worksite) return { error: "Chantier introuvable." }
+
+  const delayedUntil = new Date(delayedUntilStr)
+  if (delayedUntil <= new Date()) return { error: "La date de décalage doit être dans le futur." }
+
+  await prisma.worksite.update({
+    where: { id: worksiteId },
+    data: { status: "DELAYED", delayedUntil },
+  })
+
+  revalidatePath("/chantiers")
+  revalidatePath(`/chantiers/${worksiteId}`)
+  return { success: true }
+}
+
 // ─── Confirmer ou refuser une affectation ────────────────────────────────────
 
 export async function updateAssignmentStatus(

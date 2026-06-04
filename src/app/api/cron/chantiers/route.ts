@@ -17,6 +17,23 @@ export async function GET(req: Request) {
 
   const stats = { started: 0, completed: 0, archived: 0 }
 
+  // ── 0. DELAYED → IN_PROGRESS : chantiers décalés dont la date de reprise est arrivée ──
+  const delayedToStart = await prisma.worksite.findMany({
+    where: {
+      status:       "DELAYED",
+      delayedUntil: { lte: today },
+    },
+    select: { id: true },
+  })
+
+  if (delayedToStart.length > 0) {
+    await prisma.worksite.updateMany({
+      where: { id: { in: delayedToStart.map((w) => w.id) } },
+      data:  { status: "IN_PROGRESS", delayedUntil: null },
+    })
+    stats.started += delayedToStart.length
+  }
+
   // ── 1. PLANNED → IN_PROGRESS : chantiers dont la date de début est arrivée ──
   const toStart = await prisma.worksite.findMany({
     where: {

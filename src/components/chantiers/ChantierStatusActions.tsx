@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { updateChantierStatus, prolongerChantier } from "@/lib/actions/chantier.actions"
+import { updateChantierStatus, prolongerChantier, decalerChantier } from "@/lib/actions/chantier.actions"
 
 interface Props {
   worksiteId: string
@@ -19,8 +19,10 @@ export function ChantierStatusActions({ worksiteId, currentStatus, endDate }: Pr
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [showProlonger, setShowProlonger] = useState(false)
+  const [showDecaler, setShowDecaler] = useState(false)
   const [newEndDate, setNewEndDate] = useState("")
   const [reason, setReason] = useState("")
+  const [delayedUntil, setDelayedUntil] = useState("")
 
   const handleStatus = async (status: "PLANNED" | "IN_PROGRESS" | "COMPLETED" | "ARCHIVED") => {
     setLoading(true)
@@ -49,6 +51,23 @@ export function ChantierStatusActions({ worksiteId, currentStatus, endDate }: Pr
       setShowProlonger(false)
       setNewEndDate("")
       setReason("")
+      router.refresh()
+    }
+  }
+
+  const handleDecaler = async () => {
+    if (!delayedUntil) { toast.error("Veuillez saisir une date de décalage."); return }
+    setLoading(true)
+    const formData = new FormData()
+    formData.append("delayedUntil", delayedUntil)
+    const result = await decalerChantier(worksiteId, formData)
+    setLoading(false)
+    if (result?.error) {
+      toast.error(result.error)
+    } else {
+      toast.success("Chantier décalé.")
+      setShowDecaler(false)
+      setDelayedUntil("")
       router.refresh()
     }
   }
@@ -85,10 +104,38 @@ export function ChantierStatusActions({ worksiteId, currentStatus, endDate }: Pr
             <Button
               variant="outline"
               className="w-full"
-              onClick={() => setShowProlonger(!showProlonger)}
+              onClick={() => { setShowProlonger(!showProlonger); setShowDecaler(false) }}
               disabled={loading}
             >
               Prolonger le chantier
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full border-orange-300 text-orange-600 hover:bg-orange-50"
+              onClick={() => { setShowDecaler(!showDecaler); setShowProlonger(false) }}
+              disabled={loading}
+            >
+              Chantier Décalé
+            </Button>
+          </>
+        )}
+
+        {currentStatus === "DELAYED" && (
+          <>
+            <Button
+              className="w-full bg-blue-600 hover:bg-blue-700"
+              onClick={() => handleStatus("IN_PROGRESS")}
+              disabled={loading}
+            >
+              Reprendre le chantier
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full border-orange-300 text-orange-600 hover:bg-orange-50"
+              onClick={() => { setShowDecaler(!showDecaler); setShowProlonger(false) }}
+              disabled={loading}
+            >
+              Modifier le décalage
             </Button>
           </>
         )}
@@ -129,6 +176,28 @@ export function ChantierStatusActions({ worksiteId, currentStatus, endDate }: Pr
               disabled={loading}
             >
               Confirmer la prolongation
+            </Button>
+          </div>
+        )}
+
+        {showDecaler && (
+          <div className="border border-orange-200 rounded-lg p-3 space-y-3 mt-2 bg-orange-50/50">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-orange-700">Date de reprise prévue *</Label>
+              <Input
+                type="date"
+                min={new Date().toISOString().split("T")[0]}
+                value={delayedUntil}
+                onChange={(e) => setDelayedUntil(e.target.value)}
+                className="border-orange-200 focus-visible:ring-orange-400"
+              />
+            </div>
+            <Button
+              className="w-full bg-orange-500 hover:bg-orange-600"
+              onClick={handleDecaler}
+              disabled={loading}
+            >
+              Confirmer le décalage
             </Button>
           </div>
         )}
