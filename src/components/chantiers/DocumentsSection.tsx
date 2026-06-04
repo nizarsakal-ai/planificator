@@ -33,8 +33,16 @@ function isImage(mimeType: string | null) {
   return mimeType?.startsWith("image/") ?? false
 }
 
-// Pour les PDFs et docs : passer par la route proxy pour les bons headers
-function docUrl(id: string, mimeType: string | null, originalUrl: string) {
+// Pour les PDFs : Google Docs Viewer (universel, contourne les restrictions Cloudinary)
+// Pour les images : URL Cloudinary directe
+function docUrl(id: string, mimeType: string | null, name: string, originalUrl: string) {
+  const isPdf =
+    mimeType === "application/pdf" ||
+    (!mimeType && name.toLowerCase().endsWith(".pdf"))
+
+  if (isPdf) {
+    return `https://docs.google.com/viewer?url=${encodeURIComponent(originalUrl)}&embedded=false`
+  }
   if (!mimeType?.startsWith("image/")) return `/api/documents/${id}`
   return originalUrl
 }
@@ -177,7 +185,7 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
                 )}
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                   <a
-                    href={docUrl(doc.id, doc.mimeType, doc.url)}
+                    href={docUrl(doc.id, doc.mimeType, doc.name, doc.url)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-white text-xs bg-white/20 px-2 py-1 rounded hover:bg-white/30"
@@ -208,7 +216,7 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
                   <FileText className="h-4 w-4 text-slate-400 shrink-0" />
                   <div className="min-w-0">
                     <a
-                      href={docUrl(doc.id, doc.mimeType, doc.url)}
+                      href={docUrl(doc.id, doc.mimeType, doc.name, doc.url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-sm font-medium text-[#0f3460] hover:underline truncate block"
