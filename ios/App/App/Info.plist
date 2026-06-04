@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CAPACITOR_DEBUG</key>
+	<string>$(CAPACITOR_DEBUG)</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+        <string>Planificator</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIMainStoryboardFile</key>
+	<string>Main</string>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>armv7</string>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<true/>
+
+	<!-- Géolocalisation (pointage GPS) -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Planificator utilise votre position pour enregistrer vos pointages d'arrivée et de départ sur les chantiers.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Planificator utilise votre position pour enregistrer vos pointages d'arrivée et de départ sur les chantiers.</string>
+
+	<!-- Caméra (photo justificatif de frais) -->
+	<key>NSCameraUsageDescription</key>
+	<string>Planificator utilise la caméra pour photographier vos justificatifs de notes de frais.</string>
+
+	<!-- Galerie photos (sélection d'un justificatif) -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Planificator accède à votre galerie pour sélectionner un justificatif de note de frais.</string>
+
+	<!-- Face ID (authentification future) -->
+	<key>NSFaceIDUsageDescription</key>
+	<string>Planificator utilise Face ID pour sécuriser votre accès.</string>
+
+	<!-- Portrait uniquement sur iPhone -->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+
+	<!-- Statut bar style -->
+	<key>UIStatusBarStyle</key>
+	<string>UIStatusBarStyleLightContent</string>
+</dict>
+</plist>

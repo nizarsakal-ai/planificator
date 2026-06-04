@@ -194,21 +194,33 @@ export async function prolongerChantier(worksiteId: string, formData: FormData) 
   return { success: true }
 }
 
-// ─── Affecter une équipe à un chantier pour une date ─────────────────────────
+// ─── Affecter une équipe à un chantier pour une plage de dates ───────────────
 
 export async function affecterEquipe(formData: FormData) {
   const user = await requireAdmin()
 
-  const worksiteId = formData.get("worksiteId") as string
-  const teamId     = formData.get("teamId")     as string
-  const dateStr    = formData.get("date")       as string
+  const worksiteId  = formData.get("worksiteId")  as string
+  const teamId      = formData.get("teamId")      as string
+  const dateFromStr = formData.get("dateFrom")    as string
+  const dateToStr   = formData.get("dateTo")      as string
 
-  if (!worksiteId || !teamId || !dateStr) {
+  if (!worksiteId || !teamId || !dateFromStr) {
     return { error: "Informations manquantes." }
   }
 
-  const date = new Date(dateStr)
-  date.setHours(0, 0, 0, 0)
+  const dateFrom = new Date(dateFromStr); dateFrom.setHours(0, 0, 0, 0)
+  const dateTo   = dateToStr ? new Date(dateToStr) : new Date(dateFrom)
+  dateTo.setHours(0, 0, 0, 0)
+
+  if (dateTo < dateFrom) return { error: "La date de fin doit être après la date de début." }
+
+  // Construire la liste des jours de la plage
+  const dates: Date[] = []
+  const cursor = new Date(dateFrom)
+  while (cursor <= dateTo) {
+    dates.push(new Date(cursor))
+    cursor.setDate(cursor.getDate() + 1)
+  }
 
   // Vérifier que le chantier appartient à l'entreprise
   const worksite = await prisma.worksite.findFirst({
@@ -220,46 +232,49 @@ export async function affecterEquipe(formData: FormData) {
   const team = await prisma.team.findFirst({
     where: { id: teamId, companyId: user.companyId! },
     include: {
-      members: {
-        where: { leftAt: null },
-        select: { employeeId: true },
-      },
-      leader: { select: { userId: true } },
+      members: { where: { leftAt: null }, select: { employeeId: true } },
+      leader:  { select: { userId: true } },
     },
   })
   if (!team) return { error: "Équipe introuvable." }
 
-  // Vérifier contrainte : équipe déjà affectée ce jour-là ?
+  const memberIds = team.members.map((m) => m.employeeId)
+
+  // Vérifier les conflits sur toute la plage
   const conflitEquipe = await prisma.assignment.findFirst({
-    where: { teamId, date },
+    where: { teamId, date: { in: dates } },
   })
   if (conflitEquipe) {
-    return { error: "Cette équipe est déjà affectée à un chantier ce jour-là." }
+    const d = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(conflitEquipe.date)
+    return { error: `Cette équipe est déjà affectée le ${d}.` }
   }
 
-  // Vérifier contrainte : un employé déjà affecté ce jour-là ?
-  const memberIds = team.members.map((m) => m.employeeId)
-  const conflitEmploye = await prisma.employeeAssignment.findFirst({
-    where: { employeeId: { in: memberIds }, date },
-  })
-  if (conflitEmploye) {
-    return { error: "Un ou plusieurs membres de cette équipe sont déjà affectés ce jour-là." }
+  if (memberIds.length > 0) {
+    const conflitEmploye = await prisma.employeeAssignment.findFirst({
+      where: { employeeId: { in: memberIds }, date: { in: dates } },
+    })
+    if (conflitEmploye) {
+      const d = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(conflitEmploye.date)
+      return { error: `Un membre de l'équipe est déjà affecté le ${d}.` }
+    }
   }
 
-  // Créer l'affectation
+  // Créer une affectation par jour
   await prisma.$transaction(async (tx) => {
-    const assignment = await tx.assignment.create({
-      data: { worksiteId, teamId, date, status: "PENDING" },
-    })
-
-    // Affecter individuellement chaque membre
-    await tx.employeeAssignment.createMany({
-      data: memberIds.map((employeeId) => ({
-        assignmentId: assignment.id,
-        employeeId,
-        date,
-      })),
-    })
+    for (const date of dates) {
+      const assignment = await tx.assignment.create({
+        data: { worksiteId, teamId, date, status: "PENDING" },
+      })
+      if (memberIds.length > 0) {
+        await tx.employeeAssignment.createMany({
+          data: memberIds.map((employeeId) => ({
+            assignmentId: assignment.id,
+            employeeId,
+            date,
+          })),
+        })
+      }
+    }
 
     // Passer le chantier en IN_PROGRESS si encore PLANNED
     if (worksite.status === "PLANNED") {
@@ -269,23 +284,25 @@ export async function affecterEquipe(formData: FormData) {
       })
     }
 
-    // Notifier le chef d'équipe
+    // Notifier le chef d'équipe (une seule notification pour toute la plage)
     if (team.leader?.userId) {
-      const dateLabel = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "2-digit", month: "long" }).format(date)
+      const fromLabel = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(dateFrom)
+      const toLabel   = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(dateTo)
+      const rangeLabel = dates.length === 1 ? fromLabel : `du ${fromLabel} au ${toLabel}`
+
       await tx.notification.create({
         data: {
           userId:    team.leader.userId,
           companyId: user.companyId!,
           type:      "ASSIGNMENT_CREATED",
           title:     `Nouvelle affectation — ${worksite.name}`,
-          message:   `Votre équipe est affectée le ${dateLabel}. Confirmez ou refusez.`,
+          message:   `Votre équipe est affectée ${rangeLabel}. Confirmez ou refusez.`,
           link:      `/planning`,
         },
       })
 
-      // Email au chef d'équipe
       const leaderUser = await tx.user.findUnique({
-        where: { id: team.leader.userId },
+        where:  { id: team.leader.userId },
         select: { email: true, name: true },
       })
       if (leaderUser?.email) {
@@ -294,7 +311,7 @@ export async function affecterEquipe(formData: FormData) {
           to:             leaderUser.email,
           teamLeaderName: leaderUser.name ?? leaderUser.email,
           worksiteName:   worksite.name,
-          dateLabel,
+          dateLabel:      rangeLabel,
           companyName:    company?.name ?? "",
         }).catch(() => {})
       }
@@ -304,7 +321,7 @@ export async function affecterEquipe(formData: FormData) {
   revalidatePath("/chantiers")
   revalidatePath(`/chantiers/${worksiteId}`)
   revalidatePath("/planning")
-  return { success: true }
+  return { success: true, count: dates.length }
 }
 
 // ─── Confirmer ou refuser une affectation ────────────────────────────────────

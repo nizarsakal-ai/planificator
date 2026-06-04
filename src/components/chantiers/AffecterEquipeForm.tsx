@@ -22,20 +22,29 @@ interface Props {
 export function AffecterEquipeForm({ worksiteId, teams }: Props) {
   const router = useRouter()
   const [teamId, setTeamId] = useState("")
-  const [date, setDate] = useState("")
+  const [dateFrom, setDateFrom] = useState("")
+  const [dateTo, setDateTo] = useState("")
   const [loading, setLoading] = useState(false)
 
   const today = new Date().toISOString().split("T")[0]
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!teamId || !date) { toast.error("Sélectionnez une équipe et une date."); return }
+    if (!teamId || !dateFrom) {
+      toast.error("Sélectionnez une équipe et une date de début.")
+      return
+    }
+    if (dateTo && dateTo < dateFrom) {
+      toast.error("La date de fin doit être après la date de début.")
+      return
+    }
 
     setLoading(true)
     const formData = new FormData()
     formData.append("worksiteId", worksiteId)
     formData.append("teamId", teamId)
-    formData.append("date", date)
+    formData.append("dateFrom", dateFrom)
+    formData.append("dateTo", dateTo || dateFrom)
 
     const result = await affecterEquipe(formData)
     setLoading(false)
@@ -43,44 +52,82 @@ export function AffecterEquipeForm({ worksiteId, teams }: Props) {
     if (result?.error) {
       toast.error(result.error)
     } else {
-      toast.success("Équipe affectée avec succès !")
+      const count = result?.count ?? 1
+      toast.success(
+        count > 1
+          ? `${count} affectations créées avec succès !`
+          : "Équipe affectée avec succès !"
+      )
       setTeamId("")
-      setDate("")
+      setDateFrom("")
+      setDateTo("")
       router.refresh()
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3">
-      <div className="flex-1 space-y-1">
-        <Label className="text-xs text-slate-500">Équipe</Label>
-        <select
-          value={teamId}
-          onChange={(e) => setTeamId(e.target.value)}
-          className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
-        >
-          <option value="">-- Choisir une équipe --</option>
-          {teams.map((t) => (
-            <option key={t.id} value={t.id}>{t.name}</option>
-          ))}
-        </select>
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <div className="flex flex-col sm:flex-row gap-3">
+        {/* Équipe */}
+        <div className="flex-1 space-y-1">
+          <Label className="text-xs text-slate-500">Équipe</Label>
+          <select
+            value={teamId}
+            onChange={(e) => setTeamId(e.target.value)}
+            className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+          >
+            <option value="">-- Choisir une équipe --</option>
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Date de début */}
+        <div className="flex-1 space-y-1">
+          <Label className="text-xs text-slate-500">Date de début</Label>
+          <Input
+            type="date"
+            min={today}
+            value={dateFrom}
+            onChange={(e) => {
+              setDateFrom(e.target.value)
+              // Si date de fin avant date de début → on la reset
+              if (dateTo && e.target.value > dateTo) setDateTo("")
+            }}
+          />
+        </div>
+
+        {/* Date de fin */}
+        <div className="flex-1 space-y-1">
+          <Label className="text-xs text-slate-500">Date de fin <span className="text-slate-400">(optionnelle)</span></Label>
+          <Input
+            type="date"
+            min={dateFrom || today}
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            disabled={!dateFrom}
+          />
+        </div>
+
+        <div className="flex items-end">
+          <Button type="submit" disabled={loading} className="bg-[#0f3460] hover:bg-[#0a2540] w-full sm:w-auto">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Affecter"}
+          </Button>
+        </div>
       </div>
 
-      <div className="flex-1 space-y-1">
-        <Label className="text-xs text-slate-500">Date</Label>
-        <Input
-          type="date"
-          min={today}
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-        />
-      </div>
-
-      <div className="flex items-end">
-        <Button type="submit" disabled={loading} className="bg-[#0f3460] hover:bg-[#0a2540] w-full sm:w-auto">
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Affecter"}
-        </Button>
-      </div>
+      {/* Récap jours si plage sélectionnée */}
+      {dateFrom && dateTo && dateTo > dateFrom && (
+        <p className="text-xs text-slate-400">
+          {(() => {
+            const from = new Date(dateFrom)
+            const to   = new Date(dateTo)
+            const days = Math.round((to.getTime() - from.getTime()) / 86400000) + 1
+            return `${days} jour${days > 1 ? "s" : ""} d'affectation`
+          })()}
+        </p>
+      )}
     </form>
   )
 }
