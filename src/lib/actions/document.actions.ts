@@ -44,15 +44,23 @@ export async function uploadDocument(formData: FormData) {
     ).end(buffer)
   })
 
+  // Normaliser le mimeType : file.type peut être vide sur certains navigateurs
+  let mimeType = file.type
+  if (!mimeType || mimeType === "application/octet-stream") {
+    const lower = file.name.toLowerCase()
+    if (lower.endsWith(".pdf"))   mimeType = "application/pdf"
+    else if (lower.endsWith(".docx")) mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    else if (lower.endsWith(".xlsx")) mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  }
+
   await prisma.document.create({
     data: {
       worksiteId,
       name:     file.name,
       url:      result.secure_url,
       size:     file.size,
-      mimeType: file.type,
+      mimeType,
       type:     type || DocumentType.DOCUMENT,
-      // On stocke le public_id dans metadata si on veut supprimer plus tard
     },
   })
 

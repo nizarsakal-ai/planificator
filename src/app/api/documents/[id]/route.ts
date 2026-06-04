@@ -26,19 +26,33 @@ export async function GET(
   }
 
   // Récupérer le fichier depuis Cloudinary
-  const response = await fetch(doc.url)
+  let response: Response
+  try {
+    response = await fetch(doc.url, { headers: { "User-Agent": "Planificator/1.0" } })
+  } catch (err) {
+    console.error("[documents] fetch error:", err)
+    return new NextResponse("Impossible de récupérer le fichier", { status: 502 })
+  }
+
   if (!response.ok) {
-    return new NextResponse("Erreur lors du chargement du fichier", { status: 502 })
+    console.error("[documents] Cloudinary response:", response.status, doc.url)
+    return new NextResponse(`Cloudinary: ${response.status}`, { status: 502 })
   }
 
   const buffer = await response.arrayBuffer()
 
-  // Déterminer le Content-Type
-  const contentType = doc.mimeType ?? "application/octet-stream"
+  // Détecter le Content-Type : depuis la DB, puis depuis la réponse Cloudinary, puis depuis l'extension
+  let contentType = doc.mimeType ?? response.headers.get("content-type") ?? ""
+  if (!contentType || contentType === "application/octet-stream") {
+    const lower = doc.name.toLowerCase()
+    if (lower.endsWith(".pdf"))  contentType = "application/pdf"
+    else if (lower.endsWith(".docx")) contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    else if (lower.endsWith(".xlsx")) contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    else contentType = "application/octet-stream"
+  }
 
-  // Pour les PDFs : inline (ouvrir dans le navigateur)
-  // Pour les autres : attachment (télécharger)
-  const disposition = contentType === "application/pdf"
+  const isPdf = contentType.includes("pdf")
+  const disposition = isPdf
     ? `inline; filename="${encodeURIComponent(doc.name)}"`
     : `attachment; filename="${encodeURIComponent(doc.name)}"`
 
