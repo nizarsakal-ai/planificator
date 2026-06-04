@@ -23,6 +23,7 @@ const statusColors: Record<string, string> = {
   EXTENDED:    "#f59e0b", // orange
   COMPLETED:   "#6b7280", // gris
   ARCHIVED:    "#374151", // gris foncé
+  DELAYED:     "#ef4444", // rouge
 }
 
 const statusLabels: Record<string, string> = {
@@ -31,6 +32,7 @@ const statusLabels: Record<string, string> = {
   EXTENDED:    "Prolongé",
   COMPLETED:   "Terminé",
   ARCHIVED:    "Archivé",
+  DELAYED:     "Décalé",
 }
 
 export function ChantiersMap({ chantiers }: ChantiersMapProps) {
@@ -81,25 +83,16 @@ export function ChantiersMap({ chantiers }: ChantiersMapProps) {
           className: "",
         })
 
-        const popup = L.popup().setContent(`
-          <div style="min-width:160px;font-family:sans-serif;">
-            <p style="font-weight:600;font-size:14px;margin:0 0 4px">${chantier.name}</p>
-            <p style="color:#6b7280;font-size:12px;margin:0 0 2px">${chantier.client.name}</p>
-            ${chantier.address ? `<p style="color:#6b7280;font-size:12px;margin:0 0 6px">${chantier.address}</p>` : ""}
-            <span style="
-              background:${color};color:white;
-              padding:2px 8px;border-radius:9999px;
-              font-size:11px;font-weight:500;
-            ">${statusLabels[chantier.status] ?? chantier.status}</span>
-            <br/><a href="/chantiers/${chantier.id}" style="color:#0f3460;font-size:12px;margin-top:6px;display:inline-block;">
-              Voir le chantier →
-            </a>
-          </div>
-        `)
+        // Tooltip au survol pour voir le nom sans cliquer
+        const tooltip = L.tooltip({ permanent: false, direction: "top", offset: [0, -30] })
+          .setContent(`<span style="font-weight:600;font-size:13px">${chantier.name}</span><br/><span style="color:#6b7280;font-size:11px">${chantier.client.name}</span>`)
 
         L.marker([chantier.latitude!, chantier.longitude!], { icon })
           .addTo(map)
-          .bindPopup(popup)
+          .bindTooltip(tooltip)
+          .on("click", () => {
+            window.location.href = `/chantiers/${chantier.id}`
+          })
 
         bounds.push([chantier.latitude!, chantier.longitude!])
       })
