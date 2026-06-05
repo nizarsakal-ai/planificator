@@ -134,18 +134,40 @@ export async function addMembre(teamId: string, employeeId: string) {
     where: { teamId, employeeId },
   })
 
-  if (existing) {
-    await prisma.teamMember.update({
-      where: { id: existing.id },
-      data: { leftAt: null, joinedAt: new Date() },
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+
+  await prisma.$transaction(async (tx) => {
+    if (existing) {
+      await tx.teamMember.update({
+        where: { id: existing.id },
+        data: { leftAt: null, joinedAt: new Date() },
+      })
+    } else {
+      await tx.teamMember.create({
+        data: { teamId, employeeId },
+      })
+    }
+
+    // Ajouter l'employé aux EmployeeAssignments futurs de cette équipe
+    const futureAssignments = await tx.assignment.findMany({
+      where: { teamId, date: { gte: today } },
+      select: { id: true, date: true },
     })
-  } else {
-    await prisma.teamMember.create({
-      data: { teamId, employeeId },
-    })
-  }
+    if (futureAssignments.length > 0) {
+      await tx.employeeAssignment.createMany({
+        data: futureAssignments.map(a => ({
+          assignmentId: a.id,
+          employeeId,
+          date: a.date,
+        })),
+        skipDuplicates: true,
+      })
+    }
+  })
 
   revalidatePath("/equipes")
+  revalidatePath("/chantiers")
+  revalidatePath("/planning")
   return { success: true }
 }
 
@@ -164,12 +186,31 @@ export async function removeMembre(teamId: string, employeeId: string) {
     return { error: "Impossible de retirer le chef d'équipe. Changez le chef d'abord." }
   }
 
-  await prisma.teamMember.updateMany({
-    where: { teamId, employeeId, leftAt: null },
-    data: { leftAt: new Date() },
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+
+  await prisma.$transaction(async (tx) => {
+    // Marquer le membre comme parti
+    await tx.teamMember.updateMany({
+      where: { teamId, employeeId, leftAt: null },
+      data: { leftAt: new Date() },
+    })
+
+    // Supprimer les EmployeeAssignments futurs de cet employé dans cette équipe
+    const futureAssignments = await tx.assignment.findMany({
+      where: { teamId, date: { gte: today } },
+      select: { id: true },
+    })
+    const assignmentIds = futureAssignments.map(a => a.id)
+    if (assignmentIds.length > 0) {
+      await tx.employeeAssignment.deleteMany({
+        where: { employeeId, assignmentId: { in: assignmentIds } },
+      })
+    }
   })
 
   revalidatePath("/equipes")
+  revalidatePath("/chantiers")
+  revalidatePath("/planning")
   return { success: true }
 }
 
