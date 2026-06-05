@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef } from "react"
-import { Upload, Trash2, FileText, Image, FileImage, Loader2 } from "lucide-react"
+import { Upload, Trash2, FileText, Image, FileImage, Loader2, Download } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -33,12 +33,14 @@ function isImage(mimeType: string | null) {
   return mimeType?.startsWith("image/") ?? false
 }
 
-// Images : URL Cloudinary directe
-// Tout le reste (PDF, DOCX, XLSX…) : proxy /api/documents/[id]
-// qui sert avec Content-Type correct et Content-Disposition inline pour les PDFs
-function docUrl(id: string, mimeType: string | null, _name: string, _originalUrl: string) {
-  if (mimeType?.startsWith("image/")) return _originalUrl
-  return `/api/documents/${id}`
+// Ouvrir : Google Docs Viewer pour tout fichier non-image (PDF, DOCX, XLSX…)
+// Télécharger : proxy /api/documents/[id] qui force le download
+function viewUrl(mimeType: string | null, originalUrl: string) {
+  if (mimeType?.startsWith("image/")) return originalUrl
+  return `https://docs.google.com/viewer?url=${encodeURIComponent(originalUrl)}&embedded=false`
+}
+function downloadUrl(id: string) {
+  return `/api/documents/${id}?dl=1`
 }
 
 export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProps) {
@@ -179,12 +181,18 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
                 )}
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                   <a
-                    href={docUrl(doc.id, doc.mimeType, doc.name, doc.url)}
+                    href={viewUrl(doc.mimeType, doc.url)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-white text-xs bg-white/20 px-2 py-1 rounded hover:bg-white/30"
                   >
                     Voir
+                  </a>
+                  <a
+                    href={downloadUrl(doc.id)}
+                    className="text-white text-xs bg-white/20 px-2 py-1 rounded hover:bg-white/30"
+                  >
+                    <Download className="h-3.5 w-3.5" />
                   </a>
                   <button
                     onClick={() => handleDelete(doc.id)}
@@ -210,7 +218,7 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
                   <FileText className="h-4 w-4 text-slate-400 shrink-0" />
                   <div className="min-w-0">
                     <a
-                      href={docUrl(doc.id, doc.mimeType, doc.name, doc.url)}
+                      href={viewUrl(doc.mimeType, doc.url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-sm font-medium text-[#0f3460] hover:underline truncate block"
@@ -222,17 +230,26 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
                     )}
                   </div>
                 </div>
-                <button
-                  onClick={() => handleDelete(doc.id)}
-                  disabled={deleting === doc.id}
-                  className="ml-2 text-red-400 hover:text-red-600 shrink-0"
-                >
-                  {deleting === doc.id ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-4 w-4" />
-                  )}
-                </button>
+                <div className="flex items-center gap-1 ml-2 shrink-0">
+                  <a
+                    href={downloadUrl(doc.id)}
+                    title="Télécharger"
+                    className="text-slate-400 hover:text-[#0f3460] transition-colors"
+                  >
+                    <Download className="h-4 w-4" />
+                  </a>
+                  <button
+                    onClick={() => handleDelete(doc.id)}
+                    disabled={deleting === doc.id}
+                    className="text-red-400 hover:text-red-600"
+                  >
+                    {deleting === doc.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
               </div>
             ))}
           </div>

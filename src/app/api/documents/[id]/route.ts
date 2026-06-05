@@ -3,7 +3,7 @@ import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await auth()
@@ -51,8 +51,9 @@ export async function GET(
     else contentType = "application/octet-stream"
   }
 
+  const forceDownload = new URL(req.url).searchParams.get("dl") === "1"
   const isPdf = contentType.includes("pdf")
-  const disposition = isPdf
+  const disposition = (!forceDownload && isPdf)
     ? `inline; filename="${encodeURIComponent(doc.name)}"`
     : `attachment; filename="${encodeURIComponent(doc.name)}"`
 
