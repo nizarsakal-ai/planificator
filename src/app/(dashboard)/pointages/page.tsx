@@ -16,7 +16,29 @@ interface PageProps {
 export default async function PointagesPage({ searchParams }: PageProps) {
   const session = await auth()
   if (!session?.user) redirect("/login")
-  if (!["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) redirect("/dashboard")
+
+  const isAdmin      = ["ADMIN", "SUPER_ADMIN"].includes(session.user.role)
+  const isTeamLeader = session.user.role === "TEAM_LEADER"
+  if (!isAdmin && !isTeamLeader) redirect("/dashboard")
+
+  const companyId = session.user.companyId!
+
+  // Pour TEAM_LEADER : filtrer aux membres de son équipe
+  let memberIds: string[] | undefined
+  if (isTeamLeader) {
+    const leaderEmployee = await prisma.employee.findFirst({
+      where: { userId: session.user.id!, companyId },
+      select: {
+        ledTeams: {
+          where: { active: true },
+          select: { members: { where: { leftAt: null }, select: { employeeId: true } } },
+          take: 1,
+        },
+      },
+    })
+    memberIds = leaderEmployee?.ledTeams[0]?.members.map((m) => m.employeeId) ?? []
+    if (memberIds.length === 0) redirect("/dashboard")
+  }
 
   const { date: dateParam } = await searchParams
   const selectedDate = dateParam ? new Date(dateParam) : new Date()
@@ -24,8 +46,9 @@ export default async function PointagesPage({ searchParams }: PageProps) {
 
   const pointages = await prisma.timeclock.findMany({
     where: {
-      companyId: session.user.companyId!,
+      companyId,
       date: selectedDate,
+      ...(isTeamLeader ? { employeeId: { in: memberIds } } : {}),
     },
     include: {
       employee: { select: { firstName: true, lastName: true, avatarUrl: true } },
@@ -58,7 +81,9 @@ export default async function PointagesPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Pointages</h1>
+          <h1 className="text-2xl font-bold text-slate-900">
+            {isTeamLeader ? "Pointages de mon équipe" : "Pointages"}
+          </h1>
           <p className="text-sm text-slate-500 mt-1 capitalize">{fmtDate(selectedDate)}</p>
         </div>
 

@@ -34,7 +34,27 @@ export default async function EmployeDetailPage({
   const session = await auth()
   if (!session?.user) redirect("/login")
 
+  const isAdmin      = ["ADMIN", "SUPER_ADMIN"].includes(session.user.role)
+  const isTeamLeader = session.user.role === "TEAM_LEADER"
+  if (!isAdmin && !isTeamLeader) redirect("/dashboard")
+
   const { id } = await params
+
+  // Pour TEAM_LEADER : vérifier que l'employé est dans son équipe
+  if (isTeamLeader) {
+    const leaderEmployee = await prisma.employee.findFirst({
+      where: { userId: session.user.id!, companyId: session.user.companyId! },
+      select: {
+        ledTeams: {
+          where: { active: true },
+          select: { members: { where: { leftAt: null }, select: { employeeId: true } } },
+          take: 1,
+        },
+      },
+    })
+    const memberIds = leaderEmployee?.ledTeams[0]?.members.map((m) => m.employeeId) ?? []
+    if (!memberIds.includes(id)) redirect("/dashboard")
+  }
 
   const yearStart  = new Date(new Date().getFullYear(), 0, 1)
   const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0)
@@ -81,12 +101,21 @@ export default async function EmployeDetailPage({
 
       {/* Header */}
       <div className="flex items-start gap-5">
-        {/* Avatar avec upload */}
-        <AvatarUpload
-          employeeId={employee.id}
-          avatarUrl={employee.avatarUrl}
-          initials={getInitials(fullName)}
-        />
+        {/* Avatar */}
+        {isAdmin ? (
+          <AvatarUpload
+            employeeId={employee.id}
+            avatarUrl={employee.avatarUrl}
+            initials={getInitials(fullName)}
+          />
+        ) : (
+          <div className="w-16 h-16 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg shrink-0">
+            {employee.avatarUrl
+              ? <img src={employee.avatarUrl} alt={fullName} className="w-16 h-16 rounded-full object-cover" />
+              : getInitials(fullName)
+            }
+          </div>
+        )}
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
@@ -123,9 +152,11 @@ export default async function EmployeDetailPage({
               </span>
             )}
           </div>
-          <div className="mt-3">
-            <EmployeActions employeeId={employee.id} active={employee.active} />
-          </div>
+          {isAdmin && (
+            <div className="mt-3">
+              <EmployeActions employeeId={employee.id} active={employee.active} />
+            </div>
+          )}
         </div>
       </div>
 

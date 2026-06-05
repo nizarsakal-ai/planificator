@@ -67,13 +67,16 @@ function getNavItems(role: Role): NavItem[] {
       ]
     case "TEAM_LEADER":
       return [
-        { label: "Dashboard",      href: "/dashboard",          icon: LayoutDashboard },
-        { label: "Mon équipe",     href: "/planning/equipe",    icon: ClipboardList },
-        { label: "Mon planning",   href: "/planning/moi",       icon: Calendar },
-        { label: "Mes absences",   href: "/mes-absences",       icon: CalendarOff },
-        { label: "Notes de frais", href: "/mes-notes-de-frais", icon: Receipt },
-        { label: "Pointage",       href: "/pointage",           icon: MapPin },
-        { label: "Mon profil",     href: "/profil",             icon: User },
+        { label: "Dashboard",          href: "/dashboard",          icon: LayoutDashboard },
+        { label: "Mon équipe",         href: "/planning/equipe",    icon: ClipboardList },
+        { label: "Mes chantiers",      href: "/chantiers",          icon: HardHat },
+        { label: "Mon planning",       href: "/planning/moi",       icon: Calendar },
+        { label: "Absences équipe",    href: "/absences",           icon: CalendarOff },
+        { label: "Pointages équipe",   href: "/pointages",          icon: MapPin },
+        { label: "Mes absences",       href: "/mes-absences",       icon: CalendarOff },
+        { label: "Notes de frais",     href: "/mes-notes-de-frais", icon: Receipt },
+        { label: "Mon pointage",       href: "/pointage",           icon: MapPin },
+        { label: "Mon profil",         href: "/profil",             icon: User },
       ]
     case "EMPLOYEE":
       return [

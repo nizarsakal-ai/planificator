@@ -29,11 +29,29 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
   const { id } = await params
   const session = await auth()
   if (!session?.user) redirect("/login")
-  if (!["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) redirect("/dashboard")
+
+  const isAdmin      = ["ADMIN", "SUPER_ADMIN"].includes(session.user.role)
+  const isTeamLeader = session.user.role === "TEAM_LEADER"
+  if (!isAdmin && !isTeamLeader) redirect("/dashboard")
+
+  // Pour TEAM_LEADER : vérifier que son équipe est affectée à ce chantier
+  let leaderTeamId: string | undefined
+  if (isTeamLeader) {
+    const leaderEmployee = await prisma.employee.findFirst({
+      where: { userId: session.user.id!, companyId: session.user.companyId! },
+      select: { ledTeams: { where: { active: true }, select: { id: true }, take: 1 } },
+    })
+    leaderTeamId = leaderEmployee?.ledTeams[0]?.id
+    if (!leaderTeamId) redirect("/dashboard")
+  }
 
   const [chantier, teams, clients] = await Promise.all([
     prisma.worksite.findFirst({
-      where: { id, companyId: session.user.companyId! },
+      where: {
+        id,
+        companyId: session.user.companyId!,
+        ...(isTeamLeader ? { assignments: { some: { teamId: leaderTeamId } } } : {}),
+      },
       include: {
         client: { select: { name: true } },
         assignments: {
@@ -102,19 +120,21 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm font-semibold text-slate-700">Informations</CardTitle>
-                <ChantierEditForm
-                  worksiteId={chantier.id}
-                  clients={clients}
-                  defaultValues={{
-                    name:        chantier.name,
-                    description: chantier.description ?? "",
-                    address:     chantier.address     ?? "",
-                    clientId:    chantier.clientId,
-                    startDate:   chantier.startDate.toISOString().split("T")[0],
-                    endDate:     chantier.endDate.toISOString().split("T")[0],
-                    dailyHours:  chantier.dailyHours,
-                  }}
-                />
+                {isAdmin && (
+                  <ChantierEditForm
+                    worksiteId={chantier.id}
+                    clients={clients}
+                    defaultValues={{
+                      name:        chantier.name,
+                      description: chantier.description ?? "",
+                      address:     chantier.address     ?? "",
+                      clientId:    chantier.clientId,
+                      startDate:   chantier.startDate.toISOString().split("T")[0],
+                      endDate:     chantier.endDate.toISOString().split("T")[0],
+                      dailyHours:  chantier.dailyHours,
+                    }}
+                  />
+                )}
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -143,14 +163,16 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
             </CardContent>
           </Card>
 
-          {/* Actions statut */}
-          <ChantierStatusActions worksiteId={chantier.id} currentStatus={chantier.status} endDate={chantier.endDate} />
+          {/* Actions statut — ADMIN uniquement */}
+          {isAdmin && (
+            <ChantierStatusActions worksiteId={chantier.id} currentStatus={chantier.status} endDate={chantier.endDate} />
+          )}
         </div>
 
         {/* Colonne droite — affectations */}
         <div className="lg:col-span-2 space-y-4">
-          {/* Affecter une équipe */}
-          {!["COMPLETED", "ARCHIVED"].includes(chantier.status) && (
+          {/* Affecter une équipe — ADMIN uniquement */}
+          {isAdmin && !["COMPLETED", "ARCHIVED"].includes(chantier.status) && (
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold text-slate-700">Affecter une équipe</CardTitle>

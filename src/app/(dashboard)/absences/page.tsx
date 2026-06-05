@@ -20,18 +20,44 @@ const TYPE_LABELS: Record<string, string> = {
 export default async function AbsencesPage() {
   const session = await auth()
   if (!session?.user) redirect("/login")
-  if (!["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) redirect("/dashboard")
+
+  const isAdmin      = ["ADMIN", "SUPER_ADMIN"].includes(session.user.role)
+  const isTeamLeader = session.user.role === "TEAM_LEADER"
+  if (!isAdmin && !isTeamLeader) redirect("/dashboard")
 
   const companyId = session.user.companyId!
 
+  // Pour TEAM_LEADER : filtrer aux membres de son équipe
+  let memberIds: string[] | undefined
+  if (isTeamLeader) {
+    const leaderEmployee = await prisma.employee.findFirst({
+      where: { userId: session.user.id!, companyId },
+      select: {
+        ledTeams: {
+          where: { active: true },
+          select: { members: { where: { leftAt: null }, select: { employeeId: true } } },
+          take: 1,
+        },
+      },
+    })
+    memberIds = leaderEmployee?.ledTeams[0]?.members.map((m) => m.employeeId) ?? []
+    if (memberIds.length === 0) redirect("/dashboard")
+  }
+
+  const absenceWhere = isTeamLeader
+    ? { companyId, employeeId: { in: memberIds } }
+    : { companyId }
+
   const [absences, employees] = await Promise.all([
     prisma.absence.findMany({
-      where: { companyId },
+      where: absenceWhere,
       include: { employee: { select: { firstName: true, lastName: true } } },
       orderBy: { startDate: "desc" },
     }),
     prisma.employee.findMany({
-      where: { companyId, active: true },
+      where: isTeamLeader
+        ? { companyId, active: true, id: { in: memberIds } }
+        : { companyId, active: true },
       select: { id: true, firstName: true, lastName: true },
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
     }),
@@ -57,12 +83,14 @@ export default async function AbsencesPage() {
       {/* En-tête */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Absences</h1>
+          <h1 className="text-2xl font-bold text-slate-900">
+            {isTeamLeader ? "Absences de mon équipe" : "Absences"}
+          </h1>
           <p className="text-sm text-slate-500 mt-1">
             {pending} en attente · {approved} approuvée{approved > 1 ? "s" : ""} · {rejected} refusée{rejected > 1 ? "s" : ""}
           </p>
         </div>
-        <NouvelleAbsenceDialog employees={employees} />
+        {isAdmin && <NouvelleAbsenceDialog employees={employees} />}
       </div>
 
       {/* KPIs */}
