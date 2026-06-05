@@ -33,18 +33,12 @@ function isImage(mimeType: string | null) {
   return mimeType?.startsWith("image/") ?? false
 }
 
-// Pour les PDFs : Google Docs Viewer (universel, contourne les restrictions Cloudinary)
-// Pour les images : URL Cloudinary directe
-function docUrl(id: string, mimeType: string | null, name: string, originalUrl: string) {
-  const isPdf =
-    mimeType === "application/pdf" ||
-    (!mimeType && name.toLowerCase().endsWith(".pdf"))
-
-  if (isPdf) {
-    return `https://docs.google.com/viewer?url=${encodeURIComponent(originalUrl)}&embedded=false`
-  }
-  if (!mimeType?.startsWith("image/")) return `/api/documents/${id}`
-  return originalUrl
+// Images : URL Cloudinary directe
+// Tout le reste (PDF, DOCX, XLSX…) : proxy /api/documents/[id]
+// qui sert avec Content-Type correct et Content-Disposition inline pour les PDFs
+function docUrl(id: string, mimeType: string | null, _name: string, _originalUrl: string) {
+  if (mimeType?.startsWith("image/")) return _originalUrl
+  return `/api/documents/${id}`
 }
 
 export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProps) {
