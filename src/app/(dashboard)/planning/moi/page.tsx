@@ -4,7 +4,8 @@ import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
-import { HardHat, MapPin, Clock, CalendarDays } from "lucide-react"
+import { HardHat, MapPin, Clock, CalendarDays, Users } from "lucide-react"
+import Link from "next/link"
 
 export const metadata: Metadata = { title: "Mon Planning" }
 
@@ -27,10 +28,28 @@ export default async function MonPlanningPage() {
   const session = await auth()
   if (!session?.user) redirect("/login")
 
-  // Trouver l'employé lié à cet utilisateur
+  // Trouver l'employé lié à cet utilisateur avec son équipe et son chef
   const employee = await prisma.employee.findFirst({
     where: { userId: session.user.id },
-    select: { id: true, firstName: true, lastName: true },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      teamMemberships: {
+        where: { leftAt: null },
+        select: {
+          team: {
+            select: {
+              id: true,
+              name: true,
+              color: true,
+              leader: { select: { firstName: true, lastName: true } },
+            },
+          },
+        },
+        take: 1,
+      },
+    },
   })
 
   if (!employee) {
@@ -70,6 +89,7 @@ export default async function MonPlanningPage() {
 
   const upcoming = assignments.filter((a) => isUpcoming(a.date))
   const past     = assignments.filter((a) => !isUpcoming(a.date))
+  const myTeam   = employee.teamMemberships[0]?.team
 
   return (
     <div className="space-y-6">
@@ -79,6 +99,32 @@ export default async function MonPlanningPage() {
           {employee.firstName} {employee.lastName} · {upcoming.length} affectation{upcoming.length > 1 ? "s" : ""} à venir
         </p>
       </div>
+
+      {/* Mon équipe & chef d'équipe */}
+      {myTeam && (
+        <Card>
+          <CardContent className="p-4 flex items-center gap-4">
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+              style={{ backgroundColor: myTeam.color ?? "#0f3460" }}
+            >
+              <Users className="h-5 w-5 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-slate-800">{myTeam.name}</p>
+              <p className="text-xs text-slate-500">
+                Chef d&apos;équipe : <span className="font-medium text-slate-700">{myTeam.leader.firstName} {myTeam.leader.lastName}</span>
+              </p>
+            </div>
+            <Link
+              href="/chantiers"
+              className="text-xs text-[#0f3460] hover:underline font-medium shrink-0"
+            >
+              Mes chantiers →
+            </Link>
+          </CardContent>
+        </Card>
+      )}
 
       {/* À venir */}
       <div className="space-y-3">

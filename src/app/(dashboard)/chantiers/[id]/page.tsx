@@ -32,9 +32,10 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
 
   const isAdmin      = ["ADMIN", "SUPER_ADMIN"].includes(session.user.role)
   const isTeamLeader = session.user.role === "TEAM_LEADER"
-  if (!isAdmin && !isTeamLeader) redirect("/dashboard")
+  const isEmployee   = session.user.role === "EMPLOYEE"
+  if (!isAdmin && !isTeamLeader && !isEmployee) redirect("/dashboard")
 
-  // Pour TEAM_LEADER : vérifier que son équipe est affectée à ce chantier
+  // TEAM_LEADER : vérifier que son équipe est affectée à ce chantier
   let leaderTeamId: string | undefined
   if (isTeamLeader) {
     const leaderEmployee = await prisma.employee.findFirst({
@@ -45,12 +46,24 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
     if (!leaderTeamId) redirect("/dashboard")
   }
 
+  // EMPLOYEE : vérifier qu'il est affecté à ce chantier
+  let currentEmployeeId: string | undefined
+  if (isEmployee) {
+    const emp = await prisma.employee.findFirst({
+      where: { userId: session.user.id!, companyId: session.user.companyId! },
+      select: { id: true },
+    })
+    currentEmployeeId = emp?.id
+    if (!currentEmployeeId) redirect("/dashboard")
+  }
+
   const [chantier, teams, clients] = await Promise.all([
     prisma.worksite.findFirst({
       where: {
         id,
         companyId: session.user.companyId!,
         ...(isTeamLeader ? { assignments: { some: { teamId: leaderTeamId } } } : {}),
+        ...(isEmployee ? { assignments: { some: { employeeAssignments: { some: { employeeId: currentEmployeeId } } } } } : {}),
       },
       include: {
         client: { select: { name: true } },
@@ -164,9 +177,7 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
           </Card>
 
           {/* Actions statut — ADMIN uniquement */}
-          {isAdmin && (
-            <ChantierStatusActions worksiteId={chantier.id} currentStatus={chantier.status} endDate={chantier.endDate} />
-          )}
+          {isAdmin && <ChantierStatusActions worksiteId={chantier.id} currentStatus={chantier.status} endDate={chantier.endDate} />}
         </div>
 
         {/* Colonne droite — affectations */}

@@ -82,6 +82,7 @@ function getNavItems(role: Role): NavItem[] {
       return [
         { label: "Dashboard",      href: "/dashboard",          icon: LayoutDashboard },
         { label: "Mon planning",   href: "/planning/moi",       icon: Calendar },
+        { label: "Mes chantiers",  href: "/chantiers",          icon: HardHat },
         { label: "Mes absences",   href: "/mes-absences",       icon: CalendarOff },
         { label: "Notes de frais", href: "/mes-notes-de-frais", icon: Receipt },
         { label: "Pointage",       href: "/pointage",           icon: MapPin },

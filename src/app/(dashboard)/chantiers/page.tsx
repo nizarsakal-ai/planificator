@@ -15,11 +15,12 @@ export default async function ChantiersPage() {
 
   const isAdmin      = ["ADMIN", "SUPER_ADMIN"].includes(session.user.role)
   const isTeamLeader = session.user.role === "TEAM_LEADER"
-  if (!isAdmin && !isTeamLeader) redirect("/dashboard")
+  const isEmployee   = session.user.role === "EMPLOYEE"
+  if (!isAdmin && !isTeamLeader && !isEmployee) redirect("/dashboard")
 
   const companyId = session.user.companyId!
 
-  // Pour TEAM_LEADER : récupérer son équipe et filtrer les chantiers
+  // TEAM_LEADER : filtrer aux chantiers de son équipe
   let teamId: string | undefined
   if (isTeamLeader) {
     const leaderEmployee = await prisma.employee.findFirst({
@@ -30,8 +31,21 @@ export default async function ChantiersPage() {
     if (!teamId) redirect("/dashboard")
   }
 
+  // EMPLOYEE : filtrer aux chantiers où il est affecté
+  let employeeId: string | undefined
+  if (isEmployee) {
+    const emp = await prisma.employee.findFirst({
+      where: { userId: session.user.id!, companyId },
+      select: { id: true },
+    })
+    employeeId = emp?.id
+    if (!employeeId) redirect("/dashboard")
+  }
+
   const worksiteWhere = isTeamLeader
     ? { companyId, assignments: { some: { teamId } } }
+    : isEmployee
+    ? { companyId, assignments: { some: { employeeAssignments: { some: { employeeId } } } } }
     : { companyId }
 
   const [chantiers, clients] = await Promise.all([
@@ -75,7 +89,7 @@ export default async function ChantiersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">
-            {isTeamLeader ? "Mes chantiers" : "Chantiers"}
+            {isAdmin ? "Chantiers" : "Mes chantiers"}
           </h1>
           <p className="text-sm text-slate-500 mt-1">
             {enCours} en cours · {planifies} planifié{planifies > 1 ? "s" : ""}
