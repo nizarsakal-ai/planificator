@@ -422,3 +422,24 @@ export async function updateAssignmentStatus(
   revalidatePath("/planning")
   return { success: true }
 }
+
+export async function removeEmployeeFromAssignment(assignmentId: string, employeeId: string) {
+  const session = await auth()
+  if (!session?.user || !["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) {
+    return { error: "Non autorisé" }
+  }
+
+  const assignment = await prisma.assignment.findFirst({
+    where: { id: assignmentId, worksite: { companyId: session.user.companyId! } },
+    select: { worksiteId: true },
+  })
+  if (!assignment) return { error: "Affectation introuvable" }
+
+  await prisma.employeeAssignment.deleteMany({
+    where: { assignmentId, employeeId },
+  })
+
+  revalidatePath(`/chantiers/${assignment.worksiteId}`)
+  revalidatePath("/planning")
+  return { success: true }
+}

@@ -9,6 +9,7 @@ import { ChantierStatusActions } from "@/components/chantiers/ChantierStatusActi
 import { ChantierEditForm } from "@/components/chantiers/ChantierEditForm"
 import { AffecterEquipeForm } from "@/components/chantiers/AffecterEquipeForm"
 import { DocumentsSection } from "@/components/chantiers/DocumentsSection"
+import { RemoveEmployeeButton } from "@/components/chantiers/RemoveEmployeeButton"
 
 export const metadata: Metadata = { title: "Détail chantier" }
 
@@ -248,6 +249,13 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
                               className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 text-[11px] font-medium px-2 py-0.5 rounded-full"
                             >
                               {ea.employee.firstName} {ea.employee.lastName}
+                              {isAdmin && (
+                                <RemoveEmployeeButton
+                                  assignmentId={a.id}
+                                  employeeId={ea.employee.id}
+                                  employeeName={`${ea.employee.firstName} ${ea.employee.lastName}`}
+                                />
+                              )}
                             </span>
                           ))}
                         </div>
