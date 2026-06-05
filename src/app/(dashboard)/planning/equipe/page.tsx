@@ -63,6 +63,11 @@ export default async function PlanningEquipePage() {
     },
     include: {
       worksite: { select: { id: true, name: true, address: true, dailyHours: true } },
+      employeeAssignments: {
+        include: {
+          employee: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+        },
+      },
     },
     orderBy: { date: "asc" },
   })
@@ -169,6 +174,20 @@ export default async function PlanningEquipePage() {
                         <Clock className="h-3.5 w-3.5 shrink-0" />
                         {a.worksite.dailyHours}h / jour
                       </div>
+                      {/* Membres affectés */}
+                      {a.employeeAssignments.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {a.employeeAssignments.map((ea) => (
+                            <span
+                              key={ea.employee.id}
+                              className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 text-[11px] font-medium px-2 py-0.5 rounded-full"
+                            >
+                              <Users className="h-3 w-3 shrink-0" />
+                              {ea.employee.firstName} {ea.employee.lastName}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <Badge variant={st.variant} className="text-xs shrink-0">{st.label}</Badge>
                   </div>

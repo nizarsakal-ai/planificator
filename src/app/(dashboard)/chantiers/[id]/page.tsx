@@ -69,7 +69,12 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
         client: { select: { name: true } },
         assignments: {
           include: {
-            team: { select: { name: true } },
+            team: { select: { name: true, color: true } },
+            employeeAssignments: {
+              include: {
+                employee: { select: { id: true, firstName: true, lastName: true } },
+              },
+            },
           },
           orderBy: { date: "desc" },
           take: 20,
@@ -213,19 +218,40 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
               ) : (
                 <div className="space-y-2">
                   {chantier.assignments.map((a) => (
-                    <div key={a.id} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
-                      <div>
-                        <p className="text-sm font-medium text-slate-800">{a.team.name}</p>
-                        <p className="text-xs text-slate-400">
-                          {new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "2-digit", month: "long" }).format(a.date)}
-                        </p>
+                    <div key={a.id} className="py-2 border-b border-slate-50 last:border-0 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
+                              style={{ backgroundColor: a.team.color ?? "#0f3460" }}
+                            />
+                            <p className="text-sm font-medium text-slate-800">{a.team.name}</p>
+                          </div>
+                          <p className="text-xs text-slate-400 capitalize">
+                            {new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "2-digit", month: "long" }).format(a.date)}
+                          </p>
+                        </div>
+                        <Badge
+                          variant={a.status === "CONFIRMED" ? "default" : a.status === "REFUSED" ? "destructive" : "secondary"}
+                          className="text-xs shrink-0"
+                        >
+                          {a.status === "CONFIRMED" ? "Confirmé" : a.status === "REFUSED" ? "Refusé" : "En attente"}
+                        </Badge>
                       </div>
-                      <Badge
-                        variant={a.status === "CONFIRMED" ? "default" : a.status === "REFUSED" ? "destructive" : "secondary"}
-                        className="text-xs"
-                      >
-                        {a.status === "CONFIRMED" ? "Confirmé" : a.status === "REFUSED" ? "Refusé" : "En attente"}
-                      </Badge>
+                      {/* Membres affectés */}
+                      {a.employeeAssignments.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pl-4">
+                          {a.employeeAssignments.map((ea) => (
+                            <span
+                              key={ea.employee.id}
+                              className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 text-[11px] font-medium px-2 py-0.5 rounded-full"
+                            >
+                              {ea.employee.firstName} {ea.employee.lastName}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
