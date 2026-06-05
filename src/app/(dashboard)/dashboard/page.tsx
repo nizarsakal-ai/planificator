@@ -19,6 +19,10 @@ import {
   TrendingUp,
   AlertCircle,
   ArrowRight,
+  Clock,
+  FileText,
+  CalendarOff,
+  Download,
 } from "lucide-react"
 import { formatDate } from "@/lib/utils"
 import { AssignmentsChart } from "@/components/dashboard/AssignmentsChart"
@@ -39,13 +43,15 @@ function StatCard({
   value: number | string
   icon: React.ElementType
   description?: string
-  color?: "blue" | "green" | "orange" | "purple"
+  color?: "blue" | "green" | "orange" | "purple" | "slate" | "amber"
 }) {
   const colors = {
     blue: "bg-blue-50 text-blue-600",
     green: "bg-green-50 text-green-600",
     orange: "bg-orange-50 text-orange-600",
     purple: "bg-purple-50 text-purple-600",
+    slate: "bg-slate-100 text-slate-600",
+    amber: "bg-amber-50 text-amber-600",
   }
 
   return (
@@ -116,9 +122,13 @@ async function AdminDashboard({ companyId }: { companyId: string }) {
   const now   = new Date()
   const day30 = new Date(now); day30.setDate(day30.getDate() - 29); day30.setHours(0,0,0,0)
 
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+  const endOfMonth   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
+
   const [
     employeesCount, teamsCount, clientsCount,
     worksitesByStatus, recentAssignments, pendingAbsences,
+    dailyReportsCount, _signaturesCount, hoursResult, activeWorksites,
   ] = await Promise.all([
     prisma.employee.count({ where: { companyId, active: true } }),
     prisma.team.count({ where: { companyId, active: true } }),
@@ -132,8 +142,25 @@ async function AdminDashboard({ companyId }: { companyId: string }) {
       where: { worksite: { companyId }, date: { gte: day30 } },
       select: { date: true },
     }),
-    prisma.absence.count({ where: { companyId: companyId, status: "PENDING" } }),
+    prisma.absence.count({ where: { companyId, status: "PENDING" } }),
+    prisma.dailyReport.count({
+      where: { worksite: { companyId }, date: { gte: startOfMonth, lte: endOfMonth } },
+    }),
+    prisma.signature.count({
+      where: { assignment: { worksite: { companyId }, date: { gte: startOfMonth, lte: endOfMonth } } },
+    }),
+    prisma.dailyReport.aggregate({
+      where: { worksite: { companyId }, date: { gte: startOfMonth, lte: endOfMonth } },
+      _sum: { hoursWorked: true },
+    }),
+    prisma.worksite.count({
+      where: { companyId, status: { in: ["IN_PROGRESS", "EXTENDED"] } },
+    }),
   ])
+
+  const totalHours = hoursResult._sum.hoursWorked ?? 0
+  const currentMonth = now.getMonth() + 1
+  const currentYear  = now.getFullYear()
 
   const worksitesCount = worksitesByStatus
     .filter((w) => ["PLANNED", "IN_PROGRESS", "EXTENDED"].includes(w.status))
@@ -209,6 +236,49 @@ async function AdminDashboard({ companyId }: { companyId: string }) {
             <WorksiteStatusChart data={pieData} />
           </CardContent>
         </Card>
+      </div>
+
+      {/* KPIs mensuels + Export PDF */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-700">Ce mois-ci</h2>
+          <a
+            href={`/api/pdf/mensuel?month=${currentMonth}&year=${currentYear}`}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[#0f3460]/30 bg-[#0f3460]/5 px-3 py-1.5 text-xs font-semibold text-[#0f3460] hover:bg-[#0f3460]/10 transition-colors"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export PDF mensuel
+          </a>
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            title="Heures totales ce mois"
+            value={`${Math.round(totalHours)}h`}
+            icon={Clock}
+            color="blue"
+          />
+          <StatCard
+            title="Rapports journaliers"
+            value={dailyReportsCount}
+            icon={FileText}
+            description="Ce mois"
+            color="green"
+          />
+          <StatCard
+            title="Chantiers actifs"
+            value={activeWorksites}
+            icon={HardHat}
+            description="En cours ou prolongés"
+            color="slate"
+          />
+          <StatCard
+            title="Absences en attente"
+            value={pendingAbsences}
+            icon={CalendarOff}
+            description="À valider"
+            color="amber"
+          />
+        </div>
       </div>
 
       {/* Bannière onboarding si l'entreprise est vide */}
