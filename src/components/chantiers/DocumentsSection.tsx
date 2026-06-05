@@ -33,11 +33,11 @@ function isImage(mimeType: string | null) {
   return mimeType?.startsWith("image/") ?? false
 }
 
-// Ouvrir : Google Docs Viewer pour tout fichier non-image (PDF, DOCX, XLSX…)
-// Télécharger : proxy /api/documents/[id] qui force le download
-function viewUrl(mimeType: string | null, originalUrl: string) {
+// Toutes les URLs passent par notre API → URL signée Cloudinary
+// ?dl=1 force le téléchargement (fl_attachment), sinon ouverture dans le navigateur
+function viewUrl(mimeType: string | null, originalUrl: string, id: string) {
   if (mimeType?.startsWith("image/")) return originalUrl
-  return `https://docs.google.com/viewer?url=${encodeURIComponent(originalUrl)}&embedded=false`
+  return `/api/documents/${id}`
 }
 function downloadUrl(id: string) {
   return `/api/documents/${id}?dl=1`
@@ -181,7 +181,7 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
                 )}
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                   <a
-                    href={viewUrl(doc.mimeType, doc.url)}
+                    href={viewUrl(doc.mimeType, doc.url, doc.id)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-white text-xs bg-white/20 px-2 py-1 rounded hover:bg-white/30"
@@ -219,7 +219,7 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
                   <FileText className="h-4 w-4 text-slate-400 shrink-0" />
                   <div className="min-w-0">
                     <a
-                      href={viewUrl(doc.mimeType, doc.url)}
+                      href={viewUrl(doc.mimeType, doc.url, doc.id)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-sm font-medium text-[#0f3460] hover:underline truncate block"

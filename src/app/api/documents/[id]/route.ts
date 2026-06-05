@@ -3,10 +3,6 @@ import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { v2 as cloudinary } from "cloudinary"
 
-/**
- * Extrait le resource_type et le public_id depuis une URL Cloudinary.
- * Pour les raw uploads, le public_id inclut l'extension (ex: "folder/file.pdf").
- */
 function parseCloudinaryUrl(url: string): {
   resourceType: "image" | "video" | "raw"
   publicId: string
@@ -15,7 +11,6 @@ function parseCloudinaryUrl(url: string): {
   if (url.includes("/image/upload/")) resourceType = "image"
   else if (url.includes("/video/upload/")) resourceType = "video"
 
-  // Capturer tout ce qui suit /upload/ en ignorant la version optionnelle (v1234567/)
   const match = url.match(/\/upload\/(?:v\d+\/)?(.+)$/)
   if (!match) return null
 
@@ -23,7 +18,7 @@ function parseCloudinaryUrl(url: string): {
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await auth()
@@ -32,6 +27,7 @@ export async function GET(
   }
 
   const { id } = await params
+  const forceDownload = new URL(req.url).searchParams.get("dl") === "1"
 
   const doc = await prisma.document.findFirst({
     where: { id, worksite: { companyId: session.user.companyId! } },
@@ -51,18 +47,15 @@ export async function GET(
     return NextResponse.redirect(doc.url)
   }
 
-  // private_download_url génère une URL signée via l'API Cloudinary (pas le CDN).
-  // La signature (api_key + timestamp + secret) est incluse dans les paramètres →
-  // le navigateur peut y accéder directement sans passer par notre serveur.
-  // attachment:true force Content-Disposition: attachment → téléchargement immédiat.
-  const downloadUrl = cloudinary.utils.private_download_url(
-    parts.publicId,
-    "",  // format vide : le publicId des raw files inclut déjà l'extension
-    {
-      resource_type: parts.resourceType,
-      attachment: true,
-    }
-  )
+  // URL signée CDN Cloudinary — accessible directement par le navigateur.
+  // sign_url:true intègre la signature dans l'URL → fonctionne même pour les fichiers
+  // en accès restreint. fl_attachment force le téléchargement si ?dl=1.
+  const signedUrl = cloudinary.url(parts.publicId, {
+    resource_type: parts.resourceType,
+    secure: true,
+    sign_url: true,
+    ...(forceDownload ? { flags: "attachment" } : {}),
+  })
 
-  return NextResponse.redirect(downloadUrl, 302)
+  return NextResponse.redirect(signedUrl, 302)
 }
