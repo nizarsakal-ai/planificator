@@ -60,6 +60,7 @@ function getNavItems(role: Role): NavItem[] {
         { label: "Planning",       href: "/planning",              icon: Calendar },
         { label: "Gantt",          href: "/planning/gantt",        icon: GanttChart },
         { label: "Calendrier",     href: "/planning/calendrier",   icon: CalendarDays },
+        { label: "Personnel",      href: "/planning/personnel",    icon: Users },
         { label: "Absences",       href: "/absences",        icon: CalendarOff },
         { label: "Notes de frais", href: "/notes-de-frais",  icon: Receipt },
         { label: "Pointages",      href: "/pointages",       icon: MapPin },
