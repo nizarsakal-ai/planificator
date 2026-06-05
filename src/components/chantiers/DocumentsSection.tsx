@@ -190,6 +190,7 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
                   </a>
                   <a
                     href={downloadUrl(doc.id)}
+                    download
                     className="text-white text-xs bg-white/20 px-2 py-1 rounded hover:bg-white/30"
                   >
                     <Download className="h-3.5 w-3.5" />
@@ -233,6 +234,7 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
                 <div className="flex items-center gap-1 ml-2 shrink-0">
                   <a
                     href={downloadUrl(doc.id)}
+                    download
                     title="Télécharger"
                     className="text-slate-400 hover:text-[#0f3460] transition-colors"
                   >
