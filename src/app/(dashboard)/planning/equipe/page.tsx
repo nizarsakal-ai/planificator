@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { HardHat, MapPin, Clock, Calendar, Users, CheckCircle2, XCircle, Clock3 } from "lucide-react"
 import { AssignmentActions } from "@/components/planning/AssignmentActions"
+import { DailyReportDialog } from "@/components/planning/DailyReportDialog"
 
 export const metadata: Metadata = { title: "Planning équipe" }
 
@@ -56,21 +57,26 @@ export default async function PlanningEquipePage() {
   const from = new Date(); from.setDate(from.getDate() - 30); from.setHours(0,0,0,0)
   const to   = new Date(); to.setDate(to.getDate() + 60);     to.setHours(23,59,59,999)
 
-  const assignments = await prisma.assignment.findMany({
-    where: {
-      teamId: team.id,
-      date:   { gte: from, lte: to },
-    },
-    include: {
-      worksite: { select: { id: true, name: true, address: true, dailyHours: true } },
-      employeeAssignments: {
-        include: {
-          employee: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+  const [assignments, dailyReports] = await Promise.all([
+    prisma.assignment.findMany({
+      where: {
+        teamId: team.id,
+        date:   { gte: from, lte: to },
+      },
+      include: {
+        worksite: { select: { id: true, name: true, address: true, dailyHours: true } },
+        employeeAssignments: {
+          include: {
+            employee: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+          },
         },
       },
-    },
-    orderBy: { date: "asc" },
-  })
+      orderBy: { date: "asc" },
+    }),
+    prisma.dailyReport.findMany({
+      where: { teamId: team.id, date: { gte: from, lte: to } },
+    }),
+  ])
 
   const today    = new Date(); today.setHours(0,0,0,0)
   const upcoming = assignments.filter(a => new Date(a.date) >= today)
@@ -201,6 +207,18 @@ export default async function PlanningEquipePage() {
                       <XCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                       {a.refusalReason}
                     </div>
+                  )}
+
+                  {/* Rapport journalier — uniquement pour les affectations confirmées */}
+                  {a.status === "CONFIRMED" && (
+                    <DailyReportDialog
+                      worksiteId={a.worksite.id}
+                      worksiteName={a.worksite.name}
+                      teamId={team.id}
+                      date={a.date.toISOString().split("T")[0]}
+                      dailyHours={a.worksite.dailyHours}
+                      existingReport={dailyReports.find(r => r.date.toISOString().split("T")[0] === a.date.toISOString().split("T")[0]) ?? null}
+                    />
                   )}
                 </CardContent>
               </Card>

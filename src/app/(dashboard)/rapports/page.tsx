@@ -3,8 +3,17 @@ import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { CheckCircle2, XCircle, Clock3, Users, HardHat, TrendingUp } from "lucide-react"
+import { CheckCircle2, XCircle, Clock3, Users, HardHat, TrendingUp, FileText, Download } from "lucide-react"
 import { RapportFilters } from "@/components/rapports/RapportFilters"
+
+const WEATHER_EMOJI: Record<string, string> = {
+  SUNNY:  "☀️",
+  CLOUDY: "⛅",
+  RAINY:  "🌧️",
+  STORMY: "⛈️",
+  WINDY:  "💨",
+  SNOW:   "❄️",
+}
 
 export const metadata: Metadata = { title: "Rapports" }
 
@@ -66,9 +75,19 @@ export default async function RapportsPage() {
   const teamIds     = byTeam.map(t => t.teamId)
   const chantierIds = byChantier.map(c => c.worksiteId)
 
-  const [teamNames, chantierNames] = await Promise.all([
+  const [teamNames, chantierNames, recentReports] = await Promise.all([
     prisma.team.findMany({ where: { id: { in: teamIds } }, select: { id: true, name: true } }),
     prisma.worksite.findMany({ where: { id: { in: chantierIds } }, select: { id: true, name: true } }),
+    prisma.dailyReport.findMany({
+      where: { worksite: { companyId } },
+      include: {
+        worksite: { select: { name: true } },
+        team:     { select: { name: true } },
+        createdBy: { select: { firstName: true, lastName: true } },
+      },
+      orderBy: { date: "desc" },
+      take: 20,
+    }),
   ])
 
   const topTeams = byTeam.map(t => ({
@@ -224,6 +243,55 @@ export default async function RapportsPage() {
         teams={teams}
         chantiers={chantiers}
       />
+
+      {/* Rapports journaliers */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+            <FileText className="h-4 w-4" /> Rapports journaliers récents
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {recentReports.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-6">Aucun rapport journalier enregistré.</p>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {recentReports.map((r) => {
+                const dateStr = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", year: "numeric" }).format(r.date)
+                return (
+                  <div key={r.id} className="py-3 flex items-start gap-4">
+                    <div className="text-2xl shrink-0 mt-0.5">{WEATHER_EMOJI[r.weather] ?? "🌤️"}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-semibold text-slate-800">{r.worksite.name}</span>
+                        <span className="text-xs text-slate-400">·</span>
+                        <span className="text-xs text-slate-600">{r.team.name}</span>
+                        <span className="text-xs text-slate-400">·</span>
+                        <span className="text-xs text-slate-500">{dateStr}</span>
+                        <span className="text-xs text-slate-400">·</span>
+                        <span className="text-xs text-slate-500">{r.hoursWorked}h</span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1 line-clamp-2">{r.description}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {r.createdBy.firstName} {r.createdBy.lastName}
+                      </p>
+                    </div>
+                    <a
+                      href={`/api/pdf/rapport/${r.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 flex items-center gap-1 text-xs text-[#0f3460] hover:underline"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      PDF
+                    </a>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

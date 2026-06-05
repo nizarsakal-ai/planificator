@@ -97,6 +97,15 @@ enum ExpenseStatus {
   REJECTED  // Refusée
 }
 
+enum WeatherCondition {
+  SUNNY
+  CLOUDY
+  RAINY
+  STORMY
+  WINDY
+  SNOW
+}
+
 enum HistoryAction {
   CREATED        // Entité créée
   UPDATED        // Entité modifiée
@@ -227,6 +236,7 @@ model Employee {
   absences            Absence[]
   expenseReports      ExpenseReport[]
   timeclocks          Timeclock[]
+  dailyReports        DailyReport[]
 
   @@index([companyId])
   @@index([userId])
@@ -249,10 +259,11 @@ model Team {
   updatedAt DateTime @updatedAt
 
   // Relations
-  company     Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  leader      Employee     @relation("TeamLeader", fields: [leaderId], references: [id])
-  members     TeamMember[]
-  assignments Assignment[]
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leader       Employee      @relation("TeamLeader", fields: [leaderId], references: [id])
+  members      TeamMember[]
+  assignments  Assignment[]
+  dailyReports DailyReport[]
 
   @@unique([name, companyId]) // pas de doublon de nom d'équipe dans la même entreprise
   @@index([companyId])
@@ -342,13 +353,14 @@ model Worksite {
   updatedAt   DateTime       @updatedAt
 
   // Relations
-  client      Client       @relation(fields: [clientId], references: [id])
-  company     Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  documents   Document[]
-  assignments Assignment[]
-  extensions  Extension[]
-  historyLogs HistoryLog[]
-  timeclocks  Timeclock[]
+  client       Client        @relation(fields: [clientId], references: [id])
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  documents    Document[]
+  assignments  Assignment[]
+  extensions   Extension[]
+  historyLogs  HistoryLog[]
+  timeclocks   Timeclock[]
+  dailyReports DailyReport[]
 
   @@index([companyId])
   @@index([clientId])
@@ -639,4 +651,33 @@ model Timeclock {
   @@index([companyId])
   @@index([date])
   @@map("timeclocks")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DAILY REPORT — Rapport journalier rempli par le chef d'équipe
+// ═══════════════════════════════════════════════════════════════════════════
+
+model DailyReport {
+  id          String           @id @default(cuid())
+  worksiteId  String
+  teamId      String
+  createdById String
+  date        DateTime         @db.Date
+  weather     WeatherCondition @default(SUNNY)
+  description String
+  issues      String?
+  hoursWorked Float            @default(0)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  worksite  Worksite @relation(fields: [worksiteId], references: [id], onDelete: Cascade)
+  team      Team     @relation(fields: [teamId], references: [id])
+  createdBy Employee @relation(fields: [createdById], references: [id])
+
+  @@unique([teamId, date])
+  @@index([worksiteId])
+  @@index([teamId])
+  @@index([date])
+  @@index([createdById])
+  @@map("daily_reports")
 }
