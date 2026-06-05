@@ -36,6 +36,7 @@ export async function uploadDocument(formData: FormData) {
         resource_type: "auto",
         use_filename:  true,
         unique_filename: true,
+        access_mode:   "public",
       },
       (err, res) => {
         if (err || !res) return reject(err ?? new Error("Upload failed"))
