@@ -237,6 +237,7 @@ model Employee {
   expenseReports      ExpenseReport[]
   timeclocks          Timeclock[]
   dailyReports        DailyReport[]
+  signatures          Signature[]
 
   @@index([companyId])
   @@index([userId])
@@ -412,6 +413,7 @@ model Assignment {
   worksite            Worksite             @relation(fields: [worksiteId], references: [id], onDelete: Cascade)
   team                Team                 @relation(fields: [teamId], references: [id])
   employeeAssignments EmployeeAssignment[]
+  signature           Signature?
 
   @@unique([teamId, date]) // CONTRAINTE MÉTIER : 1 équipe ne peut pas être sur 2 chantiers le même jour
   @@index([worksiteId])
@@ -682,4 +684,24 @@ model DailyReport {
   @@index([date])
   @@index([createdById])
   @@map("daily_reports")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SIGNATURE — Signature électronique de la feuille de présence
+// Liée à une affectation (1-to-1), signée par le chef d'équipe
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Signature {
+  id           String   @id @default(cuid())
+  assignmentId String   @unique
+  signedById   String   // employeeId of the team leader who signed
+  signatureUrl String   // Cloudinary URL of the signature image
+  signedAt     DateTime @default(now())
+
+  assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  signedBy   Employee   @relation(fields: [signedById], references: [id])
+
+  @@index([assignmentId])
+  @@index([signedById])
+  @@map("signatures")
 }

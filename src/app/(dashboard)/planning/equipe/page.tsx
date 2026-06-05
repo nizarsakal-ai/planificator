@@ -4,9 +4,10 @@ import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
-import { HardHat, MapPin, Clock, Calendar, Users, CheckCircle2, XCircle, Clock3 } from "lucide-react"
+import { HardHat, MapPin, Clock, Calendar, Users, CheckCircle2, XCircle, Clock3, FileText } from "lucide-react"
 import { AssignmentActions } from "@/components/planning/AssignmentActions"
 import { DailyReportDialog } from "@/components/planning/DailyReportDialog"
+import { SignaturePad } from "@/components/planning/SignaturePad"
 
 export const metadata: Metadata = { title: "Planning équipe" }
 
@@ -70,6 +71,7 @@ export default async function PlanningEquipePage() {
             employee: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
           },
         },
+        signature: true,
       },
       orderBy: { date: "asc" },
     }),
@@ -219,6 +221,30 @@ export default async function PlanningEquipePage() {
                       dailyHours={a.worksite.dailyHours}
                       existingReport={dailyReports.find(r => r.date.toISOString().split("T")[0] === a.date.toISOString().split("T")[0]) ?? null}
                     />
+                  )}
+
+                  {/* Signature électronique — uniquement pour les affectations confirmées */}
+                  {a.status === "CONFIRMED" && (
+                    <SignaturePad
+                      assignmentId={a.id}
+                      worksiteName={a.worksite.name}
+                      date={a.date.toISOString().split("T")[0]}
+                      isSigned={!!a.signature}
+                      existingSignatureUrl={a.signature?.signatureUrl ?? null}
+                    />
+                  )}
+
+                  {/* Lien PDF feuille de présence signée */}
+                  {a.status === "CONFIRMED" && a.signature && (
+                    <a
+                      href={`/api/pdf/signature/${a.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 transition-colors"
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                      Télécharger la feuille signée (PDF)
+                    </a>
                   )}
                 </CardContent>
               </Card>
