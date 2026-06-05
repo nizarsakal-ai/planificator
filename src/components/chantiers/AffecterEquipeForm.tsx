@@ -1,13 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
-import { Loader2 } from "lucide-react"
+import { AlertTriangle, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { affecterEquipe } from "@/lib/actions/chantier.actions"
+import { checkTeamConflict } from "@/lib/actions/assignment.actions"
 
 interface Team {
   id: string
@@ -27,6 +28,24 @@ export function AffecterEquipeForm({ worksiteId, teams, worksiteStartDate, works
   const [dateFrom, setDateFrom] = useState(worksiteStartDate)
   const [dateTo, setDateTo] = useState("")
   const [loading, setLoading] = useState(false)
+  const [conflict, setConflict] = useState<string | null>(null)
+
+  // Check for team conflict whenever teamId or dateFrom changes
+  useEffect(() => {
+    if (!teamId || !dateFrom) {
+      setConflict(null)
+      return
+    }
+
+    let cancelled = false
+    checkTeamConflict(teamId, dateFrom, worksiteId).then((result) => {
+      if (!cancelled) {
+        setConflict(result ? result.worksiteName : null)
+      }
+    })
+
+    return () => { cancelled = true }
+  }, [teamId, dateFrom, worksiteId])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -61,6 +80,7 @@ export function AffecterEquipeForm({ worksiteId, teams, worksiteStartDate, works
       setTeamId("")
       setDateFrom("")
       setDateTo("")
+      setConflict(null)
       router.refresh()
     }
   }
@@ -117,6 +137,14 @@ export function AffecterEquipeForm({ worksiteId, teams, worksiteStartDate, works
           </Button>
         </div>
       </div>
+
+      {/* Conflict warning */}
+      {conflict && (
+        <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
+          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
+          <span>Cette équipe est déjà affectée au chantier <strong>{conflict}</strong> ce jour-là. Vous pouvez quand même valider.</span>
+        </div>
+      )}
 
       {/* Récap jours si plage sélectionnée */}
       {dateFrom && dateTo && dateTo > dateFrom && (
