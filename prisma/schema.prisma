@@ -380,6 +380,8 @@ model Document {
   url        String
   size       Int?         // taille en octets
   mimeType   String?
+  latitude   Float?
+  longitude  Float?
   type       DocumentType @default(DOCUMENT)
   uploadedAt DateTime     @default(now())
 

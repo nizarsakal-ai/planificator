@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef } from "react"
-import { Upload, Trash2, FileText, Image, FileImage, Loader2, Download } from "lucide-react"
+import { Upload, Trash2, FileText, Image, FileImage, Loader2, Download, MapPin } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -15,6 +15,8 @@ interface Document {
   mimeType: string | null
   type: "PLAN" | "PHOTO" | "DOCUMENT"
   uploadedAt: Date
+  latitude: number | null
+  longitude: number | null
 }
 
 interface DocumentsSectionProps {
@@ -33,14 +35,18 @@ function isImage(mimeType: string | null) {
   return mimeType?.startsWith("image/") ?? false
 }
 
-// Toutes les URLs passent par notre API → URL signée Cloudinary
-// ?dl=1 force le téléchargement (fl_attachment), sinon ouverture dans le navigateur
 function viewUrl(mimeType: string | null, originalUrl: string, id: string) {
   if (mimeType?.startsWith("image/")) return originalUrl
   return `/api/documents/${id}`
 }
 function downloadUrl(id: string) {
   return `/api/documents/${id}?dl=1`
+}
+
+function formatCoords(lat: number, lng: number) {
+  const latDir = lat >= 0 ? "N" : "S"
+  const lngDir = lng >= 0 ? "E" : "O"
+  return `${Math.abs(lat).toFixed(4)}° ${latDir}, ${Math.abs(lng).toFixed(4)}° ${lngDir}`
 }
 
 export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProps) {
@@ -50,6 +56,40 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const filtered = documents.filter((d) => d.type === activeTab)
+
+  const handleAddClick = () => {
+    if (activeTab !== "PHOTO") {
+      // Plans et documents : upload direct sans GPS
+      fileInputRef.current?.click()
+      return
+    }
+
+    // Photos : demander la géolocalisation d'abord
+    if (!navigator.geolocation) {
+      fileInputRef.current?.click()
+      return
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        // Stocker les coords dans des attributs data sur l'input
+        if (fileInputRef.current) {
+          fileInputRef.current.dataset.lat = String(pos.coords.latitude)
+          fileInputRef.current.dataset.lng = String(pos.coords.longitude)
+        }
+        fileInputRef.current?.click()
+      },
+      () => {
+        // Géolocalisation refusée ou erreur → upload sans GPS
+        if (fileInputRef.current) {
+          delete fileInputRef.current.dataset.lat
+          delete fileInputRef.current.dataset.lng
+        }
+        fileInputRef.current?.click()
+      },
+      { timeout: 5000, maximumAge: 30000 }
+    )
+  }
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -61,6 +101,14 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
       formData.append("worksiteId", worksiteId)
       formData.append("type", activeTab)
       formData.append("file", file)
+
+      // Récupérer les coords GPS si disponibles
+      const lat = fileInputRef.current?.dataset.lat
+      const lng = fileInputRef.current?.dataset.lng
+      if (lat && lng) {
+        formData.append("latitude", lat)
+        formData.append("longitude", lng)
+      }
 
       const result = await uploadDocument(formData)
 
@@ -74,7 +122,11 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
       console.error(err)
     } finally {
       setUploading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ""
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""
+        delete fileInputRef.current.dataset.lat
+        delete fileInputRef.current.dataset.lng
+      }
     }
   }
 
@@ -113,7 +165,7 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
             />
             <Button
               size="sm"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={handleAddClick}
               disabled={uploading}
               className="bg-[#0f3460] hover:bg-[#0a2540] h-8 text-xs"
             >
@@ -151,7 +203,7 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
         {filtered.length === 0 ? (
           <div
             className="flex flex-col items-center justify-center py-8 border-2 border-dashed border-slate-200 rounded-lg cursor-pointer hover:border-slate-300 transition-colors"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={handleAddClick}
           >
             {activeTab === "PHOTO" ? (
               <Image className="h-8 w-8 text-slate-300 mb-2" />
@@ -179,33 +231,51 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
                     <FileText className="h-8 w-8 text-slate-400" />
                   </div>
                 )}
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                  <a
-                    href={viewUrl(doc.mimeType, doc.url, doc.id)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-white text-xs bg-white/20 px-2 py-1 rounded hover:bg-white/30"
-                  >
-                    Voir
-                  </a>
-                  <a
-                    href={downloadUrl(doc.id)}
-                    download
-                    className="text-white text-xs bg-white/20 px-2 py-1 rounded hover:bg-white/30"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                  </a>
-                  <button
-                    onClick={() => handleDelete(doc.id)}
-                    disabled={deleting === doc.id}
-                    className="text-white"
-                  >
-                    {deleting === doc.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4 text-red-300 hover:text-red-200" />
-                    )}
-                  </button>
+
+                {/* Badge GPS */}
+                {doc.latitude && doc.longitude && (
+                  <div className="absolute bottom-1 left-1 flex items-center gap-0.5 bg-black/60 rounded px-1 py-0.5">
+                    <MapPin className="h-2.5 w-2.5 text-green-400" />
+                    <span className="text-[9px] text-white font-medium">GPS</span>
+                  </div>
+                )}
+
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2">
+                  {/* Coords GPS au survol */}
+                  {doc.latitude && doc.longitude && (
+                    <div className="flex items-center gap-1 bg-black/50 rounded px-2 py-1 mb-1">
+                      <MapPin className="h-3 w-3 text-green-400 shrink-0" />
+                      <span className="text-white text-[10px]">{formatCoords(doc.latitude, doc.longitude)}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={viewUrl(doc.mimeType, doc.url, doc.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-white text-xs bg-white/20 px-2 py-1 rounded hover:bg-white/30"
+                    >
+                      Voir
+                    </a>
+                    <a
+                      href={downloadUrl(doc.id)}
+                      download
+                      className="text-white text-xs bg-white/20 px-2 py-1 rounded hover:bg-white/30"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                    </a>
+                    <button
+                      onClick={() => handleDelete(doc.id)}
+                      disabled={deleting === doc.id}
+                      className="text-white"
+                    >
+                      {deleting === doc.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4 text-red-300 hover:text-red-200" />
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}

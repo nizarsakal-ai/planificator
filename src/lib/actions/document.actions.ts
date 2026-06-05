@@ -54,6 +54,11 @@ export async function uploadDocument(formData: FormData) {
     else if (lower.endsWith(".xlsx")) mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
   }
 
+  const latStr = formData.get("latitude") as string | null
+  const lngStr = formData.get("longitude") as string | null
+  const latitude  = latStr  ? parseFloat(latStr)  : null
+  const longitude = lngStr ? parseFloat(lngStr) : null
+
   await prisma.document.create({
     data: {
       worksiteId,
@@ -62,6 +67,8 @@ export async function uploadDocument(formData: FormData) {
       size:     file.size,
       mimeType,
       type:     type || DocumentType.DOCUMENT,
+      latitude,
+      longitude,
     },
   })
 
