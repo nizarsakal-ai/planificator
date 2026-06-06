@@ -441,6 +441,38 @@ export async function deleteChantier(worksiteId: string) {
   return { success: true }
 }
 
+// ─── Supprimer une plage d'affectation d'une équipe ─────────────────────────
+
+export async function deleteAssignmentBlock(
+  worksiteId: string,
+  teamId: string,
+  startDate: string,
+  endDate: string
+) {
+  const user = await requireAdmin()
+
+  const worksite = await prisma.worksite.findFirst({
+    where: { id: worksiteId, companyId: user.companyId! },
+    select: { id: true },
+  })
+  if (!worksite) return { error: "Chantier introuvable." }
+
+  await prisma.assignment.deleteMany({
+    where: {
+      worksiteId,
+      teamId,
+      date: {
+        gte: new Date(startDate),
+        lte: new Date(endDate),
+      },
+    },
+  })
+
+  revalidatePath(`/chantiers/${worksiteId}`)
+  revalidatePath("/planning")
+  return { success: true }
+}
+
 export async function removeEmployeeFromAssignment(assignmentId: string, employeeId: string) {
   const session = await auth()
   if (!session?.user || !["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) {

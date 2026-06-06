@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
-import { AlertTriangle, Loader2 } from "lucide-react"
+import { AlertTriangle, Loader2, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -20,9 +20,22 @@ interface Props {
   teams: Team[]
   worksiteStartDate: string // "YYYY-MM-DD"
   worksiteEndDate: string   // "YYYY-MM-DD"
+  nextRelayDate?: string    // "YYYY-MM-DD" — jour suivant la dernière affectation
+  lastCoveredDate?: string  // "YYYY-MM-DD" — dernier jour couvert
 }
 
-export function AffecterEquipeForm({ worksiteId, teams, worksiteStartDate, worksiteEndDate }: Props) {
+function fmtDateFR(iso: string) {
+  return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(new Date(iso))
+}
+
+export function AffecterEquipeForm({
+  worksiteId,
+  teams,
+  worksiteStartDate,
+  worksiteEndDate,
+  nextRelayDate,
+  lastCoveredDate,
+}: Props) {
   const router = useRouter()
   const [teamId, setTeamId] = useState("")
   const [dateFrom, setDateFrom] = useState(worksiteStartDate)
@@ -30,22 +43,23 @@ export function AffecterEquipeForm({ worksiteId, teams, worksiteStartDate, works
   const [loading, setLoading] = useState(false)
   const [conflict, setConflict] = useState<string | null>(null)
 
-  // Check for team conflict whenever teamId or dateFrom changes
   useEffect(() => {
     if (!teamId || !dateFrom) {
       setConflict(null)
       return
     }
-
     let cancelled = false
     checkTeamConflict(teamId, dateFrom, worksiteId).then((result) => {
-      if (!cancelled) {
-        setConflict(result ? result.worksiteName : null)
-      }
+      if (!cancelled) setConflict(result ? result.worksiteName : null)
     })
-
     return () => { cancelled = true }
   }, [teamId, dateFrom, worksiteId])
+
+  function applyRelayDates() {
+    if (!nextRelayDate) return
+    setDateFrom(nextRelayDate)
+    setDateTo(worksiteEndDate)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -87,6 +101,24 @@ export function AffecterEquipeForm({ worksiteId, teams, worksiteStartDate, works
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
+      {/* Suggestion de relève */}
+      {nextRelayDate && lastCoveredDate && (
+        <div className="flex items-center justify-between gap-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700">
+          <span>
+            <ArrowRight className="h-3.5 w-3.5 inline mr-1 shrink-0" />
+            Les affectations couvrent jusqu'au <strong>{fmtDateFR(lastCoveredDate)}</strong>.
+            Configurer une relève à partir du <strong>{fmtDateFR(nextRelayDate)}</strong> ?
+          </span>
+          <button
+            type="button"
+            onClick={applyRelayDates}
+            className="shrink-0 font-semibold underline hover:text-blue-900 transition-colors"
+          >
+            Préremplir
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row gap-3">
         {/* Équipe */}
         <div className="flex-1 space-y-1">
@@ -120,7 +152,9 @@ export function AffecterEquipeForm({ worksiteId, teams, worksiteStartDate, works
 
         {/* Date de fin */}
         <div className="flex-1 space-y-1">
-          <Label className="text-xs text-slate-500">Date de fin <span className="text-slate-400">(optionnelle)</span></Label>
+          <Label className="text-xs text-slate-500">
+            Date de fin <span className="text-slate-400">(optionnelle)</span>
+          </Label>
           <Input
             type="date"
             min={dateFrom || worksiteStartDate}
@@ -132,17 +166,24 @@ export function AffecterEquipeForm({ worksiteId, teams, worksiteStartDate, works
         </div>
 
         <div className="flex items-end">
-          <Button type="submit" disabled={loading} className="bg-[#0f3460] hover:bg-[#0a2540] w-full sm:w-auto">
+          <Button
+            type="submit"
+            disabled={loading}
+            className="bg-[#0f3460] hover:bg-[#0a2540] w-full sm:w-auto"
+          >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Affecter"}
           </Button>
         </div>
       </div>
 
-      {/* Conflict warning */}
+      {/* Avertissement conflit */}
       {conflict && (
         <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
           <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
-          <span>Cette équipe est déjà affectée au chantier <strong>{conflict}</strong> ce jour-là. Vous pouvez quand même valider.</span>
+          <span>
+            Cette équipe est déjà affectée au chantier{" "}
+            <strong>{conflict}</strong> ce jour-là. Vous pouvez quand même valider.
+          </span>
         </div>
       )}
 

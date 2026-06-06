@@ -9,22 +9,99 @@ import { ChantierStatusActions } from "@/components/chantiers/ChantierStatusActi
 import { ChantierEditForm } from "@/components/chantiers/ChantierEditForm"
 import { AffecterEquipeForm } from "@/components/chantiers/AffecterEquipeForm"
 import { DocumentsSection } from "@/components/chantiers/DocumentsSection"
-import { RemoveEmployeeButton } from "@/components/chantiers/RemoveEmployeeButton"
 import { DeleteChantierButton } from "@/components/chantiers/DeleteChantierButton"
+import { DeleteAssignmentBlockButton } from "@/components/chantiers/DeleteAssignmentBlockButton"
 
 export const metadata: Metadata = { title: "Détail chantier" }
 
 const statusLabels: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  PLANNED:     { label: "Planifié",       variant: "secondary" },
-  IN_PROGRESS: { label: "En cours",      variant: "default" },
-  EXTENDED:    { label: "Prolongé",      variant: "outline" },
-  COMPLETED:   { label: "Terminé",       variant: "secondary" },
-  ARCHIVED:    { label: "Archivé",       variant: "secondary" },
-  DELAYED:     { label: "Décalé",        variant: "destructive" },
+  PLANNED:     { label: "Planifié",  variant: "secondary" },
+  IN_PROGRESS: { label: "En cours", variant: "default" },
+  EXTENDED:    { label: "Prolongé", variant: "outline" },
+  COMPLETED:   { label: "Terminé",  variant: "secondary" },
+  ARCHIVED:    { label: "Archivé",  variant: "secondary" },
+  DELAYED:     { label: "Décalé",   variant: "destructive" },
 }
 
 function formatDate(date: Date) {
   return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long", year: "numeric" }).format(date)
+}
+
+function formatDateShort(date: Date) {
+  return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short" }).format(date)
+}
+
+// ─── Regroupement des affectations en blocs continus par équipe ───────────────
+
+type AssignmentRow = {
+  id: string
+  date: Date
+  status: string
+  teamId: string
+  team: { name: string; color: string | null }
+  employeeAssignments: {
+    employee: { id: string; firstName: string; lastName: string }
+  }[]
+}
+
+type AssignmentBlock = {
+  teamId: string
+  teamName: string
+  teamColor: string | null
+  startDate: Date
+  endDate: Date
+  status: "CONFIRMED" | "PENDING" | "REFUSED"
+  employees: { id: string; firstName: string; lastName: string }[]
+  dayCount: number
+}
+
+function groupAssignmentBlocks(assignments: AssignmentRow[]): AssignmentBlock[] {
+  if (assignments.length === 0) return []
+
+  // Trier par équipe puis par date ASC
+  const sorted = [...assignments].sort((a, b) => {
+    const t = a.teamId.localeCompare(b.teamId)
+    if (t !== 0) return t
+    return a.date.getTime() - b.date.getTime()
+  })
+
+  const statusPriority: Record<string, number> = { REFUSED: 3, PENDING: 2, CONFIRMED: 1 }
+  const blocks: AssignmentBlock[] = []
+
+  for (const a of sorted) {
+    const last = blocks[blocks.length - 1]
+    const sameTeam  = last?.teamId === a.teamId
+    const diffMs    = sameTeam ? a.date.getTime() - last!.endDate.getTime() : Infinity
+    const isConsec  = diffMs <= 86400000 // 1 jour max
+
+    if (sameTeam && isConsec) {
+      last!.endDate = a.date
+      last!.dayCount++
+      const sp = statusPriority[a.status] ?? 0
+      if (sp > (statusPriority[last!.status] ?? 0)) {
+        last!.status = a.status as "CONFIRMED" | "PENDING" | "REFUSED"
+      }
+      for (const ea of a.employeeAssignments) {
+        if (!last!.employees.find((e) => e.id === ea.employee.id)) {
+          last!.employees.push(ea.employee)
+        }
+      }
+    } else {
+      blocks.push({
+        teamId:    a.teamId,
+        teamName:  a.team.name,
+        teamColor: a.team.color,
+        startDate: a.date,
+        endDate:   a.date,
+        status:    a.status as "CONFIRMED" | "PENDING" | "REFUSED",
+        employees: a.employeeAssignments.map((ea) => ea.employee),
+        dayCount:  1,
+      })
+    }
+  }
+
+  // Trier par date de début DESC (plus récent en premier)
+  return blocks.sort((a, b) => b.startDate.getTime() - a.startDate.getTime())
 }
 
 export default async function ChantierDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -37,7 +114,6 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
   const isEmployee   = session.user.role === "EMPLOYEE"
   if (!isAdmin && !isTeamLeader && !isEmployee) redirect("/dashboard")
 
-  // TEAM_LEADER : vérifier que son équipe est affectée à ce chantier
   let leaderTeamId: string | undefined
   if (isTeamLeader) {
     const leaderEmployee = await prisma.employee.findFirst({
@@ -48,7 +124,6 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
     if (!leaderTeamId) redirect("/dashboard")
   }
 
-  // EMPLOYEE : vérifier qu'il est affecté à ce chantier
   let currentEmployeeId: string | undefined
   if (isEmployee) {
     const emp = await prisma.employee.findFirst({
@@ -78,15 +153,10 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
               },
             },
           },
-          orderBy: { date: "desc" },
-          take: 20,
+          orderBy: { date: "asc" },
         },
-        extensions: {
-          orderBy: { createdAt: "desc" },
-        },
-        documents: {
-          orderBy: { uploadedAt: "desc" },
-        },
+        extensions: { orderBy: { createdAt: "desc" } },
+        documents:  { orderBy: { uploadedAt: "desc" } },
       },
     }),
     prisma.team.findMany({
@@ -104,6 +174,27 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
   if (!chantier) notFound()
 
   const status = statusLabels[chantier.status] ?? { label: chantier.status, variant: "secondary" as const }
+
+  // Calcul des blocs groupés
+  const assignmentBlocks = groupAssignmentBlocks(chantier.assignments)
+
+  // Dernier jour couvert + suggestion de relève
+  const lastCoveredDate = chantier.assignments.length > 0
+    ? chantier.assignments.reduce<Date | null>(
+        (max, a) => (!max || a.date > max ? a.date : max),
+        null
+      )
+    : null
+
+  const nextRelayDate = lastCoveredDate && lastCoveredDate < chantier.endDate
+    ? new Date(lastCoveredDate.getTime() + 86400000).toISOString().split("T")[0]
+    : undefined
+
+  const lastCoveredDateStr = lastCoveredDate?.toISOString().split("T")[0]
+
+  // Timeline : largeur totale du chantier en jours
+  const totalMs   = chantier.endDate.getTime() - chantier.startDate.getTime() + 86400000
+  const totalDays = totalMs / 86400000
 
   return (
     <div className="space-y-6">
@@ -138,7 +229,6 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Colonne gauche — infos + actions */}
         <div className="lg:col-span-1 space-y-4">
-          {/* Infos générales */}
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
@@ -186,17 +276,24 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
             </CardContent>
           </Card>
 
-          {/* Actions statut — ADMIN uniquement */}
-          {isAdmin && <ChantierStatusActions worksiteId={chantier.id} currentStatus={chantier.status} endDate={chantier.endDate} />}
+          {isAdmin && (
+            <ChantierStatusActions
+              worksiteId={chantier.id}
+              currentStatus={chantier.status}
+              endDate={chantier.endDate}
+            />
+          )}
         </div>
 
         {/* Colonne droite — affectations */}
         <div className="lg:col-span-2 space-y-4">
-          {/* Affecter une équipe — ADMIN uniquement */}
+          {/* Formulaire d'affectation */}
           {isAdmin && !["COMPLETED", "ARCHIVED"].includes(chantier.status) && (
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold text-slate-700">Affecter une équipe</CardTitle>
+                <CardTitle className="text-sm font-semibold text-slate-700">
+                  Affecter une équipe
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <AffecterEquipeForm
@@ -204,62 +301,139 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
                   teams={teams}
                   worksiteStartDate={chantier.startDate.toISOString().split("T")[0]}
                   worksiteEndDate={chantier.endDate.toISOString().split("T")[0]}
+                  nextRelayDate={nextRelayDate}
+                  lastCoveredDate={lastCoveredDateStr}
                 />
               </CardContent>
             </Card>
           )}
 
-          {/* Historique des affectations */}
+          {/* Planning des équipes */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
                 <Users className="h-4 w-4" />
-                Affectations
+                Planning des équipes
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              {chantier.assignments.length === 0 ? (
-                <p className="text-sm text-slate-400 text-center py-6">Aucune affectation pour ce chantier.</p>
-              ) : (
-                <div className="space-y-2">
-                  {chantier.assignments.map((a) => (
-                    <div key={a.id} className="py-2 border-b border-slate-50 last:border-0 space-y-1.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span
-                              className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
-                              style={{ backgroundColor: a.team.color ?? "#0f3460" }}
-                            />
-                            <p className="text-sm font-medium text-slate-800">{a.team.name}</p>
+            <CardContent className="space-y-4">
+              {/* Timeline visuelle */}
+              {assignmentBlocks.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-[10px] text-slate-400 px-0.5">
+                    <span>{formatDateShort(chantier.startDate)}</span>
+                    <span>{formatDateShort(chantier.endDate)}</span>
+                  </div>
+                  <div className="relative h-7 bg-slate-100 rounded-lg overflow-hidden">
+                    {/* Barre grise "non couvert" visible en fond */}
+                    {[...assignmentBlocks]
+                      .sort((a, b) => a.startDate.getTime() - b.startDate.getTime())
+                      .map((block, i) => {
+                        const left  = Math.max(0, (block.startDate.getTime() - chantier.startDate.getTime()) / (totalDays * 86400000) * 100)
+                        const width = Math.min(100 - left, (block.dayCount / totalDays) * 100)
+                        return (
+                          <div
+                            key={`tl-${block.teamId}-${i}`}
+                            className="absolute h-full flex items-center justify-center text-[10px] font-semibold text-white overflow-hidden"
+                            style={{
+                              left:            `${left}%`,
+                              width:           `${Math.max(width, 0.5)}%`,
+                              backgroundColor: block.teamColor ?? "#0f3460",
+                              opacity:         0.85,
+                            }}
+                            title={`${block.teamName} : ${formatDateShort(block.startDate)} → ${formatDateShort(block.endDate)}`}
+                          >
+                            {width > 12 ? block.teamName : ""}
                           </div>
-                          <p className="text-xs text-slate-400 capitalize">
-                            {new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "2-digit", month: "long" }).format(a.date)}
-                          </p>
+                        )
+                      })}
+                  </div>
+                  {/* Légende équipes */}
+                  <div className="flex flex-wrap gap-2 pt-0.5">
+                    {[...new Map(assignmentBlocks.map((b) => [b.teamId, b])).values()].map((b) => (
+                      <span key={b.teamId} className="flex items-center gap-1 text-[11px] text-slate-500">
+                        <span
+                          className="inline-block w-2.5 h-2.5 rounded-sm shrink-0"
+                          style={{ backgroundColor: b.teamColor ?? "#0f3460" }}
+                        />
+                        {b.teamName}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Liste des blocs */}
+              {assignmentBlocks.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-6">
+                  Aucune affectation pour ce chantier.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {assignmentBlocks.map((block, i) => (
+                    <div
+                      key={`${block.teamId}-${i}`}
+                      className="p-3 rounded-lg border border-slate-100 bg-slate-50/50 space-y-2"
+                    >
+                      {/* En-tête du bloc */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className="inline-block w-3 h-3 rounded-full shrink-0"
+                            style={{ backgroundColor: block.teamColor ?? "#0f3460" }}
+                          />
+                          <span className="text-sm font-semibold text-slate-800 truncate">
+                            {block.teamName}
+                          </span>
+                          <span className="text-xs text-slate-400 shrink-0">
+                            {block.dayCount} jour{block.dayCount > 1 ? "s" : ""}
+                          </span>
                         </div>
-                        <Badge
-                          variant={a.status === "CONFIRMED" ? "default" : a.status === "REFUSED" ? "destructive" : "secondary"}
-                          className="text-xs shrink-0"
-                        >
-                          {a.status === "CONFIRMED" ? "Confirmé" : a.status === "REFUSED" ? "Refusé" : "En attente"}
-                        </Badge>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Badge
+                            variant={
+                              block.status === "CONFIRMED" ? "default"
+                              : block.status === "REFUSED" ? "destructive"
+                              : "secondary"
+                            }
+                            className="text-xs"
+                          >
+                            {block.status === "CONFIRMED" ? "Confirmé"
+                              : block.status === "REFUSED" ? "Refusé"
+                              : "En attente"}
+                          </Badge>
+                          {isAdmin && (
+                            <DeleteAssignmentBlockButton
+                              worksiteId={chantier.id}
+                              teamId={block.teamId}
+                              teamName={block.teamName}
+                              startDate={block.startDate.toISOString().split("T")[0]}
+                              endDate={block.endDate.toISOString().split("T")[0]}
+                              dayCount={block.dayCount}
+                            />
+                          )}
+                        </div>
                       </div>
-                      {/* Membres affectés */}
-                      {a.employeeAssignments.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 pl-4">
-                          {a.employeeAssignments.map((ea) => (
+
+                      {/* Plage de dates */}
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                        <Calendar className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        <span>
+                          {block.dayCount === 1
+                            ? formatDate(block.startDate)
+                            : `${formatDate(block.startDate)} → ${formatDate(block.endDate)}`}
+                        </span>
+                      </div>
+
+                      {/* Membres */}
+                      {block.employees.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pl-5">
+                          {block.employees.map((emp) => (
                             <span
-                              key={ea.employee.id}
-                              className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 text-[11px] font-medium px-2 py-0.5 rounded-full"
+                              key={emp.id}
+                              className="inline-flex items-center gap-1 bg-white border border-slate-200 text-slate-600 text-[11px] font-medium px-2 py-0.5 rounded-full"
                             >
-                              {ea.employee.firstName} {ea.employee.lastName}
-                              {isAdmin && (
-                                <RemoveEmployeeButton
-                                  assignmentId={a.id}
-                                  employeeId={ea.employee.id}
-                                  employeeName={`${ea.employee.firstName} ${ea.employee.lastName}`}
-                                />
-                              )}
+                              {emp.firstName} {emp.lastName}
                             </span>
                           ))}
                         </div>
@@ -271,7 +445,7 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
             </CardContent>
           </Card>
 
-          {/* Extensions */}
+          {/* Prolongations */}
           {chantier.extensions.length > 0 && (
             <Card>
               <CardHeader className="pb-3">
@@ -293,10 +467,7 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
           )}
 
           {/* Photos, Plans & Documents */}
-          <DocumentsSection
-            worksiteId={chantier.id}
-            documents={chantier.documents}
-          />
+          <DocumentsSection worksiteId={chantier.id} documents={chantier.documents} />
         </div>
       </div>
     </div>
