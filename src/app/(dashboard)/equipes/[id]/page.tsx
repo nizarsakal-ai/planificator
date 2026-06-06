@@ -6,7 +6,7 @@ import Link from "next/link"
 import { ArrowLeft, Crown, Users } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { getInitials } from "@/lib/utils"
 import { EquipeEditForm } from "@/components/equipes/EquipeEditForm"
 import { MembreActions } from "@/components/equipes/MembreActions"
@@ -141,6 +141,7 @@ export default async function EquipeDetailPage({
                     >
                       <div className="flex items-center gap-2.5">
                         <Avatar className="h-8 w-8">
+                          <AvatarImage src={membre.employee.avatarUrl ?? undefined} alt={name} />
                           <AvatarFallback
                             className="text-white text-xs font-medium"
                             style={{ backgroundColor: team.color ?? "#0f3460" }}
