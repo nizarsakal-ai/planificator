@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: "Calendrier" }
 export default async function CalendrierPage({ searchParams }: { searchParams: Promise<{ month?: string; year?: string }> }) {
   const session = await auth()
   if (!session?.user) redirect("/login")
-  if (!["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) redirect("/dashboard")
+  if (!["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)) redirect("/dashboard")
 
   const sp = await searchParams
   const now = new Date()
