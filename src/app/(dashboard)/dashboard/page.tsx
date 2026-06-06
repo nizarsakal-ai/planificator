@@ -399,12 +399,12 @@ async function TeamLeaderDashboard({
 
 // ─── Dashboard Employé ───────────────────────────────────────────────────────
 
-async function EmployeeDashboard({ userId }: { userId: string }) {
+async function EmployeeDashboard({ userId, days }: { userId: string; days: 7 | 30 }) {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  const nextWeek = new Date(today)
-  nextWeek.setDate(nextWeek.getDate() + 7)
+  const toDate = new Date(today)
+  toDate.setDate(toDate.getDate() + days)
 
   const employee = await prisma.employee.findUnique({
     where: { userId },
@@ -414,7 +414,7 @@ async function EmployeeDashboard({ userId }: { userId: string }) {
         include: { team: { include: { leader: true } } },
       },
       employeeAssignments: {
-        where: { date: { gte: today, lte: nextWeek } },
+        where: { date: { gte: today, lte: toDate } },
         include: {
           assignment: {
             include: { worksite: true },
@@ -442,20 +442,41 @@ async function EmployeeDashboard({ userId }: { userId: string }) {
           color="blue"
         />
         <StatCard
-          title="Jours planifiés cette semaine"
+          title="Jours planifiés"
           value={employee?.employeeAssignments.length ?? 0}
           icon={Calendar}
-          description="7 prochains jours"
+          description={`${days} prochains jours`}
           color="green"
         />
       </div>
 
-      {employee && employee.employeeAssignments.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Mon planning (7 jours)</CardTitle>
-          </CardHeader>
-          <CardContent>
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">Mon planning ({days} jours)</CardTitle>
+            {/* Toggle 7 / 30 jours */}
+            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+              <Link
+                href="/dashboard?days=7"
+                className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                  days === 7 ? "bg-white text-[#0f3460] shadow-sm" : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                7 jours
+              </Link>
+              <Link
+                href="/dashboard?days=30"
+                className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                  days === 30 ? "bg-white text-[#0f3460] shadow-sm" : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                30 jours
+              </Link>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {employee && employee.employeeAssignments.length > 0 ? (
             <div className="space-y-2">
               {employee.employeeAssignments.map((ea) => (
                 <div
@@ -474,26 +495,29 @@ async function EmployeeDashboard({ userId }: { userId: string }) {
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {employee?.employeeAssignments.length === 0 && (
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-slate-400">
-            Aucun chantier planifié dans les 7 prochains jours.
-          </CardContent>
-        </Card>
-      )}
+          ) : (
+            <p className="py-6 text-center text-sm text-slate-400">
+              Aucun chantier planifié dans les {days} prochains jours.
+            </p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }
 
 // ─── Page principale Dashboard ───────────────────────────────────────────────
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ days?: string }>
+}) {
   const session = await auth()
   if (!session?.user) redirect("/login")
+
+  const { days: daysParam } = await searchParams
+  const planningDays: 7 | 30 = daysParam === "30" ? 30 : 7
 
   const { id: userId, role, companyId, name } = session.user
 
@@ -546,7 +570,7 @@ export default async function DashboardPage() {
       )}
 
       {role === "EMPLOYEE" && (
-        <EmployeeDashboard userId={userId} />
+        <EmployeeDashboard userId={userId} days={planningDays} />
       )}
     </div>
   )
