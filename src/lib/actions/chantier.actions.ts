@@ -260,7 +260,7 @@ export async function affecterEquipe(formData: FormData) {
   }
 
   // Créer une affectation par jour
-  await prisma.$transaction(async (tx) => {
+  try { await prisma.$transaction(async (tx) => {
     for (const date of dates) {
       const assignment = await tx.assignment.create({
         data: { worksiteId, teamId, date, status: "PENDING" },
@@ -316,7 +316,11 @@ export async function affecterEquipe(formData: FormData) {
         }).catch(() => {})
       }
     }
-  })
+  }) } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error("[affecterEquipe] transaction error:", msg)
+    return { error: "Erreur lors de la création des affectations. Veuillez réessayer." }
+  }
 
   revalidatePath("/chantiers")
   revalidatePath(`/chantiers/${worksiteId}`)

@@ -73,29 +73,35 @@ export function AffecterEquipeForm({
     }
 
     setLoading(true)
-    const formData = new FormData()
-    formData.append("worksiteId", worksiteId)
-    formData.append("teamId", teamId)
-    formData.append("dateFrom", dateFrom)
-    formData.append("dateTo", dateTo || dateFrom)
+    try {
+      const formData = new FormData()
+      formData.append("worksiteId", worksiteId)
+      formData.append("teamId", teamId)
+      formData.append("dateFrom", dateFrom)
+      formData.append("dateTo", dateTo || dateFrom)
 
-    const result = await affecterEquipe(formData)
-    setLoading(false)
+      const result = await affecterEquipe(formData)
 
-    if (result?.error) {
-      toast.error(result.error)
-    } else {
-      const count = result?.count ?? 1
-      toast.success(
-        count > 1
-          ? `${count} affectations créées avec succès !`
-          : "Équipe affectée avec succès !"
-      )
-      setTeamId("")
-      setDateFrom("")
-      setDateTo("")
-      setConflict(null)
-      router.refresh()
+      if (result?.error) {
+        toast.error(result.error)
+      } else {
+        const count = result?.count ?? 1
+        toast.success(
+          count > 1
+            ? `${count} affectations créées avec succès !`
+            : "Équipe affectée avec succès !"
+        )
+        setTeamId("")
+        setDateFrom("")
+        setDateTo("")
+        setConflict(null)
+        router.refresh()
+      }
+    } catch (err) {
+      console.error("affecterEquipe error:", err)
+      toast.error("Une erreur est survenue. Veuillez réessayer.")
+    } finally {
+      setLoading(false)
     }
   }
 
