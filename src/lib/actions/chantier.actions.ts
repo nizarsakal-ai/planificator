@@ -423,6 +423,24 @@ export async function updateAssignmentStatus(
   return { success: true }
 }
 
+// ─── Supprimer un chantier ───────────────────────────────────────────────────
+
+export async function deleteChantier(worksiteId: string) {
+  const user = await requireAdmin()
+
+  const worksite = await prisma.worksite.findFirst({
+    where: { id: worksiteId, companyId: user.companyId! },
+    select: { id: true },
+  })
+  if (!worksite) return { error: "Chantier introuvable." }
+
+  await prisma.worksite.delete({ where: { id: worksiteId } })
+
+  revalidatePath("/chantiers")
+  revalidatePath("/planning")
+  return { success: true }
+}
+
 export async function removeEmployeeFromAssignment(assignmentId: string, employeeId: string) {
   const session = await auth()
   if (!session?.user || !["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) {

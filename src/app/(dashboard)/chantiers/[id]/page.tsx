@@ -10,6 +10,7 @@ import { ChantierEditForm } from "@/components/chantiers/ChantierEditForm"
 import { AffecterEquipeForm } from "@/components/chantiers/AffecterEquipeForm"
 import { DocumentsSection } from "@/components/chantiers/DocumentsSection"
 import { RemoveEmployeeButton } from "@/components/chantiers/RemoveEmployeeButton"
+import { DeleteChantierButton } from "@/components/chantiers/DeleteChantierButton"
 
 export const metadata: Metadata = { title: "Détail chantier" }
 
@@ -118,6 +119,9 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {isAdmin && (
+            <DeleteChantierButton worksiteId={chantier.id} worksiteName={chantier.name} />
+          )}
           <a
             href={`/api/pdf/chantier/${chantier.id}`}
             target="_blank"
