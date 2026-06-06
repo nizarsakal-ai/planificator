@@ -6,6 +6,8 @@ import { v2 as cloudinary } from "cloudinary"
 import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
 import { createEmployeSchema, updateEmployeSchema } from "@/lib/validations/employe"
+import { sendWelcomeEmail } from "@/lib/email"
+import crypto from "crypto"
 
 // ─── Utilitaire : récupère la session et vérifie le rôle ────────────────────
 
@@ -168,6 +170,61 @@ export async function updateEmployeAvatar(employeeId: string, formData: FormData
   revalidatePath("/employes")
   revalidatePath(`/employes/${employeeId}`)
   return { success: true, avatarUrl: result.secure_url }
+}
+
+// ─── Renvoyer les emails d'accès à tous les employés actifs ─────────────────
+
+export async function resendAccessEmails() {
+  const adminUser = await requireAdmin()
+
+  const company = await prisma.company.findUnique({
+    where: { id: adminUser.companyId! },
+    select: { name: true },
+  })
+
+  const employees = await prisma.employee.findMany({
+    where: { companyId: adminUser.companyId!, active: true },
+    include: { user: { select: { id: true, email: true } } },
+  })
+
+  if (employees.length === 0) return { success: true, sent: 0 }
+
+  let sent = 0
+  const errors: string[] = []
+
+  for (const emp of employees) {
+    try {
+      // Supprimer les anciens tokens de réinitialisation non utilisés
+      await prisma.passwordReset.deleteMany({
+        where: { userId: emp.user.id, usedAt: null },
+      })
+
+      const token = crypto.randomBytes(32).toString("hex")
+      const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000) // 72h
+
+      await prisma.passwordReset.create({
+        data: { userId: emp.user.id, token, expiresAt },
+      })
+
+      await sendWelcomeEmail({
+        to: emp.user.email,
+        token,
+        employeeName: emp.firstName,
+        companyName: company?.name ?? "votre entreprise",
+      })
+
+      sent++
+    } catch (e) {
+      errors.push(emp.user.email)
+      console.error(`Erreur envoi accès à ${emp.user.email}:`, e)
+    }
+  }
+
+  if (errors.length > 0) {
+    return { success: false, sent, errors }
+  }
+
+  return { success: true, sent }
 }
 
 // ─── Désactiver un employé ───────────────────────────────────────────────────

@@ -126,6 +126,40 @@ function footer(msg = "Si vous n'attendiez pas cet email, ignorez-le.") {
   return `<p style="color:#94a3b8;font-size:11px;text-align:center;margin-top:24px;">${msg}</p>`
 }
 
+// ─── Premier accès / Bienvenue → employé ─────────────────────────────────────
+
+export async function sendWelcomeEmail({
+  to,
+  token,
+  employeeName,
+  companyName,
+}: {
+  to: string
+  token: string
+  employeeName: string
+  companyName: string
+}) {
+  const url = `${APP_URL}/reinitialiser?token=${token}`
+
+  await resend.emails.send({
+    from: FROM,
+    to,
+    subject: `Bienvenue sur Planificator — ${companyName}`,
+    html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px;">
+      ${header()}
+      <h2 style="color:#1e293b;margin-bottom:8px;">Bienvenue, ${employeeName} !</h2>
+      <p style="color:#64748b;line-height:1.6;">
+        Votre compte a été créé sur <strong>Planificator</strong> pour <strong>${companyName}</strong>.<br><br>
+        Cliquez sur le bouton ci-dessous pour définir votre mot de passe et accéder à votre planning.
+      </p>
+      ${btn(url, "Accéder à mon compte")}
+      <p style="color:#94a3b8;font-size:12px;text-align:center;">
+        Ce lien est valable 72 heures. Si vous n'attendiez pas cet email, ignorez-le.
+      </p>
+    </div>`,
+  })
+}
+
 // ─── Nouvelle affectation → chef d'équipe ─────────────────────────────────────
 
 export async function sendAssignmentCreatedEmail({

@@ -7,6 +7,7 @@ import { Users } from "lucide-react"
 import { NouvelEmployeDialog } from "@/components/employes/NouvelEmployeDialog"
 import { InviterMembreDialog } from "@/components/invitations/InviterMembreDialog"
 import { EmployesView } from "@/components/employes/EmployesView"
+import { ResendAccessButton } from "@/components/employes/ResendAccessButton"
 
 export const metadata: Metadata = { title: "Employés" }
 
@@ -41,6 +42,7 @@ export default async function EmployesPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <ResendAccessButton />
           <InviterMembreDialog />
           <NouvelEmployeDialog />
         </div>

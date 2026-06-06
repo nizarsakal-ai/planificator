@@ -7,10 +7,17 @@ import { Badge } from "@/components/ui/badge"
 import { CheckCircle2, AlertCircle, Users } from "lucide-react"
 import { PersonnelDateNav } from "@/components/planning/PersonnelDateNav"
 import { PersonnelAssignForm } from "@/components/planning/PersonnelAssignForm"
+import { PersonnelViewTabs } from "@/components/planning/PersonnelViewTabs"
+import {
+  PersonnelDisponibiliteView,
+  type EmployeeAvailability,
+  type FreeWindow,
+  type TimelineSegment,
+} from "@/components/planning/PersonnelDisponibiliteView"
 
 export const metadata: Metadata = { title: "Personnel disponible" }
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types (vue journée) ───────────────────────────────────────────────────────
 
 interface WorksiteOption {
   id: string
@@ -25,6 +32,7 @@ interface TeamMemberData {
     firstName: string
     lastName: string
     employeeAssignments: Array<{
+      date: Date
       assignment: { worksite: { id: string; name: string } }
     }>
   }
@@ -39,18 +47,192 @@ interface TeamData {
   assignments: Array<{ worksite: { id: string; name: string } }>
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function buildAllDates(from: Date, totalDays: number): string[] {
+  const dates: string[] = []
+  const d = new Date(from)
+  for (let i = 0; i < totalDays; i++) {
+    dates.push(d.toISOString().split("T")[0])
+    d.setDate(d.getDate() + 1)
+  }
+  return dates
+}
+
+function computeWindows(
+  allDates: string[],
+  occupiedSet: Set<string>
+): { windows: FreeWindow[]; timeline: TimelineSegment[] } {
+  const windows: FreeWindow[] = []
+  const timeline: TimelineSegment[] = []
+
+  let winStart: string | null = null
+  let winEnd: string | null = null
+
+  for (const dateStr of allDates) {
+    const occupied = occupiedSet.has(dateStr)
+
+    // Build timeline segments (merge consecutive same-state days)
+    if (timeline.length === 0 || timeline[timeline.length - 1].occupied !== occupied) {
+      timeline.push({ occupied, count: 1 })
+    } else {
+      timeline[timeline.length - 1].count++
+    }
+
+    // Build free windows
+    if (!occupied) {
+      if (!winStart) winStart = dateStr
+      winEnd = dateStr
+    } else {
+      if (winStart && winEnd) {
+        const days =
+          Math.floor(
+            (new Date(winEnd).getTime() - new Date(winStart).getTime()) / 86400000
+          ) + 1
+        windows.push({ from: winStart, to: winEnd, days })
+      }
+      winStart = null
+      winEnd = null
+    }
+  }
+  // Flush last window
+  if (winStart && winEnd) {
+    const days =
+      Math.floor(
+        (new Date(winEnd).getTime() - new Date(winStart).getTime()) / 86400000
+      ) + 1
+    windows.push({ from: winStart, to: winEnd, days })
+  }
+
+  return { windows, timeline }
+}
+
+// ─── Disponibilité immédiate ──────────────────────────────────────────────────
+
+function getFirstFreeWindow(
+  allDates: string[],
+  occupiedSet: Set<string>
+): { from: string; to: string; days: number } | null {
+  let winStart: string | null = null
+  let winEnd: string | null = null
+  for (const d of allDates) {
+    if (!occupiedSet.has(d)) {
+      if (!winStart) winStart = d
+      winEnd = d
+    } else if (winStart) {
+      break
+    }
+  }
+  if (!winStart || !winEnd) return null
+  const days =
+    Math.floor((new Date(winEnd).getTime() - new Date(winStart).getTime()) / 86400000) + 1
+  return { from: winStart, to: winEnd, days }
+}
+
+const FMT_DAY = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short" })
+function fd(s: string) { return FMT_DAY.format(new Date(s + "T00:00:00")) }
+
+function fmtAvailWindow(
+  win: { from: string; to: string; days: number },
+  selectedDate: string
+): string {
+  if (win.from === selectedDate) {
+    return win.from === win.to ? "libre aujourd'hui" : `libre jusqu'au ${fd(win.to)}`
+  }
+  return `libre du ${fd(win.from)} au ${fd(win.to)}`
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default async function PersonnelDisponiblePage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string }>
+  searchParams: Promise<{ date?: string; vue?: string; days?: string }>
 }) {
   const session = await auth()
   if (!session?.user) redirect("/login")
   if (!["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) redirect("/dashboard")
 
-  const { date } = await searchParams
+  const { date, vue: vueParam, days: daysParam } = await searchParams
+  const companyId = session.user.companyId!
+
+  const vue = vueParam === "plages" ? "plages" : "jour"
+
+  // ── Vue "Plages de disponibilité" ──────────────────────────────────────────
+  if (vue === "plages") {
+    const horizon = Math.min(Math.max(parseInt(daysParam ?? "60") || 60, 7), 180)
+
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const toDate = new Date(today)
+    toDate.setDate(toDate.getDate() + horizon - 1)
+
+    const fromStr = today.toISOString().split("T")[0]
+    const toStr   = toDate.toISOString().split("T")[0]
+    const allDates = buildAllDates(today, horizon)
+
+    const rawEmployees = await prisma.employee.findMany({
+      where: { companyId, active: true },
+      include: {
+        teamMemberships: {
+          where: { leftAt: null },
+          include: { team: { select: { name: true, color: true } } },
+          orderBy: { joinedAt: "desc" },
+          take: 1,
+        },
+        employeeAssignments: {
+          where: { date: { gte: today, lte: toDate } },
+          select: { date: true },
+        },
+      },
+      orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+    })
+
+    const employees: EmployeeAvailability[] = rawEmployees.map((emp) => {
+      const occupiedSet = new Set(
+        emp.employeeAssignments.map((a) => a.date.toISOString().split("T")[0])
+      )
+      const { windows, timeline } = computeWindows(allDates, occupiedSet)
+      const totalFreeDays = windows.reduce((s, w) => s + w.days, 0)
+      const team = emp.teamMemberships[0]?.team ?? null
+
+      return {
+        id: emp.id,
+        firstName: emp.firstName,
+        lastName: emp.lastName,
+        jobTitle: emp.jobTitle,
+        team,
+        freeWindows: windows,
+        timeline,
+        totalFreeDays,
+        totalDays: horizon,
+      }
+    })
+
+    return (
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Personnel disponible</h1>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Visualisez et affectez les équipes pour la journée
+            </p>
+          </div>
+          <PersonnelViewTabs vue="plages" currentDate={fromStr} />
+        </div>
+
+        <PersonnelDisponibiliteView
+          employees={employees}
+          fromDate={fromStr}
+          toDate={toStr}
+          horizon={horizon}
+        />
+      </div>
+    )
+  }
+
+  // ── Vue "Journée" (existante) ──────────────────────────────────────────────
 
   let selectedDate: Date
   if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -62,7 +244,12 @@ export default async function PersonnelDisponiblePage({
   }
 
   const dateStr = selectedDate.toISOString().split("T")[0]
-  const companyId = session.user.companyId!
+
+  // Lookahead 60 jours pour les plages de disponibilité
+  const JOUR_HORIZON = 60
+  const jourToDate = new Date(selectedDate)
+  jourToDate.setDate(jourToDate.getDate() + JOUR_HORIZON - 1)
+  const jourAllDates = buildAllDates(selectedDate, JOUR_HORIZON)
 
   const [rawTeams, rawWorksites] = await Promise.all([
     prisma.team.findMany({
@@ -78,13 +265,13 @@ export default async function PersonnelDisponiblePage({
                 firstName: true,
                 lastName: true,
                 employeeAssignments: {
-                  where: { date: selectedDate },
+                  where: { date: { gte: selectedDate, lte: jourToDate } },
                   include: {
                     assignment: {
                       include: { worksite: { select: { id: true, name: true } } },
                     },
                   },
-                  take: 1,
+                  orderBy: { date: "asc" },
                 },
               },
             },
@@ -130,7 +317,10 @@ export default async function PersonnelDisponiblePage({
             Visualisez et affectez les équipes pour la journée
           </p>
         </div>
-        <PersonnelDateNav currentDate={dateStr} />
+        <div className="flex items-center gap-2 flex-wrap">
+          <PersonnelViewTabs vue="jour" currentDate={dateStr} />
+          <PersonnelDateNav currentDate={dateStr} />
+        </div>
       </div>
 
       {/* Stats */}
@@ -169,6 +359,7 @@ export default async function PersonnelDisponiblePage({
                 team={team}
                 worksites={worksites}
                 selectedDate={dateStr}
+                allDates={jourAllDates}
                 available
               />
             ))}
@@ -190,6 +381,7 @@ export default async function PersonnelDisponiblePage({
                 team={team}
                 worksites={worksites}
                 selectedDate={dateStr}
+                allDates={jourAllDates}
                 available={false}
               />
             ))}
@@ -215,11 +407,13 @@ function TeamCard({
   team,
   worksites,
   selectedDate,
+  allDates,
   available,
 }: {
   team: TeamData
   worksites: WorksiteOption[]
   selectedDate: string
+  allDates: string[]
   available: boolean
 }) {
   const worksiteName = team.assignments[0]?.worksite.name
@@ -255,21 +449,37 @@ function TeamCard({
 
       <CardContent className="space-y-3">
         {/* Membres */}
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           {team.members.map(({ employee: emp }) => {
-            const empWorksite = emp.employeeAssignments[0]?.assignment.worksite.name
+            const occupiedSet = new Set(
+              emp.employeeAssignments.map((a) => a.date.toISOString().split("T")[0])
+            )
+            const todayAssign = emp.employeeAssignments.find(
+              (a) => a.date.toISOString().split("T")[0] === selectedDate
+            )
+            const firstWindow = getFirstFreeWindow(allDates, occupiedSet)
+
             return (
-              <div key={emp.id} className="flex items-center justify-between gap-2">
-                <span className="text-xs text-slate-600 truncate">
+              <div key={emp.id} className="flex items-start justify-between gap-2">
+                <span className="text-xs text-slate-600 truncate shrink-0">
                   {emp.firstName} {emp.lastName}
                 </span>
-                {empWorksite ? (
-                  <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded shrink-0 max-w-[120px] truncate">
-                    {empWorksite}
-                  </span>
-                ) : (
-                  <span className="text-[10px] text-emerald-600 shrink-0">libre</span>
-                )}
+                <div className="flex flex-col items-end gap-0.5 min-w-0">
+                  {todayAssign ? (
+                    <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded shrink-0 max-w-[130px] truncate">
+                      {todayAssign.assignment.worksite.name}
+                    </span>
+                  ) : null}
+                  {firstWindow ? (
+                    <span className="text-[10px] text-emerald-700 font-medium shrink-0">
+                      {fmtAvailWindow(firstWindow, selectedDate)}
+                    </span>
+                  ) : todayAssign ? (
+                    <span className="text-[10px] text-slate-400 shrink-0">aucune dispo.</span>
+                  ) : (
+                    <span className="text-[10px] text-emerald-600 shrink-0">libre</span>
+                  )}
+                </div>
               </div>
             )
           })}
