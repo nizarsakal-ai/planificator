@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/gmail-scan",
-      "schedule": "0 * * * *"
+      "schedule": "0 8 * * *"
     }
   ]
 }
