@@ -18,6 +18,7 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.102.0",
     "@auth/prisma-adapter": "^2.7.4",
     "@capacitor/cli": "^8.3.4",
     "@capacitor/core": "^8.3.4",

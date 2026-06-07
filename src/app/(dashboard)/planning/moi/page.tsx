@@ -4,7 +4,7 @@ import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
-import { HardHat, MapPin, Clock, CalendarDays, Users } from "lucide-react"
+import { HardHat, MapPin, Clock, CalendarDays, Users, BedDouble, KeyRound, Phone } from "lucide-react"
 import Link from "next/link"
 
 export const metadata: Metadata = { title: "Mon Planning" }
@@ -70,6 +70,19 @@ export default async function MonPlanningPage() {
   // Récupérer les affectations des 30 derniers jours + 60 jours à venir
   const from = new Date(); from.setDate(from.getDate() - 30); from.setHours(0,0,0,0)
   const to   = new Date(); to.setDate(to.getDate() + 60);   to.setHours(23,59,59,999)
+  const todayDate = new Date(); todayDate.setHours(0,0,0,0)
+
+  // Logements de l'équipe à venir
+  const teamId = employee.teamMemberships[0]?.team?.id
+  const accommodations = teamId ? await prisma.accommodation.findMany({
+    where: {
+      teamId,
+      companyId: session.user.companyId!,
+      endDate: { gte: todayDate },
+      status: { not: "CANCELLED" },
+    },
+    orderBy: { startDate: "asc" },
+  }) : []
 
   const assignments = await prisma.employeeAssignment.findMany({
     where: {
@@ -124,6 +137,60 @@ export default async function MonPlanningPage() {
             </Link>
           </CardContent>
         </Card>
+      )}
+
+      {/* Logements */}
+      {accommodations.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide flex items-center gap-2">
+            <BedDouble className="h-4 w-4 text-[#0f3460]" />
+            Mon logement
+          </h2>
+          {accommodations.map((acc) => {
+            const fmtDate = (d: Date) =>
+              new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long", year: "numeric" }).format(d)
+            const isActive = todayDate >= new Date(acc.startDate) && todayDate <= new Date(acc.endDate)
+            return (
+              <Card key={acc.id} className="border-l-4" style={{ borderLeftColor: "#0f3460" }}>
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <BedDouble className="h-4 w-4 text-[#0f3460]" />
+                      <span className="text-sm font-semibold text-slate-800">
+                        {isActive ? "Hébergement en cours" : "Hébergement à venir"}
+                      </span>
+                    </div>
+                    <Badge variant={isActive ? "default" : "secondary"} className="text-xs shrink-0">
+                      {isActive ? "En cours" : "À venir"}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-slate-500 font-medium">
+                    {fmtDate(acc.startDate)} → {fmtDate(acc.endDate)}
+                  </p>
+                  <div className="flex items-start gap-1.5 text-xs text-slate-600">
+                    <MapPin className="h-3.5 w-3.5 shrink-0 mt-0.5 text-slate-400" />
+                    <span>{acc.address}{acc.city ? `, ${acc.city}` : ""}{acc.zipCode ? ` ${acc.zipCode}` : ""}</span>
+                  </div>
+                  {acc.doorCode && (
+                    <div className="flex items-center gap-1.5 text-xs text-slate-600">
+                      <KeyRound className="h-3.5 w-3.5 text-slate-400" />
+                      Code porte : <strong>{acc.doorCode}</strong>
+                    </div>
+                  )}
+                  {acc.contactPhone && (
+                    <div className="flex items-center gap-1.5 text-xs text-slate-600">
+                      <Phone className="h-3.5 w-3.5 text-slate-400" />
+                      {acc.contactName ? `${acc.contactName} · ` : ""}{acc.contactPhone}
+                    </div>
+                  )}
+                  {acc.notes && (
+                    <p className="text-xs text-slate-400 italic">{acc.notes}</p>
+                  )}
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
       )}
 
       {/* À venir */}

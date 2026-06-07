@@ -66,21 +66,30 @@ enum AbsenceStatus {
 }
 
 enum NotificationType {
-  ASSIGNMENT_CREATED    // Nouvelle affectation créée
-  ASSIGNMENT_CONFIRMED  // Affectation confirmée
-  ASSIGNMENT_REFUSED    // Affectation refusée
-  WORKSITE_UPDATED      // Chantier modifié
-  WORKSITE_ARCHIVED     // Chantier archivé
-  WORKSITE_EXTENDED     // Chantier prolongé
-  INVITATION_SENT       // Invitation envoyée
-  ABSENCE_REQUESTED     // Absence soumise
-  ABSENCE_APPROVED      // Absence validée
-  ABSENCE_REJECTED      // Absence refusée
-  EXPENSE_SUBMITTED     // Note de frais soumise
-  EXPENSE_APPROVED      // Note de frais approuvée
-  EXPENSE_REJECTED      // Note de frais refusée
-  TIMECLOCK_IN          // Pointage arrivée
-  TIMECLOCK_OUT         // Pointage départ
+  ASSIGNMENT_CREATED      // Nouvelle affectation créée
+  ASSIGNMENT_CONFIRMED    // Affectation confirmée
+  ASSIGNMENT_REFUSED      // Affectation refusée
+  WORKSITE_UPDATED        // Chantier modifié
+  WORKSITE_ARCHIVED       // Chantier archivé
+  WORKSITE_EXTENDED       // Chantier prolongé
+  INVITATION_SENT         // Invitation envoyée
+  ABSENCE_REQUESTED       // Absence soumise
+  ABSENCE_APPROVED        // Absence validée
+  ABSENCE_REJECTED        // Absence refusée
+  EXPENSE_SUBMITTED       // Note de frais soumise
+  EXPENSE_APPROVED        // Note de frais approuvée
+  EXPENSE_REJECTED        // Note de frais refusée
+  TIMECLOCK_IN            // Pointage arrivée
+  TIMECLOCK_OUT           // Pointage départ
+  ACCOMMODATION_CREATED   // Logement réservé
+  ACCOMMODATION_CANCELLED // Logement annulé
+}
+
+enum AccommodationStatus {
+  UPCOMING   // Réservation future
+  ACTIVE     // Séjour en cours
+  COMPLETED  // Terminé
+  CANCELLED  // Annulé
 }
 
 enum ExpenseCategory {
@@ -143,18 +152,19 @@ model Company {
   updatedAt DateTime @updatedAt
 
   // Relations
-  users          User[]
-  employees      Employee[]
-  teams          Team[]
-  clients        Client[]
-  worksites      Worksite[]
-  invitations    Invitation[]
-  notifications  Notification[]
-  historyLogs    HistoryLog[]
-  absences       Absence[]
-  expenseReports ExpenseReport[]
-  timeclocks     Timeclock[]
-  settings       CompanySettings?
+  users           User[]
+  employees       Employee[]
+  teams           Team[]
+  clients         Client[]
+  worksites       Worksite[]
+  invitations     Invitation[]
+  notifications   Notification[]
+  historyLogs     HistoryLog[]
+  absences        Absence[]
+  expenseReports  ExpenseReport[]
+  timeclocks      Timeclock[]
+  settings        CompanySettings?
+  accommodations  Accommodation[]
 
   @@map("companies")
 }
@@ -260,11 +270,12 @@ model Team {
   updatedAt DateTime @updatedAt
 
   // Relations
-  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  leader       Employee      @relation("TeamLeader", fields: [leaderId], references: [id])
-  members      TeamMember[]
-  assignments  Assignment[]
-  dailyReports DailyReport[]
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leader         Employee        @relation("TeamLeader", fields: [leaderId], references: [id])
+  members        TeamMember[]
+  assignments    Assignment[]
+  dailyReports   DailyReport[]
+  accommodations Accommodation[]
 
   @@unique([name, companyId]) // pas de doublon de nom d'équipe dans la même entreprise
   @@index([companyId])
@@ -704,4 +715,43 @@ model Signature {
   @@index([assignmentId])
   @@index([signedById])
   @@map("signatures")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ACCOMMODATION — Logement réservé pour une équipe
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Accommodation {
+  id           String              @id @default(cuid())
+  companyId    String
+  teamId       String
+  createdById  String              // userId de l'admin qui a créé
+
+  status       AccommodationStatus @default(UPCOMING)
+
+  startDate    DateTime            @db.Date
+  endDate      DateTime            @db.Date
+
+  address      String
+  city         String?
+  zipCode      String?
+
+  doorCode     String?
+  contactName  String?
+  contactPhone String?
+
+  notes        String?
+
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  // Relations
+  company  Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  team     Team    @relation(fields: [teamId], references: [id])
+
+  @@index([companyId])
+  @@index([teamId])
+  @@index([startDate])
+  @@index([status])
+  @@map("accommodations")
 }

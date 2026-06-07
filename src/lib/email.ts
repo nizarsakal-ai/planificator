@@ -285,3 +285,49 @@ export async function sendAssignmentRefusedEmail({
     </div>`,
   })
 }
+
+// ─── Logement créé ─────────────────────────────────────────────────────────────
+
+export async function sendLogementCreatedEmail({
+  to,
+  recipientName,
+  teamName,
+  address,
+  startLabel,
+  endLabel,
+  doorCode,
+  contactPhone,
+  companyName,
+}: {
+  to: string
+  recipientName: string
+  teamName: string
+  address: string
+  startLabel: string
+  endLabel: string
+  doorCode?: string | null
+  contactPhone?: string | null
+  companyName: string
+}) {
+  await resend.emails.send({
+    from: FROM,
+    to,
+    subject: `Logement réservé — ${teamName}`,
+    html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px;">
+      ${header()}
+      <h2 style="color:#0f3460;margin-bottom:8px;">🏠 Logement réservé</h2>
+      <p style="color:#64748b;line-height:1.6;">
+        Bonjour <strong>${recipientName}</strong>,<br><br>
+        Un logement a été réservé pour l'équipe <strong>${teamName}</strong>
+        du <strong>${startLabel}</strong> au <strong>${endLabel}</strong>.
+      </p>
+      <div style="background:#f0f7ff;border-left:3px solid #0f3460;padding:16px;border-radius:4px;margin:16px 0;">
+        <p style="margin:0 0 8px;color:#0f3460;font-weight:600;">📍 ${address}</p>
+        ${doorCode ? `<p style="margin:0 0 4px;color:#334155;font-size:13px;">🔑 Code porte : <strong>${doorCode}</strong></p>` : ""}
+        ${contactPhone ? `<p style="margin:0;color:#334155;font-size:13px;">📞 Contact : <strong>${contactPhone}</strong></p>` : ""}
+      </div>
+      ${btn(`${APP_URL}/planning/moi`, "Voir mon planning")}
+      ${footer()}
+    </div>`,
+  })
+}
