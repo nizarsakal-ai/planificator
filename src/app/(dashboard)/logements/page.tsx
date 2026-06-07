@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { BedDouble, MapPin, KeyRound, Phone, User, CalendarDays, FileText } from "lucide-react"
 import { NouveauLogementDialog } from "@/components/logements/NouveauLogementDialog"
 import { LogementDeleteButton } from "@/components/logements/LogementDeleteButton"
+import { PendingBookingsBanner } from "@/components/logements/PendingBookingsBanner"
 
 export const metadata: Metadata = { title: "Logements" }
 
@@ -29,7 +30,7 @@ export default async function LogementsPage() {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  const [accommodations, teams] = await Promise.all([
+  const [accommodations, teams, pendingAccommodations] = await Promise.all([
     prisma.accommodation.findMany({
       where: { companyId: session.user.companyId! },
       include: { team: { select: { name: true, color: true } } },
@@ -39,6 +40,11 @@ export default async function LogementsPage() {
       where: { companyId: session.user.companyId!, active: true },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
+    }),
+    prisma.pendingAccommodation.findMany({
+      where:   { companyId: session.user.companyId!, status: "PENDING" },
+      select:  { id: true, propertyName: true, address: true, city: true, zipCode: true, startDate: true, endDate: true, rawEmailSnippet: true },
+      orderBy: { createdAt: "desc" },
     }),
   ])
 
@@ -71,6 +77,11 @@ export default async function LogementsPage() {
         </div>
         <NouveauLogementDialog teams={teams} />
       </div>
+
+      {/* Réservations Booking.com en attente */}
+      {pendingAccommodations.length > 0 && (
+        <PendingBookingsBanner pendings={pendingAccommodations} teams={teams} />
+      )}
 
       {/* KPI */}
       <div className="grid grid-cols-3 gap-4">

@@ -6,10 +6,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Building2, SlidersHorizontal, Users, HardHat, CalendarDays } from "lucide-react"
 import { CompanyForm } from "@/components/parametres/CompanyForm"
 import { SettingsForm } from "@/components/parametres/SettingsForm"
+import { GmailConnectionCard } from "@/components/parametres/GmailConnectionCard"
 
 export const metadata: Metadata = { title: "Paramètres" }
 
-export default async function ParametresPage() {
+export default async function ParametresPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ gmail?: string }>
+}) {
   const session = await auth()
   if (!session?.user) redirect("/login")
   if (!["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) redirect("/dashboard")
@@ -21,11 +26,17 @@ export default async function ParametresPage() {
 
   if (!company) redirect("/dashboard")
 
-  // Statistiques rapides
-  const [nbEmployes, nbEquipes, nbChantiers] = await Promise.all([
+  const { gmail: gmailParam } = await searchParams
+
+  // Statistiques rapides + connexion Gmail
+  const [nbEmployes, nbEquipes, nbChantiers, gmailConnection] = await Promise.all([
     prisma.employee.count({ where: { companyId: company.id, active: true } }),
     prisma.team.count({ where: { companyId: company.id, active: true } }),
     prisma.worksite.count({ where: { companyId: company.id, status: { in: ["PLANNED", "IN_PROGRESS"] } } }),
+    prisma.gmailConnection.findUnique({
+      where:  { companyId: company.id },
+      select: { gmailAddress: true, connectedAt: true },
+    }),
   ])
 
   return (
@@ -96,6 +107,9 @@ export default async function ParametresPage() {
             <SettingsForm settings={company.settings} />
           </CardContent>
         </Card>
+
+        {/* Connexion Gmail */}
+        <GmailConnectionCard connection={gmailConnection} gmailParam={gmailParam} />
       </div>
     </div>
   )

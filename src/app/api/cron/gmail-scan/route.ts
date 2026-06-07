@@ -1,0 +1,203 @@
+import { NextResponse } from "next/server"
+import { prisma } from "@/lib/prisma"
+import { decrypt, encrypt } from "@/lib/encryption"
+import Anthropic from "@anthropic-ai/sdk"
+
+// Helper : extrait le texte d'un message Gmail (payload récursif)
+function extractTextFromParts(parts: { mimeType?: string; body?: { data?: string }; parts?: unknown[] }[]): string {
+  let text = ""
+  for (const part of parts ?? []) {
+    if (part.mimeType === "text/plain" && part.body?.data) {
+      text += Buffer.from(part.body.data, "base64url").toString("utf8")
+    } else if (part.mimeType === "text/html" && part.body?.data && !text) {
+      const html = Buffer.from(part.body.data, "base64url").toString("utf8")
+      text += html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+    } else if (part.parts) {
+      text += extractTextFromParts(part.parts as { mimeType?: string; body?: { data?: string }; parts?: unknown[] }[])
+    }
+  }
+  return text
+}
+
+function extractMessageBody(payload: { body?: { data?: string }; parts?: unknown[] } | undefined): string {
+  if (!payload) return ""
+  if (payload.parts) return extractTextFromParts(payload.parts as { mimeType?: string; body?: { data?: string }; parts?: unknown[] }[])
+  if (payload.body?.data) return Buffer.from(payload.body.data, "base64url").toString("utf8")
+  return ""
+}
+
+export async function GET(req: Request) {
+  const authHeader = req.headers.get("authorization")
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return NextResponse.json({ error: "ANTHROPIC_API_KEY not set" }, { status: 500 })
+  }
+
+  const connections = await prisma.gmailConnection.findMany()
+  const stats = { scanned: 0, detected: 0, errors: 0 }
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+
+  for (const conn of connections) {
+    try {
+      // ── Rafraîchir le token si proche de l'expiration (marge 5 min) ──
+      let accessToken = decrypt(conn.accessToken)
+      const expirySoon = conn.tokenExpiry < new Date(Date.now() + 5 * 60 * 1000)
+
+      if (expirySoon) {
+        const refreshRes = await fetch("https://oauth2.googleapis.com/token", {
+          method:  "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body:    new URLSearchParams({
+            client_id:     process.env.GOOGLE_CLIENT_ID!,
+            client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+            refresh_token: decrypt(conn.refreshToken),
+            grant_type:    "refresh_token",
+          }),
+        })
+        const refreshData = await refreshRes.json()
+        if (!refreshData.access_token) {
+          console.error(`[gmail-scan] Token refresh failed for company ${conn.companyId}:`, refreshData.error)
+          stats.errors++
+          continue
+        }
+        accessToken = refreshData.access_token
+        await prisma.gmailConnection.update({
+          where: { id: conn.id },
+          data:  {
+            accessToken: encrypt(refreshData.access_token),
+            tokenExpiry: new Date(Date.now() + (refreshData.expires_in ?? 3600) * 1000),
+          },
+        })
+      }
+
+      // ── Rechercher les emails Booking.com ──────────────────────────────
+      const listRes  = await fetch(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages?q=from:noreply@booking.com&maxResults=50",
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      )
+      const listData = await listRes.json()
+      if (!listData.messages?.length) continue
+
+      // ── Exclure les messages déjà traités ─────────────────────────────
+      const messageIds = (listData.messages as { id: string }[]).map((m) => m.id)
+      const processed  = await prisma.processedGmailMessage.findMany({
+        where:  { companyId: conn.companyId, messageId: { in: messageIds } },
+        select: { messageId: true },
+      })
+      const processedSet = new Set(processed.map((p) => p.messageId))
+      const newMessages  = (listData.messages as { id: string }[]).filter((m) => !processedSet.has(m.id))
+      if (!newMessages.length) continue
+
+      for (const msg of newMessages) {
+        try {
+          stats.scanned++
+
+          // Marquer immédiatement pour éviter les doublons en cas d'erreur partielle
+          await prisma.processedGmailMessage.create({
+            data: { companyId: conn.companyId, messageId: msg.id },
+          })
+
+          // ── Récupérer le corps complet du message ──────────────────────
+          const msgRes  = await fetch(
+            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          )
+          const msgData = await msgRes.json()
+          const bodyText = extractMessageBody(msgData.payload)
+          const snippet  = (msgData.snippet ?? "") as string
+
+          if (!bodyText && !snippet) continue
+
+          // ── Analyser avec Claude ───────────────────────────────────────
+          const today = new Date().toISOString().split("T")[0]
+          const aiRes = await anthropic.messages.create({
+            model:      "claude-haiku-4-5-20251001",
+            max_tokens: 512,
+            system: `Tu analyses des emails de confirmation Booking.com et extrais les informations de logement.
+Aujourd'hui nous sommes le ${today}.
+Réponds UNIQUEMENT en JSON valide, sans markdown, sans balises de code.
+Format (toutes les valeurs peuvent être null si non trouvées) :
+{
+  "propertyName": "nom du logement",
+  "address": "adresse complète (rue + numéro)",
+  "city": "ville",
+  "zipCode": "code postal",
+  "startDate": "YYYY-MM-DD (date d'arrivée/check-in)",
+  "endDate": "YYYY-MM-DD (date de départ/check-out)",
+  "doorCode": "code d'accès ou digicode si mentionné",
+  "contactName": "nom du propriétaire ou hôte",
+  "contactPhone": "numéro de téléphone de contact",
+  "notes": "numéro de confirmation et autres infos utiles"
+}`,
+            messages: [{ role: "user", content: `Email à analyser :\n\n${(bodyText || snippet).substring(0, 4000)}` }],
+          })
+
+          const aiContent = aiRes.content[0]
+          if (aiContent.type !== "text") continue
+
+          let parsed: Record<string, string | null>
+          try {
+            parsed = JSON.parse(aiContent.text)
+          } catch {
+            console.error(`[gmail-scan] AI JSON parse error for message ${msg.id}`)
+            continue
+          }
+
+          // ── Créer la réservation en attente ───────────────────────────
+          await prisma.pendingAccommodation.create({
+            data: {
+              companyId:       conn.companyId,
+              gmailMessageId:  msg.id,
+              propertyName:    parsed.propertyName  ?? null,
+              address:         parsed.address       ?? null,
+              city:            parsed.city          ?? null,
+              zipCode:         parsed.zipCode       ?? null,
+              startDate:       parsed.startDate ? new Date(parsed.startDate) : null,
+              endDate:         parsed.endDate   ? new Date(parsed.endDate)   : null,
+              doorCode:        parsed.doorCode      ?? null,
+              contactName:     parsed.contactName   ?? null,
+              contactPhone:    parsed.contactPhone  ?? null,
+              notes:           parsed.notes         ?? null,
+              rawEmailSnippet: snippet.substring(0, 500),
+            },
+          })
+
+          // ── Notifier les admins ────────────────────────────────────────
+          const admins = await prisma.user.findMany({
+            where:  { companyId: conn.companyId, role: { in: ["ADMIN", "SUPER_ADMIN"] } },
+            select: { id: true },
+          })
+          if (admins.length > 0) {
+            const dateInfo = parsed.startDate
+              ? ` du ${parsed.startDate}${parsed.endDate ? ` au ${parsed.endDate}` : ""}`
+              : ""
+            await prisma.notification.createMany({
+              data: admins.map((admin) => ({
+                userId:    admin.id,
+                companyId: conn.companyId,
+                type:      "BOOKING_DETECTED" as const,
+                title:     "Réservation Booking.com détectée",
+                message:   `${parsed.propertyName ?? "Logement"}${dateInfo} — Cliquez pour affecter une équipe.`,
+                link:      "/logements",
+              })),
+            })
+          }
+
+          stats.detected++
+        } catch (msgErr) {
+          console.error(`[gmail-scan] Error processing message ${msg.id}:`, msgErr)
+          stats.errors++
+        }
+      }
+    } catch (connErr) {
+      console.error(`[gmail-scan] Error for company ${conn.companyId}:`, connErr)
+      stats.errors++
+    }
+  }
+
+  console.log(`[CRON gmail-scan] scanned: ${stats.scanned}, detected: ${stats.detected}, errors: ${stats.errors}`)
+  return NextResponse.json({ ok: true, ...stats })
+}

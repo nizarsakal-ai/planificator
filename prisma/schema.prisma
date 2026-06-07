@@ -65,6 +65,12 @@ enum AbsenceStatus {
   REJECTED  // Refusée
 }
 
+enum PendingAccommodationStatus {
+  PENDING    // En attente de validation admin
+  CONFIRMED  // Admin a confirmé → Accommodation créé
+  DISMISSED  // Admin a ignoré
+}
+
 enum NotificationType {
   ASSIGNMENT_CREATED      // Nouvelle affectation créée
   ASSIGNMENT_CONFIRMED    // Affectation confirmée
@@ -83,6 +89,7 @@ enum NotificationType {
   TIMECLOCK_OUT           // Pointage départ
   ACCOMMODATION_CREATED   // Logement réservé
   ACCOMMODATION_CANCELLED // Logement annulé
+  BOOKING_DETECTED        // Email Booking.com détecté, en attente de validation
 }
 
 enum AccommodationStatus {
@@ -152,19 +159,22 @@ model Company {
   updatedAt DateTime @updatedAt
 
   // Relations
-  users           User[]
-  employees       Employee[]
-  teams           Team[]
-  clients         Client[]
-  worksites       Worksite[]
-  invitations     Invitation[]
-  notifications   Notification[]
-  historyLogs     HistoryLog[]
-  absences        Absence[]
-  expenseReports  ExpenseReport[]
-  timeclocks      Timeclock[]
-  settings        CompanySettings?
-  accommodations  Accommodation[]
+  users                   User[]
+  employees               Employee[]
+  teams                   Team[]
+  clients                 Client[]
+  worksites               Worksite[]
+  invitations             Invitation[]
+  notifications           Notification[]
+  historyLogs             HistoryLog[]
+  absences                Absence[]
+  expenseReports          ExpenseReport[]
+  timeclocks              Timeclock[]
+  settings                CompanySettings?
+  accommodations          Accommodation[]
+  gmailConnection         GmailConnection?
+  processedGmailMessages  ProcessedGmailMessage[]
+  pendingAccommodations   PendingAccommodation[]
 
   @@map("companies")
 }
@@ -754,4 +764,77 @@ model Accommodation {
   @@index([startDate])
   @@index([status])
   @@map("accommodations")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GMAIL CONNECTION — OAuth tokens Gmail par entreprise
+// ═══════════════════════════════════════════════════════════════════════════
+
+model GmailConnection {
+  id            String   @id @default(cuid())
+  companyId     String   @unique
+  gmailAddress  String
+  accessToken   String   // chiffré AES-256-GCM
+  refreshToken  String   // chiffré AES-256-GCM
+  tokenExpiry   DateTime
+  connectedById String
+  connectedAt   DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("gmail_connections")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PROCESSED GMAIL MESSAGE — Évite le retraitement des emails déjà analysés
+// ═══════════════════════════════════════════════════════════════════════════
+
+model ProcessedGmailMessage {
+  id          String   @id @default(cuid())
+  companyId   String
+  messageId   String
+  processedAt DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, messageId])
+  @@index([companyId])
+  @@map("processed_gmail_messages")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PENDING ACCOMMODATION — Réservation détectée, en attente d'attribution équipe
+// ═══════════════════════════════════════════════════════════════════════════
+
+model PendingAccommodation {
+  id              String                     @id @default(cuid())
+  companyId       String
+  gmailMessageId  String
+
+  propertyName    String?
+  address         String?
+  city            String?
+  zipCode         String?
+  startDate       DateTime?                  @db.Date
+  endDate         DateTime?                  @db.Date
+  doorCode        String?
+  contactName     String?
+  contactPhone    String?
+  notes           String?
+  rawEmailSnippet String?
+
+  status          PendingAccommodationStatus @default(PENDING)
+  accommodationId String?
+  confirmedById   String?
+  confirmedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([status])
+  @@map("pending_accommodations")
 }
