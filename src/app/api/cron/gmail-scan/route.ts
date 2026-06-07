@@ -130,7 +130,8 @@ Format (toutes les valeurs peuvent être null si non trouvées) :
   "doorCode": "code d'accès ou digicode si mentionné",
   "contactName": "nom du propriétaire ou hôte",
   "contactPhone": "numéro de téléphone de contact",
-  "notes": "numéro de confirmation et autres infos utiles"
+  "notes": "numéro de confirmation et autres infos utiles",
+  "teamName": "prénom ou nom de l'équipe mentionné dans la réservation (ex: dans 'Réservation de Makram', extraire 'Makram'). null si non trouvé."
 }`,
             messages: [{ role: "user", content: `Email à analyser :\n\n${(bodyText || snippet).substring(0, 4000)}` }],
           })
@@ -146,37 +147,91 @@ Format (toutes les valeurs peuvent être null si non trouvées) :
             continue
           }
 
-          // ── Créer la réservation en attente ───────────────────────────
-          await prisma.pendingAccommodation.create({
-            data: {
-              companyId:       conn.companyId,
-              gmailMessageId:  msg.id,
-              propertyName:    parsed.propertyName  ?? null,
-              address:         parsed.address       ?? null,
-              city:            parsed.city          ?? null,
-              zipCode:         parsed.zipCode       ?? null,
-              startDate:       parsed.startDate ? new Date(parsed.startDate) : null,
-              endDate:         parsed.endDate   ? new Date(parsed.endDate)   : null,
-              doorCode:        parsed.doorCode      ?? null,
-              contactName:     parsed.contactName   ?? null,
-              contactPhone:    parsed.contactPhone  ?? null,
-              notes:           parsed.notes         ?? null,
-              rawEmailSnippet: snippet.substring(0, 500),
-            },
-          })
-
-          // ── Notifier les admins ────────────────────────────────────────
-          const admins = await prisma.user.findMany({
-            where:  { companyId: conn.companyId, role: { in: ["ADMIN", "SUPER_ADMIN"] } },
+          // ── Chercher l'admin pour createdById ─────────────────────────
+          const admin = await prisma.user.findFirst({
+            where:  { companyId: conn.companyId, role: { in: ["SUPER_ADMIN", "ADMIN"] } },
             select: { id: true },
           })
-          if (admins.length > 0) {
+
+          // ── Chercher l'équipe par nom si extrait ──────────────────────
+          let matchedTeamId: string | null = null
+          if (parsed.teamName) {
+            const team = await prisma.team.findFirst({
+              where: {
+                companyId: conn.companyId,
+                active:    true,
+                name:      { contains: parsed.teamName, mode: "insensitive" },
+              },
+              select: { id: true },
+            })
+            matchedTeamId = team?.id ?? null
+          }
+
+          // ── Créer directement le logement si équipe trouvée ──────────
+          if (matchedTeamId && admin && parsed.address && parsed.startDate && parsed.endDate) {
+            await prisma.accommodation.create({
+              data: {
+                companyId:   conn.companyId,
+                teamId:      matchedTeamId,
+                createdById: admin.id,
+                address:     parsed.address,
+                city:        parsed.city        ?? null,
+                zipCode:     parsed.zipCode     ?? null,
+                startDate:   new Date(parsed.startDate),
+                endDate:     new Date(parsed.endDate),
+                doorCode:    parsed.doorCode    ?? null,
+                contactName: parsed.contactName ?? null,
+                contactPhone:parsed.contactPhone?? null,
+                notes:       parsed.notes       ?? null,
+              },
+            })
+
+            // Notifier les admins — logement créé automatiquement
+            const admins = await prisma.user.findMany({
+              where:  { companyId: conn.companyId, role: { in: ["ADMIN", "SUPER_ADMIN"] } },
+              select: { id: true },
+            })
+            const dateInfo = ` du ${parsed.startDate} au ${parsed.endDate}`
+            await prisma.notification.createMany({
+              data: admins.map((a) => ({
+                userId:    a.id,
+                companyId: conn.companyId,
+                type:      "BOOKING_DETECTED" as const,
+                title:     "Logement créé automatiquement",
+                message:   `${parsed.propertyName ?? parsed.address}${dateInfo} — Équipe ${parsed.teamName} affectée.`,
+                link:      "/logements",
+              })),
+            })
+          } else {
+            // ── Fallback : réservation en attente si équipe non trouvée ──
+            await prisma.pendingAccommodation.create({
+              data: {
+                companyId:       conn.companyId,
+                gmailMessageId:  msg.id,
+                propertyName:    parsed.propertyName  ?? null,
+                address:         parsed.address       ?? null,
+                city:            parsed.city          ?? null,
+                zipCode:         parsed.zipCode       ?? null,
+                startDate:       parsed.startDate ? new Date(parsed.startDate) : null,
+                endDate:         parsed.endDate   ? new Date(parsed.endDate)   : null,
+                doorCode:        parsed.doorCode      ?? null,
+                contactName:     parsed.contactName   ?? null,
+                contactPhone:    parsed.contactPhone  ?? null,
+                notes:           parsed.notes         ?? null,
+                rawEmailSnippet: snippet.substring(0, 500),
+              },
+            })
+
+            const admins = await prisma.user.findMany({
+              where:  { companyId: conn.companyId, role: { in: ["ADMIN", "SUPER_ADMIN"] } },
+              select: { id: true },
+            })
             const dateInfo = parsed.startDate
               ? ` du ${parsed.startDate}${parsed.endDate ? ` au ${parsed.endDate}` : ""}`
               : ""
             await prisma.notification.createMany({
-              data: admins.map((admin) => ({
-                userId:    admin.id,
+              data: admins.map((a) => ({
+                userId:    a.id,
                 companyId: conn.companyId,
                 type:      "BOOKING_DETECTED" as const,
                 title:     "Réservation Booking.com détectée",
