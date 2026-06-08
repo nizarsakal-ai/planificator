@@ -26,19 +26,88 @@ function extractMessageBody(payload: { body?: { data?: string }; parts?: unknown
   return ""
 }
 
+// ── Regex fallback parser (used when Claude API is unavailable) ────────────
+const FRENCH_MONTHS: Record<string, string> = {
+  janvier: "01", février: "02", fevrier: "02", mars: "03", avril: "04",
+  mai: "05", juin: "06", juillet: "07", août: "08", aout: "08",
+  septembre: "09", octobre: "10", novembre: "11", décembre: "12", decembre: "12",
+}
+
+function parseFrenchDate(raw: string): string | null {
+  // "15 janvier 2025" or "15 jan. 2025"
+  const m = raw.match(/(\d{1,2})\s+([a-zéûô\.]+)\s+(\d{4})/i)
+  if (m) {
+    const day   = m[1].padStart(2, "0")
+    const month = FRENCH_MONTHS[m[2].toLowerCase().replace(".", "")] ?? null
+    if (month) return `${m[3]}-${month}-${day}`
+  }
+  // "2025-01-15" or "15/01/2025"
+  const iso = raw.match(/(\d{4})-(\d{2})-(\d{2})/)
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
+  const slashes = raw.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+  if (slashes) return `${slashes[3]}-${slashes[2].padStart(2, "0")}-${slashes[1].padStart(2, "0")}`
+  return null
+}
+
+function regexFallbackParser(text: string): Record<string, string | null> {
+  const result: Record<string, string | null> = {
+    propertyName: null, address: null, city: null, zipCode: null,
+    startDate: null, endDate: null, doorCode: null, contactPhone: null,
+    contactName: null, teamName: null, notes: null,
+  }
+
+  // propertyName – lines that look like a heading before the address block
+  const propMatch = text.match(/(?:appartement|appart|logement|villa|studio|maison|résidence)\s*[:\-]?\s*([A-Z][^\n]{3,60})/i)
+  if (propMatch) result.propertyName = propMatch[1].trim()
+
+  // address – street with number
+  const addrMatch = text.match(/(\d{1,4}[\s,]+(?:rue|avenue|av\.|boulevard|bd\.?|chemin|impasse|allée|place|route|voie)[^\n,]{3,60})/i)
+  if (addrMatch) result.address = addrMatch[1].trim()
+
+  // zipCode – 5-digit French postal code
+  const zipMatch = text.match(/\b((?:0[1-9]|[1-8]\d|9[0-5])\d{3})\b/)
+  if (zipMatch) result.zipCode = zipMatch[1]
+
+  // city – word(s) after the zip code
+  if (result.zipCode) {
+    const cityMatch = text.match(new RegExp(result.zipCode + "\\s+([A-ZÀ-Ÿ][a-zà-ÿA-ZÀ-Ÿ\\s\\-]{2,40})"))
+    if (cityMatch) result.city = cityMatch[1].trim()
+  }
+
+  // startDate – "Arrivée", "Arrivee", "check-in", "Check-in"
+  const startMatch = text.match(/(?:arrivée|arrivee|check[\s\-]in)\s*[:\-]?\s*([\d]{1,2}[\s\/\-][a-zéûôA-Z\d]{2,10}[\s\/\-][\d]{4})/i)
+  if (startMatch) result.startDate = parseFrenchDate(startMatch[1])
+
+  // endDate – "Départ", "Depart", "check-out"
+  const endMatch = text.match(/(?:départ|depart|check[\s\-]out)\s*[:\-]?\s*([\d]{1,2}[\s\/\-][a-zéûôA-Z\d]{2,10}[\s\/\-][\d]{4})/i)
+  if (endMatch) result.endDate = parseFrenchDate(endMatch[1])
+
+  // doorCode – code / digicode followed by digits (or mixed alphanumeric ≤ 10 chars)
+  const doorMatch = text.match(/(?:code[^:]*|digicode[^:]*)\s*[:\-]\s*([A-Z0-9#\*]{3,10})/i)
+  if (doorMatch) result.doorCode = doorMatch[1].trim()
+
+  // contactPhone – French phone number patterns
+  const phoneMatch = text.match(/(?:\+33|0033|0)\s*[1-9](?:[\s.\-]?\d{2}){4}/)
+  if (phoneMatch) result.contactPhone = phoneMatch[0].replace(/\s/g, "")
+
+  // teamName – "guest [Name]", "for guest [Name]", "réservation de [Name]", "booked by [Name]"
+  const teamMatch = text.match(/(?:for\s+guest|guest|réservation de|reservation de|booked by)\s+([A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖÙÚÛÜÝ][a-zà-ÿ]+(?:\s+[A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖÙÚÛÜÝ][a-zà-ÿ]+)?)/i)
+  if (teamMatch) result.teamName = teamMatch[1].trim()
+
+  return result
+}
+
 export async function GET(req: Request) {
   const authHeader = req.headers.get("authorization")
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json({ error: "ANTHROPIC_API_KEY not set" }, { status: 500 })
-  }
-
   const connections = await prisma.gmailConnection.findMany()
   const stats = { scanned: 0, detected: 0, errors: 0 }
-  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  const anthropic = process.env.ANTHROPIC_API_KEY
+    ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+    : null
 
   for (const conn of connections) {
     try {
@@ -111,12 +180,18 @@ export async function GET(req: Request) {
 
           if (!bodyText && !snippet) continue
 
-          // ── Analyser avec Claude ───────────────────────────────────────
-          const today = new Date().toISOString().split("T")[0]
-          const aiRes = await anthropic.messages.create({
-            model:      "claude-haiku-4-5-20251001",
-            max_tokens: 512,
-            system: `Tu analyses des emails de confirmation Booking.com et extrais les informations de logement.
+          // ── Analyser avec Claude (avec fallback regex si API indisponible) ──
+          let parsed: Record<string, string | null>
+          const emailText = (bodyText || snippet).substring(0, 4000)
+
+          let usedFallback = false
+          if (anthropic) {
+            try {
+              const today = new Date().toISOString().split("T")[0]
+              const aiRes = await anthropic.messages.create({
+                model:      "claude-haiku-4-5-20251001",
+                max_tokens: 512,
+                system: `Tu analyses des emails de confirmation Booking.com et extrais les informations de logement.
 Aujourd'hui nous sommes le ${today}.
 Réponds UNIQUEMENT en JSON valide, sans markdown, sans balises de code.
 Format (toutes les valeurs peuvent être null si non trouvées) :
@@ -133,17 +208,42 @@ Format (toutes les valeurs peuvent être null si non trouvées) :
   "notes": "numéro de confirmation et autres infos utiles",
   "teamName": "prénom ou nom de l'équipe mentionné dans la réservation (ex: dans 'Réservation de Makram', extraire 'Makram'). null si non trouvé."
 }`,
-            messages: [{ role: "user", content: `Email à analyser :\n\n${(bodyText || snippet).substring(0, 4000)}` }],
-          })
+                messages: [{ role: "user", content: `Email à analyser :\n\n${emailText}` }],
+              })
 
-          const aiContent = aiRes.content[0]
-          if (aiContent.type !== "text") continue
+              const aiContent = aiRes.content[0]
+              if (aiContent.type !== "text") {
+                console.warn(`[gmail-scan] Unexpected AI content type for message ${msg.id}, switching to regex fallback`)
+                parsed = regexFallbackParser(emailText)
+                usedFallback = true
+              } else {
+                try {
+                  parsed = JSON.parse(aiContent.text)
+                } catch {
+                  console.warn(`[gmail-scan] AI JSON parse error for message ${msg.id}, switching to regex fallback`)
+                  parsed = regexFallbackParser(emailText)
+                  usedFallback = true
+                }
+              }
+            } catch (claudeErr) {
+              console.warn(`[gmail-scan] Claude API error for message ${msg.id}, switching to regex fallback:`, claudeErr)
+              parsed = regexFallbackParser(emailText)
+              usedFallback = true
+            }
+          } else {
+            console.warn(`[gmail-scan] No ANTHROPIC_API_KEY – using regex fallback for message ${msg.id}`)
+            parsed = regexFallbackParser(emailText)
+            usedFallback = true
+          }
 
-          let parsed: Record<string, string | null>
-          try {
-            parsed = JSON.parse(aiContent.text)
-          } catch {
-            console.error(`[gmail-scan] AI JSON parse error for message ${msg.id}`)
+          if (usedFallback) {
+            console.log(`[gmail-scan] Regex fallback result for ${msg.id}:`, JSON.stringify(parsed))
+          }
+
+          // If the fallback found nothing useful, skip this message
+          const hasUsefulData = parsed.address || parsed.startDate || parsed.endDate || parsed.propertyName
+          if (!hasUsefulData) {
+            console.log(`[gmail-scan] No useful data extracted for message ${msg.id}, skipping`)
             continue
           }
 
