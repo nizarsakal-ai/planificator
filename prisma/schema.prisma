@@ -752,6 +752,10 @@ model Accommodation {
 
   notes        String?
 
+  // Source & référence externe
+  bookingReference  String?  @unique  // Numéro de réservation Booking.com
+  source            String?  @default("manual")  // "manual" | "gmail-scan" | "n8n"
+
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
 
@@ -762,6 +766,7 @@ model Accommodation {
   @@index([companyId])
   @@index([teamId])
   @@index([startDate])
+  @@index([bookingReference])
   @@index([status])
   @@map("accommodations")
 }
