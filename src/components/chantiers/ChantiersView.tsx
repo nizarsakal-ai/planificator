@@ -57,17 +57,24 @@ function TeamAvatars({ teams, size = "md" }: { teams: TeamInfo[]; size?: "sm" | 
   return (
     <div className="flex items-center -space-x-2">
       {visible.map((team) => (
-        <div
-          key={team.id}
-          title={`${team.leader.firstName} ${team.leader.lastName} — ${team.name}`}
-          className={`${dim} rounded-full border-2 border-white shrink-0 overflow-hidden flex items-center justify-center font-bold text-white`}
-          style={team.leader.avatarUrl ? undefined : { backgroundColor: team.color ?? "#0f3460" }}
-        >
-          {team.leader.avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={team.leader.avatarUrl} alt={`${team.leader.firstName} ${team.leader.lastName}`} className="w-full h-full object-cover" />
-          ) : (
-            getInitials(team.leader.firstName, team.leader.lastName)
+        <div key={team.id} className="flex items-center -space-x-1">
+          {/* Initiales avec couleur */}
+          <div
+            title={`${team.leader.firstName} ${team.leader.lastName} — ${team.name}`}
+            className={`${dim} rounded-full border-2 border-white flex items-center justify-center font-bold text-white shrink-0`}
+            style={{ backgroundColor: team.color ?? "#0f3460" }}
+          >
+            {getInitials(team.leader.firstName, team.leader.lastName)}
+          </div>
+          {/* Photo si disponible */}
+          {team.leader.avatarUrl && (
+            <div
+              title={`${team.leader.firstName} ${team.leader.lastName}`}
+              className={`${dim} rounded-full border-2 border-white shrink-0 overflow-hidden`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={team.leader.avatarUrl} alt={`${team.leader.firstName} ${team.leader.lastName}`} className="w-full h-full object-cover" />
+            </div>
           )}
         </div>
       ))}
