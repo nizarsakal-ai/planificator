@@ -87,12 +87,25 @@ export function ChantiersMap({ chantiers }: ChantiersMapProps) {
         const tooltip = L.tooltip({ permanent: false, direction: "top", offset: [0, -30] })
           .setContent(`<span style="font-weight:600;font-size:13px">${chantier.name}</span><br/><span style="color:#6b7280;font-size:11px">${chantier.client.name}</span>`)
 
+        const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${chantier.latitude},${chantier.longitude}`
+        const popupContent = `
+          <div style="min-width:160px">
+            <p style="font-weight:600;font-size:13px;margin-bottom:4px">${chantier.name}</p>
+            <p style="color:#6b7280;font-size:11px;margin-bottom:8px">${chantier.client.name}</p>
+            <div style="display:flex;gap:6px">
+              <a href="${googleMapsUrl}" target="_blank" rel="noopener" style="flex:1;text-align:center;background:#1a73e8;color:white;padding:5px 8px;border-radius:6px;font-size:11px;font-weight:600;text-decoration:none">
+                🧭 Naviguer
+              </a>
+              <a href="/chantiers/${chantier.id}" style="flex:1;text-align:center;background:#f1f5f9;color:#334155;padding:5px 8px;border-radius:6px;font-size:11px;font-weight:600;text-decoration:none">
+                Détail
+              </a>
+            </div>
+          </div>`
+
         L.marker([chantier.latitude!, chantier.longitude!], { icon })
           .addTo(map)
           .bindTooltip(tooltip)
-          .on("click", () => {
-            window.location.href = `/chantiers/${chantier.id}`
-          })
+          .bindPopup(popupContent, { maxWidth: 220 })
 
         bounds.push([chantier.latitude!, chantier.longitude!])
       })

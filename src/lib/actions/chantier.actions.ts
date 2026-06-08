@@ -106,6 +106,22 @@ export async function updateChantier(worksiteId: string, formData: FormData) {
   })
   if (!client) return { error: "Client introuvable." }
 
+  let latitude: number | null = worksite.latitude
+  let longitude: number | null = worksite.longitude
+  if (parsed.data.address && parsed.data.address !== worksite.address) {
+    try {
+      const geoRes = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(parsed.data.address)}&format=json&limit=1`,
+        { headers: { "User-Agent": "Planificator/1.0" } }
+      )
+      const geoData = await geoRes.json()
+      if (geoData[0]) {
+        latitude  = parseFloat(geoData[0].lat)
+        longitude = parseFloat(geoData[0].lon)
+      }
+    } catch { /* géocodage non bloquant */ }
+  }
+
   await prisma.worksite.update({
     where: { id: worksiteId },
     data: {
@@ -116,6 +132,8 @@ export async function updateChantier(worksiteId: string, formData: FormData) {
       startDate:   new Date(parsed.data.startDate),
       endDate:     new Date(parsed.data.endDate),
       dailyHours:  parsed.data.dailyHours,
+      latitude,
+      longitude,
     },
   })
 
