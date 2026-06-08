@@ -16,7 +16,7 @@ interface TeamInfo {
   id: string
   name: string
   color: string | null
-  leader: { firstName: string; lastName: string }
+  leader: { firstName: string; lastName: string; avatarUrl: string | null }
 }
 
 interface Chantier {
@@ -60,10 +60,15 @@ function TeamAvatars({ teams, size = "md" }: { teams: TeamInfo[]; size?: "sm" | 
         <div
           key={team.id}
           title={`${team.leader.firstName} ${team.leader.lastName} — ${team.name}`}
-          className={`${dim} rounded-full border-2 border-white flex items-center justify-center font-bold text-white shrink-0`}
-          style={{ backgroundColor: team.color ?? "#0f3460" }}
+          className={`${dim} rounded-full border-2 border-white shrink-0 overflow-hidden flex items-center justify-center font-bold text-white`}
+          style={team.leader.avatarUrl ? undefined : { backgroundColor: team.color ?? "#0f3460" }}
         >
-          {getInitials(team.leader.firstName, team.leader.lastName)}
+          {team.leader.avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={team.leader.avatarUrl} alt={`${team.leader.firstName} ${team.leader.lastName}`} className="w-full h-full object-cover" />
+          ) : (
+            getInitials(team.leader.firstName, team.leader.lastName)
+          )}
         </div>
       ))}
       {extra > 0 && (

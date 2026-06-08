@@ -62,7 +62,7 @@ export default async function ChantiersPage() {
                 id: true,
                 name: true,
                 color: true,
-                leader: { select: { firstName: true, lastName: true } },
+                leader: { select: { firstName: true, lastName: true, avatarUrl: true } },
               },
             },
           },
@@ -70,7 +70,7 @@ export default async function ChantiersPage() {
           take: 30,
         },
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: { startDate: "asc" },
     }),
     isAdmin
       ? prisma.client.findMany({
