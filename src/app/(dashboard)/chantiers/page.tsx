@@ -13,23 +13,11 @@ export default async function ChantiersPage() {
   const session = await auth()
   if (!session?.user) redirect("/login")
 
-  const isAdmin      = ["ADMIN", "SUPER_ADMIN"].includes(session.user.role)
-  const isTeamLeader = session.user.role === "TEAM_LEADER"
+  const isAdmin      = ["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)
   const isEmployee   = session.user.role === "EMPLOYEE"
-  if (!isAdmin && !isTeamLeader && !isEmployee) redirect("/dashboard")
+  if (!isAdmin && !isEmployee) redirect("/dashboard")
 
   const companyId = session.user.companyId!
-
-  // TEAM_LEADER : filtrer aux chantiers de son équipe
-  let teamId: string | undefined
-  if (isTeamLeader) {
-    const leaderEmployee = await prisma.employee.findFirst({
-      where: { userId: session.user.id!, companyId },
-      select: { ledTeams: { where: { active: true }, select: { id: true }, take: 1 } },
-    })
-    teamId = leaderEmployee?.ledTeams[0]?.id
-    if (!teamId) redirect("/dashboard")
-  }
 
   // EMPLOYEE : filtrer aux chantiers où il est affecté
   let employeeId: string | undefined
@@ -42,9 +30,7 @@ export default async function ChantiersPage() {
     if (!employeeId) redirect("/dashboard")
   }
 
-  const worksiteWhere = isTeamLeader
-    ? { companyId, assignments: { some: { teamId } } }
-    : isEmployee
+  const worksiteWhere = isEmployee
     ? { companyId, assignments: { some: { employeeAssignments: { some: { employeeId } } } } }
     : { companyId }
 
@@ -95,7 +81,7 @@ export default async function ChantiersPage() {
             {enCours} en cours · {planifies} planifié{planifies > 1 ? "s" : ""}
           </p>
         </div>
-        {isAdmin && <NouveauChantierDialog clients={clients} />}
+        {isAdmin && !isEmployee && <NouveauChantierDialog clients={clients} />}
       </div>
 
       {chantiers.length === 0 ? (

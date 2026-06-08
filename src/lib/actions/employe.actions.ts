@@ -14,7 +14,7 @@ import crypto from "crypto"
 async function requireAdmin() {
   const session = await auth()
   if (!session?.user) throw new Error("Non authentifié")
-  if (!["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) {
+  if (!["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)) {
     throw new Error("Accès refusé")
   }
   if (!session.user.companyId) throw new Error("Entreprise introuvable")

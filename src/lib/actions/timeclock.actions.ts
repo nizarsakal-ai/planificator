@@ -128,7 +128,7 @@ export async function getMyTimeclocks(limit = 14) {
 export async function getAllTimeclocks(dateFrom?: Date, dateTo?: Date) {
   const session = await auth()
   if (!session?.user) throw new Error("Non authentifié")
-  if (!["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) throw new Error("Accès refusé")
+  if (!["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)) throw new Error("Accès refusé")
 
   const today = new Date()
   today.setHours(0, 0, 0, 0)

@@ -14,7 +14,7 @@ export const metadata: Metadata = { title: "Employés" }
 export default async function EmployesPage() {
   const session = await auth()
   if (!session?.user) redirect("/login")
-  if (!["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) redirect("/dashboard")
+  if (!["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)) redirect("/dashboard")
 
   const employees = await prisma.employee.findMany({
     where: { companyId: session.user.companyId! },

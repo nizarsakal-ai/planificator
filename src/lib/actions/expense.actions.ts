@@ -103,7 +103,7 @@ export async function updateExpenseStatus(
 ) {
   const session = await auth()
   if (!session?.user) throw new Error("Non authentifié")
-  if (!["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) throw new Error("Accès refusé")
+  if (!["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)) throw new Error("Accès refusé")
 
   if (status === "REJECTED" && !rejectionNote?.trim()) {
     return { error: "La raison du refus est obligatoire." }
@@ -151,7 +151,7 @@ export async function deleteExpenseReport(id: string) {
   })
   if (!expense) return { error: "Note de frais introuvable." }
 
-  const isAdmin = ["ADMIN", "SUPER_ADMIN"].includes(session.user.role)
+  const isAdmin = ["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)
   const isOwner = expense.employee.userId === session.user.id && expense.status === "PENDING"
 
   if (!isAdmin && !isOwner) return { error: "Accès refusé." }

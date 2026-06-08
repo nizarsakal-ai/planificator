@@ -28,7 +28,7 @@ function fmt(d: Date | string) {
 export default async function NotesDeFraisPage() {
   const session = await auth()
   if (!session?.user) redirect("/login")
-  if (!["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) redirect("/dashboard")
+  if (!["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)) redirect("/dashboard")
 
   const expenses = await prisma.expenseReport.findMany({
     where: { companyId: session.user.companyId! },

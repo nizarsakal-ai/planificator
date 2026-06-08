@@ -10,7 +10,7 @@ import { DocumentType } from "@prisma/client"
 
 export async function uploadDocument(formData: FormData) {
   const session = await auth()
-  if (!session?.user || !["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) {
+  if (!session?.user || !["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)) {
     return { error: "Non autorisé" }
   }
 
@@ -78,7 +78,7 @@ export async function uploadDocument(formData: FormData) {
 
 export async function deleteDocument(documentId: string, worksiteId: string) {
   const session = await auth()
-  if (!session?.user || !["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) {
+  if (!session?.user || !["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)) {
     return { error: "Non autorisé" }
   }
 

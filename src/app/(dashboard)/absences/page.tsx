@@ -21,7 +21,7 @@ export default async function AbsencesPage() {
   const session = await auth()
   if (!session?.user) redirect("/login")
 
-  const isAdmin      = ["ADMIN", "SUPER_ADMIN"].includes(session.user.role)
+  const isAdmin      = ["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)
   const isTeamLeader = session.user.role === "TEAM_LEADER"
   if (!isAdmin && !isTeamLeader) redirect("/dashboard")
 
