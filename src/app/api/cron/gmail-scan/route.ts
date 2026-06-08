@@ -74,13 +74,25 @@ function regexFallbackParser(text: string): Record<string, string | null> {
     if (cityMatch) result.city = cityMatch[1].trim()
   }
 
-  // startDate – "Arrivée", "Arrivee", "check-in", "Check-in"
-  const startMatch = text.match(/(?:arrivée|arrivee|check[\s\-]in)\s*[:\-]?\s*([\d]{1,2}[\s\/\-][a-zéûôA-Z\d]{2,10}[\s\/\-][\d]{4})/i)
-  if (startMatch) result.startDate = parseFrenchDate(startMatch[1])
+  // Date pattern: optional day-of-week, then "8 juin 2026" or "08/06/2026" or "2026-06-08"
+  const DATE_PAT = "(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)?\\s*(\\d{1,2}[\\s\\/\\-][a-zéûôA-Z\\d]{2,12}[\\s\\/\\-]\\d{4}|\\d{4}-\\d{2}-\\d{2})"
 
-  // endDate – "Départ", "Depart", "check-out"
-  const endMatch = text.match(/(?:départ|depart|check[\s\-]out)\s*[:\-]?\s*([\d]{1,2}[\s\/\-][a-zéûôA-Z\d]{2,10}[\s\/\-][\d]{4})/i)
-  if (endMatch) result.endDate = parseFrenchDate(endMatch[1])
+  // startDate – "Arrivée", "check-in" followed by optional day name + date
+  const startMatch = text.match(new RegExp("(?:arrivée|arrivee|check[\\s\\-]in)[\\s\\S]{0,30}?" + DATE_PAT, "i"))
+  if (startMatch) result.startDate = parseFrenchDate(startMatch[1] ?? startMatch[0])
+
+  // endDate – "Départ", "check-out"
+  const endMatch = text.match(new RegExp("(?:départ|depart|check[\\s\\-]out)[\\s\\S]{0,30}?" + DATE_PAT, "i"))
+  if (endMatch) result.endDate = parseFrenchDate(endMatch[1] ?? endMatch[0])
+
+  // Fallback: "du [date] au [date]" pattern
+  if (!result.startDate || !result.endDate) {
+    const duAuMatch = text.match(/du\s+(\d{1,2}\s+[a-zéûô]+\s+\d{4})\s+au\s+(\d{1,2}\s+[a-zéûô]+\s+\d{4})/i)
+    if (duAuMatch) {
+      if (!result.startDate) result.startDate = parseFrenchDate(duAuMatch[1])
+      if (!result.endDate)   result.endDate   = parseFrenchDate(duAuMatch[2])
+    }
+  }
 
   // doorCode – code / digicode followed by digits (or mixed alphanumeric ≤ 10 chars)
   const doorMatch = text.match(/(?:code[^:]*|digicode[^:]*)\s*[:\-]\s*([A-Z0-9#\*]{3,10})/i)
