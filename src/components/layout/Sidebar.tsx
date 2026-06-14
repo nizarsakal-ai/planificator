@@ -53,12 +53,23 @@ function getNavItems(role: Role): NavItem[] {
   switch (role) {
     case "SUPER_ADMIN":
       return [
-        { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-        {
-          label: "Entreprises",
-          href: "/super-admin/entreprises",
-          icon: Building2,
-        },
+        { label: "Dashboard",        href: "/dashboard",              icon: LayoutDashboard },
+        { label: "Administration",   href: "/super-admin/entreprises",icon: Building2 },
+        { label: "Employés",         href: "/employes",               icon: Users },
+        { label: "Équipes",          href: "/equipes",                icon: Layers },
+        { label: "Clients",          href: "/clients",                icon: UserCheck },
+        { label: "Chantiers",        href: "/chantiers",              icon: HardHat },
+        { label: "Logements",        href: "/logements",              icon: BedDouble },
+        { label: "Planning",         href: "/planning",               icon: Calendar },
+        { label: "Gantt",            href: "/planning/gantt",         icon: GanttChart },
+        { label: "Calendrier",       href: "/planning/calendrier",    icon: CalendarDays },
+        { label: "Personnel",        href: "/planning/personnel",     icon: Users },
+        { label: "Absences",         href: "/absences",               icon: CalendarOff },
+        { label: "Notes de frais",   href: "/notes-de-frais",         icon: Receipt },
+        { label: "Pointages",        href: "/pointages",              icon: MapPin },
+        { label: "Rapports",         href: "/rapports",               icon: ClipboardList },
+        { label: "Mon profil",       href: "/profil",                 icon: User },
+        { label: "Paramètres",       href: "/parametres",             icon: Settings },
       ]
 
     case "ADMIN":
