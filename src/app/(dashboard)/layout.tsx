@@ -1,5 +1,6 @@
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
+import { prisma } from "@/lib/prisma"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { Navbar } from "@/components/layout/Navbar"
 import { InstallPrompt } from "@/components/pwa/InstallPrompt"
@@ -12,6 +13,22 @@ export default async function DashboardLayout({
   const session = await auth()
 
   if (!session?.user) redirect("/login")
+
+  // Relire le rôle réel depuis la DB (contourne le cache JWT)
+  if (session.user.id) {
+    try {
+      const dbUser = await prisma.user.findUnique({
+        where:  { id: session.user.id },
+        select: { role: true, companyId: true },
+      })
+      if (dbUser) {
+        session.user.role      = dbUser.role
+        session.user.companyId = dbUser.companyId
+      }
+    } catch {
+      // DB indisponible : on garde la session en cache
+    }
+  }
 
   // Les clients ont leur propre portail
   if (session.user.role === "CLIENT") redirect("/mes-chantiers")
