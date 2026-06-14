@@ -69,20 +69,31 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
-    // Inclure role et companyId dans le JWT
+    // Inclure role et companyId dans le JWT — relit la DB à chaque login
     async jwt({ token, user }) {
       if (user) {
-        token.id = user.id as string
-        token.role = (user as any).role
+        // Connexion fraîche : on stocke l'id, role et companyId
+        token.id        = user.id as string
+        token.role      = (user as any).role
         token.companyId = (user as any).companyId ?? null
+      } else if (token.id) {
+        // Session existante : on relit le rôle depuis la DB pour le garder à jour
+        const dbUser = await prisma.user.findUnique({
+          where:  { id: token.id as string },
+          select: { role: true, companyId: true, active: true },
+        })
+        if (dbUser && dbUser.active) {
+          token.role      = dbUser.role
+          token.companyId = dbUser.companyId
+        }
       }
       return token
     },
     // Exposer role et companyId dans la session côté client
     async session({ session, token }) {
       if (token) {
-        session.user.id = token.id as string
-        session.user.role = token.role as import("@prisma/client").Role
+        session.user.id        = token.id as string
+        session.user.role      = token.role as import("@prisma/client").Role
         session.user.companyId = token.companyId as string | null
       }
       return session
