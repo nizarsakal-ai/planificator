@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { Building2, Users, HardHat, Calendar, CheckCircle2, XCircle } from "lucide-react"
 import { CreateCompanyDialog } from "@/components/super-admin/CreateCompanyDialog"
+import { CompanyActions } from "@/components/super-admin/CompanyActions"
 
 export const metadata: Metadata = { title: "Super Admin — Entreprises" }
 
@@ -26,6 +27,11 @@ export default async function SuperAdminEntreprisesPage() {
           employees:  true,
           worksites:  true,
         },
+      },
+      users: {
+        select: { updatedAt: true },
+        orderBy: { updatedAt: "desc" },
+        take: 1,
       },
     },
     orderBy: { createdAt: "desc" },
@@ -123,19 +129,33 @@ export default async function SuperAdminEntreprisesPage() {
                   </div>
 
                   {/* Stats */}
-                  <div className="flex items-center gap-6 text-xs text-slate-500">
-                    <div className="flex items-center gap-1.5">
-                      <Users className="h-3.5 w-3.5 text-slate-400" />
-                      <span>{company._count.users} util.</span>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-6 text-xs text-slate-500">
+                      <div className="flex items-center gap-1.5">
+                        <Users className="h-3.5 w-3.5 text-slate-400" />
+                        <span>{company._count.users} util.</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <HardHat className="h-3.5 w-3.5 text-slate-400" />
+                        <span>{company._count.worksites} chantiers</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-slate-400">
+                        <Calendar className="h-3.5 w-3.5" />
+                        <span>{formatDate(company.createdAt)}</span>
+                      </div>
+                      {company.users[0] && (
+                        <div className="text-slate-400 hidden sm:block">
+                          <span>Actif {formatDate(company.users[0].updatedAt)}</span>
+                        </div>
+                      )}
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <HardHat className="h-3.5 w-3.5 text-slate-400" />
-                      <span>{company._count.worksites} chantiers</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-slate-400">
-                      <Calendar className="h-3.5 w-3.5" />
-                      <span>{formatDate(company.createdAt)}</span>
-                    </div>
+
+                    {/* Actions */}
+                    <CompanyActions
+                      companyId={company.id}
+                      isActive={company.active}
+                      companyName={company.name}
+                    />
                   </div>
                 </div>
               ))}
