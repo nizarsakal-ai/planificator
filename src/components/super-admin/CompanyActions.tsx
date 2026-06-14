@@ -4,17 +4,6 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { toggleCompanyActive, deleteCompany } from "@/lib/actions/super-admin.actions"
 import { Trash2, PowerOff, Power } from "lucide-react"
 
@@ -43,6 +32,11 @@ export function CompanyActions({ companyId, isActive, companyName }: Props) {
   }
 
   async function handleDelete() {
+    const confirmed = window.confirm(
+      `Supprimer "${companyName}" ?\n\nCette action est irréversible. Tous les utilisateurs, chantiers, équipes et logements seront définitivement supprimés.`
+    )
+    if (!confirmed) return
+
     setLoadingDelete(true)
     try {
       await deleteCompany(companyId)
@@ -75,37 +69,16 @@ export function CompanyActions({ companyId, isActive, companyName }: Props) {
         )}
       </Button>
 
-      {/* Supprimer avec confirmation */}
-      <AlertDialog>
-        <AlertDialogTrigger asChild>
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={loadingDelete}
-          >
-            <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-            Supprimer
-          </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Supprimer &quot;{companyName}&quot; ?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Cette action est <strong>irréversible</strong>. Toutes les données
-              (utilisateurs, chantiers, équipes, logements…) seront définitivement supprimées.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Annuler</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              className="bg-red-600 hover:bg-red-700"
-            >
-              Oui, supprimer définitivement
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Supprimer */}
+      <Button
+        variant="destructive"
+        size="sm"
+        onClick={handleDelete}
+        disabled={loadingDelete}
+      >
+        <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+        Supprimer
+      </Button>
     </div>
   )
 }
