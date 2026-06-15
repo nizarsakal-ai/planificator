@@ -224,14 +224,20 @@ export async function GET(req: NextRequest) {
             <View style={styles.empHeader}>
               <Text style={styles.empName}>{emp.firstName} {emp.lastName}</Text>
               <View style={styles.badgeRow}>
-                {emp.absenceDays > 0 && (
-                  <View style={styles.absenceBadge}>
-                    <Text style={styles.absenceBadgeText}>-{emp.absenceDays}j abs.</Text>
+                {emp.absenceDays > 0 ? (
+                  <>
+                    <View style={styles.absenceBadge}>
+                      <Text style={styles.absenceBadgeText}>{emp.totalDays}j − {emp.absenceDays}j abs.</Text>
+                    </View>
+                    <View style={styles.empBadge}>
+                      <Text style={styles.empBadgeText}>= {emp.totalDays - emp.absenceDays}j net</Text>
+                    </View>
+                  </>
+                ) : (
+                  <View style={styles.empBadge}>
+                    <Text style={styles.empBadgeText}>{emp.totalDays}j travaillés</Text>
                   </View>
                 )}
-                <View style={styles.empBadge}>
-                  <Text style={styles.empBadgeText}>{emp.totalDays}j travaillés</Text>
-                </View>
               </View>
             </View>
             <View style={styles.empBody}>

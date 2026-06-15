@@ -198,15 +198,22 @@ export default async function RapportMensuelPage({
                   <CardTitle className="text-sm font-semibold text-slate-800">
                     {emp.firstName} {emp.lastName}
                   </CardTitle>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 text-xs font-semibold">
+                    <span className="text-slate-500">{emp.totalDays}j</span>
                     {emp.absenceDays > 0 && (
-                      <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 text-xs font-semibold px-2.5 py-1 rounded-full">
-                        -{emp.absenceDays}j absence
+                      <>
+                        <span className="text-amber-600">− {emp.absenceDays}j</span>
+                        <span className="text-slate-400">=</span>
+                        <span className="bg-[#0f3460]/10 text-[#0f3460] px-2.5 py-1 rounded-full font-bold">
+                          {emp.totalDays - emp.absenceDays}j net
+                        </span>
+                      </>
+                    )}
+                    {emp.absenceDays === 0 && (
+                      <span className="bg-[#0f3460]/10 text-[#0f3460] px-2.5 py-1 rounded-full font-bold">
+                        {emp.totalDays}j net
                       </span>
                     )}
-                    <span className="inline-flex items-center gap-1 bg-[#0f3460]/10 text-[#0f3460] text-xs font-bold px-2.5 py-1 rounded-full">
-                      {emp.totalDays}j travaillé{emp.totalDays > 1 ? "s" : ""}
-                    </span>
                   </div>
                 </div>
               </CardHeader>
