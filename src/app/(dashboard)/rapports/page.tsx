@@ -101,9 +101,18 @@ export default async function RapportsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Rapports</h1>
-        <p className="text-sm text-slate-500 mt-1">Statistiques et exports des 30 derniers jours</p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Rapports</h1>
+          <p className="text-sm text-slate-500 mt-1">Statistiques et exports des 30 derniers jours</p>
+        </div>
+        <a
+          href="/rapports/mensuel"
+          className="inline-flex items-center gap-2 bg-[#0f3460] text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-[#0f3460]/90 transition-colors"
+        >
+          <FileText className="h-4 w-4" />
+          Rapport de paie mensuel
+        </a>
       </div>
 
       {/* KPIs */}
