@@ -191,6 +191,142 @@ export async function createLogement(formData: FormData) {
   return { success: true }
 }
 
+// ─── Traitement automatique IA des réservations en attente ───────────────────
+
+export async function autoProcessPendingAccommodations() {
+  const user = await requireAdmin()
+
+  if (!process.env.ANTHROPIC_API_KEY) return { error: "Clé API Anthropic non configurée." }
+
+  const [pendings, teams, admin] = await Promise.all([
+    prisma.pendingAccommodation.findMany({
+      where:   { companyId: user.companyId!, status: "PENDING" },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.team.findMany({
+      where:  { companyId: user.companyId!, active: true },
+      select: { id: true, name: true },
+    }),
+    prisma.user.findFirst({
+      where:  { companyId: user.companyId!, role: { in: ["SUPER_ADMIN", "ADMIN"] } },
+      select: { id: true },
+    }),
+  ])
+
+  if (pendings.length === 0) return { success: true, processed: 0, failed: 0 }
+
+  const Anthropic = (await import("@anthropic-ai/sdk")).default
+  const client    = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  const teamNames = teams.map((t) => t.name).join(", ")
+  const today     = new Date().toISOString().split("T")[0]
+
+  let processed = 0
+  let failed    = 0
+
+  for (const pending of pendings) {
+    const emailText = [pending.propertyName, pending.rawEmailSnippet].filter(Boolean).join("\n")
+    if (!emailText) { failed++; continue }
+
+    try {
+      const msg = await client.messages.create({
+        model:      "claude-haiku-4-5-20251001",
+        max_tokens: 512,
+        system: `Extrais les informations d'une réservation Booking.com.
+Équipes disponibles: ${teamNames}
+Aujourd'hui: ${today}
+Réponds UNIQUEMENT en JSON valide sans markdown:
+{
+  "address": "adresse complète ou null",
+  "city": "ville ou null",
+  "zipCode": "code postal ou null",
+  "teamName": "nom exact d'une équipe disponible ou null",
+  "doorCode": "code porte ou null",
+  "contactPhone": "téléphone ou null",
+  "contactName": "nom contact ou null"
+}
+Pour teamName: cherche un prénom/nom qui correspond à une équipe disponible.`,
+        messages: [{ role: "user", content: emailText }],
+      })
+
+      const content = msg.content[0]
+      if (content.type !== "text") { failed++; continue }
+
+      const extracted = JSON.parse(content.text)
+      const finalAddress = pending.address || (extracted.address as string)?.trim() || null
+
+      // Enrichir le pending avec les données extraites
+      await prisma.pendingAccommodation.update({
+        where: { id: pending.id },
+        data: {
+          address:      finalAddress,
+          city:         (extracted.city         as string) || pending.city         || null,
+          zipCode:      (extracted.zipCode      as string) || pending.zipCode      || null,
+          doorCode:     (extracted.doorCode     as string) || pending.doorCode     || null,
+          contactPhone: (extracted.contactPhone as string) || pending.contactPhone || null,
+          contactName:  (extracted.contactName  as string) || pending.contactName  || null,
+        },
+      })
+
+      // Matcher l'équipe
+      let teamId: string | null = null
+      const teamName = extracted.teamName as string | null
+      if (teamName) {
+        const match = teams.find((t) =>
+          t.name.toLowerCase() === teamName.toLowerCase() ||
+          t.name.toLowerCase().includes(teamName.toLowerCase()) ||
+          teamName.toLowerCase().includes(t.name.toLowerCase())
+        )
+        teamId = match?.id ?? null
+      }
+
+      if (!teamId || !finalAddress || !pending.startDate || !pending.endDate || !admin) {
+        failed++
+        continue
+      }
+
+      // Confirmation automatique
+      const notesValue = [pending.propertyName, pending.notes].filter(Boolean).join(" — ") || null
+
+      await prisma.$transaction(async (tx) => {
+        const created = await tx.accommodation.create({
+          data: {
+            companyId:    user.companyId!,
+            teamId:       teamId!,
+            createdById:  admin.id,
+            startDate:    pending.startDate!,
+            endDate:      pending.endDate!,
+            address:      finalAddress!,
+            city:         (extracted.city         as string) || pending.city         || null,
+            zipCode:      (extracted.zipCode      as string) || pending.zipCode      || null,
+            doorCode:     (extracted.doorCode     as string) || pending.doorCode     || null,
+            contactName:  (extracted.contactName  as string) || pending.contactName  || null,
+            contactPhone: (extracted.contactPhone as string) || pending.contactPhone || null,
+            notes:        notesValue,
+          },
+        })
+
+        await tx.pendingAccommodation.update({
+          where: { id: pending.id },
+          data: {
+            status:          "CONFIRMED",
+            accommodationId: created.id,
+            confirmedById:   user.id,
+            confirmedAt:     new Date(),
+          },
+        })
+      })
+
+      processed++
+    } catch {
+      failed++
+    }
+  }
+
+  revalidatePath("/logements")
+  revalidatePath("/planning/moi")
+  return { success: true, processed, failed }
+}
+
 // ─── Supprimer un logement ────────────────────────────────────────────────────
 
 export async function deleteLogement(id: string) {

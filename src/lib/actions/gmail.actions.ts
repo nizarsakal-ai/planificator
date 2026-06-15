@@ -28,7 +28,7 @@ export async function getPendingAccommodations() {
   })
 }
 
-export async function confirmPendingAccommodation(id: string, teamId: string) {
+export async function confirmPendingAccommodation(id: string, teamId: string, overrideAddress?: string) {
   const user = await requireAdmin()
 
   const pending = await prisma.pendingAccommodation.findFirst({
@@ -36,7 +36,8 @@ export async function confirmPendingAccommodation(id: string, teamId: string) {
   })
   if (!pending)               return { error: "Réservation introuvable." }
   if (!pending.startDate || !pending.endDate) return { error: "Dates manquantes dans l'email." }
-  if (!pending.address)       return { error: "Adresse manquante dans l'email." }
+  const finalAddress = pending.address || overrideAddress?.trim()
+  if (!finalAddress)          return { error: "Veuillez saisir l'adresse du logement." }
 
   const team = await prisma.team.findFirst({
     where: { id: teamId, companyId: user.companyId! },
@@ -79,7 +80,7 @@ export async function confirmPendingAccommodation(id: string, teamId: string) {
         createdById:  user.id,
         startDate:    pending.startDate!,
         endDate:      pending.endDate!,
-        address:      pending.address!,
+        address:      finalAddress,
         city:         pending.city         || null,
         zipCode:      pending.zipCode      || null,
         doorCode:     pending.doorCode     || null,
@@ -127,7 +128,7 @@ export async function confirmPendingAccommodation(id: string, teamId: string) {
       to:            email,
       recipientName: `${membre.employee.firstName} ${membre.employee.lastName}`,
       teamName:      team.name,
-      address:       `${pending.address}${pending.city ? `, ${pending.city}` : ""}`,
+      address:       `${finalAddress}${pending.city ? `, ${pending.city}` : ""}`,
       startLabel,
       endLabel,
       doorCode:      pending.doorCode  ?? undefined,
