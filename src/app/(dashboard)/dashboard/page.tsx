@@ -560,7 +560,21 @@ export default async function DashboardPage({
       </div>
 
       {/* Contenu selon le rôle */}
-      {role === "SUPER_ADMIN" && <SuperAdminDashboard />}
+      {role === "SUPER_ADMIN" && (
+        <>
+          <SuperAdminDashboard />
+          {companyId && (
+            <>
+              <div className="flex items-center gap-3 pt-2">
+                <div className="h-px flex-1 bg-slate-200" />
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Mon entreprise</span>
+                <div className="h-px flex-1 bg-slate-200" />
+              </div>
+              <AdminDashboard companyId={companyId} />
+            </>
+          )}
+        </>
+      )}
 
       {role === "ADMIN" && companyId && (
         <AdminDashboard companyId={companyId} />
