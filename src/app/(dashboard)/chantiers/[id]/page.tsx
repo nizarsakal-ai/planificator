@@ -11,6 +11,7 @@ import { AffecterEquipeForm } from "@/components/chantiers/AffecterEquipeForm"
 import { DocumentsSection } from "@/components/chantiers/DocumentsSection"
 import { DeleteChantierButton } from "@/components/chantiers/DeleteChantierButton"
 import { DeleteAssignmentBlockButton } from "@/components/chantiers/DeleteAssignmentBlockButton"
+import { RemoveEmployeeFromBlockButton } from "@/components/chantiers/RemoveEmployeeFromBlockButton"
 
 export const metadata: Metadata = { title: "Détail chantier" }
 
@@ -434,6 +435,16 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
                               className="inline-flex items-center gap-1 bg-white border border-slate-200 text-slate-600 text-[11px] font-medium px-2 py-0.5 rounded-full"
                             >
                               {emp.firstName} {emp.lastName}
+                              {isAdmin && (
+                                <RemoveEmployeeFromBlockButton
+                                  worksiteId={chantier.id}
+                                  teamId={block.teamId}
+                                  startDate={block.startDate.toISOString().split("T")[0]}
+                                  endDate={block.endDate.toISOString().split("T")[0]}
+                                  employeeId={emp.id}
+                                  employeeName={`${emp.firstName} ${emp.lastName}`}
+                                />
+                              )}
                             </span>
                           ))}
                         </div>

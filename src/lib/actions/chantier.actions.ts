@@ -515,3 +515,46 @@ export async function removeEmployeeFromAssignment(assignmentId: string, employe
   revalidatePath("/planning")
   return { success: true }
 }
+
+// ─── Retirer un employé de toutes les affectations d'un bloc ─────────────────
+
+export async function removeEmployeeFromBlock(
+  worksiteId: string,
+  teamId: string,
+  startDate: string,
+  endDate: string,
+  employeeId: string,
+) {
+  const session = await auth()
+  if (!session?.user || !["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)) {
+    return { error: "Non autorisé" }
+  }
+
+  const isSuperAdmin = session.user.role === "SUPER_ADMIN"
+
+  const worksite = await prisma.worksite.findFirst({
+    where: {
+      id: worksiteId,
+      ...(isSuperAdmin ? {} : { companyId: session.user.companyId! }),
+    },
+    select: { id: true },
+  })
+  if (!worksite) return { error: "Chantier introuvable" }
+
+  const assignments = await prisma.assignment.findMany({
+    where: {
+      worksiteId,
+      teamId,
+      date: { gte: new Date(startDate), lte: new Date(endDate) },
+    },
+    select: { id: true },
+  })
+
+  await prisma.employeeAssignment.deleteMany({
+    where: { assignmentId: { in: assignments.map((a) => a.id) }, employeeId },
+  })
+
+  revalidatePath(`/chantiers/${worksiteId}`)
+  revalidatePath("/planning")
+  return { success: true }
+}
