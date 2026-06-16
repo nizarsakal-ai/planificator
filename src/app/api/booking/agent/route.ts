@@ -112,14 +112,30 @@ Instructions importantes:
 
   // ── MATCH ÉQUIPE ───────────────────────────────────────────────────────────
   let matchedTeamId: string | null = null
-  const teamName = extracted.teamName as string | null
-  if (teamName) {
-    const match = teams.find((t) =>
-      t.name.toLowerCase() === teamName.toLowerCase() ||
-      t.name.toLowerCase().includes(teamName.toLowerCase()) ||
-      teamName.toLowerCase().includes(t.name.toLowerCase())
-    )
-    matchedTeamId = match?.id ?? null
+
+  // 1) Par adresse déjà connue (logements passés)
+  if (finalAddress) {
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "")
+    const prefix = normalize(finalAddress).substring(0, 10)
+    const pastAcc = await prisma.accommodation.findMany({
+      where: { companyId },
+      select: { teamId: true, address: true },
+    })
+    const match = pastAcc.find((a) => a.address && normalize(a.address).includes(prefix))
+    if (match) matchedTeamId = match.teamId
+  }
+
+  // 2) Fallback : nom d'équipe dans l'email
+  if (!matchedTeamId) {
+    const teamName = extracted.teamName as string | null
+    if (teamName) {
+      const match = teams.find((t) =>
+        t.name.toLowerCase() === teamName.toLowerCase() ||
+        t.name.toLowerCase().includes(teamName.toLowerCase()) ||
+        teamName.toLowerCase().includes(t.name.toLowerCase())
+      )
+      matchedTeamId = match?.id ?? null
+    }
   }
 
   const hasAllData = matchedTeamId && admin && finalAddress && extracted.startDate && extracted.endDate
