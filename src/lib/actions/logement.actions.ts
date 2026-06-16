@@ -267,16 +267,39 @@ Pour teamName: cherche un prénom/nom qui correspond à une équipe disponible.`
         },
       })
 
-      // Matcher l'équipe
+      // Matcher l'équipe — 1) par adresse déjà connue, 2) par nom extrait
       let teamId: string | null = null
-      const teamName = extracted.teamName as string | null
-      if (teamName) {
-        const match = teams.find((t) =>
-          t.name.toLowerCase() === teamName.toLowerCase() ||
-          t.name.toLowerCase().includes(teamName.toLowerCase()) ||
-          teamName.toLowerCase().includes(t.name.toLowerCase())
-        )
-        teamId = match?.id ?? null
+
+      if (finalAddress) {
+        const normalizeAddr = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "")
+        const pastAcc = await prisma.accommodation.findFirst({
+          where: { companyId: user.companyId!, teamId: { not: null } },
+          orderBy: { createdAt: "desc" },
+          select: { teamId: true, address: true },
+        })
+        if (pastAcc?.address) {
+          const allAcc = await prisma.accommodation.findMany({
+            where: { companyId: user.companyId!, teamId: { not: null } },
+            select: { teamId: true, address: true },
+          })
+          const match = allAcc.find(
+            (a) => a.address && normalizeAddr(a.address).includes(normalizeAddr(finalAddress).substring(0, 10))
+          )
+          teamId = match?.teamId ?? null
+        }
+      }
+
+      // Fallback : nom d'équipe extrait par l'IA
+      if (!teamId) {
+        const teamName = extracted.teamName as string | null
+        if (teamName) {
+          const match = teams.find((t) =>
+            t.name.toLowerCase() === teamName.toLowerCase() ||
+            t.name.toLowerCase().includes(teamName.toLowerCase()) ||
+            teamName.toLowerCase().includes(t.name.toLowerCase())
+          )
+          teamId = match?.id ?? null
+        }
       }
 
       if (!teamId || !finalAddress || !pending.startDate || !pending.endDate || !admin) {
