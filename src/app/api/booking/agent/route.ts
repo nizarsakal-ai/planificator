@@ -98,13 +98,16 @@ Instructions importantes:
   const propertyName  = (extracted.propertyName as string) || null
 
   // ── FILTRE DATES PASSÉES ───────────────────────────────────────────────────
-  if (extracted.endDate) {
-    const endDate = new Date(extracted.endDate as string)
-    const todayStart = new Date()
-    todayStart.setHours(0, 0, 0, 0)
-    if (endDate < todayStart) {
-      return NextResponse.json({ ok: true, action: "skipped", reason: "past reservation" })
-    }
+  // Si pas de date de fin extractible → ignorer
+  if (!extracted.endDate) {
+    return NextResponse.json({ ok: true, action: "skipped", reason: "no date found" })
+  }
+  // Si date de fin passée → ignorer
+  const endDate = new Date(extracted.endDate as string)
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
+  if (endDate < todayStart) {
+    return NextResponse.json({ ok: true, action: "skipped", reason: "past reservation" })
   }
 
   // ── CAS ANNULATION ─────────────────────────────────────────────────────────
