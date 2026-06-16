@@ -272,21 +272,15 @@ Pour teamName: cherche un prénom/nom qui correspond à une équipe disponible.`
 
       if (finalAddress) {
         const normalizeAddr = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "")
-        const pastAcc = await prisma.accommodation.findFirst({
-          where: { companyId: user.companyId!, teamId: { not: null } },
-          orderBy: { createdAt: "desc" },
+        const allAcc = await prisma.accommodation.findMany({
+          where: { companyId: user.companyId! },
           select: { teamId: true, address: true },
         })
-        if (pastAcc?.address) {
-          const allAcc = await prisma.accommodation.findMany({
-            where: { companyId: user.companyId!, teamId: { not: null } },
-            select: { teamId: true, address: true },
-          })
-          const match = allAcc.find(
-            (a) => a.address && normalizeAddr(a.address).includes(normalizeAddr(finalAddress).substring(0, 10))
-          )
-          teamId = match?.teamId ?? null
-        }
+        const addrPrefix = normalizeAddr(finalAddress).substring(0, 10)
+        const match = allAcc.find(
+          (a) => a.address && normalizeAddr(a.address).includes(addrPrefix)
+        )
+        if (match) teamId = match.teamId
       }
 
       // Fallback : nom d'équipe extrait par l'IA
