@@ -97,6 +97,16 @@ Instructions importantes:
   const finalAddress  = (extracted.address as string) || null
   const propertyName  = (extracted.propertyName as string) || null
 
+  // ── FILTRE DATES PASSÉES ───────────────────────────────────────────────────
+  if (extracted.endDate) {
+    const endDate = new Date(extracted.endDate as string)
+    const todayStart = new Date()
+    todayStart.setHours(0, 0, 0, 0)
+    if (endDate < todayStart) {
+      return NextResponse.json({ ok: true, action: "skipped", reason: "past reservation" })
+    }
+  }
+
   // ── CAS ANNULATION ─────────────────────────────────────────────────────────
   if (finalStatus === "cancelled" && finalRef) {
     const existing = await prisma.accommodation.findUnique({
