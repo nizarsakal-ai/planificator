@@ -97,19 +97,6 @@ Instructions importantes:
   const finalAddress  = (extracted.address as string) || null
   const propertyName  = (extracted.propertyName as string) || null
 
-  // ── FILTRE DATES PASSÉES ───────────────────────────────────────────────────
-  // Si pas de date de fin extractible → ignorer
-  if (!extracted.endDate) {
-    return NextResponse.json({ ok: true, action: "skipped", reason: "no date found" })
-  }
-  // Si date de fin passée → ignorer
-  const endDate = new Date(extracted.endDate as string)
-  const todayStart = new Date()
-  todayStart.setHours(0, 0, 0, 0)
-  if (endDate < todayStart) {
-    return NextResponse.json({ ok: true, action: "skipped", reason: "past reservation" })
-  }
-
   // ── CAS ANNULATION ─────────────────────────────────────────────────────────
   if (finalStatus === "cancelled" && finalRef) {
     const existing = await prisma.accommodation.findUnique({
@@ -121,6 +108,20 @@ Instructions importantes:
       await notifyAdmins(companyId, "Réservation annulée (IA)", `Booking #${finalRef} annulée automatiquement.`, "/logements")
       return NextResponse.json({ ok: true, action: "cancelled", id: existing.id })
     }
+  }
+
+  // ── FILTRE : SEULEMENT CONFIRMÉES À PARTIR DU 17/06/2026 ──────────────────
+  if (finalStatus !== "confirmed") {
+    return NextResponse.json({ ok: true, action: "skipped", reason: "not confirmed" })
+  }
+  if (!extracted.startDate) {
+    return NextResponse.json({ ok: true, action: "skipped", reason: "no start date found" })
+  }
+  const startDate = new Date(extracted.startDate as string)
+  const cutoffDate = new Date("2026-06-17")
+  cutoffDate.setHours(0, 0, 0, 0)
+  if (startDate < cutoffDate) {
+    return NextResponse.json({ ok: true, action: "skipped", reason: "before cutoff date" })
   }
 
   // ── MATCH ÉQUIPE ───────────────────────────────────────────────────────────

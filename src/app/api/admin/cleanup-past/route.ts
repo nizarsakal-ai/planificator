@@ -10,10 +10,13 @@ export async function POST(req: Request) {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
+  const cutoff = new Date("2026-06-17")
+  cutoff.setHours(0, 0, 0, 0)
+
   const [deletedPending, deletedAccommodations] = await Promise.all([
     prisma.pendingAccommodation.deleteMany({}),
     prisma.accommodation.deleteMany({
-      where: { endDate: { lt: today } },
+      where: { startDate: { lt: cutoff } },
     }),
   ])
 
