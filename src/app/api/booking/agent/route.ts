@@ -3,6 +3,18 @@ import { prisma } from "@/lib/prisma"
 import Anthropic from "@anthropic-ai/sdk"
 import { z } from "zod"
 
+// Retry helper for Neon cold-start: up to 3 attempts with 1s/2s backoff
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  for (let i = 0; i < attempts; i++) {
+    try { return await fn() }
+    catch (err) {
+      if (i === attempts - 1) throw err
+      await new Promise(r => setTimeout(r, 1000 * (i + 1)))
+    }
+  }
+  throw new Error("unreachable")
+}
+
 const AgentSchema = z.object({
   companyId:        z.string().min(1),
   rawEmailText:     z.string().min(1),
@@ -27,10 +39,10 @@ export async function POST(req: Request) {
 
   const { companyId, rawEmailText, bookingReference, status } = parsed.data
 
-  const company = await prisma.company.findUnique({ where: { id: companyId }, select: { id: true } })
+  const company = await withRetry(() => prisma.company.findUnique({ where: { id: companyId }, select: { id: true } }))
   if (!company) return NextResponse.json({ error: "Company not found" }, { status: 404 })
 
-  const [teams, admin] = await Promise.all([
+  const [teams, admin] = await withRetry(() => Promise.all([
     prisma.team.findMany({
       where: { companyId, active: true },
       select: { id: true, name: true },
@@ -39,7 +51,7 @@ export async function POST(req: Request) {
       where: { companyId, role: { in: ["SUPER_ADMIN", "ADMIN"] } },
       select: { id: true },
     }),
-  ])
+  ]))
 
   // ── Agent IA : extraction intelligente ─────────────────────────────────────
   const teamNames = teams.map((t) => t.name).join(", ")
