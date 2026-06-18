@@ -85,7 +85,8 @@ Instructions importantes:
 
       const content = msg.content[0]
       if (content.type === "text") {
-        extracted = JSON.parse(content.text)
+        const cleaned = content.text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim()
+        extracted = JSON.parse(cleaned)
       }
     } catch (err) {
       console.error("[booking/agent] Claude error:", err)
