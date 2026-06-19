@@ -123,18 +123,21 @@ Instructions importantes:
     }
   }
 
-  // ── FILTRE : SEULEMENT CONFIRMÉES À PARTIR DU 17/06/2026 ──────────────────
+  // ── FILTRE : SEULEMENT CONFIRMÉES, IGNORER SI DÉJÀ TERMINÉES AVANT 17/06/2026 ──
   if (finalStatus !== "confirmed") {
     return NextResponse.json({ ok: true, action: "skipped", reason: "not confirmed" })
   }
   if (!extracted.startDate) {
     return NextResponse.json({ ok: true, action: "skipped", reason: "no start date found" })
   }
-  const startDate = new Date(extracted.startDate as string)
-  const cutoffDate = new Date("2026-06-17")
-  cutoffDate.setHours(0, 0, 0, 0)
-  if (startDate < cutoffDate) {
-    return NextResponse.json({ ok: true, action: "skipped", reason: "before cutoff date" })
+  // Ne skip que si la réservation est entièrement terminée avant le 17/06/2026
+  if (extracted.endDate) {
+    const endDate = new Date(extracted.endDate as string)
+    const cutoffDate = new Date("2026-06-17")
+    cutoffDate.setHours(0, 0, 0, 0)
+    if (endDate < cutoffDate) {
+      return NextResponse.json({ ok: true, action: "skipped", reason: "reservation ended before cutoff" })
+    }
   }
 
   // ── MATCH ÉQUIPE ───────────────────────────────────────────────────────────
