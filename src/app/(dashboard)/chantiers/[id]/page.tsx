@@ -12,6 +12,7 @@ import { DocumentsSection } from "@/components/chantiers/DocumentsSection"
 import { DeleteChantierButton } from "@/components/chantiers/DeleteChantierButton"
 import { DeleteAssignmentBlockButton } from "@/components/chantiers/DeleteAssignmentBlockButton"
 import { RemoveEmployeeFromBlockButton } from "@/components/chantiers/RemoveEmployeeFromBlockButton"
+import { AddEmployeeToBlockButton } from "@/components/chantiers/AddEmployeeToBlockButton"
 
 export const metadata: Metadata = { title: "Détail chantier" }
 
@@ -135,7 +136,7 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
     if (!currentEmployeeId) redirect("/dashboard")
   }
 
-  const [chantier, teams, clients] = await Promise.all([
+  const [chantier, teams, clients, allEmployees] = await Promise.all([
     prisma.worksite.findFirst({
       where: {
         id,
@@ -169,6 +170,11 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
       where: { companyId: session.user.companyId!, active: true },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
+    }),
+    prisma.employee.findMany({
+      where: { companyId: session.user.companyId!, active: true },
+      select: { id: true, firstName: true, lastName: true },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
     }),
   ])
 
@@ -427,28 +433,36 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
                       </div>
 
                       {/* Membres */}
-                      {block.employees.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 pl-5">
-                          {block.employees.map((emp) => (
-                            <span
-                              key={emp.id}
-                              className="inline-flex items-center gap-1 bg-white border border-slate-200 text-slate-600 text-[11px] font-medium px-2 py-0.5 rounded-full"
-                            >
-                              {emp.firstName} {emp.lastName}
-                              {isAdmin && (
-                                <RemoveEmployeeFromBlockButton
-                                  worksiteId={chantier.id}
-                                  teamId={block.teamId}
-                                  startDate={block.startDate.toISOString().split("T")[0]}
-                                  endDate={block.endDate.toISOString().split("T")[0]}
-                                  employeeId={emp.id}
-                                  employeeName={`${emp.firstName} ${emp.lastName}`}
-                                />
-                              )}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                      <div className="flex flex-wrap gap-1.5 pl-5 items-center">
+                        {block.employees.map((emp) => (
+                          <span
+                            key={emp.id}
+                            className="inline-flex items-center gap-1 bg-white border border-slate-200 text-slate-600 text-[11px] font-medium px-2 py-0.5 rounded-full"
+                          >
+                            {emp.firstName} {emp.lastName}
+                            {isAdmin && (
+                              <RemoveEmployeeFromBlockButton
+                                worksiteId={chantier.id}
+                                teamId={block.teamId}
+                                startDate={block.startDate.toISOString().split("T")[0]}
+                                endDate={block.endDate.toISOString().split("T")[0]}
+                                employeeId={emp.id}
+                                employeeName={`${emp.firstName} ${emp.lastName}`}
+                              />
+                            )}
+                          </span>
+                        ))}
+                        {isAdmin && (
+                          <AddEmployeeToBlockButton
+                            worksiteId={chantier.id}
+                            teamId={block.teamId}
+                            startDate={block.startDate.toISOString().split("T")[0]}
+                            endDate={block.endDate.toISOString().split("T")[0]}
+                            currentEmployeeIds={block.employees.map((e) => e.id)}
+                            allEmployees={allEmployees}
+                          />
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>

@@ -558,3 +558,55 @@ export async function removeEmployeeFromBlock(
   revalidatePath("/planning")
   return { success: true }
 }
+
+export async function addEmployeeToBlock(
+  worksiteId: string,
+  teamId: string,
+  startDate: string,
+  endDate: string,
+  employeeId: string,
+) {
+  const session = await auth()
+  if (!session?.user || !["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) {
+    return { error: "Non autorisé" }
+  }
+
+  const isSuperAdmin = session.user.role === "SUPER_ADMIN"
+
+  const worksite = await prisma.worksite.findFirst({
+    where: {
+      id: worksiteId,
+      ...(isSuperAdmin ? {} : { companyId: session.user.companyId! }),
+    },
+    select: { id: true },
+  })
+  if (!worksite) return { error: "Chantier introuvable" }
+
+  const assignments = await prisma.assignment.findMany({
+    where: {
+      worksiteId,
+      teamId,
+      date: { gte: new Date(startDate), lte: new Date(endDate) },
+    },
+    select: { id: true, date: true },
+  })
+
+  // Créer les EmployeeAssignment un par un en ignorant les conflits (employé déjà affecté ce jour-là)
+  let added = 0
+  let skipped = 0
+  for (const assignment of assignments) {
+    try {
+      await prisma.employeeAssignment.create({
+        data: { assignmentId: assignment.id, employeeId, date: assignment.date },
+      })
+      added++
+    } catch {
+      // Conflit unique (employé déjà sur un autre chantier ce jour) — on ignore
+      skipped++
+    }
+  }
+
+  revalidatePath(`/chantiers/${worksiteId}`)
+  revalidatePath("/planning")
+  return { success: true, added, skipped }
+}
