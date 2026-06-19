@@ -106,13 +106,24 @@ export default async function RapportsPage() {
           <h1 className="text-2xl font-bold text-slate-900">Rapports</h1>
           <p className="text-sm text-slate-500 mt-1">Statistiques et exports des 30 derniers jours</p>
         </div>
-        <a
-          href="/rapports/mensuel"
-          className="inline-flex items-center gap-2 bg-[#0f3460] text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-[#0f3460]/90 transition-colors"
-        >
-          <FileText className="h-4 w-4" />
-          Rapport de paie mensuel
-        </a>
+        <div className="flex items-center gap-2">
+          <a
+            href="/rapports/mensuel"
+            className="inline-flex items-center gap-2 bg-[#0f3460] text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-[#0f3460]/90 transition-colors"
+          >
+            <FileText className="h-4 w-4" />
+            Rapport de paie mensuel
+          </a>
+          <a
+            href="/api/pdf/presence"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 bg-green-700 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-green-800 transition-colors"
+          >
+            <Download className="h-4 w-4" />
+            Présence 30 jours (PDF)
+          </a>
+        </div>
       </div>
 
       {/* KPIs */}
