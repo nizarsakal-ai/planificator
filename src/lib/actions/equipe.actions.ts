@@ -92,17 +92,26 @@ export async function updateEquipeLeader(teamId: string, newLeaderId: string) {
   })
   if (!newLeader) return { error: "Employé introuvable." }
 
+  // Vérifier si l'ancien chef dirige d'autres équipes actives
+  const otherLeadTeams = await prisma.team.count({
+    where: {
+      leaderId: team.leaderId,
+      id: { not: teamId },
+      active: true,
+    },
+  })
+
   await prisma.$transaction([
     // Nouveau chef → TEAM_LEADER
     prisma.user.update({
       where: { id: newLeader.userId },
       data: { role: "TEAM_LEADER" },
     }),
-    // Ancien chef → EMPLOYEE (si pas chef d'une autre équipe)
-    prisma.user.update({
+    // Ancien chef → EMPLOYEE seulement s'il ne dirige plus aucune autre équipe
+    ...(otherLeadTeams === 0 ? [prisma.user.update({
       where: { id: team.leader.userId },
       data: { role: "EMPLOYEE" },
-    }),
+    })] : []),
     // Mettre à jour l'équipe
     prisma.team.update({
       where: { id: teamId },

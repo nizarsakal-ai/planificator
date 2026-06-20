@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { toast } from "sonner"
-import { UserX, UserCheck, Pencil } from "lucide-react"
+import { UserX, UserCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { toggleEmployeActive } from "@/lib/actions/employe.actions"
 
