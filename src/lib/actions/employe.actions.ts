@@ -263,6 +263,7 @@ export async function deleteEmploye(employeeId: string) {
 
     if (!employee) return { error: "Employé introuvable" }
 
+    await prisma.employeeAssignment.deleteMany({ where: { employeeId } })
     await prisma.employee.delete({ where: { id: employeeId } })
 
     if (employee.userId) {
