@@ -2,7 +2,14 @@ import { Resend } from "resend"
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
-const FROM = process.env.FROM_EMAIL ?? "Planificator <noreply@planificator.fr>"
+// Resend refuse tout envoi depuis un domaine non vérifié (erreur 403).
+// Seul galyaevents.fr est vérifié sur ce compte Resend : on ignore donc
+// toute valeur de FROM_EMAIL qui ne serait pas sur ce domaine, afin que
+// les emails partent toujours, même si la variable Vercel est mal configurée.
+const VERIFIED_FROM = "Planificator <noreply@galyaevents.fr>"
+const FROM = process.env.FROM_EMAIL?.includes("@galyaevents.fr")
+  ? process.env.FROM_EMAIL
+  : VERIFIED_FROM
 const APP_URL = process.env.NEXTAUTH_URL ?? "http://localhost:3000"
 
 // ─── Invitation ───────────────────────────────────────────────────────────────
