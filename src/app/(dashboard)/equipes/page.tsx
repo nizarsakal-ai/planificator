@@ -38,6 +38,10 @@ export default async function EquipesPage() {
       orderBy: { firstName: "asc" },
       select: { id: true, firstName: true, lastName: true, jobTitle: true },
     }),
+    prisma.truck.findMany({
+      where: { companyId: session.user.companyId! },
+      orderBy: { matricule: "asc" },
+    }),
   ])
 
   const actives = teams.filter((t) => t.active).length
