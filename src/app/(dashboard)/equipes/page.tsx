@@ -10,6 +10,7 @@ import { Layers, Crown, Users, ChevronRight } from "lucide-react"
 import { getInitials } from "@/lib/utils"
 import { NouvelleEquipeDialog } from "@/components/equipes/NouvelleEquipeDialog"
 import { MembreActions } from "@/components/equipes/MembreActions"
+import { TruckSelector } from "@/components/equipes/TruckSelector"
 
 export const metadata: Metadata = { title: "Équipes" }
 
@@ -18,7 +19,7 @@ export default async function EquipesPage() {
   if (!session?.user) redirect("/login")
   if (!["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)) redirect("/dashboard")
 
-  const [teams, employees] = await Promise.all([
+  const [teams, employees, trucks] = await Promise.all([
     prisma.team.findMany({
       where: { companyId: session.user.companyId! },
       include: {
@@ -28,6 +29,7 @@ export default async function EquipesPage() {
           include: { employee: true },
           orderBy: { joinedAt: "asc" },
         },
+        truck: true,
       },
       orderBy: { name: "asc" },
     }),
@@ -194,6 +196,11 @@ export default async function EquipesPage() {
                       />
                     </div>
                   </div>
+                  <TruckSelector
+                    teamId={team.id}
+                    currentTruck={team.truck ?? null}
+                    allTrucks={trucks}
+                  />
                 </CardContent>
               </Card>
             )

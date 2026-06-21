@@ -286,6 +286,7 @@ model Team {
   assignments    Assignment[]
   dailyReports   DailyReport[]
   accommodations Accommodation[]
+  truck          Truck?
 
   @@unique([name, companyId]) // pas de doublon de nom d'équipe dans la même entreprise
   @@index([companyId])
@@ -842,4 +843,19 @@ model PendingAccommodation {
   @@index([companyId])
   @@index([status])
   @@map("pending_accommodations")
+}
+
+model Truck {
+  id         String   @id @default(cuid())
+  matricule  String
+  companyId  String
+  teamId     String?  @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  team    Team?    @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  @@unique([matricule, companyId])
+  @@index([companyId])
+  @@map("trucks")
 }
