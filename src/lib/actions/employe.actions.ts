@@ -251,3 +251,20 @@ export async function toggleEmployeActive(employeeId: string, active: boolean) {
   revalidatePath("/employes")
   return { success: true }
 }
+
+export async function deleteEmploye(employeeId: string) {
+  try {
+    const session = await getServerSession(authOptions)
+    if (!session) return { error: "Non autorisé" }
+
+    await prisma.user.delete({
+      where: { id: employeeId },
+    })
+
+    revalidatePath("/employes")
+    return { success: true }
+  } catch (error) {
+    console.error("deleteEmploye error:", error)
+    return { error: "Erreur lors de la suppression" }
+  }
+}
