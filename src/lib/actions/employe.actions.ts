@@ -267,7 +267,7 @@ export async function deleteEmploye(employeeId: string) {
     await prisma.employee.delete({ where: { id: employeeId } })
 
     if (employee.userId) {
-      await prisma.user.delete({ where: { id: employee.userId } })
+      try { await prisma.user.delete({ where: { id: employee.userId } }) } catch(_e) {}
     }
 
     revalidatePath("/employes")
