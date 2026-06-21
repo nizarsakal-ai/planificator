@@ -254,6 +254,11 @@ Format (toutes les valeurs peuvent être null si non trouvées) :
 
           // If the fallback found nothing useful, skip this message
           const hasUsefulData = parsed.address || parsed.startDate || parsed.endDate || parsed.propertyName
+          if (parsed.startDate) {
+            const startDate = new Date(parsed.startDate as string)
+            const cutoff = new Date('2026-06-17')
+            if (startDate < cutoff) { console.log('[gmail-scan] Ignoré: avant le 17/06/2026'); continue }
+          }
           if (!hasUsefulData) {
             console.log(`[gmail-scan] No useful data extracted for message ${msg.id}, skipping`)
             continue
