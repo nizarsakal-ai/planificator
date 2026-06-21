@@ -256,9 +256,18 @@ export async function deleteEmploye(employeeId: string) {
   try {
     await requireAdmin()
 
-    await prisma.employee.delete({
+    const employee = await prisma.employee.findUnique({
       where: { id: employeeId },
+      select: { userId: true },
     })
+
+    if (!employee) return { error: "Employé introuvable" }
+
+    await prisma.employee.delete({ where: { id: employeeId } })
+
+    if (employee.userId) {
+      await prisma.user.delete({ where: { id: employee.userId } })
+    }
 
     revalidatePath("/employes")
     return { success: true }
