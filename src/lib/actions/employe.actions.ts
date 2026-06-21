@@ -254,10 +254,9 @@ export async function toggleEmployeActive(employeeId: string, active: boolean) {
 
 export async function deleteEmploye(employeeId: string) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return { error: "Non autorisé" }
+    await requireAdmin()
 
-    await prisma.user.delete({
+    await prisma.employee.delete({
       where: { id: employeeId },
     })
 
