@@ -259,7 +259,19 @@ Format (toutes les valeurs peuvent être null si non trouvées) :
             continue
           }
 
-          // ── Chercher l'admin pour createdById ─────────────────────────
+          // CAS ANNULATION
+          if (parsed.status === "cancelled" && parsed.bookingReference) {
+            const existing = await prisma.accommodation.findFirst({
+              where: { companyId: conn.companyId, bookingReference: parsed.bookingReference as string },
+              select: { id: true },
+            })
+            if (existing) {
+              await prisma.accommodation.update({ where: { id: existing.id }, data: { status: "CANCELLED" } })
+              stats.detected++
+              continue
+            }
+          }
+          // Chercher l'admin pour createdById ─────────────────────────
           const admin = await prisma.user.findFirst({
             where:  { companyId: conn.companyId, role: { in: ["SUPER_ADMIN", "ADMIN"] } },
             select: { id: true },
