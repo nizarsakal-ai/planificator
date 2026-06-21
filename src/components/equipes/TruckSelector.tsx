@@ -4,7 +4,7 @@ import { Truck } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
-interface TruckData { id: string; matricule: string; teamId: string | null }
+interface TruckData { id: string; matricule: string; teamId: string | null; teamName?: string | null }
 interface Props { teamId: string; currentTruck: TruckData | null; allTrucks: TruckData[] }
 
 export function TruckSelector({ teamId, currentTruck, allTrucks }: Props) {
@@ -12,7 +12,6 @@ export function TruckSelector({ teamId, currentTruck, allTrucks }: Props) {
   const [loading, setLoading] = useState(false)
   const [newMatricule, setNewMatricule] = useState("")
   const [showAdd, setShowAdd] = useState(false)
-  const available = allTrucks.filter(t => !t.teamId || t.teamId === teamId)
 
   const assign = async (truckId: string) => {
     setLoading(true)
@@ -67,9 +66,14 @@ export function TruckSelector({ teamId, currentTruck, allTrucks }: Props) {
           className="flex-1 text-sm border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="">Aucun camion</option>
-          {available.map(t => (
-            <option key={t.id} value={t.id}>{t.matricule}</option>
-          ))}
+          {allTrucks.map(t => {
+            const usedByOther = t.teamId && t.teamId !== teamId
+            return (
+              <option key={t.id} value={t.id}>
+                {t.matricule}{usedByOther ? ` (équipe ${t.teamName ?? "autre"})` : ""}
+              </option>
+            )
+          })}
         </select>
         <button
           onClick={() => setShowAdd(!showAdd)}

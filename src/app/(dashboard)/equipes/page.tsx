@@ -46,6 +46,13 @@ export default async function EquipesPage() {
 
   const actives = teams.filter((t) => t.active).length
 
+  const trucksWithTeam = trucks.map((t) => ({
+    id: t.id,
+    matricule: t.matricule,
+    teamId: t.teamId,
+    teamName: t.teamId ? (teams.find((tm) => tm.id === t.teamId)?.name ?? null) : null,
+  }))
+
   return (
     <div className="space-y-6">
       {/* En-tête */}
@@ -203,7 +210,7 @@ export default async function EquipesPage() {
                   <TruckSelector
                     teamId={team.id}
                     currentTruck={team.truck ?? null}
-                    allTrucks={trucks}
+                    allTrucks={trucksWithTeam}
                   />
                 </CardContent>
               </Card>
