@@ -93,18 +93,30 @@ export async function POST(req: Request) {
 
   // ── Cas CONFIRMED ou MODIFIED : upsert ───────────────────────────────────
 
-  // Chercher l'équipe par nom si fourni
+  // Chercher l'équipe par nom si fourni — exact d'abord, puis partiel
   let matchedTeamId: string | null = null
   if (data.teamName) {
-    const team = await prisma.team.findFirst({
+    const exactTeam = await prisma.team.findFirst({
       where: {
         companyId: data.companyId,
         active:    true,
-        name:      { contains: data.teamName, mode: "insensitive" },
+        name:      { equals: data.teamName, mode: "insensitive" },
       },
       select: { id: true },
     })
-    matchedTeamId = team?.id ?? null
+    if (exactTeam) {
+      matchedTeamId = exactTeam.id
+    } else {
+      const partialTeam = await prisma.team.findFirst({
+        where: {
+          companyId: data.companyId,
+          active:    true,
+          name:      { contains: data.teamName, mode: "insensitive" },
+        },
+        select: { id: true },
+      })
+      matchedTeamId = partialTeam?.id ?? null
+    }
   }
 
   const hasRequiredData =

@@ -82,10 +82,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           where:  { id: token.id as string },
           select: { role: true, companyId: true, active: true },
         })
-        if (dbUser && dbUser.active) {
-          token.role      = dbUser.role
-          token.companyId = dbUser.companyId
-        }
+        if (!dbUser || !dbUser.active) return null
+        token.role      = dbUser.role
+        token.companyId = dbUser.companyId
       }
       return token
     },
