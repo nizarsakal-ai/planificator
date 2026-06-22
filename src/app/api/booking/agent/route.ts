@@ -123,8 +123,10 @@ Instructions importantes:
     }
   }
 
-  // ── FILTRE : SEULEMENT CONFIRMÉES, IGNORER SI DÉJÀ TERMINÉES AVANT 17/06/2026 ──
-  if (finalStatus !== "confirmed") {
+  // ── FILTRE : CONFIRMÉES ET MODIFIÉES, IGNORER SI DÉJÀ TERMINÉES AVANT 17/06/2026 ──
+  // Une réservation "modified" reste une réservation à venir : on la crée/met à jour
+  // comme une confirmée (l'upsert par bookingReference gère la mise à jour).
+  if (finalStatus !== "confirmed" && finalStatus !== "modified") {
     return NextResponse.json({ ok: true, action: "skipped", reason: "not confirmed" })
   }
   if (!extracted.startDate) {
