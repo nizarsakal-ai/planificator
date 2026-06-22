@@ -15,11 +15,15 @@ export async function GET() {
 export async function POST(req: Request) {
   const session = await auth()
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  const { matricule } = await req.json()
+  const { matricule, marque } = await req.json()
   if (!matricule) return NextResponse.json({ error: "Matricule requis" }, { status: 400 })
   try {
     const truck = await prisma.truck.create({
-      data: { matricule: matricule.toUpperCase(), companyId: session.user.companyId! },
+      data: {
+        matricule: matricule.toUpperCase(),
+        marque: marque?.trim() || null,
+        companyId: session.user.companyId!,
+      },
     })
     return NextResponse.json(truck)
   } catch {

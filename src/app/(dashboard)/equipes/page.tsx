@@ -49,6 +49,8 @@ export default async function EquipesPage() {
   const trucksWithTeam = trucks.map((t) => ({
     id: t.id,
     matricule: t.matricule,
+    marque: t.marque,
+    chauffeurId: t.chauffeurId,
     teamId: t.teamId,
     teamName: t.teamId ? (teams.find((tm) => tm.id === t.teamId)?.name ?? null) : null,
   }))
@@ -211,6 +213,10 @@ export default async function EquipesPage() {
                     teamId={team.id}
                     currentTruck={team.truck ?? null}
                     allTrucks={trucksWithTeam}
+                    members={membresActifs.map((m) => ({
+                      id: m.employee.id,
+                      name: `${m.employee.firstName} ${m.employee.lastName}`,
+                    }))}
                   />
                 </CardContent>
               </Card>

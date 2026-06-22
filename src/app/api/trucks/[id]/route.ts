@@ -10,7 +10,7 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
     where: { id, companyId: session.user.companyId! },
   })
   if (!existing) return NextResponse.json({ error: "Camion introuvable" }, { status: 404 })
-  const { teamId, matricule } = await req.json()
+  const { teamId, matricule, marque, chauffeurId } = await req.json()
   if (teamId) {
     await prisma.truck.updateMany({
       where: { teamId, companyId: session.user.companyId! },
@@ -21,6 +21,8 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
     where: { id },
     data: {
       ...(matricule !== undefined && { matricule: matricule.toUpperCase() }),
+      ...(marque !== undefined && { marque: marque?.trim() || null }),
+      ...(chauffeurId !== undefined && { chauffeurId: chauffeurId || null }),
       ...(teamId !== undefined && { teamId: teamId || null }),
     },
   })

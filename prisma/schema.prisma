@@ -258,6 +258,7 @@ model Employee {
   timeclocks          Timeclock[]
   dailyReports        DailyReport[]
   signatures          Signature[]
+  drivenTrucks        Truck[]              @relation("TruckChauffeur")
 
   @@index([companyId])
   @@index([userId])
@@ -846,16 +847,20 @@ model PendingAccommodation {
 }
 
 model Truck {
-  id         String   @id @default(cuid())
-  matricule  String
-  companyId  String
-  teamId     String?  @unique
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id          String   @id @default(cuid())
+  matricule   String
+  marque      String?
+  companyId   String
+  teamId      String?  @unique
+  chauffeurId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  team    Team?    @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  team      Team?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  chauffeur Employee? @relation("TruckChauffeur", fields: [chauffeurId], references: [id], onDelete: SetNull)
 
   @@unique([matricule, companyId])
   @@index([companyId])
+  @@index([chauffeurId])
   @@map("trucks")
 }
