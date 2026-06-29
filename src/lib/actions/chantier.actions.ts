@@ -261,10 +261,15 @@ export async function affecterEquipe(formData: FormData) {
   // Vérifier les conflits sur toute la plage
   const conflitEquipe = await prisma.assignment.findFirst({
     where: { teamId, date: { in: dates } },
+    include: { worksite: { select: { name: true, address: true } } },
+    orderBy: { date: "asc" },
   })
   if (conflitEquipe) {
     const d = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(conflitEquipe.date)
-    return { error: `Cette équipe est déjà affectée le ${d}.` }
+    const lieu = conflitEquipe.worksite.address ? ` (${conflitEquipe.worksite.address})` : ""
+    return {
+      error: `Cette équipe est déjà affectée le ${d} au chantier « ${conflitEquipe.worksite.name} »${lieu}. Libérez-la de ce chantier avant de la réaffecter.`,
+    }
   }
 
   if (memberIds.length > 0) {
