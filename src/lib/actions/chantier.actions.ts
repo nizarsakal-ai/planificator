@@ -280,14 +280,10 @@ export async function affecterEquipe(formData: FormData) {
       const fmt = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" })
       const lignes = conflitsEmployes.map((c) => {
         const nom = `${c.employee.firstName} ${c.employee.lastName}`
-        return `${nom} : ${fmt.format(c.date)} sur « ${c.assignment.worksite.name} » (équipe ${c.assignment.team.name})`
+        return `${nom} est affecté le ${fmt.format(c.date)} au chantier « ${c.assignment.worksite.name} » avec l'équipe ${c.assignment.team.name}.`
       })
-      const intro =
-        conflitsEmployes.length > 1
-          ? `${conflitsEmployes.length} membres de l'équipe sont déjà affectés ailleurs :`
-          : `Un membre de l'équipe est déjà affecté ailleurs :`
       return {
-        error: `${intro}\n${lignes.join("\n")}\nDésaffectez-les avant de réaffecter l'équipe.`,
+        error: `${lignes.join("\n")}\nDésaffectez-${conflitsEmployes.length > 1 ? "les" : "le"} avant de réaffecter l'équipe.`,
       }
     }
   }
