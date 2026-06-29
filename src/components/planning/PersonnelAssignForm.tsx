@@ -51,7 +51,7 @@ export function PersonnelAssignForm({ teamId, teamName, worksites, defaultDate }
     setLoading(false)
 
     if (result?.error) {
-      toast.error(result.error)
+      toast.error(<span className="whitespace-pre-line">{result.error}</span>)
     } else {
       const count = result?.count ?? 1
       toast.success(

@@ -83,7 +83,7 @@ export function AffecterEquipeForm({
       const result = await affecterEquipe(formData)
 
       if (result?.error) {
-        toast.error(result.error)
+        toast.error(<span className="whitespace-pre-line">{result.error}</span>)
       } else {
         const count = result?.count ?? 1
         toast.success(

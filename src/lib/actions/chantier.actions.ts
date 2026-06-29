@@ -268,12 +268,27 @@ export async function affecterEquipe(formData: FormData) {
   }
 
   if (memberIds.length > 0) {
-    const conflitEmploye = await prisma.employeeAssignment.findFirst({
+    const conflitsEmployes = await prisma.employeeAssignment.findMany({
       where: { employeeId: { in: memberIds }, date: { in: dates } },
+      include: {
+        employee:   { select: { firstName: true, lastName: true } },
+        assignment: { select: { worksite: { select: { name: true } }, team: { select: { name: true } } } },
+      },
+      orderBy: [{ employeeId: "asc" }, { date: "asc" }],
     })
-    if (conflitEmploye) {
-      const d = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(conflitEmploye.date)
-      return { error: `Un membre de l'équipe est déjà affecté le ${d}.` }
+    if (conflitsEmployes.length > 0) {
+      const fmt = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" })
+      const lignes = conflitsEmployes.map((c) => {
+        const nom = `${c.employee.firstName} ${c.employee.lastName}`
+        return `${nom} : ${fmt.format(c.date)} sur « ${c.assignment.worksite.name} » (équipe ${c.assignment.team.name})`
+      })
+      const intro =
+        conflitsEmployes.length > 1
+          ? `${conflitsEmployes.length} membres de l'équipe sont déjà affectés ailleurs :`
+          : `Un membre de l'équipe est déjà affecté ailleurs :`
+      return {
+        error: `${intro}\n${lignes.join("\n")}\nDésaffectez-les avant de réaffecter l'équipe.`,
+      }
     }
   }
 
@@ -593,7 +608,7 @@ export async function addEmployeeToBlock(
 
   // Créer les EmployeeAssignment un par un en ignorant les conflits (employé déjà affecté ce jour-là)
   let added = 0
-  let skipped = 0
+  const skippedDates: Date[] = []
   for (const assignment of assignments) {
     try {
       await prisma.employeeAssignment.create({
@@ -601,12 +616,32 @@ export async function addEmployeeToBlock(
       })
       added++
     } catch {
-      // Conflit unique (employé déjà sur un autre chantier ce jour) — on ignore
-      skipped++
+      // Conflit unique (employé déjà sur un autre chantier ce jour) — on note la date
+      skippedDates.push(assignment.date)
+    }
+  }
+
+  // Pour les jours ignorés, retrouver OÙ l'employé est déjà affecté (chantier + équipe)
+  const conflicts: { iso: string; date: string; worksiteName: string; teamName: string }[] = []
+  if (skippedDates.length > 0) {
+    const existing = await prisma.employeeAssignment.findMany({
+      where: { employeeId, date: { in: skippedDates } },
+      include: {
+        assignment: { select: { worksite: { select: { name: true } }, team: { select: { name: true } } } },
+      },
+      orderBy: { date: "asc" },
+    })
+    for (const ea of existing) {
+      conflicts.push({
+        iso: ea.date.toISOString().slice(0, 10),
+        date: new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(ea.date),
+        worksiteName: ea.assignment.worksite.name,
+        teamName: ea.assignment.team.name,
+      })
     }
   }
 
   revalidatePath(`/chantiers/${worksiteId}`)
   revalidatePath("/planning")
-  return { success: true, added, skipped }
+  return { success: true, added, skipped: skippedDates.length, conflicts }
 }
