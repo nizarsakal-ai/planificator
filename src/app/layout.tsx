@@ -3,6 +3,7 @@ import { Inter } from "next/font/google"
 import { SessionProvider } from "next-auth/react"
 import { Toaster } from "sonner"
 import { auth } from "@/auth"
+import { ServiceWorkerUpdater } from "@/components/ServiceWorkerUpdater"
 import "./globals.css"
 import "leaflet/dist/leaflet.css"
 
@@ -59,6 +60,7 @@ export default async function RootLayout({
       </head>
       <body className={inter.className}>
         <SessionProvider session={session}>
+          <ServiceWorkerUpdater />
           {children}
           <Toaster position="top-right" richColors closeButton />
         </SessionProvider>

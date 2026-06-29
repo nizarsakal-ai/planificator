@@ -9,6 +9,12 @@ const withPWA = withPWAInit({
   disable: process.env.NODE_ENV === "development",
   workboxOptions: {
     disableDevLogs: true,
+    // Le nouveau service worker s'active dès qu'il est installé…
+    skipWaiting: true,
+    // …et prend immédiatement le contrôle des onglets déjà ouverts.
+    // Combiné à ServiceWorkerUpdater, chaque déploiement est servi sans
+    // que l'utilisateur ait à vider le cache.
+    clientsClaim: true,
   },
 })
 
