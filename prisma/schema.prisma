@@ -107,6 +107,21 @@ enum ExpenseCategory {
   OTHER         // Autre
 }
 
+enum QuoteStatus {
+  DRAFT     // Brouillon (préparé à la main ou par l'agent IA)
+  SENT      // Envoyé au client
+  ACCEPTED  // Accepté par le client
+  REFUSED   // Refusé
+  EXPIRED   // Expiré (au-delà de validUntil)
+}
+
+enum InvoiceStatus {
+  DRAFT      // Brouillon
+  SENT       // Envoyée au client
+  PAID       // Payée
+  CANCELLED  // Annulée
+}
+
 enum ExpenseStatus {
   PENDING   // En attente de validation
   APPROVED  // Validée
@@ -175,6 +190,10 @@ model Company {
   gmailConnection         GmailConnection?
   processedGmailMessages  ProcessedGmailMessage[]
   pendingAccommodations   PendingAccommodation[]
+  articles                Article[]
+  quotes                  Quote[]
+  invoices                Invoice[]
+  documentCounters        DocumentCounter[]
 
   @@map("companies")
 }
@@ -193,6 +212,169 @@ model CompanySettings {
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@map("company_settings")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ARTICLE — Bibliothèque d'articles (catalogue prix pour devis & factures)
+// Réservé ADMIN / SUPER_ADMIN. Suppression douce via `active` pour préserver
+// l'historique des devis/factures qui référenceront ces articles.
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Article {
+  id          String   @id @default(cuid())
+  companyId   String
+  reference   String?          // code article optionnel (ex: "PLB-001")
+  designation String           // libellé de l'article
+  description String?          // détail optionnel
+  unit        String   @default("u")            // unité : u, m², ml, h, forfait…
+  unitPrice   Decimal  @db.Decimal(10, 2)       // prix unitaire HT
+  vatRate     Decimal  @default(20) @db.Decimal(5, 2) // taux de TVA % (par article)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  quoteLines   QuoteLine[]
+  invoiceLines InvoiceLine[]
+
+  @@index([companyId])
+  @@map("articles")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FACTURATION — Devis (Quote) & Factures (Invoice)
+//
+// Réservé ADMIN / SUPER_ADMIN. Chaque document est rattaché à un chantier et
+// à son client. Les lignes FIGENT designation/prix/TVA au moment de la création
+// (obligation légale : un document émis est immuable même si le catalogue change).
+// Numérotation séquentielle sans trou via DocumentCounter (par entreprise/an).
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Quote {
+  id          String      @id @default(cuid())
+  companyId   String
+  worksiteId  String
+  clientId    String
+  number      String      // "DEV-2026-0001" (séquentiel, unique par entreprise)
+  status      QuoteStatus @default(DRAFT)
+  issueDate   DateTime    @default(now())
+  validUntil  DateTime?   // date de validité du devis
+  totalHT     Decimal     @default(0) @db.Decimal(10, 2)
+  totalVAT    Decimal     @default(0) @db.Decimal(10, 2)
+  totalTTC    Decimal     @default(0) @db.Decimal(10, 2)
+  notes       String?     // notes / conditions particulières
+  paymentTerms String?    // conditions de paiement (mention légale)
+  createdById String      // userId de l'admin créateur
+  sentAt      DateTime?   // date d'envoi au client
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relations
+  company  Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  worksite Worksite    @relation(fields: [worksiteId], references: [id], onDelete: Cascade)
+  client   Client      @relation(fields: [clientId], references: [id])
+  lines    QuoteLine[]
+  invoices Invoice[]   // factures issues de ce devis
+
+  @@unique([companyId, number])
+  @@index([companyId])
+  @@index([worksiteId])
+  @@index([clientId])
+  @@index([status])
+  @@map("quotes")
+}
+
+model QuoteLine {
+  id          String  @id @default(cuid())
+  quoteId     String
+  articleId   String?           // lien optionnel vers le catalogue
+  designation String            // libellé figé
+  unit        String  @default("u")
+  quantity    Decimal @db.Decimal(10, 2)
+  unitPrice   Decimal @db.Decimal(10, 2)  // prix HT figé
+  vatRate     Decimal @db.Decimal(5, 2)   // TVA figée
+  lineHT      Decimal @db.Decimal(10, 2)  // quantity * unitPrice
+  position    Int     @default(0)         // ordre d'affichage
+
+  // Relations
+  quote   Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  article Article? @relation(fields: [articleId], references: [id])
+
+  @@index([quoteId])
+  @@map("quote_lines")
+}
+
+model Invoice {
+  id          String        @id @default(cuid())
+  companyId   String
+  worksiteId  String
+  clientId    String
+  quoteId     String?       // devis d'origine (optionnel)
+  number      String        // "FAC-2026-0001" (séquentiel, unique par entreprise)
+  status      InvoiceStatus @default(DRAFT)
+  issueDate   DateTime      @default(now())
+  dueDate     DateTime?     // échéance de paiement
+  periodStart DateTime?     // début de la période facturée (= dates du chantier)
+  periodEnd   DateTime?     // fin de la période facturée
+  totalHT     Decimal       @default(0) @db.Decimal(10, 2)
+  totalVAT    Decimal       @default(0) @db.Decimal(10, 2)
+  totalTTC    Decimal       @default(0) @db.Decimal(10, 2)
+  notes       String?
+  paymentTerms String?      // conditions de paiement (mention légale)
+  createdById String        // userId de l'admin créateur
+  sentAt      DateTime?     // date d'envoi au client
+  paidAt      DateTime?     // date de règlement
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Relations
+  company  Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  worksite Worksite      @relation(fields: [worksiteId], references: [id], onDelete: Cascade)
+  client   Client        @relation(fields: [clientId], references: [id])
+  quote    Quote?        @relation(fields: [quoteId], references: [id])
+  lines    InvoiceLine[]
+
+  @@unique([companyId, number])
+  @@index([companyId])
+  @@index([worksiteId])
+  @@index([clientId])
+  @@index([status])
+  @@map("invoices")
+}
+
+model InvoiceLine {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  articleId   String?
+  designation String
+  unit        String  @default("u")
+  quantity    Decimal @db.Decimal(10, 2)
+  unitPrice   Decimal @db.Decimal(10, 2)
+  vatRate     Decimal @db.Decimal(5, 2)
+  lineHT      Decimal @db.Decimal(10, 2)
+  position    Int     @default(0)
+
+  // Relations
+  invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  article Article? @relation(fields: [articleId], references: [id])
+
+  @@index([invoiceId])
+  @@map("invoice_lines")
+}
+
+// Compteur pour la numérotation séquentielle légale (sans trou), par entreprise/type/an.
+model DocumentCounter {
+  id        String @id @default(cuid())
+  companyId String
+  type      String // "QUOTE" | "INVOICE"
+  year      Int
+  lastValue Int    @default(0)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, type, year])
+  @@map("document_counters")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -333,6 +515,8 @@ model Client {
   company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   worksites     Worksite[]
   clientProfile ClientProfile?
+  quotes        Quote[]
+  invoices      Invoice[]
 
   @@index([companyId])
   @@map("clients")
@@ -385,6 +569,8 @@ model Worksite {
   historyLogs  HistoryLog[]
   timeclocks   Timeclock[]
   dailyReports DailyReport[]
+  quotes       Quote[]
+  invoices     Invoice[]
 
   @@index([companyId])
   @@index([clientId])

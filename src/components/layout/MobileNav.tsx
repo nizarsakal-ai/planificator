@@ -25,6 +25,8 @@ import {
   MapPin,
   CalendarDays,
   BedDouble,
+  Library,
+  FileText,
 } from "lucide-react"
 import { cn, getInitials } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -55,6 +57,8 @@ function getNavItems(role: Role): NavItem[] {
         { label: "Clients",        href: "/clients",                  icon: UserCheck },
         { label: "Chantiers",      href: "/chantiers",                icon: HardHat },
         { label: "Logements",      href: "/logements",                icon: BedDouble },
+        { label: "Bibliothèque",   href: "/articles",                 icon: Library },
+        { label: "Factures",       href: "/factures",                 icon: FileText },
         { label: "Planning",       href: "/planning",                 icon: Calendar },
         { label: "Gantt",          href: "/planning/gantt",           icon: GanttChart },
         { label: "Calendrier",     href: "/planning/calendrier",      icon: CalendarDays },
@@ -74,6 +78,8 @@ function getNavItems(role: Role): NavItem[] {
         { label: "Clients",        href: "/clients",         icon: UserCheck },
         { label: "Chantiers",      href: "/chantiers",       icon: HardHat },
         { label: "Logements",      href: "/logements",       icon: BedDouble },
+        { label: "Bibliothèque",   href: "/articles",        icon: Library },
+        { label: "Factures",       href: "/factures",        icon: FileText },
         { label: "Planning",       href: "/planning",              icon: Calendar },
         { label: "Gantt",          href: "/planning/gantt",        icon: GanttChart },
         { label: "Calendrier",     href: "/planning/calendrier",   icon: CalendarDays },
