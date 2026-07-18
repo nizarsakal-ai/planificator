@@ -1,4 +1,5 @@
 import type {
+  GmailAttachmentResource,
   GmailHistoryListResponse,
   GmailMessageResource,
   GmailMessagesListResponse,
@@ -23,6 +24,11 @@ export interface GmailApiClient {
     pageToken?: string
   ): Promise<GmailMessagesListResponse>
   getMessage(accessToken: string, messageId: string): Promise<GmailMessageResource>
+  getAttachment(
+    accessToken: string,
+    messageId: string,
+    attachmentId: string
+  ): Promise<GmailAttachmentResource>
 }
 
 async function readGmailJson<T>(res: Response, context: "list" | "history" | "message" | "profile"): Promise<T> {
@@ -86,6 +92,21 @@ export class FetchGmailApiClient implements GmailApiClient {
       throw mapHttpStatusToGmailError(res.status, "message", messageId)
     }
     return (await res.json()) as GmailMessageResource
+  }
+
+  async getAttachment(
+    accessToken: string,
+    messageId: string,
+    attachmentId: string
+  ): Promise<GmailAttachmentResource> {
+    const res = await fetch(
+      `${GMAIL_BASE}/messages/${messageId}/attachments/${attachmentId}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    )
+    if (!res.ok) {
+      throw mapHttpStatusToGmailError(res.status, "message", messageId)
+    }
+    return (await res.json()) as GmailAttachmentResource
   }
 }
 
