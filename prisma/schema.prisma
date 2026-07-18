@@ -137,6 +137,46 @@ enum WeatherCondition {
   SNOW
 }
 
+enum AcquisitionSource {
+  GMAIL
+}
+
+enum AcquisitionMessageStatus {
+  RECEIVED
+  ELIGIBLE
+  REJECTED
+  DRAFT_CREATED
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+enum WorksiteImportDraftStatus {
+  PENDING_EXTRACTION
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  CONVERTED
+  FAILED
+}
+
+enum AcquisitionAttachmentStatus {
+  DISCOVERED
+  PENDING_DOWNLOAD
+  STORED
+  REJECTED
+  FAILED
+}
+
+enum AcquisitionAttachmentCategory {
+  PLAN
+  PHOTO
+  DOCUMENT
+  ARCHIVE
+  UNSUPPORTED
+  UNKNOWN
+}
+
 enum HistoryAction {
   CREATED        // Entité créée
   UPDATED        // Entité modifiée
@@ -194,6 +234,10 @@ model Company {
   quotes                  Quote[]
   invoices                Invoice[]
   documentCounters        DocumentCounter[]
+  acquisitionMessages     AcquisitionMessage[]
+  worksiteImportDrafts    WorksiteImportDraft[]
+  acquisitionAttachments  AcquisitionAttachment[]
+  acquisitionScanCursors  AcquisitionScanCursor[]
 
   @@map("companies")
 }
@@ -403,6 +447,7 @@ model User {
   passwordResets  PasswordReset[]
   notifications   Notification[]
   historyLogs     HistoryLog[]    @relation("HistoryActor")
+  reviewedImportDrafts WorksiteImportDraft[] @relation("ImportDraftReviewer")
 
   @@index([companyId])
   @@index([email])
@@ -519,6 +564,7 @@ model Client {
   clientProfile ClientProfile?
   quotes        Quote[]
   invoices      Invoice[]
+  importDrafts  WorksiteImportDraft[]
 
   @@index([companyId])
   @@map("clients")
@@ -573,6 +619,7 @@ model Worksite {
   dailyReports DailyReport[]
   quotes       Quote[]
   invoices     Invoice[]
+  importDrafts WorksiteImportDraft[]
 
   @@index([companyId])
   @@index([clientId])
@@ -1052,6 +1099,136 @@ model Truck {
   @@index([companyId])
   @@index([chauffeurId])
   @@map("trucks")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ASSISTANT CONSULTATIONS — Fondation acquisition d'emails (inactif par défaut)
+// Email entrant → AcquisitionMessage (idempotent) → WorksiteImportDraft.
+// Aucun connecteur Gmail, aucun appel IA, aucune création de chantier dans
+// cette phase. Activation future via PLANIFICATOR_ACQUISITION_ENABLED.
+// ═══════════════════════════════════════════════════════════════════════════
+
+model AcquisitionMessage {
+  id                 String                   @id @default(cuid())
+  companyId          String
+  source             AcquisitionSource
+  externalMessageId  String
+  senderEmail        String
+  senderDomain       String
+  subject            String
+  receivedAt         DateTime
+  status             AcquisitionMessageStatus @default(RECEIVED)
+  processingAttempts Int                      @default(0)
+  lastErrorCode      String?
+  lastErrorMessage   String?
+  rawMetadata        Json?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  company     Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  draft       WorksiteImportDraft?
+  attachments AcquisitionAttachment[]
+
+  // Idempotence par tenant : le même id Gmail peut exister chez deux
+  // entreprises, jamais deux fois pour la même entreprise et la même source.
+  @@unique([companyId, source, externalMessageId])
+  // Cible des FK composites (draft, attachments) : garantit EN BASE que
+  // l'enfant porte le même companyId que son message (anti inter-tenant).
+  @@unique([id, companyId])
+  @@index([companyId, status])
+  @@index([companyId, receivedAt])
+  @@map("acquisition_messages")
+}
+
+model WorksiteImportDraft {
+  id                   String                    @id @default(cuid())
+  companyId            String
+  acquisitionMessageId String                    @unique
+  status               WorksiteImportDraftStatus @default(PENDING_EXTRACTION)
+  proposedClientId     String?
+  proposedClientName   String?
+  proposedWorksiteName String?
+  proposedAddress      String?
+  proposedPostalCode   String?
+  proposedCity         String?
+  proposedContactName  String?
+  proposedContactEmail String?
+  proposedContactPhone String?
+  proposedStartDate    DateTime?
+  proposedEndDate      DateTime?
+  proposedDescription  String?
+  extractedData        Json?
+  confidenceData       Json?
+  reviewedByUserId     String?
+  reviewedAt           DateTime?
+  rejectionReason      String?
+  createdWorksiteId    String?
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+
+  company            Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  // FK composite (acquisitionMessageId, companyId) → (id, companyId) :
+  // la base REFUSE un brouillon dont le companyId diffère de celui du message.
+  acquisitionMessage AcquisitionMessage @relation(fields: [acquisitionMessageId, companyId], references: [id, companyId], onDelete: Cascade)
+  proposedClient     Client?            @relation(fields: [proposedClientId], references: [id], onDelete: SetNull)
+  reviewedBy         User?              @relation("ImportDraftReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  createdWorksite    Worksite?          @relation(fields: [createdWorksiteId], references: [id], onDelete: SetNull)
+
+  // Requis par Prisma pour la relation 1-1 composite ; l'unicité simple sur
+  // acquisitionMessageId (plus forte) reste la garantie métier du 1-1.
+  @@unique([acquisitionMessageId, companyId])
+  @@index([companyId, status])
+  @@map("worksite_import_drafts")
+}
+
+model AcquisitionAttachment {
+  id                   String                        @id @default(cuid())
+  companyId            String
+  acquisitionMessageId String
+  // Identité STABLE de la pièce jointe dans son message, calculée par le
+  // service : "ext:<externalAttachmentId>" si fourni, sinon "part:<partId>"
+  // (partie MIME), sinon "ord:<position>" (ordinal stable). Jamais le seul
+  // filename. Garantit l'idempotence même sans identifiant Gmail exploitable.
+  attachmentKey        String
+  externalAttachmentId String?
+  filename             String
+  mimeType             String
+  sizeBytes            Int
+  category             AcquisitionAttachmentCategory @default(UNKNOWN)
+  status               AcquisitionAttachmentStatus   @default(DISCOVERED)
+  storageUrl           String?
+  storagePublicId      String?
+  createdAt            DateTime                      @default(now())
+  updatedAt            DateTime                      @updatedAt
+
+  company            Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  // FK composite : même garantie anti inter-tenant que pour les brouillons.
+  acquisitionMessage AcquisitionMessage @relation(fields: [acquisitionMessageId, companyId], references: [id, companyId], onDelete: Cascade)
+
+  @@unique([acquisitionMessageId, attachmentKey])
+  @@index([companyId])
+  @@index([acquisitionMessageId])
+  @@map("acquisition_attachments")
+}
+
+// Curseur de synchronisation mail par tenant et source (Gmail, futur Outlook/IMAP).
+// Aucun token OAuth — uniquement watermark de reprise.
+model AcquisitionScanCursor {
+  id                  String            @id @default(cuid())
+  companyId           String
+  source              AcquisitionSource
+  lastHistoryId       String?
+  lastSyncedAt        DateTime?
+  consecutiveFailures Int               @default(0)
+  lastErrorCode       String?
+  lastErrorAt         DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, source])
+  @@map("acquisition_scan_cursors")
 }
 
 // Historique des affectations camion : qui conduisait quel camion, dans
