@@ -168,6 +168,16 @@ enum AcquisitionAttachmentStatus {
   FAILED
 }
 
+enum AcquisitionAttachmentAccessAction {
+  VIEW
+  DOWNLOAD
+}
+
+enum AcquisitionAttachmentAccessOutcome {
+  GRANTED
+  DENIED
+}
+
 enum AcquisitionAttachmentCategory {
   PLAN
   PHOTO
@@ -238,6 +248,7 @@ model Company {
   worksiteImportDrafts    WorksiteImportDraft[]
   acquisitionAttachments  AcquisitionAttachment[]
   acquisitionScanCursors  AcquisitionScanCursor[]
+  acquisitionAttachmentAccessLogs AcquisitionAttachmentAccessLog[]
 
   @@map("companies")
 }
@@ -448,6 +459,7 @@ model User {
   notifications   Notification[]
   historyLogs     HistoryLog[]    @relation("HistoryActor")
   reviewedImportDrafts WorksiteImportDraft[] @relation("ImportDraftReviewer")
+  acquisitionAttachmentAccessLogs AcquisitionAttachmentAccessLog[]
 
   @@index([companyId])
   @@index([email])
@@ -1208,11 +1220,34 @@ model AcquisitionAttachment {
   company            Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
   // FK composite : même garantie anti inter-tenant que pour les brouillons.
   acquisitionMessage AcquisitionMessage @relation(fields: [acquisitionMessageId, companyId], references: [id, companyId], onDelete: Cascade)
+  accessLogs         AcquisitionAttachmentAccessLog[]
 
+  @@unique([id, companyId])
   @@unique([acquisitionMessageId, attachmentKey])
   @@index([companyId])
   @@index([acquisitionMessageId])
   @@map("acquisition_attachments")
+}
+
+model AcquisitionAttachmentAccessLog {
+  id                    String                             @id @default(cuid())
+  companyId             String
+  attachmentId          String?
+  requestedAttachmentId String
+  userId                String
+  action                AcquisitionAttachmentAccessAction
+  outcome               AcquisitionAttachmentAccessOutcome
+  reasonCode            String?
+  createdAt             DateTime                           @default(now())
+
+  company    Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attachment AcquisitionAttachment? @relation(fields: [attachmentId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([companyId, createdAt])
+  @@index([companyId, requestedAttachmentId, createdAt])
+  @@index([userId, createdAt])
+  @@map("acquisition_attachment_access_logs")
 }
 
 // Curseur de synchronisation mail par tenant et source (Gmail, futur Outlook/IMAP).
