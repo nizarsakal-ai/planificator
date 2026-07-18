@@ -87,6 +87,7 @@ describe("GmailMailProviderAdapter", () => {
         } satisfies GmailMessagesListResponse
       },
       getMessage: async (_token, messageId) => sampleMessage(messageId),
+      getAttachment: async () => ({ size: 0, data: "" }),
     }
   })
 

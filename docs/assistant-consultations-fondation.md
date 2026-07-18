@@ -337,3 +337,111 @@ L'adapter est utilisable en injection ; aucun cron actif dans PLAN-ACQ-003
 - UI, création chantier automatique
 - Modification du scanner Booking `gmail-scan`
 - Test d'intégration contre boîte Gmail réelle (infrastructure absente)
+
+---
+
+# PLAN-ACQ-004 — Téléchargement et stockage sécurisé des pièces jointes
+
+## Objectif
+
+Télécharger les pièces jointes Gmail admissibles et les stocker via Cloudinary
+(accès `authenticated`), sans IA, sans UI, sans création de chantier.
+**Inactif par défaut** — non branché au cron (PLAN-ACQ-004B).
+
+## Feature flags
+
+| Variable | Défaut | Rôle |
+|----------|--------|------|
+| `PLANIFICATOR_ACQUISITION_ENABLED` | `false` | Module Acquisition global |
+| `ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED` | `false` | Téléchargement PJ (004) |
+| `ACQUISITION_ATTACHMENT_MAX_BYTES` | `26214400` (25 MiB) | Taille max par PJ |
+
+## Formats autorisés (V1)
+
+- `application/pdf`
+- `image/jpeg`, `image/png`, `image/heic`, `image/heif`
+- `application/vnd.openxmlformats-officedocument.wordprocessingml.document` (.docx)
+- `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (.xlsx)
+- `application/zip` (archives simples — **pas d'extraction**)
+- `application/octet-stream` **uniquement** pour `.dwg` / `.dxf` reconnus
+
+## Refusés
+
+Exécutables, scripts, HTML, SVG, fichiers sans nom, archives Office déguisées en `.zip`,
+MIME/extension/signature incohérents, taille > limite.
+
+## Validation MIME
+
+Validation combinée (aucune source seule) :
+
+1. MIME déclaré Gmail
+2. Extension filename
+3. Signature magique (PDF, JPEG, PNG, HEIC/HEIF ISO BMFF, ZIP/PK, DWG/DXF)
+
+## Stockage
+
+- **Backend** : Cloudinary (réutilisation infra existante)
+- **Chemin** : `planificator/{companyId}/acquisition/{messageId}/{attachmentId}/{generatedName}`
+- **Accès** : `type: authenticated` — pas d'URL publique permanente
+- **Nom fichier** : généré serveur (`{attachmentId}-{sha256Prefix}.ext`)
+- **Filename original** : métadonnée uniquement
+
+## SHA-256
+
+Hash calculé sur le binaire décodé, persisté en `AcquisitionAttachment.sha256`.
+
+## Statuts PJ
+
+`DISCOVERED` / `PENDING_DOWNLOAD` → `STORED` | `REJECTED` | `FAILED`
+
+## Idempotence
+
+Si `STORED` + `sha256` + `storagePublicId` → `ALREADY_STORED` sans retéléchargement.
+Claim optimiste `DISCOVERED|PENDING_DOWNLOAD` → `PENDING_DOWNLOAD` avant download.
+
+## Architecture (`src/lib/acquisition/attachments/`)
+
+| Fichier | Rôle |
+|---------|------|
+| `attachment.types.ts` | Types et codes d'erreur |
+| `attachment-policy.ts` | MIME, taille, base64url, flags |
+| `attachment-storage.port.ts` | Port + adapter Cloudinary |
+| `gmail-attachment-source.adapter.ts` | Téléchargement Gmail `attachments.get` |
+| `acquisition-attachment.repository.ts` | Persistance tenant-scopée |
+| `attachment-download.service.ts` | Orchestrateur appelable |
+
+## Erreurs contrôlées
+
+`ATTACHMENT_NOT_FOUND`, `ATTACHMENT_ALREADY_STORED`, `GMAIL_ATTACHMENT_NOT_FOUND`,
+`ATTACHMENT_TOO_LARGE`, `ATTACHMENT_MIME_NOT_ALLOWED`, `ATTACHMENT_SIGNATURE_MISMATCH`,
+`ATTACHMENT_DECODE_FAILED`, `ATTACHMENT_STORAGE_FAILED`, `ATTACHMENT_PERSISTENCE_FAILED`.
+
+Aucun token, stack ou binaire dans logs/réponses.
+
+## Migration Prisma
+
+`20260719000000_add_acquisition_attachment_storage_fields` :
+
+- `sha256`, `storedAt`, `lastErrorCode`, `lastErrorAt` sur `acquisition_attachments`
+
+## Tests
+
+- `attachment-policy.test.ts`
+- `attachment-download.service.test.ts`
+- `attachment-download.integration.test.ts` (PostgreSQL jetable)
+
+## Exclus (PLAN-ACQ-004)
+
+- Branchement cron (→ PLAN-ACQ-004B)
+- Extraction d'archives
+- Antivirus / quarantaine
+- Appels IA, UI, création chantier
+- Route API de téléchargement utilisateur (future)
+
+## PLAN-ACQ-004-R1 — Corrections sécurité
+
+- **Compensation Cloudinary** : `storage.destroy(publicId)` si `markStored` échoue après upload
+- **Claim exclusif** : `DISCOVERED → PENDING_DOWNLOAD` uniquement ; `PENDING_DOWNLOAD` → `ALREADY_IN_PROGRESS`
+- **markStored conditionnel** : `where status = PENDING_DOWNLOAD` ; pas de last-write-wins
+- **Allow-list stricte** : magic bytes obligatoires pour PDF/JPEG/PNG/Office/ZIP/HEIC
+- **Retry** : `FAILED` et `REJECTED` non claimables ; retry futur via transition explicite `FAILED → DISCOVERED`

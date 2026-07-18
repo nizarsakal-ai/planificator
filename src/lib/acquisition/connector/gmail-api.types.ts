@@ -67,3 +67,8 @@ export interface GmailTokenRefreshResponse {
   error?: string
   error_description?: string
 }
+
+export interface GmailAttachmentResource {
+  size?: number
+  data?: string
+}

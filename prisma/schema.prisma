@@ -1198,6 +1198,10 @@ model AcquisitionAttachment {
   status               AcquisitionAttachmentStatus   @default(DISCOVERED)
   storageUrl           String?
   storagePublicId      String?
+  sha256               String?
+  storedAt             DateTime?
+  lastErrorCode        String?
+  lastErrorAt          DateTime?
   createdAt            DateTime                      @default(now())
   updatedAt            DateTime                      @updatedAt
 
