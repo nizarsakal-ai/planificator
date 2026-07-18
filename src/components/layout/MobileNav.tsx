@@ -27,6 +27,7 @@ import {
   BedDouble,
   Library,
   FileText,
+  Truck,
 } from "lucide-react"
 import { cn, getInitials } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -54,6 +55,7 @@ function getNavItems(role: Role): NavItem[] {
         { label: "Administration", href: "/super-admin/entreprises",  icon: Building2 },
         { label: "Employés",       href: "/employes",                 icon: Users },
         { label: "Équipes",        href: "/equipes",                  icon: Layers },
+        { label: "Véhicules",      href: "/vehicules",                icon: Truck },
         { label: "Clients",        href: "/clients",                  icon: UserCheck },
         { label: "Chantiers",      href: "/chantiers",                icon: HardHat },
         { label: "Logements",      href: "/logements",                icon: BedDouble },
@@ -75,6 +77,7 @@ function getNavItems(role: Role): NavItem[] {
         { label: "Dashboard",      href: "/dashboard",       icon: LayoutDashboard },
         { label: "Employés",       href: "/employes",        icon: Users },
         { label: "Équipes",        href: "/equipes",         icon: Layers },
+        { label: "Véhicules",      href: "/vehicules",       icon: Truck },
         { label: "Clients",        href: "/clients",         icon: UserCheck },
         { label: "Chantiers",      href: "/chantiers",       icon: HardHat },
         { label: "Logements",      href: "/logements",       icon: BedDouble },

@@ -15,6 +15,8 @@ export async function GET() {
 export async function POST(req: Request) {
   const session = await auth()
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  if (!["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role))
+    return NextResponse.json({ error: "Accès refusé" }, { status: 403 })
   const { matricule, marque } = await req.json()
   if (!matricule) return NextResponse.json({ error: "Matricule requis" }, { status: 400 })
   try {
