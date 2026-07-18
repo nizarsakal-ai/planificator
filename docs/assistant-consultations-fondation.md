@@ -346,7 +346,7 @@ L'adapter est utilisable en injection ; aucun cron actif dans PLAN-ACQ-003
 
 Télécharger les pièces jointes Gmail admissibles et les stocker via Cloudinary
 (accès `authenticated`), sans IA, sans UI, sans création de chantier.
-**Inactif par défaut** — non branché au cron (PLAN-ACQ-004B).
+**Inactif par défaut** — non branché au cron (PLAN-ACQ-004C).
 
 ## Feature flags
 
@@ -432,11 +432,11 @@ Aucun token, stack ou binaire dans logs/réponses.
 
 ## Exclus (PLAN-ACQ-004)
 
-- Branchement cron (→ PLAN-ACQ-004B)
+- Branchement cron téléchargement (→ **PLAN-ACQ-004C**)
 - Extraction d'archives
 - Antivirus / quarantaine
 - Appels IA, UI, création chantier
-- Route API de téléchargement utilisateur (future)
+- Route API consultation (→ **PLAN-ACQ-004B**)
 
 ## PLAN-ACQ-004-R1 — Corrections sécurité
 
@@ -445,3 +445,108 @@ Aucun token, stack ou binaire dans logs/réponses.
 - **markStored conditionnel** : `where status = PENDING_DOWNLOAD` ; pas de last-write-wins
 - **Allow-list stricte** : magic bytes obligatoires pour PDF/JPEG/PNG/Office/ZIP/HEIC
 - **Retry** : `FAILED` et `REJECTED` non claimables ; retry futur via transition explicite `FAILED → DISCOVERED`
+
+---
+
+# PLAN-ACQ-004B — Consultation sécurisée des pièces jointes
+
+## Objectif
+
+Permettre à un utilisateur autorisé de **consulter ou télécharger** une pièce jointe
+Acquisition en statut `STORED`, via **proxy serveur streaming**, sans exposer
+`storagePublicId`, `storageUrl`, URL Cloudinary signée ni secret Cloudinary.
+
+**Inactif par défaut** — aucune UI, aucun cron, aucun appel IA.
+
+## Renommage
+
+Le futur branchement automatique du **téléchargement Gmail** est renommé **PLAN-ACQ-004C**
+(anciennement « 004B » dans la doc fondation).
+
+## Feature flags
+
+| Variable | Défaut | Rôle |
+|----------|--------|------|
+| `PLANIFICATOR_ACQUISITION_ENABLED` | `false` | Module Acquisition global |
+| `ACQUISITION_ATTACHMENT_ACCESS_ENABLED` | `false` | Consultation PJ (004B) |
+
+## TTL signature Cloudinary
+
+| Variable | Défaut | Plage |
+|----------|--------|-------|
+| `ACQUISITION_ATTACHMENT_SIGNED_URL_TTL_SECONDS` | `120` | 30–300 s |
+
+## Matrice permissions V1
+
+| Rôle | Accès |
+|------|-------|
+| `ADMIN` | Oui (tenant session) |
+| `TEAM_LEADER` | Oui (tenant session) |
+| `EMPLOYEE` | Non |
+| `CLIENT` | Non |
+| `SUPER_ADMIN` | Oui **uniquement** si `session.user.companyId` est défini |
+
+## Politique SUPER_ADMIN
+
+- Aucun `companyId` accepté via query, body ou header client.
+- Si `companyId` absent en session → `403`.
+- Le tenant d'accès est **exclusivement** celui de la session JWT.
+
+## Architecture
+
+```
+src/lib/acquisition/access/
+├── attachment-access.types.ts
+├── attachment-access.port.ts
+├── attachment-access.repository.ts
+├── attachment-url-signer.ts
+├── attachment-access-audit.repository.ts
+└── attachment-access.service.ts
+
+GET /api/acquisition/attachments/:id
+  ?dl=1 → téléchargement (Content-Disposition: attachment)
+  sinon → consultation inline
+```
+
+## Proxy streaming
+
+- Pass-through du `ReadableStream` Cloudinary → `NextResponse` (pas de `arrayBuffer()`).
+- Headers : `Content-Type` (DB), `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`.
+- **Aucun redirect** vers Cloudinary ; **aucune URL signée en JSON**.
+
+## Audit fail-closed
+
+Table `AcquisitionAttachmentAccessLog` :
+
+- `GRANTED` / `DENIED`, action `VIEW` / `DOWNLOAD`
+- Cross-tenant : log avec `companyId` **session** uniquement, `attachmentId` null, `DENIED`
+- Si l'audit `GRANTED` échoue → `503`, flux **non** délivré (stream Cloudinary annulé)
+
+## Immutabilité des journaux (PLAN-ACQ-004B-R1)
+
+- Les journaux d'accès sont **immuables** (append-only).
+- FK composite `(attachmentId, companyId) → acquisition_attachments` avec **`ON DELETE RESTRICT`** :
+  une pièce jointe référencée par un log `GRANTED` ne peut pas être supprimée physiquement.
+- `attachmentId` nullable : tentatives `NOT_FOUND` / cross-tenant → `attachmentId = null`,
+  `requestedAttachmentId` seul identifiant la cible.
+- `companyId` du log = **toujours** le tenant de la session (jamais le tenant réel d'une ressource étrangère).
+- Future rétention : suppression logique, anonymisation ou purge ordonnée — pas de `DELETE` attachment tant que logs existent.
+
+## Migration
+
+`20260719010000_add_acquisition_attachment_access_log`
+(FK composite `ON DELETE RESTRICT ON UPDATE CASCADE` — `SetNull` interdit : `companyId` NOT NULL)
+
+## Tests
+
+- `attachment-access.service.test.ts`
+- `attachment-access.route.test.ts`
+- `attachment-access.integration.test.ts` (PostgreSQL jetable)
+
+## Exclus (PLAN-ACQ-004B)
+
+- Cron téléchargement (→ PLAN-ACQ-004C)
+- UI revue brouillon
+- Appels IA, création chantier
+- Redirect Cloudinary / JSON URL signée
+- Accès via `companyId` client
