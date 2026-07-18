@@ -20,10 +20,6 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
       select: { id: true },
     })
     if (!team) return NextResponse.json({ error: "Équipe introuvable" }, { status: 404 })
-    await prisma.truck.updateMany({
-      where: { teamId, companyId },
-      data: { teamId: null },
-    })
   }
   if (chauffeurId) {
     const employee = await prisma.employee.findFirst({
@@ -32,15 +28,71 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
     })
     if (!employee) return NextResponse.json({ error: "Chauffeur introuvable" }, { status: 404 })
   }
+
+  // Nouvelles valeurs effectives après mise à jour
+  const nextChauffeurId =
+    chauffeurId !== undefined ? chauffeurId || null : existing.chauffeurId
+  const nextTeamId = teamId !== undefined ? teamId || null : existing.teamId
+  const affectationChanged =
+    nextChauffeurId !== existing.chauffeurId || nextTeamId !== existing.teamId
+
   try {
-    const truck = await prisma.truck.update({
-      where: { id },
-      data: {
-        ...(matricule !== undefined && { matricule: String(matricule).toUpperCase() }),
-        ...(marque !== undefined && { marque: marque?.trim() || null }),
-        ...(chauffeurId !== undefined && { chauffeurId: chauffeurId || null }),
-        ...(teamId !== undefined && { teamId: teamId || null }),
-      },
+    const now = new Date()
+    const truck = await prisma.$transaction(async (tx) => {
+      // Si le camion est réaffecté à une équipe déjà équipée, libérer
+      // l'autre camion et clore son historique.
+      if (teamId) {
+        const displaced = await tx.truck.findFirst({
+          where: { teamId, companyId, id: { not: id } },
+          select: { id: true, chauffeurId: true },
+        })
+        if (displaced) {
+          await tx.truck.update({ where: { id: displaced.id }, data: { teamId: null } })
+          await tx.truckAssignment.updateMany({
+            where: { truckId: displaced.id, endedAt: null },
+            data: { endedAt: now },
+          })
+          await tx.truckAssignment.create({
+            data: {
+              truckId: displaced.id,
+              chauffeurId: displaced.chauffeurId,
+              teamId: null,
+              companyId,
+              startedAt: now,
+            },
+          })
+        }
+      }
+
+      const updated = await tx.truck.update({
+        where: { id },
+        data: {
+          ...(matricule !== undefined && { matricule: String(matricule).toUpperCase() }),
+          ...(marque !== undefined && { marque: marque?.trim() || null }),
+          ...(chauffeurId !== undefined && { chauffeurId: chauffeurId || null }),
+          ...(teamId !== undefined && { teamId: teamId || null }),
+        },
+      })
+
+      // Journal : clore la période en cours et en ouvrir une nouvelle
+      // reflétant l'état (chauffeur + équipe) après modification.
+      if (affectationChanged) {
+        await tx.truckAssignment.updateMany({
+          where: { truckId: id, endedAt: null },
+          data: { endedAt: now },
+        })
+        await tx.truckAssignment.create({
+          data: {
+            truckId: id,
+            chauffeurId: nextChauffeurId,
+            teamId: nextTeamId,
+            companyId,
+            startedAt: now,
+          },
+        })
+      }
+
+      return updated
     })
     return NextResponse.json(truck)
   } catch {

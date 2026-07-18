@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Truck, Plus, Pencil, Trash2, User, Layers } from "lucide-react"
+import { Truck, Plus, Pencil, Trash2, User, Layers, History } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -17,13 +17,30 @@ interface EmployeeOption {
   firstName: string
   lastName: string
 }
+interface HistoryEntry {
+  id: string
+  chauffeurName: string | null
+  teamName: string | null
+  startedAt: string
+  endedAt: string | null
+}
 interface TruckItem {
   id: string
   matricule: string
   marque: string | null
   team: { id: string; name: string; color: string | null } | null
   chauffeur: { id: string; firstName: string; lastName: string } | null
+  history: HistoryEntry[]
 }
+
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleDateString("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
 interface Props {
   trucks: TruckItem[]
   teams: TeamOption[]
@@ -35,6 +52,7 @@ export function VehiculesView({ trucks, teams, employees }: Props) {
   const [loading, setLoading] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const [editId, setEditId] = useState<string | null>(null)
+  const [historyId, setHistoryId] = useState<string | null>(null)
   const [matricule, setMatricule] = useState("")
   const [marque, setMarque] = useState("")
 
@@ -165,6 +183,17 @@ export function VehiculesView({ trucks, teams, employees }: Props) {
                       {t.team ? t.team.name : "Non affecté"}
                     </Badge>
                     <button
+                      onClick={() => setHistoryId(historyId === t.id ? null : t.id)}
+                      title="Historique des affectations"
+                      className={`p-1.5 rounded-lg border transition-colors ${
+                        historyId === t.id
+                          ? "border-blue-400 text-blue-500 bg-blue-50"
+                          : "border-slate-200 text-slate-500 hover:border-blue-400 hover:text-blue-500"
+                      }`}
+                    >
+                      <History className="h-3.5 w-3.5" />
+                    </button>
+                    <button
                       onClick={() => openEdit(t)}
                       disabled={loading}
                       title="Modifier le véhicule"
@@ -216,6 +245,48 @@ export function VehiculesView({ trucks, teams, employees }: Props) {
                     ))}
                   </select>
                 </div>
+
+                {/* Historique des affectations */}
+                {historyId === t.id && (
+                  <div className="mt-3 pt-3 border-t border-slate-100">
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                      <History className="h-3.5 w-3.5" />
+                      Historique des affectations
+                    </p>
+                    {t.history.length === 0 ? (
+                      <p className="text-xs text-slate-400 italic py-1">
+                        Aucun historique pour le moment. Les prochains changements
+                        de chauffeur ou d&apos;équipe seront enregistrés ici.
+                      </p>
+                    ) : (
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                        {t.history.map((h) => (
+                          <div
+                            key={h.id}
+                            className="text-xs bg-slate-50 rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-medium text-slate-700 truncate">
+                                {h.chauffeurName ?? "Aucun chauffeur"}
+                                {h.teamName && (
+                                  <span className="text-slate-400 font-normal"> · équipe {h.teamName}</span>
+                                )}
+                              </p>
+                              <p className="text-slate-400">
+                                {fmtDate(h.startedAt)} → {h.endedAt ? fmtDate(h.endedAt) : "en cours"}
+                              </p>
+                            </div>
+                            {!h.endedAt && (
+                              <span className="shrink-0 text-[10px] font-medium text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">
+                                Actuel
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           ))}

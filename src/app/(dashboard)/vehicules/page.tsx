@@ -17,6 +17,14 @@ export default async function VehiculesPage() {
       include: {
         team: { select: { id: true, name: true, color: true } },
         chauffeur: { select: { id: true, firstName: true, lastName: true } },
+        assignments: {
+          orderBy: { startedAt: "desc" },
+          take: 20,
+          include: {
+            chauffeur: { select: { firstName: true, lastName: true } },
+            team: { select: { name: true } },
+          },
+        },
       },
       orderBy: { matricule: "asc" },
     }),
@@ -40,6 +48,15 @@ export default async function VehiculesPage() {
         marque: t.marque,
         team: t.team,
         chauffeur: t.chauffeur,
+        history: t.assignments.map((a) => ({
+          id: a.id,
+          chauffeurName: a.chauffeur
+            ? `${a.chauffeur.firstName} ${a.chauffeur.lastName}`
+            : null,
+          teamName: a.team?.name ?? null,
+          startedAt: a.startedAt.toISOString(),
+          endedAt: a.endedAt?.toISOString() ?? null,
+        })),
       }))}
       teams={teams}
       employees={employees}

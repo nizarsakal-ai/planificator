@@ -441,6 +441,7 @@ model Employee {
   dailyReports        DailyReport[]
   signatures          Signature[]
   drivenTrucks        Truck[]              @relation("TruckChauffeur")
+  truckAssignments    TruckAssignment[]    @relation("TruckAssignmentChauffeur")
 
   @@index([companyId])
   @@index([userId])
@@ -470,6 +471,7 @@ model Team {
   dailyReports   DailyReport[]
   accommodations Accommodation[]
   truck          Truck?
+  truckHistory   TruckAssignment[] @relation("TruckAssignmentTeam")
 
   @@unique([name, companyId]) // pas de doublon de nom d'équipe dans la même entreprise
   @@index([companyId])
@@ -1042,11 +1044,35 @@ model Truck {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  team      Team?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
-  chauffeur Employee? @relation("TruckChauffeur", fields: [chauffeurId], references: [id], onDelete: SetNull)
+  team        Team?             @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  chauffeur   Employee?         @relation("TruckChauffeur", fields: [chauffeurId], references: [id], onDelete: SetNull)
+  assignments TruckAssignment[]
 
   @@unique([matricule, companyId])
   @@index([companyId])
   @@index([chauffeurId])
   @@map("trucks")
+}
+
+// Historique des affectations camion : qui conduisait quel camion, dans
+// quelle équipe, sur quelle période. Une ligne ouverte (endedAt null) =
+// affectation en cours. Permet de retrouver le chauffeur d'un camion à
+// une date donnée (amendes, infractions, accidents).
+model TruckAssignment {
+  id          String    @id @default(cuid())
+  truckId     String
+  chauffeurId String?
+  teamId      String?
+  companyId   String
+  startedAt   DateTime  @default(now())
+  endedAt     DateTime?
+
+  truck     Truck     @relation(fields: [truckId], references: [id], onDelete: Cascade)
+  chauffeur Employee? @relation("TruckAssignmentChauffeur", fields: [chauffeurId], references: [id], onDelete: SetNull)
+  team      Team?     @relation("TruckAssignmentTeam", fields: [teamId], references: [id], onDelete: SetNull)
+
+  @@index([truckId, startedAt])
+  @@index([chauffeurId])
+  @@index([companyId])
+  @@map("truck_assignments")
 }
