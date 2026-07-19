@@ -25,6 +25,7 @@ import {
   Library,
   FileText,
   Truck,
+  Mail,
 } from "lucide-react"
 import { cn, getInitials } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -63,6 +64,7 @@ function getNavItems(role: Role): NavItem[] {
         { label: "Véhicules",        href: "/vehicules",              icon: Truck },
         { label: "Clients",          href: "/clients",                icon: UserCheck },
         { label: "Chantiers",        href: "/chantiers",              icon: HardHat },
+        { label: "Consultations",    href: "/consultations",          icon: Mail },
         { label: "Logements",        href: "/logements",              icon: BedDouble },
         { label: "Bibliothèque",     href: "/articles",               icon: Library },
         { label: "Factures",         href: "/factures",               icon: FileText },
@@ -86,6 +88,7 @@ function getNavItems(role: Role): NavItem[] {
         { label: "Véhicules", href: "/vehicules", icon: Truck },
         { label: "Clients",   href: "/clients",   icon: UserCheck },
         { label: "Chantiers",  href: "/chantiers",  icon: HardHat },
+        { label: "Consultations", href: "/consultations", icon: Mail },
         { label: "Logements",  href: "/logements",  icon: BedDouble },
         { label: "Bibliothèque", href: "/articles", icon: Library },
         { label: "Factures",    href: "/factures", icon: FileText },
