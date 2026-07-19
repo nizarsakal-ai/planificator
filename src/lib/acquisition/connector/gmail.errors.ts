@@ -5,6 +5,7 @@ export type GmailErrorCode =
   | "GMAIL_RATE_LIMITED"
   | "GMAIL_HISTORY_EXPIRED"
   | "GMAIL_UNAVAILABLE"
+  | "GMAIL_MESSAGE_NOT_FOUND"
   | "GMAIL_MESSAGE_PARSE_ERROR"
 
 export class GmailProviderError extends Error {
@@ -36,7 +37,7 @@ export function mapHttpStatusToGmailError(
 ): GmailProviderError {
   if (status === 404 && context === "message") {
     return new GmailProviderError({
-      code: "GMAIL_MESSAGE_PARSE_ERROR",
+      code: "GMAIL_MESSAGE_NOT_FOUND",
       message: "Message Gmail introuvable",
       retryable: false,
       global: false,

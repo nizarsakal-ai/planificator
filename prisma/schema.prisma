@@ -249,6 +249,7 @@ model Company {
   acquisitionAttachments  AcquisitionAttachment[]
   acquisitionScanCursors  AcquisitionScanCursor[]
   acquisitionAttachmentAccessLogs AcquisitionAttachmentAccessLog[]
+  acquisitionMessageContents AcquisitionMessageContent[]
 
   @@map("companies")
 }
@@ -1140,6 +1141,7 @@ model AcquisitionMessage {
   company     Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
   draft       WorksiteImportDraft?
   attachments AcquisitionAttachment[]
+  content     AcquisitionMessageContent?
 
   // Idempotence par tenant : le même id Gmail peut exister chez deux
   // entreprises, jamais deux fois pour la même entreprise et la même source.
@@ -1150,6 +1152,31 @@ model AcquisitionMessage {
   @@index([companyId, status])
   @@index([companyId, receivedAt])
   @@map("acquisition_messages")
+}
+
+// PLAN-ACQ-005A — Contenu email normalisé (jamais MIME/body.data/HTML brut).
+model AcquisitionMessageContent {
+  id                   String   @id @default(cuid())
+  companyId            String
+  acquisitionMessageId String   @unique
+  normalizedText       String   @db.Text
+  contentHash          String
+  sourceMimeType       String?
+  sourceCharset        String?
+  hadHtml              Boolean  @default(false)
+  byteLengthOriginal   Int      @default(0)
+  fetchedAt            DateTime
+  sanitizedAt          DateTime
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  company            Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  // FK composite anti inter-tenant (même pattern que draft / attachments).
+  acquisitionMessage AcquisitionMessage @relation(fields: [acquisitionMessageId, companyId], references: [id, companyId], onDelete: Cascade)
+
+  @@unique([acquisitionMessageId, companyId])
+  @@index([companyId])
+  @@map("acquisition_message_contents")
 }
 
 model WorksiteImportDraft {

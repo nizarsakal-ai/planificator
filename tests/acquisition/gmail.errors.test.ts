@@ -37,6 +37,13 @@ describe("gmail.errors", () => {
     assert.equal(err.retryable, true)
   })
 
+  it("404 message → GMAIL_MESSAGE_NOT_FOUND non retryable", () => {
+    const err = mapHttpStatusToGmailError(404, "message", "mid-1")
+    assert.equal(err.code, "GMAIL_MESSAGE_NOT_FOUND")
+    assert.equal(err.retryable, false)
+    assert.equal(err.messageId, "mid-1")
+  })
+
   it("ne contient pas de token dans le message", () => {
     const err = new GmailProviderError({
       code: "GMAIL_TOKEN_REFRESH_FAILED",
