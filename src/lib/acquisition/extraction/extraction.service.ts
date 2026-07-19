@@ -12,14 +12,13 @@ import {
 import {
   EXTRACTION_SCHEMA_VERSION,
   getExtractionMaxAttempts,
-  getExtractionProviderId,
   getExtractionReclaimTtlMs,
   getExtractionTimeoutMs,
   isAcquisitionExtractionEnabled,
 } from "@/lib/acquisition/extraction/extraction-feature-flag"
 import { isExtractionProviderError } from "@/lib/acquisition/extraction/extraction-provider.errors"
 import type { ExtractionProviderPort } from "@/lib/acquisition/extraction/extraction-provider.port"
-import { deterministicExtractionProvider } from "@/lib/acquisition/extraction/deterministic-extraction.provider"
+import { resolveExtractionProvider } from "@/lib/acquisition/extraction/extraction-provider.factory"
 import {
   DraftExtractionRepository,
   draftExtractionRepository,
@@ -63,10 +62,7 @@ function fail(
 
 function resolveProvider(override?: ExtractionProviderPort): ExtractionProviderPort | null {
   if (override) return override
-  const id = getExtractionProviderId()
-  if (id === "deterministic") return deterministicExtractionProvider
-  // 005B-3 Anthropic — pas encore branché
-  return null
+  return resolveExtractionProvider()
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -373,14 +369,18 @@ export async function runDraftExtraction(
   } catch (error) {
     const completedAt = nowFn()
     let code: ExtractionErrorCode = "INTERNAL_ERROR"
+    /** Deny-by-default : seule une ExtractionProviderError.retryable=true (ou timeout enveloppe) autorise RETRY_ALLOWED. */
+    let errorRetryable = false
     if (isExtractionProviderError(error)) {
       code = error.code
+      errorRetryable = error.retryable
     } else if (
       error instanceof Error &&
       (error.message === "PROVIDER_TIMEOUT" ||
         (error as { code?: string }).code === "PROVIDER_TIMEOUT")
     ) {
       code = "PROVIDER_TIMEOUT"
+      errorRetryable = true
     }
 
     const warningCode =
@@ -416,7 +416,8 @@ export async function runDraftExtraction(
       hashPrefix: contentHashPrefix(contentHashAtClaim),
     })
 
-    const retryAllowed = claimed.extractionAttemptCount < maxAttempts
+    const retryAllowed =
+      errorRetryable && claimed.extractionAttemptCount < maxAttempts
     return fail(retryAllowed ? "RETRY_ALLOWED" : "FAILED", code, "Échec provider / timeout", {
       draftId: draft.id,
       status: "FAILED",

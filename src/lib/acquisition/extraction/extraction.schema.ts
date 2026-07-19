@@ -28,10 +28,11 @@ export const EXTRACTION_WARNING_CODES = [
   "PROVIDER_TIMEOUT",
   "PROVIDER_UNAVAILABLE",
   "STALE_CONTENT",
+  "INPUT_TRUNCATED_FOR_PROVIDER",
 ] as const
 
 export const EXTRACTION_WARNING_SEVERITIES = ["INFO", "WARNING", "ERROR"] as const
-export const EXTRACTION_WARNING_SOURCES = ["SERVICE", "PROVIDER", "VALIDATOR"] as const
+export const EXTRACTION_WARNING_SOURCES = ["SERVICE", "PROVIDER", "VALIDATOR", "PROVIDER_ADAPTER"] as const
 
 export const MAX_PROVIDER_FIELDS = 20
 export const MAX_PROVIDER_WARNINGS = 50
@@ -309,6 +310,11 @@ export const EXTRACTION_WARNING_CATALOG: Record<
     severity: "ERROR",
     blocking: true,
     message: "Contenu modifié pendant l'extraction",
+  },
+  INPUT_TRUNCATED_FOR_PROVIDER: {
+    severity: "WARNING",
+    blocking: false,
+    message: "Contenu tronqué avant envoi au fournisseur",
   },
 }
 

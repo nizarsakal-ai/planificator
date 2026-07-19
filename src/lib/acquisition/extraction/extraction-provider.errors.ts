@@ -7,6 +7,8 @@ export type ExtractionProviderErrorCode =
   | "PROVIDER_UNAVAILABLE"
   | "PROVIDER_INVALID_OUTPUT"
   | "PROVIDER_DISABLED"
+  | "PROVIDER_INTERNAL_ERROR"
+  | "PROVIDER_INPUT_TOO_LARGE"
 
 export class ExtractionProviderError extends Error {
   readonly code: ExtractionProviderErrorCode

@@ -51,6 +51,8 @@ export type ExtractionErrorCode =
   | "PROVIDER_INVALID_OUTPUT"
   | "PROVIDER_DISABLED"
   | "PROVIDER_NOT_CONFIGURED"
+  | "PROVIDER_INTERNAL_ERROR"
+  | "PROVIDER_INPUT_TOO_LARGE"
   | "ZOD_VALIDATION_FAILED"
   | "INTERNAL_ERROR"
 
@@ -72,6 +74,7 @@ export type ExtractionWarningCode =
   | "PROVIDER_TIMEOUT"
   | "PROVIDER_UNAVAILABLE"
   | "STALE_CONTENT"
+  | "INPUT_TRUNCATED_FOR_PROVIDER"
 
 export type ExtractionWarning = z.infer<typeof extractionWarningSchema>
 export type ExtractionCanonicalFields = z.infer<typeof extractionCanonicalFieldsSchema>
