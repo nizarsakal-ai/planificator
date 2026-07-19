@@ -153,6 +153,7 @@ enum AcquisitionMessageStatus {
 
 enum WorksiteImportDraftStatus {
   PENDING_EXTRACTION
+  EXTRACTING
   PENDING_REVIEW
   APPROVED
   REJECTED
@@ -1198,6 +1199,18 @@ model WorksiteImportDraft {
   proposedDescription  String?
   extractedData        Json?
   confidenceData       Json?
+  // PLAN-ACQ-005B — warnings catalogués (pas de texte provider libre)
+  warningData          Json?
+  version              Int                       @default(0)
+  extractionStartedAt  DateTime?
+  extractionCompletedAt DateTime?
+  contentHashAtExtraction String?
+  extractionSchemaVersion String?
+  extractionAttemptCount  Int                    @default(0)
+  extractionProvider   String?
+  extractionModel      String?
+  lastExtractionErrorCode String?
+  lastExtractionErrorAt   DateTime?
   reviewedByUserId     String?
   reviewedAt           DateTime?
   rejectionReason      String?
