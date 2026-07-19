@@ -291,6 +291,151 @@ describe("extraction.service R1", () => {
     if (!result.ok) assert.equal(result.outcome, "STATE_CHANGED")
   })
 
+  it("retryable=true + attempts restantes → RETRY_ALLOWED", async () => {
+    const repo = createFakeRepo()
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        throw new ExtractionProviderError("PROVIDER_UNAVAILABLE", "down", true)
+      },
+    }
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.outcome, "RETRY_ALLOWED")
+      assert.equal(result.code, "PROVIDER_UNAVAILABLE")
+      assert.equal(result.status, "FAILED")
+      assert.equal(result.attemptCount, 1)
+    }
+  })
+
+  it("retryable=true + plafond atteint → FAILED", async () => {
+    process.env.ACQUISITION_EXTRACTION_MAX_ATTEMPTS = "2"
+    const repo = createFakeRepo({
+      draft: {
+        id: "draft1",
+        companyId: "co1",
+        acquisitionMessageId: "msg1",
+        status: "FAILED",
+        version: 1,
+        extractionAttemptCount: 1,
+        extractionStartedAt: new Date(),
+        contentHashAtExtraction: null,
+        extractionSchemaVersion: null,
+      },
+    })
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        throw new ExtractionProviderError("PROVIDER_UNAVAILABLE", "down", true)
+      },
+    }
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.outcome, "FAILED")
+      assert.equal(result.code, "PROVIDER_UNAVAILABLE")
+      assert.equal(result.attemptCount, 2)
+      assert.equal(result.maxAttempts, 2)
+    }
+  })
+
+  it("retryable=false + attempts restantes → FAILED", async () => {
+    const repo = createFakeRepo()
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        throw new ExtractionProviderError("PROVIDER_DISABLED", "auth", false)
+      },
+    }
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.outcome, "FAILED")
+      assert.equal(result.code, "PROVIDER_DISABLED")
+      assert.equal(result.attemptCount, 1)
+    }
+  })
+
+  it("PROVIDER_INTERNAL_ERROR → FAILED même si attempts restantes", async () => {
+    const repo = createFakeRepo()
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        throw new ExtractionProviderError("PROVIDER_INTERNAL_ERROR", "bug", false)
+      },
+    }
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.outcome, "FAILED")
+      assert.equal(result.code, "PROVIDER_INTERNAL_ERROR")
+    }
+  })
+
+  it("PROVIDER_INPUT_TOO_LARGE → FAILED même si attempts restantes", async () => {
+    const repo = createFakeRepo()
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        throw new ExtractionProviderError("PROVIDER_INPUT_TOO_LARGE", "too big", false)
+      },
+    }
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.outcome, "FAILED")
+      assert.equal(result.code, "PROVIDER_INPUT_TOO_LARGE")
+    }
+  })
+
+  it("PROVIDER_INVALID_OUTPUT (throw provider) → FAILED", async () => {
+    const repo = createFakeRepo()
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        throw new ExtractionProviderError("PROVIDER_INVALID_OUTPUT", "bad", false)
+      },
+    }
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.outcome, "FAILED")
+      assert.equal(result.code, "PROVIDER_INVALID_OUTPUT")
+    }
+  })
+
+  it("APIUserAbort mappé non retryable → FAILED", async () => {
+    const repo = createFakeRepo()
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        // Aligné sur le mapping adapter Abort → PROVIDER_TIMEOUT retryable=false
+        throw new ExtractionProviderError("PROVIDER_TIMEOUT", "abort", false)
+      },
+    }
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.outcome, "FAILED")
+      assert.equal(result.code, "PROVIDER_TIMEOUT")
+    }
+  })
+
   it("provider timeout → FAILED / RETRY_ALLOWED", async () => {
     const repo = createFakeRepo()
     const slow: ExtractionProviderPort = {
@@ -304,7 +449,10 @@ describe("extraction.service R1", () => {
       { repository: repo as never, provider: slow, timeoutMs: 20 }
     )
     assert.equal(result.ok, false)
-    if (!result.ok) assert.equal(result.code, "PROVIDER_TIMEOUT")
+    if (!result.ok) {
+      assert.equal(result.code, "PROVIDER_TIMEOUT")
+      assert.equal(result.outcome, "RETRY_ALLOWED")
+    }
     assert.equal(repo.draft?.status, "FAILED")
   })
 
