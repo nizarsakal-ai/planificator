@@ -33,6 +33,9 @@ function baseAttachment(overrides: Partial<AttachmentRecord> = {}): AttachmentRe
     storagePublicId: null,
     storedAt: null,
     lastErrorCode: null,
+    downloadClaimedAt: null,
+    downloadRetryCount: 0,
+    downloadNextRetryAt: null,
     ...overrides,
   }
 }
@@ -57,11 +60,36 @@ function claimedRepo(overrides: Partial<AcquisitionAttachmentRepositoryPort> = {
     markFailure:
       overrides.markFailure ??
       (async (_c, _a, update: AttachmentFailureUpdate) =>
-        baseAttachment({ status: update.status, lastErrorCode: update.errorCode })),
+        update.status === "REJECTED"
+          ? {
+              outcome: "MARKED_REJECTED" as const,
+              attachment: baseAttachment({ status: "REJECTED", lastErrorCode: update.errorCode }),
+            }
+          : {
+              outcome: "MARKED_FAILED" as const,
+              attachment: baseAttachment({
+                status: "FAILED",
+                lastErrorCode: update.errorCode,
+                downloadRetryCount: 1,
+                downloadNextRetryAt: update.nextRetryAt ?? null,
+              }),
+            }),
     listCompanyIdsWithDiscoveredAttachments:
       overrides.listCompanyIdsWithDiscoveredAttachments ?? (async () => []),
     listDiscoveredAttachmentsForCompany:
       overrides.listDiscoveredAttachmentsForCompany ?? (async () => []),
+    listCompanyIdsWithReclaimCandidates:
+      overrides.listCompanyIdsWithReclaimCandidates ?? (async () => []),
+    listPendingDownloadsForReclaim:
+      overrides.listPendingDownloadsForReclaim ?? (async () => []),
+    listCompanyIdsWithRetryCandidates:
+      overrides.listCompanyIdsWithRetryCandidates ?? (async () => []),
+    listFailedAttachmentsForRetry:
+      overrides.listFailedAttachmentsForRetry ?? (async () => []),
+    reclaimPendingDownload:
+      overrides.reclaimPendingDownload ?? (async () => "NOOP"),
+    scheduleRetryToDiscovered:
+      overrides.scheduleRetryToDiscovered ?? (async () => "NOOP"),
   }
 }
 
@@ -274,7 +302,14 @@ describe("attachment-download.service", () => {
           },
           markFailure: async (_c, _a, update) => {
             failureUpdates.push(update)
-            return baseAttachment({ status: update.status, lastErrorCode: update.errorCode })
+            return {
+              outcome: "MARKED_FAILED" as const,
+              attachment: baseAttachment({
+                status: update.status,
+                lastErrorCode: update.errorCode,
+                downloadRetryCount: 1,
+              }),
+            }
           },
         }),
         gmailSource: mockGmail({

@@ -47,6 +47,9 @@ export interface AttachmentRecord {
   storagePublicId: string | null
   storedAt: Date | null
   lastErrorCode: string | null
+  downloadClaimedAt: Date | null
+  downloadRetryCount: number
+  downloadNextRetryAt: Date | null
 }
 
 export interface AttachmentMessageContext {
@@ -102,7 +105,18 @@ export interface AttachmentFailureUpdate {
   status: "FAILED" | "REJECTED"
   errorCode: AttachmentDownloadErrorCode
   failedAt: Date
+  /** Calculé par l'appelant (004). Forcé null si REJECTED. */
+  nextRetryAt?: Date | null
 }
+
+export type MarkFailureResult =
+  | { outcome: "MARKED_FAILED"; attachment: AttachmentRecord }
+  | { outcome: "MARKED_REJECTED"; attachment: AttachmentRecord }
+  | { outcome: "STATE_CHANGED" }
+  | { outcome: "NOT_FOUND" }
+
+export type ReclaimPendingDownloadResult = "RECLAIMED" | "NOOP"
+export type ScheduleRetryToDiscoveredResult = "TRANSITIONED" | "NOOP"
 
 export type ClaimForDownloadResult =
   | { status: "CLAIMED"; attachment: AttachmentRecord }
