@@ -1214,6 +1214,10 @@ model AcquisitionAttachment {
   storedAt             DateTime?
   lastErrorCode        String?
   lastErrorAt          DateTime?
+  // PLAN-ACQ-004D — reclaim / retry (pas d'historique attempts séparé en V1)
+  downloadClaimedAt    DateTime?
+  downloadRetryCount   Int                           @default(0)
+  downloadNextRetryAt  DateTime?
   createdAt            DateTime                      @default(now())
   updatedAt            DateTime                      @updatedAt
 
@@ -1227,6 +1231,8 @@ model AcquisitionAttachment {
   @@index([companyId])
   @@index([acquisitionMessageId])
   @@index([companyId, status, createdAt])
+  @@index([status, downloadClaimedAt])
+  @@index([companyId, status, downloadNextRetryAt])
   @@map("acquisition_attachments")
 }
 

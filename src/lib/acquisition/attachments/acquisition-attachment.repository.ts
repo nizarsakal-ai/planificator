@@ -5,7 +5,10 @@ import type {
   AttachmentMessageContext,
   AttachmentRecord,
   ClaimForDownloadResult,
+  MarkFailureResult,
   MarkStoredResult,
+  ReclaimPendingDownloadResult,
+  ScheduleRetryToDiscoveredResult,
   StoredAttachmentUpdate,
 } from "@/lib/acquisition/attachments/attachment.types"
 
@@ -24,12 +27,52 @@ export interface AcquisitionAttachmentRepositoryPort {
     companyId: string,
     attachmentId: string,
     update: AttachmentFailureUpdate
-  ): Promise<AttachmentRecord>
+  ): Promise<MarkFailureResult>
   listCompanyIdsWithDiscoveredAttachments(input: { limit: number }): Promise<string[]>
   listDiscoveredAttachmentsForCompany(input: {
     companyId: string
     limit: number
   }): Promise<Array<{ id: string; companyId: string; createdAt: Date }>>
+  listCompanyIdsWithReclaimCandidates(input: {
+    olderThan: Date
+    limit: number
+  }): Promise<string[]>
+  listPendingDownloadsForReclaim(input: {
+    companyId: string
+    olderThan: Date
+    limit: number
+  }): Promise<Array<{ id: string; companyId: string; downloadClaimedAt: Date }>>
+  listCompanyIdsWithRetryCandidates(input: {
+    now: Date
+    maxRetries: number
+    limit: number
+  }): Promise<string[]>
+  listFailedAttachmentsForRetry(input: {
+    companyId: string
+    now: Date
+    limit: number
+    maxRetries: number
+    retryableErrorCodes: string[]
+  }): Promise<
+    Array<{
+      id: string
+      companyId: string
+      downloadRetryCount: number
+      lastErrorCode: string | null
+    }>
+  >
+  reclaimPendingDownload(input: {
+    companyId: string
+    attachmentId: string
+    olderThan: Date
+  }): Promise<ReclaimPendingDownloadResult>
+  scheduleRetryToDiscovered(input: {
+    companyId: string
+    attachmentId: string
+    now: Date
+    maxRetries: number
+    retryableErrorCodes: string[]
+  }): Promise<ScheduleRetryToDiscoveredResult>
 }
 
 function mapRecord(row: {
@@ -46,6 +89,9 @@ function mapRecord(row: {
   storagePublicId: string | null
   storedAt: Date | null
   lastErrorCode: string | null
+  downloadClaimedAt: Date | null
+  downloadRetryCount: number
+  downloadNextRetryAt: Date | null
 }): AttachmentRecord {
   return { ...row, status: row.status }
 }
@@ -113,13 +159,17 @@ export class AcquisitionAttachmentRepository implements AcquisitionAttachmentRep
       return { status: "NOT_FOUND" }
     }
 
+    const claimedAt = new Date()
     const updated = await this.db.acquisitionAttachment.updateMany({
       where: {
         id: attachmentId,
         companyId,
         status: "DISCOVERED",
       },
-      data: { status: "PENDING_DOWNLOAD" },
+      data: {
+        status: "PENDING_DOWNLOAD",
+        downloadClaimedAt: claimedAt,
+      },
     })
 
     if (updated.count === 1) {
@@ -150,6 +200,8 @@ export class AcquisitionAttachmentRepository implements AcquisitionAttachmentRep
         mimeType: update.mimeType,
         lastErrorCode: null,
         lastErrorAt: null,
+        downloadClaimedAt: null,
+        downloadNextRetryAt: null,
       },
     })
 
@@ -172,22 +224,52 @@ export class AcquisitionAttachmentRepository implements AcquisitionAttachmentRep
     companyId: string,
     attachmentId: string,
     update: AttachmentFailureUpdate
-  ): Promise<AttachmentRecord> {
+  ): Promise<MarkFailureResult> {
+    if (!companyId || !attachmentId) return { outcome: "NOT_FOUND" }
+
+    const data =
+      update.status === "REJECTED"
+        ? {
+            status: "REJECTED" as const,
+            lastErrorCode: update.errorCode,
+            lastErrorAt: update.failedAt,
+            storageUrl: null,
+            storagePublicId: null,
+            downloadClaimedAt: null,
+            downloadNextRetryAt: null,
+          }
+        : {
+            status: "FAILED" as const,
+            lastErrorCode: update.errorCode,
+            lastErrorAt: update.failedAt,
+            storageUrl: null,
+            storagePublicId: null,
+            downloadClaimedAt: null,
+            downloadNextRetryAt: update.nextRetryAt ?? null,
+            downloadRetryCount: { increment: 1 },
+          }
+
     const result = await this.db.acquisitionAttachment.updateMany({
-      where: { id: attachmentId, companyId },
-      data: {
-        status: update.status,
-        lastErrorCode: update.errorCode,
-        lastErrorAt: update.failedAt,
-        storageUrl: null,
-        storagePublicId: null,
-      },
+      where: { id: attachmentId, companyId, status: "PENDING_DOWNLOAD" },
+      data,
     })
-    if (result.count === 0) throw new Error("ATTACHMENT_NOT_FOUND")
-    const row = await this.db.acquisitionAttachment.findFirstOrThrow({
+
+    if (result.count === 1) {
+      const row = await this.db.acquisitionAttachment.findFirstOrThrow({
+        where: { id: attachmentId, companyId },
+      })
+      const attachment = mapRecord(row)
+      return update.status === "REJECTED"
+        ? { outcome: "MARKED_REJECTED", attachment }
+        : { outcome: "MARKED_FAILED", attachment }
+    }
+
+    const latest = await this.db.acquisitionAttachment.findFirst({
       where: { id: attachmentId, companyId },
+      select: { id: true },
     })
-    return mapRecord(row)
+    if (!latest) return { outcome: "NOT_FOUND" }
+    return { outcome: "STATE_CHANGED" }
   }
 
   async listCompanyIdsWithDiscoveredAttachments(input: { limit: number }): Promise<string[]> {
@@ -218,6 +300,167 @@ export class AcquisitionAttachmentRepository implements AcquisitionAttachmentRep
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       take: limit,
     })
+  }
+
+  async listCompanyIdsWithReclaimCandidates(input: {
+    olderThan: Date
+    limit: number
+  }): Promise<string[]> {
+    const limit = Math.max(0, Math.floor(input.limit))
+    if (limit === 0) return []
+
+    const rows = await this.db.acquisitionAttachment.findMany({
+      where: {
+        status: "PENDING_DOWNLOAD",
+        downloadClaimedAt: { not: null, lte: input.olderThan },
+      },
+      distinct: ["companyId"],
+      select: { companyId: true },
+      orderBy: { companyId: "asc" },
+      take: limit,
+    })
+    return rows.map((row) => row.companyId)
+  }
+
+  async listPendingDownloadsForReclaim(input: {
+    companyId: string
+    olderThan: Date
+    limit: number
+  }): Promise<Array<{ id: string; companyId: string; downloadClaimedAt: Date }>> {
+    if (!input.companyId) return []
+    const limit = Math.max(0, Math.floor(input.limit))
+    if (limit === 0) return []
+
+    const rows = await this.db.acquisitionAttachment.findMany({
+      where: {
+        companyId: input.companyId,
+        status: "PENDING_DOWNLOAD",
+        downloadClaimedAt: { not: null, lte: input.olderThan },
+      },
+      select: { id: true, companyId: true, downloadClaimedAt: true },
+      orderBy: [{ downloadClaimedAt: "asc" }, { id: "asc" }],
+      take: limit,
+    })
+
+    return rows
+      .filter((row): row is typeof row & { downloadClaimedAt: Date } => row.downloadClaimedAt != null)
+      .map((row) => ({
+        id: row.id,
+        companyId: row.companyId,
+        downloadClaimedAt: row.downloadClaimedAt,
+      }))
+  }
+
+  async listCompanyIdsWithRetryCandidates(input: {
+    now: Date
+    maxRetries: number
+    limit: number
+  }): Promise<string[]> {
+    const limit = Math.max(0, Math.floor(input.limit))
+    if (limit === 0) return []
+
+    const rows = await this.db.acquisitionAttachment.findMany({
+      where: {
+        status: "FAILED",
+        downloadNextRetryAt: { not: null, lte: input.now },
+        downloadRetryCount: { lte: input.maxRetries },
+      },
+      distinct: ["companyId"],
+      select: { companyId: true },
+      orderBy: { companyId: "asc" },
+      take: limit,
+    })
+    return rows.map((row) => row.companyId)
+  }
+
+  async listFailedAttachmentsForRetry(input: {
+    companyId: string
+    now: Date
+    limit: number
+    maxRetries: number
+    retryableErrorCodes: string[]
+  }): Promise<
+    Array<{
+      id: string
+      companyId: string
+      downloadRetryCount: number
+      lastErrorCode: string | null
+    }>
+  > {
+    if (!input.companyId) return []
+    const limit = Math.max(0, Math.floor(input.limit))
+    if (limit === 0) return []
+    if (input.retryableErrorCodes.length === 0) return []
+
+    return this.db.acquisitionAttachment.findMany({
+      where: {
+        companyId: input.companyId,
+        status: "FAILED",
+        downloadNextRetryAt: { not: null, lte: input.now },
+        downloadRetryCount: { lte: input.maxRetries },
+        lastErrorCode: { in: input.retryableErrorCodes },
+      },
+      select: {
+        id: true,
+        companyId: true,
+        downloadRetryCount: true,
+        lastErrorCode: true,
+      },
+      orderBy: [{ downloadNextRetryAt: "asc" }, { id: "asc" }],
+      take: limit,
+    })
+  }
+
+  async reclaimPendingDownload(input: {
+    companyId: string
+    attachmentId: string
+    olderThan: Date
+  }): Promise<ReclaimPendingDownloadResult> {
+    if (!input.companyId || !input.attachmentId) return "NOOP"
+
+    const result = await this.db.acquisitionAttachment.updateMany({
+      where: {
+        id: input.attachmentId,
+        companyId: input.companyId,
+        status: "PENDING_DOWNLOAD",
+        downloadClaimedAt: { not: null, lte: input.olderThan },
+      },
+      data: {
+        status: "DISCOVERED",
+        downloadClaimedAt: null,
+      },
+    })
+
+    return result.count === 1 ? "RECLAIMED" : "NOOP"
+  }
+
+  async scheduleRetryToDiscovered(input: {
+    companyId: string
+    attachmentId: string
+    now: Date
+    maxRetries: number
+    retryableErrorCodes: string[]
+  }): Promise<ScheduleRetryToDiscoveredResult> {
+    if (!input.companyId || !input.attachmentId) return "NOOP"
+    if (input.retryableErrorCodes.length === 0) return "NOOP"
+
+    const result = await this.db.acquisitionAttachment.updateMany({
+      where: {
+        id: input.attachmentId,
+        companyId: input.companyId,
+        status: "FAILED",
+        downloadNextRetryAt: { not: null, lte: input.now },
+        downloadRetryCount: { lte: input.maxRetries },
+        lastErrorCode: { in: input.retryableErrorCodes },
+      },
+      data: {
+        status: "DISCOVERED",
+        downloadNextRetryAt: null,
+        downloadClaimedAt: null,
+      },
+    })
+
+    return result.count === 1 ? "TRANSITIONED" : "NOOP"
   }
 }
 
