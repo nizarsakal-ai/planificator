@@ -21,14 +21,9 @@ describe("canShowAffecterEquipeForm", () => {
     assert.equal(canShowAffecterEquipeForm({ role: "SUPER_ADMIN", status: "COMPLETED" }), true)
   })
 
-  it("ARCHIVED → visible pour ADMIN/SUPER_ADMIN (correction a posteriori)", () => {
-    assert.equal(canShowAffecterEquipeForm({ role: "ADMIN", status: "ARCHIVED" }), true)
-    assert.equal(canShowAffecterEquipeForm({ role: "SUPER_ADMIN", status: "ARCHIVED" }), true)
-  })
-
-  it("ARCHIVED reste masqué pour les rôles non autorisés", () => {
-    assert.equal(canShowAffecterEquipeForm({ role: "TEAM_LEADER", status: "ARCHIVED" }), false)
-    assert.equal(canShowAffecterEquipeForm({ role: "EMPLOYEE", status: "ARCHIVED" }), false)
+  it("ARCHIVED → masqué (règle terminale)", () => {
+    assert.equal(canShowAffecterEquipeForm({ role: "ADMIN", status: "ARCHIVED" }), false)
+    assert.equal(canShowAffecterEquipeForm({ role: "SUPER_ADMIN", status: "ARCHIVED" }), false)
   })
 
   it("utilisateur non autorisé → masqué", () => {
