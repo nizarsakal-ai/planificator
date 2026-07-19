@@ -1226,6 +1226,7 @@ model AcquisitionAttachment {
   @@unique([acquisitionMessageId, attachmentKey])
   @@index([companyId])
   @@index([acquisitionMessageId])
+  @@index([companyId, status, createdAt])
   @@map("acquisition_attachments")
 }
 

@@ -545,8 +545,104 @@ Table `AcquisitionAttachmentAccessLog` :
 
 ## Exclus (PLAN-ACQ-004B)
 
-- Cron téléchargement (→ PLAN-ACQ-004C)
 - UI revue brouillon
 - Appels IA, création chantier
 - Redirect Cloudinary / JSON URL signée
 - Accès via `companyId` client
+
+---
+
+# PLAN-ACQ-004C — Orchestrateur de téléchargement automatique
+
+## Objectif
+
+Planifier le téléchargement des PJ `DISCOVERED` en appelant exclusivement
+`downloadAcquisitionAttachment` (004). Aucune duplication du download.
+
+## Frontière 004D
+
+Hors scope 004C (futur **PLAN-ACQ-004D — Recovery & Retry Engine**) :
+
+- reclaim des `PENDING_DOWNLOAD` orphelins ;
+- retry `FAILED → DISCOVERED`.
+
+Risques acceptés jusqu'à 004D : PJ bloquées en `PENDING_DOWNLOAD` ; `FAILED` non rejoués.
+
+## Architecture
+
+```
+GET /api/cron/acquisition-attachment-download
+  → handler (Bearer CRON_SECRET)
+    → runAcquisitionAttachmentDownloadOrchestrator
+      → AcquisitionAttachmentRepository (étendu : listing DISCOVERED)
+      → downloadAcquisitionAttachment({ companyId, attachmentId })
+```
+
+Fichiers :
+
+- `attachment-download-cron-feature-flag.ts`
+- `attachment-download-orchestrator.types.ts`
+- `attachment-download-orchestrator.ts`
+- `attachment-download-cron.handler.ts`
+- `src/app/api/cron/acquisition-attachment-download/route.ts`
+
+**Non inscrit dans `vercel.json`** — activation manuelle / externe uniquement.
+
+## Feature flags & bornes (défauts sûrs)
+
+| Variable | Défaut | Rôle |
+|----------|--------|------|
+| `ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED` | `false` | Active le cron |
+| `ACQUISITION_ATTACHMENT_MAX_PER_COMPANY` | `20` | Plafond PJ / tenant / run |
+| `ACQUISITION_ATTACHMENT_MAX_PER_RUN` | `100` | Plafond PJ global / run |
+| `ACQUISITION_ATTACHMENT_MAX_COMPANIES_PER_RUN` | `20` | Plafond tenants / run |
+| `ACQUISITION_ATTACHMENT_CRON_MAX_DURATION_MS` | `240000` | Budget temps (vérifié avant chaque PJ) |
+
+Valeurs invalides / non finies / négatives → défauts. Bornes max défensives appliquées.
+
+Le service unitaire reste aussi derrière `ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED`
+et `PLANIFICATOR_ACQUISITION_ENABLED`.
+
+## Batch & fairness
+
+- Boucle **séquentielle** tenants puis PJ.
+- Listing candidats : `status = DISCOVERED` uniquement.
+- FIFO intra-tenant : `orderBy createdAt ASC, id ASC`.
+- Index : `@@index([companyId, status, createdAt])`
+  (`20260719020000_add_acquisition_attachment_discovered_index`).
+- Budget attachments / temps → `PARTIAL` + `DOWNLOAD_BUDGET_REACHED` uniquement
+  lorsqu'une interruption laisse du travail non traité dans le run.
+- **maxCompaniesPerRun** : probe `limit + 1` puis troncature.
+  - exact fit (aucune société N+1) → pas de budget companies ; run peut être `SUCCESS` ;
+  - overflow prouvé (`hasMoreCompanies`) → `PARTIAL` / `MAX_COMPANIES_PER_RUN`.
+- **maxPerCompany** (V1) : batch volontaire — traiter au plus N PJ / tenant ;
+  le run peut rester `SUCCESS` si aucune autre limite/erreur ; les `DISCOVERED`
+  restantes du même tenant sont reprises au run suivant (pas de `PARTIAL` auto).
+- Ne pas interrompre une PJ déjà commencée.
+
+## runId
+
+- `runId = crypto.randomUUID()` au démarrage.
+- Propagé dans tous les events du run.
+- **Jamais persisté en base** — corrélation logs/métriques uniquement.
+
+## Logs
+
+Préfixe `[acquisition-attachment-download-cron]` :
+
+`DOWNLOAD_CRON_START`, `DOWNLOAD_COMPANY_START`,
+`DOWNLOAD_COMPANY_SUCCESS|PARTIAL|FAILED|SKIPPED`,
+`DOWNLOAD_BUDGET_REACHED`, `DOWNLOAD_ATTACHMENT_THREW`, `DOWNLOAD_CRON_FINISHED`.
+
+## Tests
+
+- `attachment-download-orchestrator.test.ts`
+- `attachment-download-cron.route.test.ts`
+- `attachment-download-orchestrator.integration.test.ts`
+
+## Exclus (004C)
+
+- Reclaim / retry (→ 004D)
+- Modification 004B
+- IA, UI, création chantier
+- Inscription `vercel.json`

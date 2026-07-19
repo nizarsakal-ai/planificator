@@ -25,6 +25,11 @@ export interface AcquisitionAttachmentRepositoryPort {
     attachmentId: string,
     update: AttachmentFailureUpdate
   ): Promise<AttachmentRecord>
+  listCompanyIdsWithDiscoveredAttachments(input: { limit: number }): Promise<string[]>
+  listDiscoveredAttachmentsForCompany(input: {
+    companyId: string
+    limit: number
+  }): Promise<Array<{ id: string; companyId: string; createdAt: Date }>>
 }
 
 function mapRecord(row: {
@@ -183,6 +188,36 @@ export class AcquisitionAttachmentRepository implements AcquisitionAttachmentRep
       where: { id: attachmentId, companyId },
     })
     return mapRecord(row)
+  }
+
+  async listCompanyIdsWithDiscoveredAttachments(input: { limit: number }): Promise<string[]> {
+    const limit = Math.max(0, Math.floor(input.limit))
+    if (limit === 0) return []
+
+    const rows = await this.db.acquisitionAttachment.findMany({
+      where: { status: "DISCOVERED" },
+      distinct: ["companyId"],
+      select: { companyId: true },
+      orderBy: { companyId: "asc" },
+      take: limit,
+    })
+    return rows.map((row) => row.companyId)
+  }
+
+  async listDiscoveredAttachmentsForCompany(input: {
+    companyId: string
+    limit: number
+  }): Promise<Array<{ id: string; companyId: string; createdAt: Date }>> {
+    if (!input.companyId) return []
+    const limit = Math.max(0, Math.floor(input.limit))
+    if (limit === 0) return []
+
+    return this.db.acquisitionAttachment.findMany({
+      where: { companyId: input.companyId, status: "DISCOVERED" },
+      select: { id: true, companyId: true, createdAt: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: limit,
+    })
   }
 }
 

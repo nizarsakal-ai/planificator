@@ -98,7 +98,7 @@ async function compensateCloudinaryUpload(
 
 /**
  * Télécharge et stocke une pièce jointe Gmail admissible.
- * Service appelable — non branché au cron (PLAN-ACQ-004B).
+ * Service appelable — orchestré par PLAN-ACQ-004C (cron), sans logique cron ici.
  */
 export async function downloadAcquisitionAttachment(
   input: DownloadAcquisitionAttachmentInput,

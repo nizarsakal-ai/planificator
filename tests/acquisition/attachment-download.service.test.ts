@@ -58,6 +58,10 @@ function claimedRepo(overrides: Partial<AcquisitionAttachmentRepositoryPort> = {
       overrides.markFailure ??
       (async (_c, _a, update: AttachmentFailureUpdate) =>
         baseAttachment({ status: update.status, lastErrorCode: update.errorCode })),
+    listCompanyIdsWithDiscoveredAttachments:
+      overrides.listCompanyIdsWithDiscoveredAttachments ?? (async () => []),
+    listDiscoveredAttachmentsForCompany:
+      overrides.listDiscoveredAttachmentsForCompany ?? (async () => []),
   }
 }
 
