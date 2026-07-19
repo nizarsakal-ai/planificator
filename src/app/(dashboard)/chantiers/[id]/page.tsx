@@ -13,6 +13,8 @@ import { DeleteChantierButton } from "@/components/chantiers/DeleteChantierButto
 import { DeleteAssignmentBlockButton } from "@/components/chantiers/DeleteAssignmentBlockButton"
 import { RemoveEmployeeFromBlockButton } from "@/components/chantiers/RemoveEmployeeFromBlockButton"
 import { AddEmployeeToBlockButton } from "@/components/chantiers/AddEmployeeToBlockButton"
+import { groupAssignmentBlocks } from "@/lib/chantiers/assignment-blocks"
+import { canShowAffecterEquipeForm } from "@/lib/chantiers/assignment-ui-policy"
 
 export const metadata: Metadata = { title: "Détail chantier" }
 
@@ -31,79 +33,6 @@ function formatDate(date: Date) {
 
 function formatDateShort(date: Date) {
   return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short" }).format(date)
-}
-
-// ─── Regroupement des affectations en blocs continus par équipe ───────────────
-
-type AssignmentRow = {
-  id: string
-  date: Date
-  status: string
-  teamId: string
-  team: { name: string; color: string | null }
-  employeeAssignments: {
-    employee: { id: string; firstName: string; lastName: string }
-  }[]
-}
-
-type AssignmentBlock = {
-  teamId: string
-  teamName: string
-  teamColor: string | null
-  startDate: Date
-  endDate: Date
-  status: "CONFIRMED" | "PENDING" | "REFUSED"
-  employees: { id: string; firstName: string; lastName: string }[]
-  dayCount: number
-}
-
-function groupAssignmentBlocks(assignments: AssignmentRow[]): AssignmentBlock[] {
-  if (assignments.length === 0) return []
-
-  // Trier par équipe puis par date ASC
-  const sorted = [...assignments].sort((a, b) => {
-    const t = a.teamId.localeCompare(b.teamId)
-    if (t !== 0) return t
-    return a.date.getTime() - b.date.getTime()
-  })
-
-  const statusPriority: Record<string, number> = { REFUSED: 3, PENDING: 2, CONFIRMED: 1 }
-  const blocks: AssignmentBlock[] = []
-
-  for (const a of sorted) {
-    const last = blocks[blocks.length - 1]
-    const sameTeam  = last?.teamId === a.teamId
-    const diffMs    = sameTeam ? a.date.getTime() - last!.endDate.getTime() : Infinity
-    const isConsec  = diffMs <= 86400000 // 1 jour max
-
-    if (sameTeam && isConsec) {
-      last!.endDate = a.date
-      last!.dayCount++
-      const sp = statusPriority[a.status] ?? 0
-      if (sp > (statusPriority[last!.status] ?? 0)) {
-        last!.status = a.status as "CONFIRMED" | "PENDING" | "REFUSED"
-      }
-      for (const ea of a.employeeAssignments) {
-        if (!last!.employees.find((e) => e.id === ea.employee.id)) {
-          last!.employees.push(ea.employee)
-        }
-      }
-    } else {
-      blocks.push({
-        teamId:    a.teamId,
-        teamName:  a.team.name,
-        teamColor: a.team.color,
-        startDate: a.date,
-        endDate:   a.date,
-        status:    a.status as "CONFIRMED" | "PENDING" | "REFUSED",
-        employees: a.employeeAssignments.map((ea) => ea.employee),
-        dayCount:  1,
-      })
-    }
-  }
-
-  // Trier par date de début DESC (plus récent en premier)
-  return blocks.sort((a, b) => b.startDate.getTime() - a.startDate.getTime())
 }
 
 export default async function ChantierDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -294,8 +223,9 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
 
         {/* Colonne droite — affectations */}
         <div className="lg:col-span-2 space-y-4">
-          {/* Formulaire d'affectation */}
-          {isAdmin && !["COMPLETED", "ARCHIVED"].includes(chantier.status) && (
+          {/* Formulaire d'affectation — visible ADMIN/SUPER_ADMIN sauf ARCHIVED
+              (y compris COMPLETED / endDate passée : correction après auto-complete cron) */}
+          {canShowAffecterEquipeForm({ role: session.user.role, status: chantier.status }) && (
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold text-slate-700">
