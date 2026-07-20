@@ -27,13 +27,33 @@ PROCESSING abandonné (lastAttemptAt trop vieux) → reclaim → PROCESSING (att
 | `RETRYABLE_FAILURE` | Oui si `nextRetryAt <= now` et tentatives &lt; max |
 | `PROCESSING` | Oui si stale (TTL défaut 15 min) |
 
-## Idempotence
+## Idempotence et sémantique des identifiants
 
-- Clé unique BDD : `(companyId, messageId)`.
+| Identifiant | Rôle |
+|-------------|------|
+| `ProcessedGmailMessage (companyId, messageId)` | Claim / cycle de vie |
+| `PendingAccommodation (companyId, gmailMessageId)` | Idempotence pending |
+| `Accommodation (companyId, gmailSourceMessageId)` | Clé technique Gmail (nullable hors Gmail) |
+| `Accommodation.bookingReference` | **Uniquement** référence métier Booking.com |
+
 - Claim : `create` PROCESSING ou reprise conditionnelle (`updateMany`).
-- Succès : transaction Prisma regroupant création/récupération du résultat **et** passage à `SUCCEEDED`.
-- Pending : contrainte unique `(companyId, gmailMessageId)` + réutilisation / P2002.
-- Accommodation : référence synthétique `gmail:{companyId}:{messageId}` dans `bookingReference` (unique existante), faute de bookingReference métier.
+- Succès : transaction Prisma = création/récupération du résultat **et** `SUCCEEDED`.
+- Pending unique : migration **Option A** — échoue s’il existe des doublons ; **aucun DELETE automatique**.
+- `bookingReference` n’est jamais rempli avec un id Gmail technique.
+
+### Doublons pending — diagnostic
+
+```sql
+SELECT "companyId", "gmailMessageId", COUNT(*) AS n,
+       array_agg(id ORDER BY "createdAt") AS ids,
+       array_agg(status::text ORDER BY "createdAt") AS statuses,
+       array_agg("accommodationId" ORDER BY "createdAt") AS accommodation_ids
+FROM "pending_accommodations"
+GROUP BY "companyId", "gmailMessageId"
+HAVING COUNT(*) > 1;
+```
+
+Consolider manuellement (préserver `CONFIRMED` / `accommodationId` non null, données utilisateur), puis `prisma migrate deploy`.
 
 ## Retry
 
@@ -49,26 +69,25 @@ PROCESSING abandonné (lastAttemptAt trop vieux) → reclaim → PROCESSING (att
 
 **Permanentes** : corps vide confirmé, aucune donnée Booking utile, date avant cutoff métier documenté (17/06/2026), max tentatives.
 
-Les messages d’erreur sont tronqués et nettoyés (pas de tokens, pas de corps email).
-
 ## Lignes historiques
 
-Toute ligne existante avant cette migration est traitée comme **`SUCCEEDED`** (déjà consommée).
-Elle **n’est pas** retraitée automatiquement — certaines ont déjà produit un logement ou un pending.
+Toute ligne `ProcessedGmailMessage` existante avant la migration lifecycle → **`SUCCEEDED`** (déjà consommée).
+
+## Bruit Prisma format (PR future)
+
+Le commit `34c80b3` contient ~650 lignes de reformat `prisma format` sur `schema.prisma` (alignement commentaires). Non réécrit sans squash d’historique — documenter en revue PR.
 
 ## Diagnostic d’un message bloqué
 
 1. Lire `processed_gmail_messages` pour `(companyId, messageId)`.
 2. Inspecter `status`, `attemptCount`, `errorCode`, `nextRetryAt`, `resultType`, `resultEntityId`.
-3. Si `RETRYABLE_FAILURE` et due : attendre le prochain cron ou forcer `nextRetryAt = now()` (ops).
-4. Si `PROCESSING` stale : le prochain cron reclaim.
-5. Si `PERMANENTLY_IGNORED` : analyser `errorCode` ; retraitement manuel hors bande seulement.
-6. Ne pas utiliser `gmail-reset-test` en production (wipe global Booking).
+3. Si `RETRYABLE_FAILURE` et due : prochain cron ou `nextRetryAt = now()` (ops).
+4. Si `PROCESSING` stale : reclaim au prochain cron.
+5. Si `PERMANENTLY_IGNORED` : analyser `errorCode`.
+6. Ne pas utiliser `gmail-reset-test` en production.
 
-## Fichiers
+## Migrations
 
-- `src/lib/booking/gmail-message-lifecycle.ts`
-- `src/lib/booking/booking-gmail-errors.ts`
-- `src/lib/booking/booking-scan-result.ts`
-- `src/app/api/cron/gmail-scan/route.ts`
-- Migration `20260720220000_booking_gmail_message_lifecycle`
+- `20260720220000_booking_gmail_message_lifecycle` — cycle de vie (additif)
+- `20260720224500_booking_pending_gmail_unique` — unique pending, **fail si doublons**
+- `20260720230000_booking_accommodation_gmail_source` — `gmailSourceMessageId`

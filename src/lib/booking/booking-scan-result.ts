@@ -1,24 +1,14 @@
 /**
  * Persistance idempotente des résultats Booking dans une transaction.
  *
- * Sans bookingReference métier (hors périmètre extraction), l'idempotence
- * Accommodation repose sur une référence synthétique stable :
- *   gmail:{companyId}:{messageId}
- * (colonne bookingReference déjà unique globalement).
- *
- * PendingAccommodation : contrainte unique (companyId, gmailMessageId).
+ * - bookingReference : uniquement la vraie référence Booking.com (si connue).
+ * - Accommodation.gmailSourceMessageId : clé technique tenant-safe (companyId + messageId).
+ * - PendingAccommodation : unique (companyId, gmailMessageId).
  */
 
 import type { BookingGmailResultType, Prisma } from "@prisma/client"
 
 export type ParsedBookingFields = Record<string, string | null>
-
-export function syntheticGmailBookingReference(
-  companyId: string,
-  messageId: string
-): string {
-  return `gmail:${companyId}:${messageId}`
-}
 
 function isUniqueViolation(error: unknown): boolean {
   return (
@@ -41,13 +31,12 @@ export async function createOrGetBookingScanResult(
   }
 ): Promise<{ resultType: BookingGmailResultType; resultEntityId: string | null; createdNew: boolean }> {
   const { companyId, messageId, snippet, parsed, matchedTeamId, adminId } = input
-  const syntheticRef = syntheticGmailBookingReference(companyId, messageId)
-  const bookingRef = parsed.bookingReference?.trim() || syntheticRef
+  const bookingRef = parsed.bookingReference?.trim() || null
 
   // Annulation (chemin existant — rarement déclenché faute de champs dans le prompt)
-  if (parsed.status === "cancelled" && parsed.bookingReference) {
+  if (parsed.status === "cancelled" && bookingRef) {
     const existing = await tx.accommodation.findFirst({
-      where: { companyId, bookingReference: parsed.bookingReference },
+      where: { companyId, bookingReference: bookingRef },
       select: { id: true },
     })
     if (existing) {
@@ -80,9 +69,8 @@ export async function createOrGetBookingScanResult(
       }
     }
 
-    // Idempotence Accommodation : référence synthétique (ou réelle) par message
     const existingAcc = await tx.accommodation.findFirst({
-      where: { companyId, bookingReference: bookingRef },
+      where: { companyId, gmailSourceMessageId: messageId },
       orderBy: { createdAt: "asc" },
     })
     if (existingAcc) {
@@ -110,13 +98,14 @@ export async function createOrGetBookingScanResult(
           contactPhone: parsed.contactPhone ?? null,
           notes: parsed.notes ?? null,
           bookingReference: bookingRef,
+          gmailSourceMessageId: messageId,
           source: "gmail-scan",
         },
       })
     } catch (error) {
       if (!isUniqueViolation(error)) throw error
       const raced = await tx.accommodation.findFirst({
-        where: { companyId, bookingReference: bookingRef },
+        where: { companyId, gmailSourceMessageId: messageId },
         orderBy: { createdAt: "asc" },
       })
       if (!raced) throw error
