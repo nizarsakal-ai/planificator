@@ -64,10 +64,27 @@ export async function GET(
 
   const doc = await prisma.document.findFirst({
     where: { id, worksite: { companyId: session.user.companyId! } },
-    select: { url: true, name: true, mimeType: true },
+    select: {
+      url: true,
+      name: true,
+      mimeType: true,
+      sourceAcquisitionAttachmentId: true,
+    },
   })
 
   if (!doc) {
+    return new NextResponse("Document introuvable", { status: 404 })
+  }
+
+  // PLAN-ACQ-005D — bridge : accès via route attachments (pas d’URL stockée)
+  if (doc.sourceAcquisitionAttachmentId) {
+    const dl = forceDownload ? "?dl=1" : ""
+    return NextResponse.redirect(
+      new URL(`/api/acquisition/attachments/${doc.sourceAcquisitionAttachmentId}${dl}`, req.url)
+    )
+  }
+
+  if (!doc.url) {
     return new NextResponse("Document introuvable", { status: 404 })
   }
 

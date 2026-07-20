@@ -69,6 +69,16 @@ export default async function ClientChantierDetailPage({ params }: { params: Pro
   const plans     = chantier.documents.filter(d => d.type === "PLAN")
   const docs      = chantier.documents.filter(d => d.type === "DOCUMENT")
 
+  function resolveDocumentUrl(doc: {
+    url: string | null
+    sourceAcquisitionAttachmentId: string | null
+  }): string | null {
+    if (doc.sourceAcquisitionAttachmentId) {
+      return `/api/acquisition/attachments/${doc.sourceAcquisitionAttachmentId}`
+    }
+    return doc.url
+  }
+
   return (
     <div className="space-y-6">
       {/* Retour */}
@@ -251,13 +261,17 @@ export default async function ClientChantierDetailPage({ params }: { params: Pro
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {photos.map((p) => (
-                <a key={p.id} href={p.url} target="_blank" rel="noopener noreferrer">
-                  <div className="aspect-video rounded-lg overflow-hidden bg-slate-100 hover:opacity-90 transition-opacity">
-                    <Image src={p.url} alt={p.name} width={300} height={200} className="w-full h-full object-cover" />
-                  </div>
-                </a>
-              ))}
+              {photos.map((p) => {
+                const href = resolveDocumentUrl(p)
+                if (!href) return null
+                return (
+                  <a key={p.id} href={href} target="_blank" rel="noopener noreferrer">
+                    <div className="aspect-video rounded-lg overflow-hidden bg-slate-100 hover:opacity-90 transition-opacity">
+                      <Image src={href} alt={p.name} width={300} height={200} className="w-full h-full object-cover" />
+                    </div>
+                  </a>
+                )
+              })}
             </div>
           </CardContent>
         </Card>
@@ -271,10 +285,13 @@ export default async function ClientChantierDetailPage({ params }: { params: Pro
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {[...plans, ...docs].map((d) => (
+              {[...plans, ...docs].map((d) => {
+                const href = resolveDocumentUrl(d)
+                if (!href) return null
+                return (
                 <a
                   key={d.id}
-                  href={d.url}
+                  href={href}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors"
@@ -285,7 +302,8 @@ export default async function ClientChantierDetailPage({ params }: { params: Pro
                     <p className="text-xs text-slate-400">{d.type === "PLAN" ? "Plan" : "Document"}</p>
                   </div>
                 </a>
-              ))}
+                )
+              })}
             </div>
           </CardContent>
         </Card>

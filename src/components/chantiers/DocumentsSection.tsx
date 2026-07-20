@@ -10,13 +10,14 @@ import { uploadDocument, deleteDocument } from "@/lib/actions/document.actions"
 interface Document {
   id: string
   name: string
-  url: string
+  url: string | null
   size: number | null
   mimeType: string | null
   type: "PLAN" | "PHOTO" | "DOCUMENT"
   uploadedAt: Date
   latitude: number | null
   longitude: number | null
+  sourceAcquisitionAttachmentId?: string | null
 }
 
 interface DocumentsSectionProps {
@@ -35,12 +36,20 @@ function isImage(mimeType: string | null) {
   return mimeType?.startsWith("image/") ?? false
 }
 
-function viewUrl(mimeType: string | null, originalUrl: string, id: string) {
-  if (mimeType?.startsWith("image/")) return originalUrl
-  return `/api/documents/${id}`
+/** URL d’affichage : bridge attachment prioritaire, sinon /api/documents. */
+function resolveViewUrl(doc: Document): string {
+  if (doc.sourceAcquisitionAttachmentId) {
+    return `/api/acquisition/attachments/${doc.sourceAcquisitionAttachmentId}`
+  }
+  if (doc.mimeType?.startsWith("image/") && doc.url) return doc.url
+  return `/api/documents/${doc.id}`
 }
-function downloadUrl(id: string) {
-  return `/api/documents/${id}?dl=1`
+
+function resolveDownloadUrl(doc: Document): string {
+  if (doc.sourceAcquisitionAttachmentId) {
+    return `/api/acquisition/attachments/${doc.sourceAcquisitionAttachmentId}?dl=1`
+  }
+  return `/api/documents/${doc.id}?dl=1`
 }
 
 function formatCoords(lat: number, lng: number) {
@@ -222,7 +231,7 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
               <div key={doc.id} className="group relative aspect-square rounded-lg overflow-hidden bg-slate-100">
                 {isImage(doc.mimeType) ? (
                   <img
-                    src={doc.url}
+                    src={resolveViewUrl(doc)}
                     alt={doc.name}
                     className="w-full h-full object-cover"
                   />
@@ -250,7 +259,7 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
                   )}
                   <div className="flex items-center gap-2">
                     <a
-                      href={viewUrl(doc.mimeType, doc.url, doc.id)}
+                      href={resolveViewUrl(doc)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-white text-xs bg-white/20 px-2 py-1 rounded hover:bg-white/30"
@@ -258,7 +267,7 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
                       Voir
                     </a>
                     <a
-                      href={downloadUrl(doc.id)}
+                      href={resolveDownloadUrl(doc)}
                       download
                       className="text-white text-xs bg-white/20 px-2 py-1 rounded hover:bg-white/30"
                     >
@@ -289,7 +298,7 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
                   <FileText className="h-4 w-4 text-slate-400 shrink-0" />
                   <div className="min-w-0">
                     <a
-                      href={viewUrl(doc.mimeType, doc.url, doc.id)}
+                      href={resolveViewUrl(doc)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-sm font-medium text-[#0f3460] hover:underline truncate block"
@@ -303,7 +312,7 @@ export function DocumentsSection({ worksiteId, documents }: DocumentsSectionProp
                 </div>
                 <div className="flex items-center gap-1 ml-2 shrink-0">
                   <a
-                    href={downloadUrl(doc.id)}
+                    href={resolveDownloadUrl(doc)}
                     download
                     title="Télécharger"
                     className="text-slate-400 hover:text-[#0f3460] transition-colors"

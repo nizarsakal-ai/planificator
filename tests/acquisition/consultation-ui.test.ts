@@ -99,6 +99,7 @@ describe("consultation-ui helpers", () => {
       reviewedByUserId: "u",
       reviewedAt: new Date(),
       rejectionReason: "motif secret",
+      createdWorksiteId: null,
       updatedAt: new Date(),
     }
     const dto = toConsultationProposedFormDto(draft, true)

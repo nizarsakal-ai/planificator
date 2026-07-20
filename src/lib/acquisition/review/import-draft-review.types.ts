@@ -57,6 +57,7 @@ export type ImportDraftReviewBundle = {
     reviewedByUserId: string | null
     reviewedAt: Date | null
     rejectionReason: string | null
+    createdWorksiteId: string | null
     updatedAt: Date
   }
   message: {

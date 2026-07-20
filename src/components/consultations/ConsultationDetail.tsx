@@ -7,6 +7,8 @@ import {
   mapWarningDataToPublicView,
 } from "@/lib/acquisition/review/consultation-ui"
 import { ConsultationProposedForm } from "@/components/consultations/ConsultationProposedForm"
+import { ConsultationConversionPanel } from "@/components/consultations/ConsultationConversionPanel"
+import type { ConversionClientOption } from "@/components/consultations/ConsultationConversionPanel"
 import { toConsultationProposedFormDto } from "@/lib/acquisition/review/consultation-proposed-form.dto"
 import { cn } from "@/lib/utils"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -32,9 +34,13 @@ function formatBytes(n: number): string {
 export function ConsultationDetail({
   bundle,
   extractionEnabled,
+  conversionEnabled,
+  clients,
 }: {
   bundle: ImportDraftReviewBundle
   extractionEnabled: boolean
+  conversionEnabled: boolean
+  clients: ConversionClientOption[]
 }) {
   const { draft, message, content, attachments } = bundle
   const warnings = mapWarningDataToPublicView(draft.warningData)
@@ -150,6 +156,24 @@ export function ConsultationDetail({
           />
         </CardContent>
       </Card>
+
+      {(draft.status === "APPROVED" || draft.status === "CONVERTED") && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Conversion en chantier</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ConsultationConversionPanel
+              draftId={draft.id}
+              version={draft.version}
+              proposedClientName={draft.proposedClientName}
+              conversionEnabled={conversionEnabled}
+              clients={clients}
+              convertedWorksiteId={draft.createdWorksiteId}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

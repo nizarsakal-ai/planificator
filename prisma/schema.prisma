@@ -650,13 +650,18 @@ model Document {
   id         String       @id @default(cuid())
   worksiteId String
   name       String
-  url        String
+  // Nullable : documents bridgés Acquisition (005D) n’ont pas d’URL publique.
+  // L’accès se fait via sourceAcquisitionAttachmentId → route attachments.
+  url        String?
   size       Int?         // taille en octets
   mimeType   String?
   latitude   Float?
   longitude  Float?
   type       DocumentType @default(DOCUMENT)
   uploadedAt DateTime     @default(now())
+  // PLAN-ACQ-005D — bridge Cloudinary authenticated (pas de re-upload)
+  storagePublicId               String?
+  sourceAcquisitionAttachmentId String? @unique
 
   // Relations
   worksite Worksite @relation(fields: [worksiteId], references: [id], onDelete: Cascade)
@@ -1214,7 +1219,7 @@ model WorksiteImportDraft {
   reviewedByUserId     String?
   reviewedAt           DateTime?
   rejectionReason      String?
-  createdWorksiteId    String?
+  createdWorksiteId    String?                   @unique
   createdAt            DateTime                  @default(now())
   updatedAt            DateTime                  @updatedAt
 

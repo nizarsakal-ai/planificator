@@ -1,8 +1,10 @@
 import type { Metadata } from "next"
 import { auth } from "@/auth"
 import { notFound, redirect } from "next/navigation"
+import { prisma } from "@/lib/prisma"
 import { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
 import { isAcquisitionExtractionEnabled } from "@/lib/acquisition/extraction/extraction-feature-flag"
+import { isAcquisitionConversionFullyEnabled } from "@/lib/acquisition/conversion/conversion-feature-flag"
 import { importDraftReadRepository } from "@/lib/acquisition/review/import-draft-read.repository"
 import { ConsultationDetail } from "@/components/consultations/ConsultationDetail"
 import { Card, CardContent } from "@/components/ui/card"
@@ -41,11 +43,23 @@ export default async function ConsultationDetailPage({
   })
   if (!bundle) notFound()
 
+  const clients =
+    bundle.draft.status === "APPROVED" || bundle.draft.status === "CONVERTED"
+      ? await prisma.client.findMany({
+          where: { companyId: session.user.companyId },
+          select: { id: true, name: true },
+          orderBy: { name: "asc" },
+          take: 200,
+        })
+      : []
+
   return (
     <div className="p-6">
       <ConsultationDetail
         bundle={bundle}
         extractionEnabled={isAcquisitionExtractionEnabled()}
+        conversionEnabled={isAcquisitionConversionFullyEnabled()}
+        clients={clients}
       />
     </div>
   )
