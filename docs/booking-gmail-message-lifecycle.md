@@ -41,27 +41,54 @@ PROCESSING abandonné (lastAttemptAt trop vieux) → reclaim → PROCESSING (att
 - Pending unique : migration **Option A** — échoue s’il existe des doublons ; **aucun DELETE automatique**.
 - `bookingReference` n’est jamais rempli avec un id Gmail technique.
 
-### Doublons pending — diagnostic
+### Doublons pending — diagnostic (préflight lecture seule)
 
 ```sql
-SELECT "companyId", "gmailMessageId", COUNT(*) AS n,
+SELECT "companyId",
+       "gmailMessageId",
+       COUNT(*) AS n,
        array_agg(id ORDER BY "createdAt") AS ids,
        array_agg(status::text ORDER BY "createdAt") AS statuses,
        array_agg("accommodationId" ORDER BY "createdAt") AS accommodation_ids
 FROM "pending_accommodations"
+WHERE "gmailMessageId" IS NOT NULL
 GROUP BY "companyId", "gmailMessageId"
 HAVING COUNT(*) > 1;
 ```
 
+| Résultat | Action |
+|----------|--------|
+| Vide | Migration autorisée |
+| ≥ 1 ligne | **Déploiement interdit** — audit et consolidation manuelle obligatoire |
+
 Consolider manuellement (préserver `CONFIRMED` / `accommodationId` non null, données utilisateur), puis `prisma migrate deploy`.
 
-## Retry
+## Claim, retry et PROCESSING obsolète
+
+- **Claim** : `INSERT` en `PROCESSING` sous unique `(companyId, messageId)` ; conflit `P2002` → lecture + `updateMany` conditionnel (retry due / stale).
+- **Retry** : `RETRYABLE_FAILURE` + `nextRetryAt` (backoff 5 min × 2^(n-1), cap 6 h) ; max tentatives → `PERMANENTLY_IGNORED`.
+- **Stale** : `PROCESSING` avec `lastAttemptAt` plus vieux que le TTL (défaut 15 min) → reclaim atomique (`updateMany` + `attemptCount`).
 
 | Paramètre | Défaut | Env |
 |-----------|--------|-----|
 | Max tentatives | 5 | `BOOKING_GMAIL_MAX_ATTEMPTS` (1–20) |
 | Stale PROCESSING | 15 min | `BOOKING_GMAIL_PROCESSING_STALE_MS` |
 | Backoff | 5 min × 2^(attempt-1), cap 6 h | — |
+
+## Déploiement
+
+1. Exécuter le préflight SQL ci-dessus en **lecture seule** sur la cible.
+2. Si non vide : stopper ; consolider ; rejouer le préflight.
+3. `npx prisma migrate deploy`
+4. Redéployer l’application (cron `/api/cron/gmail-scan`).
+5. Vérifier logs cron (`scanned` / `retryable` / `permanent` / `detected`).
+
+## Incident et rollback logique
+
+- **Message bloqué** : section diagnostic ci-dessus ; ne pas wipe via `gmail-reset-test` en prod.
+- **Migration échouée sur doublons** : aucune donnée supprimée ; corriger les doublons ; relancer migrate.
+- **Rollback applicatif** : redeployer le code précédent ; laisser les colonnes/enums/index en place (additifs). Ne pas `DROP` en production.
+- **Rollback schéma destructif** : interdit dans ce lot.
 
 ## Erreurs
 
