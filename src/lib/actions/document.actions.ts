@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma"
 import { revalidatePath } from "next/cache"
 import { v2 as cloudinary } from "cloudinary"
 import { DocumentType } from "@prisma/client"
+import { shouldDestroyCloudinaryOnDocumentDelete } from "@/lib/documents/document-delete.policy"
 
 // Le SDK lit CLOUDINARY_URL automatiquement
 
@@ -90,11 +91,10 @@ export async function deleteDocument(documentId: string, worksiteId: string) {
   })
   if (!doc) return { error: "Document introuvable" }
 
-  // Supprimer sur Cloudinary si l'URL est cloudinary
-  if (doc.url.includes("cloudinary.com")) {
+  if (shouldDestroyCloudinaryOnDocumentDelete(doc)) {
     try {
-      // Extraire le public_id depuis l'URL Cloudinary
-      const matches = doc.url.match(/\/v\d+\/(.+)\.[a-z]+$/)
+      const url = doc.url!
+      const matches = url.match(/\/v\d+\/(.+)\.[a-z]+$/)
       if (matches?.[1]) {
         await cloudinary.uploader.destroy(matches[1], { resource_type: "auto" })
       }

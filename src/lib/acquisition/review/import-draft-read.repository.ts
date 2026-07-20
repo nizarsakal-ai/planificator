@@ -117,6 +117,7 @@ export class ImportDraftReadRepository {
         reviewedByUserId: true,
         reviewedAt: true,
         rejectionReason: true,
+        createdWorksiteId: true,
         updatedAt: true,
         acquisitionMessageId: true,
         acquisitionMessage: {
@@ -181,6 +182,7 @@ export class ImportDraftReadRepository {
         reviewedByUserId: draft.reviewedByUserId,
         reviewedAt: draft.reviewedAt,
         rejectionReason: draft.rejectionReason,
+        createdWorksiteId: draft.createdWorksiteId,
         updatedAt: draft.updatedAt,
       },
       message: {
