@@ -122,14 +122,19 @@ export class BookingGmailMessageLifecycle {
 
     if (existing.status === "RETRYABLE_FAILURE") {
       if (existing.attemptCount >= maxAttempts) {
-        await this.db.processedGmailMessage.update({
-          where: { id: existing.id },
+        await this.db.processedGmailMessage.updateMany({
+          where: {
+            id: existing.id,
+            status: "RETRYABLE_FAILURE",
+            attemptCount: existing.attemptCount,
+          },
           data: {
             status: "PERMANENTLY_IGNORED",
             errorCode: existing.errorCode ?? "MAX_ATTEMPTS_EXCEEDED",
             errorMessage: existing.errorMessage ?? "Nombre maximal de tentatives atteint",
             nextRetryAt: null,
             lastAttemptAt: now,
+            resultType: "IGNORED",
           },
         })
         return { action: "SKIP", reason: "PERMANENTLY_IGNORED" }
@@ -159,20 +164,27 @@ export class BookingGmailMessageLifecycle {
       return { action: "CLAIMED", record, isNew: false }
     }
 
-    // PROCESSING stale → reclaim
+    // PROCESSING stale → reclaim (updateMany conditionnel = anti-TOCTOU)
     if (existing.status === "PROCESSING") {
-      if (existing.lastAttemptAt && existing.lastAttemptAt > staleBefore) {
+      const isFresh =
+        existing.lastAttemptAt !== null && existing.lastAttemptAt > staleBefore
+      if (isFresh) {
         return { action: "SKIP", reason: "IN_FLIGHT" }
       }
       if (existing.attemptCount >= maxAttempts) {
-        await this.db.processedGmailMessage.update({
-          where: { id: existing.id },
+        await this.db.processedGmailMessage.updateMany({
+          where: {
+            id: existing.id,
+            status: "PROCESSING",
+            attemptCount: existing.attemptCount,
+          },
           data: {
             status: "PERMANENTLY_IGNORED",
             errorCode: "MAX_ATTEMPTS_EXCEEDED",
             errorMessage: "PROCESSING abandonné — max tentatives",
             nextRetryAt: null,
             lastAttemptAt: now,
+            resultType: "IGNORED",
           },
         })
         return { action: "SKIP", reason: "PERMANENTLY_IGNORED" }
@@ -181,7 +193,11 @@ export class BookingGmailMessageLifecycle {
         where: {
           id: existing.id,
           status: "PROCESSING",
-          lastAttemptAt: existing.lastAttemptAt ?? undefined,
+          attemptCount: existing.attemptCount,
+          OR: [
+            { lastAttemptAt: { lte: staleBefore } },
+            { lastAttemptAt: null },
+          ],
         },
         data: {
           attemptCount: { increment: 1 },
@@ -233,7 +249,7 @@ export class BookingGmailMessageLifecycle {
         },
       })
       if (updated.count === 0) {
-        throw new Error("BOOKING_GMAIL_SUCCESS_STATUS_UPDATE_FAILED")
+        throw new Error(BOOKING_GMAIL_SUCCESS_STATUS_UPDATE_FAILED)
       }
       return tx.processedGmailMessage.findUniqueOrThrow({
         where: {
@@ -246,6 +262,10 @@ export class BookingGmailMessageLifecycle {
     })
   }
 
+  /**
+   * Enregistre un échec uniquement si le message est encore PROCESSING.
+   * Ne peut pas écraser SUCCEEDED / PERMANENTLY_IGNORED (course stale reclaim).
+   */
   async markFailure(input: MarkFailureInput): Promise<ProcessedGmailMessage> {
     const now = input.now ?? new Date()
     const classified = classifyBookingError(input.error)
@@ -263,6 +283,17 @@ export class BookingGmailMessageLifecycle {
       throw new Error("BOOKING_GMAIL_TRACKING_NOT_FOUND")
     }
 
+    // Un autre worker a déjà finalisé : ne pas régresser le statut.
+    if (
+      existing.status === "SUCCEEDED" ||
+      existing.status === "PERMANENTLY_IGNORED"
+    ) {
+      return existing
+    }
+    if (existing.status !== "PROCESSING") {
+      return existing
+    }
+
     const attempts = existing.attemptCount
     let status: BookingGmailMessageStatus
     let nextRetryAt: Date | null = null
@@ -276,8 +307,12 @@ export class BookingGmailMessageLifecycle {
       nextRetryAt = computeNextRetryAt(attempts, now)
     }
 
-    return this.db.processedGmailMessage.update({
-      where: { id: existing.id },
+    const updated = await this.db.processedGmailMessage.updateMany({
+      where: {
+        id: existing.id,
+        status: "PROCESSING",
+        attemptCount: existing.attemptCount,
+      },
       data: {
         status,
         lastAttemptAt: now,
@@ -293,6 +328,16 @@ export class BookingGmailMessageLifecycle {
         resultType: status === "PERMANENTLY_IGNORED" ? "IGNORED" : existing.resultType,
       },
     })
+
+    if (updated.count === 0) {
+      return this.db.processedGmailMessage.findUniqueOrThrow({
+        where: { id: existing.id },
+      })
+    }
+
+    return this.db.processedGmailMessage.findUniqueOrThrow({
+      where: { id: existing.id },
+    })
   }
 
   async markPermanentIgnored(
@@ -301,8 +346,12 @@ export class BookingGmailMessageLifecycle {
     error: ClassifiedBookingError,
     now = new Date()
   ): Promise<ProcessedGmailMessage> {
-    return this.db.processedGmailMessage.update({
-      where: { companyId_messageId: { companyId, messageId } },
+    const updated = await this.db.processedGmailMessage.updateMany({
+      where: {
+        companyId,
+        messageId,
+        status: "PROCESSING",
+      },
       data: {
         status: "PERMANENTLY_IGNORED",
         lastAttemptAt: now,
@@ -313,7 +362,19 @@ export class BookingGmailMessageLifecycle {
         succeededAt: null,
       },
     })
+    if (updated.count === 0) {
+      return this.db.processedGmailMessage.findUniqueOrThrow({
+        where: { companyId_messageId: { companyId, messageId } },
+      })
+    }
+    return this.db.processedGmailMessage.findUniqueOrThrow({
+      where: { companyId_messageId: { companyId, messageId } },
+    })
   }
 }
+
+/** Erreur levée si le passage à SUCCEEDED échoue (souvent course concurrente). */
+export const BOOKING_GMAIL_SUCCESS_STATUS_UPDATE_FAILED =
+  "BOOKING_GMAIL_SUCCESS_STATUS_UPDATE_FAILED"
 
 export const bookingGmailMessageLifecycle = new BookingGmailMessageLifecycle()

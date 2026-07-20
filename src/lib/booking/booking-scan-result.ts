@@ -1,10 +1,33 @@
 /**
  * Persistance idempotente des résultats Booking dans une transaction.
+ *
+ * Sans bookingReference métier (hors périmètre extraction), l'idempotence
+ * Accommodation repose sur une référence synthétique stable :
+ *   gmail:{companyId}:{messageId}
+ * (colonne bookingReference déjà unique globalement).
+ *
+ * PendingAccommodation : contrainte unique (companyId, gmailMessageId).
  */
 
 import type { BookingGmailResultType, Prisma } from "@prisma/client"
 
 export type ParsedBookingFields = Record<string, string | null>
+
+export function syntheticGmailBookingReference(
+  companyId: string,
+  messageId: string
+): string {
+  return `gmail:${companyId}:${messageId}`
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: string }).code === "P2002"
+  )
+}
 
 export async function createOrGetBookingScanResult(
   tx: Prisma.TransactionClient,
@@ -18,6 +41,8 @@ export async function createOrGetBookingScanResult(
   }
 ): Promise<{ resultType: BookingGmailResultType; resultEntityId: string | null; createdNew: boolean }> {
   const { companyId, messageId, snippet, parsed, matchedTeamId, adminId } = input
+  const syntheticRef = syntheticGmailBookingReference(companyId, messageId)
+  const bookingRef = parsed.bookingReference?.trim() || syntheticRef
 
   // Annulation (chemin existant — rarement déclenché faute de champs dans le prompt)
   if (parsed.status === "cancelled" && parsed.bookingReference) {
@@ -55,18 +80,10 @@ export async function createOrGetBookingScanResult(
       }
     }
 
-    // Idempotence Accommodation : même company + adresse + dates + équipe
-    const startDate = new Date(parsed.startDate)
-    const endDate = new Date(parsed.endDate)
+    // Idempotence Accommodation : référence synthétique (ou réelle) par message
     const existingAcc = await tx.accommodation.findFirst({
-      where: {
-        companyId,
-        teamId: matchedTeamId,
-        address: parsed.address,
-        startDate,
-        endDate,
-      },
-      orderBy: { createdAt: "desc" },
+      where: { companyId, bookingReference: bookingRef },
+      orderBy: { createdAt: "asc" },
     })
     if (existingAcc) {
       return {
@@ -76,23 +93,39 @@ export async function createOrGetBookingScanResult(
       }
     }
 
-    const accommodation = await tx.accommodation.create({
-      data: {
-        companyId,
-        teamId: matchedTeamId,
-        createdById: adminId,
-        address: parsed.address,
-        city: parsed.city ?? null,
-        zipCode: parsed.zipCode ?? null,
-        startDate,
-        endDate,
-        doorCode: parsed.doorCode ?? null,
-        contactName: parsed.contactName ?? null,
-        contactPhone: parsed.contactPhone ?? null,
-        notes: parsed.notes ?? null,
-        source: "gmail-scan",
-      },
-    })
+    let accommodation
+    try {
+      accommodation = await tx.accommodation.create({
+        data: {
+          companyId,
+          teamId: matchedTeamId,
+          createdById: adminId,
+          address: parsed.address,
+          city: parsed.city ?? null,
+          zipCode: parsed.zipCode ?? null,
+          startDate: new Date(parsed.startDate),
+          endDate: new Date(parsed.endDate),
+          doorCode: parsed.doorCode ?? null,
+          contactName: parsed.contactName ?? null,
+          contactPhone: parsed.contactPhone ?? null,
+          notes: parsed.notes ?? null,
+          bookingReference: bookingRef,
+          source: "gmail-scan",
+        },
+      })
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error
+      const raced = await tx.accommodation.findFirst({
+        where: { companyId, bookingReference: bookingRef },
+        orderBy: { createdAt: "asc" },
+      })
+      if (!raced) throw error
+      return {
+        resultType: "ACCOMMODATION",
+        resultEntityId: raced.id,
+        createdNew: false,
+      }
+    }
 
     const admins = await tx.user.findMany({
       where: { companyId, role: { in: ["ADMIN", "SUPER_ADMIN"] } },
@@ -127,23 +160,38 @@ export async function createOrGetBookingScanResult(
     }
   }
 
-  const pending = await tx.pendingAccommodation.create({
-    data: {
-      companyId,
-      gmailMessageId: messageId,
-      propertyName: parsed.propertyName ?? null,
-      address: parsed.address ?? null,
-      city: parsed.city ?? null,
-      zipCode: parsed.zipCode ?? null,
-      startDate: parsed.startDate ? new Date(parsed.startDate) : null,
-      endDate: parsed.endDate ? new Date(parsed.endDate) : null,
-      doorCode: parsed.doorCode ?? null,
-      contactName: parsed.contactName ?? null,
-      contactPhone: parsed.contactPhone ?? null,
-      notes: parsed.notes ?? null,
-      rawEmailSnippet: snippet.substring(0, 500),
-    },
-  })
+  let pending
+  try {
+    pending = await tx.pendingAccommodation.create({
+      data: {
+        companyId,
+        gmailMessageId: messageId,
+        propertyName: parsed.propertyName ?? null,
+        address: parsed.address ?? null,
+        city: parsed.city ?? null,
+        zipCode: parsed.zipCode ?? null,
+        startDate: parsed.startDate ? new Date(parsed.startDate) : null,
+        endDate: parsed.endDate ? new Date(parsed.endDate) : null,
+        doorCode: parsed.doorCode ?? null,
+        contactName: parsed.contactName ?? null,
+        contactPhone: parsed.contactPhone ?? null,
+        notes: parsed.notes ?? null,
+        rawEmailSnippet: snippet.substring(0, 500),
+      },
+    })
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error
+    const raced = await tx.pendingAccommodation.findFirst({
+      where: { companyId, gmailMessageId: messageId },
+      orderBy: { createdAt: "asc" },
+    })
+    if (!raced) throw error
+    return {
+      resultType: "PENDING_ACCOMMODATION",
+      resultEntityId: raced.id,
+      createdNew: false,
+    }
+  }
 
   const admins = await tx.user.findMany({
     where: { companyId, role: { in: ["ADMIN", "SUPER_ADMIN"] } },

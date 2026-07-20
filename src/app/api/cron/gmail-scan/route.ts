@@ -4,6 +4,7 @@ import { decrypt, encrypt } from "@/lib/encryption"
 import Anthropic from "@anthropic-ai/sdk"
 import {
   bookingGmailMessageLifecycle,
+  BOOKING_GMAIL_SUCCESS_STATUS_UPDATE_FAILED,
 } from "@/lib/booking/gmail-message-lifecycle"
 import {
   permanentBookingError,
@@ -341,17 +342,39 @@ export async function GET(req: Request) {
 
           stats.detected++
         } catch (msgErr) {
+          // Course : un autre worker a déjà commit SUCCEEDED — ne pas marquer échec
+          if (
+            msgErr instanceof Error &&
+            msgErr.message === BOOKING_GMAIL_SUCCESS_STATUS_UPDATE_FAILED
+          ) {
+            const row = await prisma.processedGmailMessage.findUnique({
+              where: {
+                companyId_messageId: {
+                  companyId: conn.companyId,
+                  messageId: msg.id,
+                },
+              },
+            })
+            if (row?.status === "SUCCEEDED") {
+              stats.detected++
+              continue
+            }
+          }
           const failed = await lifecycle.markFailure({
             companyId: conn.companyId,
             messageId: msg.id,
             error: msgErr,
           })
+          if (failed.status === "SUCCEEDED") {
+            stats.detected++
+            continue
+          }
           if (failed.status === "RETRYABLE_FAILURE") {
             stats.retryable++
             console.warn(
               `[gmail-scan] RETRYABLE_FAILURE messageId=${msg.id} code=${failed.errorCode} nextRetryAt=${failed.nextRetryAt?.toISOString() ?? "n/a"}`
             )
-          } else {
+          } else if (failed.status === "PERMANENTLY_IGNORED") {
             stats.permanent++
             console.warn(
               `[gmail-scan] PERMANENTLY_IGNORED messageId=${msg.id} code=${failed.errorCode}`

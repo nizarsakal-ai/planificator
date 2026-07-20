@@ -32,8 +32,8 @@ PROCESSING abandonné (lastAttemptAt trop vieux) → reclaim → PROCESSING (att
 - Clé unique BDD : `(companyId, messageId)`.
 - Claim : `create` PROCESSING ou reprise conditionnelle (`updateMany`).
 - Succès : transaction Prisma regroupant création/récupération du résultat **et** passage à `SUCCEEDED`.
-- Pending : réutilisation si `PendingAccommodation` existe déjà pour `(companyId, gmailMessageId)`.
-- Accommodation : réutilisation si même company + team + address + startDate + endDate.
+- Pending : contrainte unique `(companyId, gmailMessageId)` + réutilisation / P2002.
+- Accommodation : référence synthétique `gmail:{companyId}:{messageId}` dans `bookingReference` (unique existante), faute de bookingReference métier.
 
 ## Retry
 
@@ -53,7 +53,7 @@ Les messages d’erreur sont tronqués et nettoyés (pas de tokens, pas de corps
 
 ## Lignes historiques
 
-Toute ligne existante avant cette migration est traitée comme **`SUCCEEDED`** (déjà consommée).  
+Toute ligne existante avant cette migration est traitée comme **`SUCCEEDED`** (déjà consommée).
 Elle **n’est pas** retraitée automatiquement — certaines ont déjà produit un logement ou un pending.
 
 ## Diagnostic d’un message bloqué

@@ -100,12 +100,26 @@ function makeFakeDb(): {
             row.attemptCount !== where.attemptCount
           )
             ok = false
-          if (
+          if (Array.isArray(where.OR)) {
+            const orOk = (where.OR as Array<Record<string, unknown>>).some((clause) => {
+              if ("lastAttemptAt" in clause) {
+                const cond = clause.lastAttemptAt
+                if (cond === null) return row.lastAttemptAt === null
+                if (cond && typeof cond === "object" && "lte" in cond) {
+                  const lte = (cond as { lte: Date }).lte
+                  return row.lastAttemptAt !== null && row.lastAttemptAt <= lte
+                }
+              }
+              return false
+            })
+            if (!orOk) ok = false
+          } else if (
             "lastAttemptAt" in where &&
             where.lastAttemptAt !== undefined &&
             row.lastAttemptAt?.getTime() !== (where.lastAttemptAt as Date | null)?.getTime()
-          )
+          ) {
             ok = false
+          }
           if (!ok) continue
           const next = { ...row, updatedAt: new Date() }
           if (typeof data.attemptCount === "object" && data.attemptCount && "increment" in (data.attemptCount as object)) {
@@ -367,6 +381,25 @@ describe("booking gmail lifecycle", () => {
       data: { status: "SUCCEEDED" },
     })
     assert.equal(fail.count, 0)
+  })
+
+  it("markFailure n'écrase pas SUCCEEDED", async () => {
+    await life.claimForProcessing("coA", "race")
+    await fake.api.processedGmailMessage.updateMany({
+      where: { companyId: "coA", messageId: "race", status: "PROCESSING" },
+      data: {
+        status: "SUCCEEDED",
+        succeededAt: new Date(),
+        resultType: "ACCOMMODATION",
+        resultEntityId: "acc1",
+      },
+    })
+    const row = await life.markFailure({
+      companyId: "coA",
+      messageId: "race",
+      error: new Error("timeout"),
+    })
+    assert.equal(row.status, "SUCCEEDED")
   })
 
   it("13. pas de double claim après succès", async () => {

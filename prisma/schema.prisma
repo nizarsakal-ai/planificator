@@ -1132,6 +1132,7 @@ model PendingAccommodation {
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
+  @@unique([companyId, gmailMessageId])
   @@index([companyId])
   @@index([status])
   @@map("pending_accommodations")
