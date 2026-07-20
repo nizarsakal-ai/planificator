@@ -9,7 +9,7 @@
 | **Audience** | Contributeurs, reviewers |
 | **Autorités** | Voir [Constitution — autorités fonctionnelles](./README.md#autorités-fonctionnelles-planificator) |
 
-Ce document **complète** ENGINEERING-STANDARD-001. Il ne le remplace pas.  
+Ce document **complète** ENGINEERING-STANDARD-001. Il ne le remplace pas.
 Les règles détaillées (Git, PR, sécurité, transactions, multi-tenant, tests, PRR, MODULE CLOSED, etc.) sont dans ES-001 ; ce fichier fixe le **cycle opérationnel Planificator** et les **exigences locales**.
 
 ---
@@ -48,7 +48,7 @@ ARCHITECTURE
 
 ## États de cycle de vie (canoniques ES-001)
 
-Les **seuls** états normatifs de cycle de vie d’un module sont ceux d’ENGINEERING-STANDARD-001 §5.1.  
+Les **seuls** états normatifs de cycle de vie d’un module sont ceux d’ENGINEERING-STANDARD-001 §5.1.
 Ils **ne sont pas remplacés** par des libellés locaux.
 
 | État ES-001 | Signification |
@@ -84,7 +84,7 @@ Ils **ne sont pas remplacés** par des libellés locaux.
 
 ### Jalons de suivi interne (non normatifs)
 
-Les termes `APPROVED`, `IMPLEMENTING`, `IMPLEMENTED`, `VALIDATED`, `MERGED` **PEUVENT** servir de jalons de suivi interne (tickets, board).  
+Les termes `APPROVED`, `IMPLEMENTING`, `IMPLEMENTED`, `VALIDATED`, `MERGED` **PEUVENT** servir de jalons de suivi interne (tickets, board).
 Ils **NE DOIVENT PAS** être présentés comme les états normatifs du module. L’état normatif reste toujours l’un des états ES-001 §5.1 ci-dessus.
 
 ---
@@ -120,7 +120,7 @@ Toute dérogation à ce document ou à ES-001 **doit** être enregistrée dans l
 
 ## Annexe — Instructions pour agents automatisés
 
-Cette annexe **adapte** la gouvernance aux assistants automatisés.  
+Cette annexe **adapte** la gouvernance aux assistants automatisés.
 Elle **ne remplace pas** les obligations humaines Git, PR, review et PRR.
 
 - Le document `docs/constitution/PLAN-GOVERNANCE-001.md` reste la **source versionnée** de la gouvernance locale.

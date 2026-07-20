@@ -73,9 +73,11 @@ Implémentation
 5. Toute PR qui met à jour la copie ES-001 **DOIT** fournir une preuve `diff` ou `shasum` démontrant l’identité avec la source validée.
 6. Une **divergence de hash** entre la copie locale et la source adoptée **DOIT** bloquer l’adoption ou la livraison documentaire concernée.
 
-Le chemin absolu de la source canonique provisoire est une **référence d’exploitation locale**. Il **NE DOIT PAS** être utilisé comme lien portable dans le [README racine](../../README.md).
+Le chemin absolu `/Users/isac/AURORA/docs/constitution/ENGINEERING-STANDARD-001.md` est une **localisation provisoire locale et non portable**. Aucun autre contributeur **NE DOIT** dépendre de ce chemin. Il **NE DOIT PAS** être utilisé comme lien portable dans le [README racine](../../README.md) ni comme prérequis d’accès à la norme.
 
-> **Note.** Le futur déplacement vers un dépôt neutre `engineering-standards` fera l’objet d’une décision et d’une migration documentaire séparées. Hors périmètre de l’adoption courante.
+La copie versionnée [`docs/constitution/ENGINEERING-STANDARD-001.md`](./ENGINEERING-STANDARD-001.md) est la **norme applicable au dépôt Planificator**. Cette copie **NE DOIT PAS** être modifiée directement (voir règles 1–6 ci-dessus).
+
+> **Note.** Le futur dépôt neutre `engineering-standards` remplacera la source locale provisoire. Ce déplacement fera l’objet d’une décision et d’une migration documentaire séparées. Hors périmètre de l’adoption courante.
 
 ---
 

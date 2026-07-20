@@ -6,7 +6,7 @@
 | **Audience** | Ops, autorités fonctionnelles, on-call |
 | **Norme** | [ENGINEERING-STANDARD-001](../constitution/ENGINEERING-STANDARD-001.md) §23–§25 |
 
-Ce répertoire accueille les **procédures d’exploitation** versionnées.  
+Ce répertoire accueille les **procédures d’exploitation** versionnées.
 **Aucun runbook réel** n’est fourni ici : uniquement les conventions.
 
 Les runbooks font partie des preuves de Production Readiness (ES-001-§25) et des critères MODULE CLOSED (ES-001-§26, C10–C11).

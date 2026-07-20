@@ -6,7 +6,7 @@
 | **Audience** | Contributeurs, architecture |
 | **Norme** | [ENGINEERING-STANDARD-001](../constitution/ENGINEERING-STANDARD-001.md) §21 |
 
-Ce répertoire accueille les **décisions d’architecture** de Planificator.  
+Ce répertoire accueille les **décisions d’architecture** de Planificator.
 **Aucun ADR fictif** ne doit être créé. Ce fichier décrit uniquement la convention.
 
 ---
