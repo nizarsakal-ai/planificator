@@ -16,116 +16,133 @@ datasource db {
 // ═══════════════════════════════════════════════════════════════════════════
 
 enum Role {
-  SUPER_ADMIN  // Accès global, gère toutes les entreprises
-  ADMIN        // Gère son entreprise uniquement
-  TEAM_LEADER  // Consulte et confirme/refuse les affectations de son équipe
-  EMPLOYEE     // Consulte son propre planning
-  CLIENT       // Consulte ses chantiers et le planning associé
+  SUPER_ADMIN // Accès global, gère toutes les entreprises
+  ADMIN // Gère son entreprise uniquement
+  TEAM_LEADER // Consulte et confirme/refuse les affectations de son équipe
+  EMPLOYEE // Consulte son propre planning
+  CLIENT // Consulte ses chantiers et le planning associé
 }
 
 enum WorksiteStatus {
-  PLANNED      // Planifié, pas encore commencé
-  IN_PROGRESS  // En cours
-  COMPLETED    // Terminé — archivage automatique après 48h
-  ARCHIVED     // Archivé définitivement
-  EXTENDED     // Prolongé au-delà de la date de fin initiale
-  DELAYED      // Décalé — démarrage repoussé à une date ultérieure
+  PLANNED // Planifié, pas encore commencé
+  IN_PROGRESS // En cours
+  COMPLETED // Terminé — archivage automatique après 48h
+  ARCHIVED // Archivé définitivement
+  EXTENDED // Prolongé au-delà de la date de fin initiale
+  DELAYED // Décalé — démarrage repoussé à une date ultérieure
 }
 
 enum AssignmentStatus {
-  PENDING    // En attente de confirmation par le chef d'équipe
-  CONFIRMED  // Confirmé
-  REFUSED    // Refusé avec raison obligatoire
+  PENDING // En attente de confirmation par le chef d'équipe
+  CONFIRMED // Confirmé
+  REFUSED // Refusé avec raison obligatoire
 }
 
 enum DocumentType {
-  PLAN      // Plan de chantier
-  PHOTO     // Photo de chantier
-  DOCUMENT  // Document administratif ou technique
+  PLAN // Plan de chantier
+  PHOTO // Photo de chantier
+  DOCUMENT // Document administratif ou technique
 }
 
 enum InvitationStatus {
-  PENDING    // Invitation envoyée, non encore acceptée
-  ACCEPTED   // Compte créé via le lien d'invitation
-  EXPIRED    // Délai d'expiration dépassé
-  CANCELLED  // Annulée manuellement par un admin
+  PENDING // Invitation envoyée, non encore acceptée
+  ACCEPTED // Compte créé via le lien d'invitation
+  EXPIRED // Délai d'expiration dépassé
+  CANCELLED // Annulée manuellement par un admin
 }
 
 enum AbsenceType {
-  VACATION  // Congés payés
-  SICK      // Arrêt maladie
-  UNPAID    // Congé sans solde
-  TRAINING  // Formation
-  OTHER     // Autre motif
+  VACATION // Congés payés
+  SICK // Arrêt maladie
+  UNPAID // Congé sans solde
+  TRAINING // Formation
+  OTHER // Autre motif
 }
 
 enum AbsenceStatus {
-  PENDING   // En attente de validation
-  APPROVED  // Validée
-  REJECTED  // Refusée
+  PENDING // En attente de validation
+  APPROVED // Validée
+  REJECTED // Refusée
 }
 
 enum PendingAccommodationStatus {
-  PENDING    // En attente de validation admin
-  CONFIRMED  // Admin a confirmé → Accommodation créé
-  DISMISSED  // Admin a ignoré
+  PENDING // En attente de validation admin
+  CONFIRMED // Admin a confirmé → Accommodation créé
+  DISMISSED // Admin a ignoré
+}
+
+/// Cycle de vie d'un message Gmail Booking (table processed_gmail_messages).
+/// Les lignes historiques sans statut explicite sont migrées en SUCCEEDED.
+enum BookingGmailMessageStatus {
+  PROCESSING
+  SUCCEEDED
+  RETRYABLE_FAILURE
+  PERMANENTLY_IGNORED
+}
+
+/// Type de résultat produit par le scan Booking (traçabilité).
+enum BookingGmailResultType {
+  ACCOMMODATION
+  PENDING_ACCOMMODATION
+  CANCELLATION
+  IGNORED
 }
 
 enum NotificationType {
-  ASSIGNMENT_CREATED      // Nouvelle affectation créée
-  ASSIGNMENT_CONFIRMED    // Affectation confirmée
-  ASSIGNMENT_REFUSED      // Affectation refusée
-  WORKSITE_UPDATED        // Chantier modifié
-  WORKSITE_ARCHIVED       // Chantier archivé
-  WORKSITE_EXTENDED       // Chantier prolongé
-  INVITATION_SENT         // Invitation envoyée
-  ABSENCE_REQUESTED       // Absence soumise
-  ABSENCE_APPROVED        // Absence validée
-  ABSENCE_REJECTED        // Absence refusée
-  EXPENSE_SUBMITTED       // Note de frais soumise
-  EXPENSE_APPROVED        // Note de frais approuvée
-  EXPENSE_REJECTED        // Note de frais refusée
-  TIMECLOCK_IN            // Pointage arrivée
-  TIMECLOCK_OUT           // Pointage départ
-  ACCOMMODATION_CREATED   // Logement réservé
+  ASSIGNMENT_CREATED // Nouvelle affectation créée
+  ASSIGNMENT_CONFIRMED // Affectation confirmée
+  ASSIGNMENT_REFUSED // Affectation refusée
+  WORKSITE_UPDATED // Chantier modifié
+  WORKSITE_ARCHIVED // Chantier archivé
+  WORKSITE_EXTENDED // Chantier prolongé
+  INVITATION_SENT // Invitation envoyée
+  ABSENCE_REQUESTED // Absence soumise
+  ABSENCE_APPROVED // Absence validée
+  ABSENCE_REJECTED // Absence refusée
+  EXPENSE_SUBMITTED // Note de frais soumise
+  EXPENSE_APPROVED // Note de frais approuvée
+  EXPENSE_REJECTED // Note de frais refusée
+  TIMECLOCK_IN // Pointage arrivée
+  TIMECLOCK_OUT // Pointage départ
+  ACCOMMODATION_CREATED // Logement réservé
   ACCOMMODATION_CANCELLED // Logement annulé
-  BOOKING_DETECTED        // Email Booking.com détecté, en attente de validation
+  BOOKING_DETECTED // Email Booking.com détecté, en attente de validation
 }
 
 enum AccommodationStatus {
-  UPCOMING   // Réservation future
-  ACTIVE     // Séjour en cours
-  COMPLETED  // Terminé
-  CANCELLED  // Annulé
+  UPCOMING // Réservation future
+  ACTIVE // Séjour en cours
+  COMPLETED // Terminé
+  CANCELLED // Annulé
 }
 
 enum ExpenseCategory {
-  TRANSPORT     // Transport / carburant / péage
-  REPAS         // Repas / restauration
-  HEBERGEMENT   // Hébergement
-  MATERIEL      // Matériel / fournitures
-  OTHER         // Autre
+  TRANSPORT // Transport / carburant / péage
+  REPAS // Repas / restauration
+  HEBERGEMENT // Hébergement
+  MATERIEL // Matériel / fournitures
+  OTHER // Autre
 }
 
 enum QuoteStatus {
-  DRAFT     // Brouillon (préparé à la main ou par l'agent IA)
-  SENT      // Envoyé au client
-  ACCEPTED  // Accepté par le client
-  REFUSED   // Refusé
-  EXPIRED   // Expiré (au-delà de validUntil)
+  DRAFT // Brouillon (préparé à la main ou par l'agent IA)
+  SENT // Envoyé au client
+  ACCEPTED // Accepté par le client
+  REFUSED // Refusé
+  EXPIRED // Expiré (au-delà de validUntil)
 }
 
 enum InvoiceStatus {
-  DRAFT      // Brouillon
-  SENT       // Envoyée au client
-  PAID       // Payée
-  CANCELLED  // Annulée
+  DRAFT // Brouillon
+  SENT // Envoyée au client
+  PAID // Payée
+  CANCELLED // Annulée
 }
 
 enum ExpenseStatus {
-  PENDING   // En attente de validation
-  APPROVED  // Validée
-  REJECTED  // Refusée
+  PENDING // En attente de validation
+  APPROVED // Validée
+  REJECTED // Refusée
 }
 
 enum WeatherCondition {
@@ -189,19 +206,19 @@ enum AcquisitionAttachmentCategory {
 }
 
 enum HistoryAction {
-  CREATED        // Entité créée
-  UPDATED        // Entité modifiée
-  DELETED        // Entité supprimée
-  ASSIGNED       // Équipe ou employé affecté
-  UNASSIGNED     // Affectation supprimée
-  CONFIRMED      // Affectation confirmée
-  REFUSED        // Affectation refusée
-  EXTENDED       // Chantier prolongé
-  ARCHIVED       // Chantier archivé
-  COMPLETED      // Chantier marqué terminé
-  INVITED        // Invitation envoyée
+  CREATED // Entité créée
+  UPDATED // Entité modifiée
+  DELETED // Entité supprimée
+  ASSIGNED // Équipe ou employé affecté
+  UNASSIGNED // Affectation supprimée
+  CONFIRMED // Affectation confirmée
+  REFUSED // Affectation refusée
+  EXTENDED // Chantier prolongé
+  ARCHIVED // Chantier archivé
+  COMPLETED // Chantier marqué terminé
+  INVITED // Invitation envoyée
   STATUS_CHANGED // Changement de statut
-  MEMBER_ADDED   // Membre ajouté à une équipe
+  MEMBER_ADDED // Membre ajouté à une équipe
   MEMBER_REMOVED // Membre retiré d'une équipe
   LEADER_CHANGED // Chef d'équipe changé
 }
@@ -225,32 +242,32 @@ model Company {
   updatedAt DateTime @updatedAt
 
   // Relations
-  users                   User[]
-  employees               Employee[]
-  teams                   Team[]
-  clients                 Client[]
-  worksites               Worksite[]
-  invitations             Invitation[]
-  notifications           Notification[]
-  historyLogs             HistoryLog[]
-  absences                Absence[]
-  expenseReports          ExpenseReport[]
-  timeclocks              Timeclock[]
-  settings                CompanySettings?
-  accommodations          Accommodation[]
-  gmailConnection         GmailConnection?
-  processedGmailMessages  ProcessedGmailMessage[]
-  pendingAccommodations   PendingAccommodation[]
-  articles                Article[]
-  quotes                  Quote[]
-  invoices                Invoice[]
-  documentCounters        DocumentCounter[]
-  acquisitionMessages     AcquisitionMessage[]
-  worksiteImportDrafts    WorksiteImportDraft[]
-  acquisitionAttachments  AcquisitionAttachment[]
-  acquisitionScanCursors  AcquisitionScanCursor[]
+  users                           User[]
+  employees                       Employee[]
+  teams                           Team[]
+  clients                         Client[]
+  worksites                       Worksite[]
+  invitations                     Invitation[]
+  notifications                   Notification[]
+  historyLogs                     HistoryLog[]
+  absences                        Absence[]
+  expenseReports                  ExpenseReport[]
+  timeclocks                      Timeclock[]
+  settings                        CompanySettings?
+  accommodations                  Accommodation[]
+  gmailConnection                 GmailConnection?
+  processedGmailMessages          ProcessedGmailMessage[]
+  pendingAccommodations           PendingAccommodation[]
+  articles                        Article[]
+  quotes                          Quote[]
+  invoices                        Invoice[]
+  documentCounters                DocumentCounter[]
+  acquisitionMessages             AcquisitionMessage[]
+  worksiteImportDrafts            WorksiteImportDraft[]
+  acquisitionAttachments          AcquisitionAttachment[]
+  acquisitionScanCursors          AcquisitionScanCursor[]
   acquisitionAttachmentAccessLogs AcquisitionAttachmentAccessLog[]
-  acquisitionMessageContents AcquisitionMessageContent[]
+  acquisitionMessageContents      AcquisitionMessageContent[]
 
   @@map("companies")
 }
@@ -259,9 +276,9 @@ model Company {
 model CompanySettings {
   id                    String @id @default(cuid())
   companyId             String @unique
-  defaultDailyHours     Float  @default(10)   // heures travaillées par journée
-  archiveDelayHours     Int    @default(48)   // délai avant archivage auto après COMPLETED
-  invitationExpiryHours Int    @default(24)   // durée de validité des liens d'invitation
+  defaultDailyHours     Float  @default(10) // heures travaillées par journée
+  archiveDelayHours     Int    @default(48) // délai avant archivage auto après COMPLETED
+  invitationExpiryHours Int    @default(24) // durée de validité des liens d'invitation
   timezone              String @default("Europe/Paris")
   primaryColor          String @default("#0f3460")
 
@@ -280,11 +297,11 @@ model CompanySettings {
 model Article {
   id          String   @id @default(cuid())
   companyId   String
-  reference   String?          // code article optionnel (ex: "PLB-001")
-  designation String           // libellé de l'article
-  description String?          // détail optionnel
-  unit        String   @default("u")            // unité : u, m², ml, h, forfait…
-  unitPrice   Decimal  @db.Decimal(10, 2)       // prix unitaire HT
+  reference   String? // code article optionnel (ex: "PLB-001")
+  designation String // libellé de l'article
+  description String? // détail optionnel
+  unit        String   @default("u") // unité : u, m², ml, h, forfait…
+  unitPrice   Decimal  @db.Decimal(10, 2) // prix unitaire HT
   vatRate     Decimal  @default(20) @db.Decimal(5, 2) // taux de TVA % (par article)
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
@@ -309,30 +326,30 @@ model Article {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Quote {
-  id          String      @id @default(cuid())
-  companyId   String
-  worksiteId  String
-  clientId    String
-  number      String      // "DEV-2026-0001" (séquentiel, unique par entreprise)
-  status      QuoteStatus @default(DRAFT)
-  issueDate   DateTime    @default(now())
-  validUntil  DateTime?   // date de validité du devis
-  totalHT     Decimal     @default(0) @db.Decimal(10, 2)
-  totalVAT    Decimal     @default(0) @db.Decimal(10, 2)
-  totalTTC    Decimal     @default(0) @db.Decimal(10, 2)
-  notes       String?     // notes / conditions particulières
-  paymentTerms String?    // conditions de paiement (mention légale)
-  createdById String      // userId de l'admin créateur
-  sentAt      DateTime?   // date d'envoi au client
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id           String      @id @default(cuid())
+  companyId    String
+  worksiteId   String
+  clientId     String
+  number       String // "DEV-2026-0001" (séquentiel, unique par entreprise)
+  status       QuoteStatus @default(DRAFT)
+  issueDate    DateTime    @default(now())
+  validUntil   DateTime? // date de validité du devis
+  totalHT      Decimal     @default(0) @db.Decimal(10, 2)
+  totalVAT     Decimal     @default(0) @db.Decimal(10, 2)
+  totalTTC     Decimal     @default(0) @db.Decimal(10, 2)
+  notes        String? // notes / conditions particulières
+  paymentTerms String? // conditions de paiement (mention légale)
+  createdById  String // userId de l'admin créateur
+  sentAt       DateTime? // date d'envoi au client
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
 
   // Relations
   company  Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   worksite Worksite    @relation(fields: [worksiteId], references: [id], onDelete: Cascade)
   client   Client      @relation(fields: [clientId], references: [id])
   lines    QuoteLine[]
-  invoices Invoice[]   // factures issues de ce devis
+  invoices Invoice[] // factures issues de ce devis
 
   @@unique([companyId, number])
   @@index([companyId])
@@ -345,14 +362,14 @@ model Quote {
 model QuoteLine {
   id          String  @id @default(cuid())
   quoteId     String
-  articleId   String?           // lien optionnel vers le catalogue
-  designation String            // libellé figé
+  articleId   String? // lien optionnel vers le catalogue
+  designation String // libellé figé
   unit        String  @default("u")
   quantity    Decimal @db.Decimal(10, 2)
-  unitPrice   Decimal @db.Decimal(10, 2)  // prix HT figé
-  vatRate     Decimal @db.Decimal(5, 2)   // TVA figée
-  lineHT      Decimal @db.Decimal(10, 2)  // quantity * unitPrice
-  position    Int     @default(0)         // ordre d'affichage
+  unitPrice   Decimal @db.Decimal(10, 2) // prix HT figé
+  vatRate     Decimal @db.Decimal(5, 2) // TVA figée
+  lineHT      Decimal @db.Decimal(10, 2) // quantity * unitPrice
+  position    Int     @default(0) // ordre d'affichage
 
   // Relations
   quote   Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
@@ -363,27 +380,27 @@ model QuoteLine {
 }
 
 model Invoice {
-  id          String        @id @default(cuid())
-  companyId   String
-  worksiteId  String
-  clientId    String
-  quoteId     String?       // devis d'origine (optionnel)
-  number      String        // "FAC-2026-0001" (séquentiel, unique par entreprise)
-  status      InvoiceStatus @default(DRAFT)
-  issueDate   DateTime      @default(now())
-  dueDate     DateTime?     // échéance de paiement
-  periodStart DateTime?     // début de la période facturée (= dates du chantier)
-  periodEnd   DateTime?     // fin de la période facturée
-  totalHT     Decimal       @default(0) @db.Decimal(10, 2)
-  totalVAT    Decimal       @default(0) @db.Decimal(10, 2)
-  totalTTC    Decimal       @default(0) @db.Decimal(10, 2)
-  notes       String?
-  paymentTerms String?      // conditions de paiement (mention légale)
-  createdById String        // userId de l'admin créateur
-  sentAt      DateTime?     // date d'envoi au client
-  paidAt      DateTime?     // date de règlement
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id           String        @id @default(cuid())
+  companyId    String
+  worksiteId   String
+  clientId     String
+  quoteId      String? // devis d'origine (optionnel)
+  number       String // "FAC-2026-0001" (séquentiel, unique par entreprise)
+  status       InvoiceStatus @default(DRAFT)
+  issueDate    DateTime      @default(now())
+  dueDate      DateTime? // échéance de paiement
+  periodStart  DateTime? // début de la période facturée (= dates du chantier)
+  periodEnd    DateTime? // fin de la période facturée
+  totalHT      Decimal       @default(0) @db.Decimal(10, 2)
+  totalVAT     Decimal       @default(0) @db.Decimal(10, 2)
+  totalTTC     Decimal       @default(0) @db.Decimal(10, 2)
+  notes        String?
+  paymentTerms String? // conditions de paiement (mention légale)
+  createdById  String // userId de l'admin créateur
+  sentAt       DateTime? // date d'envoi au client
+  paidAt       DateTime? // date de règlement
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
   // Relations
   company  Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -444,23 +461,23 @@ model User {
   id          String    @id @default(cuid())
   email       String    @unique
   name        String?
-  password    String    // bcrypt hash
+  password    String // bcrypt hash
   role        Role      @default(EMPLOYEE)
   active      Boolean   @default(true)
-  companyId   String?   // null uniquement pour SUPER_ADMIN
+  companyId   String? // null uniquement pour SUPER_ADMIN
   lastLoginAt DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   // Relations
-  company         Company?        @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  employeeProfile Employee?       // présent pour ADMIN, TEAM_LEADER, EMPLOYEE
-  clientProfile   ClientProfile?  // présent pour CLIENT uniquement
-  sentInvitations Invitation[]    @relation("InvitedBy")
-  passwordResets  PasswordReset[]
-  notifications   Notification[]
-  historyLogs     HistoryLog[]    @relation("HistoryActor")
-  reviewedImportDrafts WorksiteImportDraft[] @relation("ImportDraftReviewer")
+  company                         Company?                         @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  employeeProfile                 Employee? // présent pour ADMIN, TEAM_LEADER, EMPLOYEE
+  clientProfile                   ClientProfile? // présent pour CLIENT uniquement
+  sentInvitations                 Invitation[]                     @relation("InvitedBy")
+  passwordResets                  PasswordReset[]
+  notifications                   Notification[]
+  historyLogs                     HistoryLog[]                     @relation("HistoryActor")
+  reviewedImportDrafts            WorksiteImportDraft[]            @relation("ImportDraftReviewer")
   acquisitionAttachmentAccessLogs AcquisitionAttachmentAccessLog[]
 
   @@index([companyId])
@@ -515,16 +532,16 @@ model Employee {
 model Team {
   id        String   @id @default(cuid())
   name      String
-  color     String?  // couleur hex pour le calendrier ex: #FF5733
+  color     String? // couleur hex pour le calendrier ex: #FF5733
   companyId String
-  leaderId  String   // employeeId — chef d'équipe obligatoire
+  leaderId  String // employeeId — chef d'équipe obligatoire
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
-  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  leader         Employee        @relation("TeamLeader", fields: [leaderId], references: [id])
+  company        Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leader         Employee          @relation("TeamLeader", fields: [leaderId], references: [id])
   members        TeamMember[]
   assignments    Assignment[]
   dailyReports   DailyReport[]
@@ -573,7 +590,7 @@ model Client {
   updatedAt DateTime @updatedAt
 
   // Relations
-  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company       Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
   worksites     Worksite[]
   clientProfile ClientProfile?
   quotes        Quote[]
@@ -603,28 +620,28 @@ model ClientProfile {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Worksite {
-  id          String         @id @default(cuid())
-  name        String
-  description String?
-  address     String?
-  latitude    Float?         // prévu pour une carte future
-  longitude   Float?
-  status      WorksiteStatus @default(PLANNED)
-  startDate   DateTime
-  endDate     DateTime
-  dailyHours  Float          @default(10)   // heures de travail par journée
-  clientId    String
-  companyId   String
-  createdById String         // userId de l'admin qui a créé le chantier
-  completedAt DateTime?      // date de passage au statut COMPLETED
-  archivedAt  DateTime?      // date d'archivage effectif
-  delayedUntil DateTime?     // date de décalage (statut DELAYED)
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id           String         @id @default(cuid())
+  name         String
+  description  String?
+  address      String?
+  latitude     Float? // prévu pour une carte future
+  longitude    Float?
+  status       WorksiteStatus @default(PLANNED)
+  startDate    DateTime
+  endDate      DateTime
+  dailyHours   Float          @default(10) // heures de travail par journée
+  clientId     String
+  companyId    String
+  createdById  String // userId de l'admin qui a créé le chantier
+  completedAt  DateTime? // date de passage au statut COMPLETED
+  archivedAt   DateTime? // date d'archivage effectif
+  delayedUntil DateTime? // date de décalage (statut DELAYED)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
   // Relations
-  client       Client        @relation(fields: [clientId], references: [id])
-  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  client       Client                @relation(fields: [clientId], references: [id])
+  company      Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
   documents    Document[]
   assignments  Assignment[]
   extensions   Extension[]
@@ -647,21 +664,21 @@ model Worksite {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Document {
-  id         String       @id @default(cuid())
-  worksiteId String
-  name       String
+  id                            String       @id @default(cuid())
+  worksiteId                    String
+  name                          String
   // Nullable : documents bridgés Acquisition (005D) n’ont pas d’URL publique.
   // L’accès se fait via sourceAcquisitionAttachmentId → route attachments.
-  url        String?
-  size       Int?         // taille en octets
-  mimeType   String?
-  latitude   Float?
-  longitude  Float?
-  type       DocumentType @default(DOCUMENT)
-  uploadedAt DateTime     @default(now())
+  url                           String?
+  size                          Int? // taille en octets
+  mimeType                      String?
+  latitude                      Float?
+  longitude                     Float?
+  type                          DocumentType @default(DOCUMENT)
+  uploadedAt                    DateTime     @default(now())
   // PLAN-ACQ-005D — bridge Cloudinary authenticated (pas de re-upload)
   storagePublicId               String?
-  sourceAcquisitionAttachmentId String? @unique
+  sourceAcquisitionAttachmentId String?      @unique
 
   // Relations
   worksite Worksite @relation(fields: [worksiteId], references: [id], onDelete: Cascade)
@@ -679,9 +696,9 @@ model Assignment {
   id            String           @id @default(cuid())
   worksiteId    String
   teamId        String
-  date          DateTime         @db.Date  // journée complète — pas d'heure
+  date          DateTime         @db.Date // journée complète — pas d'heure
   status        AssignmentStatus @default(PENDING)
-  refusalReason String?          // obligatoire si status = REFUSED
+  refusalReason String? // obligatoire si status = REFUSED
   notes         String?
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
@@ -705,8 +722,8 @@ model Assignment {
 model EmployeeAssignment {
   id           String   @id @default(cuid())
   assignmentId String
-  employeeId   String   // pointe vers Employee (pas User)
-  date         DateTime @db.Date  // dupliqué depuis Assignment pour la contrainte unique
+  employeeId   String // pointe vers Employee (pas User)
+  date         DateTime @db.Date // dupliqué depuis Assignment pour la contrainte unique
   createdAt    DateTime @default(now())
 
   // Relations
@@ -730,7 +747,7 @@ model Extension {
   previousEndDate DateTime // date de fin avant prolongation
   newEndDate      DateTime // nouvelle date de fin après prolongation
   reason          String?
-  createdById     String   // userId de celui qui a prolongé
+  createdById     String // userId de celui qui a prolongé
   createdAt       DateTime @default(now())
 
   // Relations
@@ -755,13 +772,13 @@ model Absence {
   endDate      DateTime      @db.Date
   reason       String?
   refusalNote  String?
-  approvedById String?       // userId du validateur
+  approvedById String? // userId du validateur
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
   // Relations
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  company  Company  @relation(fields: [companyId],  references: [id], onDelete: Cascade)
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
   @@index([companyId])
@@ -779,13 +796,13 @@ model HistoryLog {
   id         String        @id @default(cuid())
   companyId  String?
   worksiteId String?
-  actorId    String        // userId de celui qui a effectué l'action
+  actorId    String // userId de celui qui a effectué l'action
   action     HistoryAction
-  entityType String?       // "Worksite" | "Team" | "Assignment" | "Employee" | ...
-  entityId   String?       // id de l'entité concernée
-  detail     String?       // description lisible humainement
-  oldValue   Json?         // état de l'entité avant modification
-  newValue   Json?         // état de l'entité après modification
+  entityType String? // "Worksite" | "Team" | "Assignment" | "Employee" | ...
+  entityId   String? // id de l'entité concernée
+  detail     String? // description lisible humainement
+  oldValue   Json? // état de l'entité avant modification
+  newValue   Json? // état de l'entité après modification
   createdAt  DateTime      @default(now())
 
   // Relations
@@ -814,8 +831,8 @@ model Notification {
   message   String
   read      Boolean          @default(false)
   readAt    DateTime?
-  link      String?          // URL relative vers la ressource concernée
-  metadata  Json?            // données contextuelles (ids, noms, etc.)
+  link      String? // URL relative vers la ressource concernée
+  metadata  Json? // données contextuelles (ids, noms, etc.)
   createdAt DateTime         @default(now())
 
   // Relations
@@ -837,11 +854,11 @@ model Invitation {
   email       String
   role        Role
   companyId   String
-  invitedById String           // userId de l'admin qui a invité
+  invitedById String // userId de l'admin qui a invité
   token       String           @unique @default(cuid())
   status      InvitationStatus @default(PENDING)
-  expiresAt   DateTime         // calculé à la création (ex: now + 24h)
-  acceptedAt  DateTime?        // renseigné quand le compte est créé
+  expiresAt   DateTime // calculé à la création (ex: now + 24h)
+  acceptedAt  DateTime? // renseigné quand le compte est créé
   createdAt   DateTime         @default(now())
 
   // Relations
@@ -863,7 +880,7 @@ model PasswordReset {
   id        String    @id @default(cuid())
   userId    String
   token     String    @unique @default(cuid())
-  expiresAt DateTime  // durée de validité courte recommandée (15-30 min)
+  expiresAt DateTime // durée de validité courte recommandée (15-30 min)
   usedAt    DateTime? // renseigné une fois le mot de passe réinitialisé
   createdAt DateTime  @default(now())
 
@@ -880,22 +897,22 @@ model PasswordReset {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model ExpenseReport {
-  id             String          @id @default(cuid())
-  employeeId     String
-  companyId      String
-  date           DateTime        @db.Date
-  amount         Float
-  category       ExpenseCategory
-  description    String
-  receiptUrl     String?
-  status         ExpenseStatus   @default(PENDING)
-  rejectionNote  String?
-  approvedById   String?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  id            String          @id @default(cuid())
+  employeeId    String
+  companyId     String
+  date          DateTime        @db.Date
+  amount        Float
+  category      ExpenseCategory
+  description   String
+  receiptUrl    String?
+  status        ExpenseStatus   @default(PENDING)
+  rejectionNote String?
+  approvedById  String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
 
-  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
   @@index([companyId])
@@ -908,24 +925,24 @@ model ExpenseReport {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Timeclock {
-  id           String    @id @default(cuid())
-  employeeId   String
-  companyId    String
-  worksiteId   String?   // chantier associé (détecté par proximité ou choisi)
-  date         DateTime  @db.Date
-  checkInAt    DateTime?
-  checkInLat   Float?
-  checkInLng   Float?
-  checkOutAt   DateTime?
-  checkOutLat  Float?
-  checkOutLng  Float?
-  note         String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id          String    @id @default(cuid())
+  employeeId  String
+  companyId   String
+  worksiteId  String? // chantier associé (détecté par proximité ou choisi)
+  date        DateTime  @db.Date
+  checkInAt   DateTime?
+  checkInLat  Float?
+  checkInLng  Float?
+  checkOutAt  DateTime?
+  checkOutLat Float?
+  checkOutLng Float?
+  note        String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  worksite  Worksite? @relation(fields: [worksiteId], references: [id], onDelete: SetNull)
+  employee Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  worksite Worksite? @relation(fields: [worksiteId], references: [id], onDelete: SetNull)
 
   @@unique([employeeId, date])
   @@index([employeeId])
@@ -971,8 +988,8 @@ model DailyReport {
 model Signature {
   id           String   @id @default(cuid())
   assignmentId String   @unique
-  signedById   String   // employeeId of the team leader who signed
-  signatureUrl String   // Cloudinary URL of the signature image
+  signedById   String // employeeId of the team leader who signed
+  signatureUrl String // Cloudinary URL of the signature image
   signedAt     DateTime @default(now())
 
   assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
@@ -988,36 +1005,36 @@ model Signature {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Accommodation {
-  id           String              @id @default(cuid())
-  companyId    String
-  teamId       String
-  createdById  String              // userId de l'admin qui a créé
+  id          String @id @default(cuid())
+  companyId   String
+  teamId      String
+  createdById String // userId de l'admin qui a créé
 
-  status       AccommodationStatus @default(UPCOMING)
+  status AccommodationStatus @default(UPCOMING)
 
-  startDate    DateTime            @db.Date
-  endDate      DateTime            @db.Date
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
 
-  address      String
-  city         String?
-  zipCode      String?
+  address String
+  city    String?
+  zipCode String?
 
   doorCode     String?
   contactName  String?
   contactPhone String?
 
-  notes        String?
+  notes String?
 
   // Source & référence externe
-  bookingReference  String?  @unique  // Numéro de réservation Booking.com
-  source            String?  @default("manual")  // "manual" | "gmail-scan" | "n8n"
+  bookingReference String? @unique // Numéro de réservation Booking.com
+  source           String? @default("manual") // "manual" | "gmail-scan" | "n8n"
 
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  company  Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  team     Team    @relation(fields: [teamId], references: [id])
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  team    Team    @relation(fields: [teamId], references: [id])
 
   @@index([companyId])
   @@index([teamId])
@@ -1035,8 +1052,8 @@ model GmailConnection {
   id            String   @id @default(cuid())
   companyId     String   @unique
   gmailAddress  String
-  accessToken   String   // chiffré AES-256-GCM
-  refreshToken  String   // chiffré AES-256-GCM
+  accessToken   String // chiffré AES-256-GCM
+  refreshToken  String // chiffré AES-256-GCM
   tokenExpiry   DateTime
   connectedById String
   connectedAt   DateTime @default(now())
@@ -1048,19 +1065,39 @@ model GmailConnection {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PROCESSED GMAIL MESSAGE — Évite le retraitement des emails déjà analysés
+// PROCESSED GMAIL MESSAGE — Suivi cycle de vie emails Booking (pas Acquisition)
 // ═══════════════════════════════════════════════════════════════════════════
 
 model ProcessedGmailMessage {
-  id          String   @id @default(cuid())
-  companyId   String
-  messageId   String
+  id        String @id @default(cuid())
+  companyId String
+  messageId String
+
+  /// Instant de première observation (lignes historiques : date d'insertion initiale).
   processedAt DateTime @default(now())
+
+  status BookingGmailMessageStatus @default(SUCCEEDED)
+
+  attemptCount   Int       @default(0)
+  firstAttemptAt DateTime?
+  lastAttemptAt  DateTime?
+  nextRetryAt    DateTime?
+  succeededAt    DateTime?
+
+  errorCode    String?
+  errorMessage String?
+
+  resultType     BookingGmailResultType?
+  resultEntityId String?
+
+  updatedAt DateTime @updatedAt
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@unique([companyId, messageId])
   @@index([companyId])
+  @@index([status, nextRetryAt])
+  @@index([status, lastAttemptAt])
   @@map("processed_gmail_messages")
 }
 
@@ -1069,16 +1106,16 @@ model ProcessedGmailMessage {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model PendingAccommodation {
-  id              String                     @id @default(cuid())
-  companyId       String
-  gmailMessageId  String
+  id             String @id @default(cuid())
+  companyId      String
+  gmailMessageId String
 
   propertyName    String?
   address         String?
   city            String?
   zipCode         String?
-  startDate       DateTime?                  @db.Date
-  endDate         DateTime?                  @db.Date
+  startDate       DateTime? @db.Date
+  endDate         DateTime? @db.Date
   doorCode        String?
   contactName     String?
   contactPhone    String?
@@ -1144,7 +1181,7 @@ model AcquisitionMessage {
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
 
-  company     Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company     Company                    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   draft       WorksiteImportDraft?
   attachments AcquisitionAttachment[]
   content     AcquisitionMessageContent?
@@ -1186,42 +1223,42 @@ model AcquisitionMessageContent {
 }
 
 model WorksiteImportDraft {
-  id                   String                    @id @default(cuid())
-  companyId            String
-  acquisitionMessageId String                    @unique
-  status               WorksiteImportDraftStatus @default(PENDING_EXTRACTION)
-  proposedClientId     String?
-  proposedClientName   String?
-  proposedWorksiteName String?
-  proposedAddress      String?
-  proposedPostalCode   String?
-  proposedCity         String?
-  proposedContactName  String?
-  proposedContactEmail String?
-  proposedContactPhone String?
-  proposedStartDate    DateTime?
-  proposedEndDate      DateTime?
-  proposedDescription  String?
-  extractedData        Json?
-  confidenceData       Json?
+  id                      String                    @id @default(cuid())
+  companyId               String
+  acquisitionMessageId    String                    @unique
+  status                  WorksiteImportDraftStatus @default(PENDING_EXTRACTION)
+  proposedClientId        String?
+  proposedClientName      String?
+  proposedWorksiteName    String?
+  proposedAddress         String?
+  proposedPostalCode      String?
+  proposedCity            String?
+  proposedContactName     String?
+  proposedContactEmail    String?
+  proposedContactPhone    String?
+  proposedStartDate       DateTime?
+  proposedEndDate         DateTime?
+  proposedDescription     String?
+  extractedData           Json?
+  confidenceData          Json?
   // PLAN-ACQ-005B — warnings catalogués (pas de texte provider libre)
-  warningData          Json?
-  version              Int                       @default(0)
-  extractionStartedAt  DateTime?
-  extractionCompletedAt DateTime?
+  warningData             Json?
+  version                 Int                       @default(0)
+  extractionStartedAt     DateTime?
+  extractionCompletedAt   DateTime?
   contentHashAtExtraction String?
   extractionSchemaVersion String?
-  extractionAttemptCount  Int                    @default(0)
-  extractionProvider   String?
-  extractionModel      String?
+  extractionAttemptCount  Int                       @default(0)
+  extractionProvider      String?
+  extractionModel         String?
   lastExtractionErrorCode String?
   lastExtractionErrorAt   DateTime?
-  reviewedByUserId     String?
-  reviewedAt           DateTime?
-  rejectionReason      String?
-  createdWorksiteId    String?                   @unique
-  createdAt            DateTime                  @default(now())
-  updatedAt            DateTime                  @updatedAt
+  reviewedByUserId        String?
+  reviewedAt              DateTime?
+  rejectionReason         String?
+  createdWorksiteId       String?                   @unique
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
 
   company            Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
   // FK composite (acquisitionMessageId, companyId) → (id, companyId) :
@@ -1266,9 +1303,9 @@ model AcquisitionAttachment {
   createdAt            DateTime                      @default(now())
   updatedAt            DateTime                      @updatedAt
 
-  company            Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company            Company                          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   // FK composite : même garantie anti inter-tenant que pour les brouillons.
-  acquisitionMessage AcquisitionMessage @relation(fields: [acquisitionMessageId, companyId], references: [id, companyId], onDelete: Cascade)
+  acquisitionMessage AcquisitionMessage               @relation(fields: [acquisitionMessageId, companyId], references: [id, companyId], onDelete: Cascade)
   accessLogs         AcquisitionAttachmentAccessLog[]
 
   @@unique([id, companyId])
@@ -1292,8 +1329,8 @@ model AcquisitionAttachmentAccessLog {
   reasonCode            String?
   createdAt             DateTime                           @default(now())
 
-  company    Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company    Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user       User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   attachment AcquisitionAttachment? @relation(fields: [attachmentId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([companyId, createdAt])
