@@ -1,26 +1,42 @@
-# PLAN-ACQ-OPS-002 — Scheduling Vercel des crons Acquisition
+# PLAN-ACQ-OPS-002 — Scheduling Acquisition (externe / Hobby)
 
 | Champ | Valeur |
 |-------|--------|
-| **Version** | 1.0.0 |
+| **Version** | 1.1.0 |
 | **Lot** | PLAN-ACQ-OPS-002 |
-| **Config** | `vercel.json` |
-| **Hors périmètre** | Workers content/extraction ; orchestration ; nouveaux flags ; Booking ; Prisma |
+| **Config Vercel** | `vercel.json` — crons Booking/chantiers uniquement |
+| **Hors périmètre** | Workers content/extraction ; orchestration ; nouveaux flags ; Booking ; Prisma ; mise en place du scheduler externe |
 
 ## Objectif
 
-Enregistrer les routes cron Acquisition déjà implémentées pour qu’elles soient **invoquées automatiquement** par Vercel Cron.  
+Préparer les **points d’entrée HTTP** des crons Acquisition (`maxDuration`, auth `CRON_SECRET`, gates OPS-001) sans les déclarer dans Vercel Cron.
+
+**Contrainte plan** : le projet reste sur **Vercel Hobby**. Hobby refuse toute expression cron exécutée plus d’une fois par jour. Les fréquences Acquisition requises (sub-quotidiennes) **ne sont pas dégradées** en quotidiens : elles seront assurées **hors Vercel**.
+
 L’exécution métier reste **gated par les feature flags** (OPS-001) : sans flags ON, chaque run retourne `SKIPPED` (no-op contrôlé).
 
-## Fréquences retenues (UTC)
+## Décision d’architecture
 
-| Path | Schedule | Fréquence |
-|------|----------|-----------|
+| Choix | Détail |
+|-------|--------|
+| Application | Reste sur **Vercel Hobby** (pas d’achat Pro dans ce lot) |
+| `vercel.json` | Conserve **uniquement** les crons compatibles existants Booking/chantiers |
+| Routes Acquisition | Existent, sécurisées par `CRON_SECRET` ; **non** enregistrées comme Vercel Cron |
+| Scheduling Acquisition | **Externe** (cible privilégiée : Raspberry Pi / ordonnanceur contrôlé) — **non configuré dans ce lot** |
+
+Présence des routes ≠ activation effective. **Aucun cron Acquisition n’est actif** tant que le scheduler externe n’est pas configuré et n’appelle pas les endpoints.
+
+## Fréquences cibles (UTC) — scheduler externe
+
+| Path | Schedule cible | Fréquence |
+|------|----------------|-----------|
 | `/api/cron/acquisition-gmail-sync` | `*/15 * * * *` | Toutes les 15 minutes |
 | `/api/cron/acquisition-attachment-download` | `5,20,35,50 * * * *` | Toutes les 15 minutes, décalé de +5 min |
 | `/api/cron/acquisition-attachment-recovery` | `40 * * * *` | Toutes les heures à :40 |
 
-### Schedules Booking inchangés
+Ces expressions restent la **cible opérationnelle** ; elles ne figurent **pas** dans `vercel.json`.
+
+### Schedules Vercel inchangés (Hobby-compatibles)
 
 | Path | Schedule |
 |------|----------|
@@ -31,19 +47,20 @@ L’exécution métier reste **gated par les feature flags** (OPS-001) : sans fl
 
 1. **Sync Gmail (15 min)** — latence acceptable pour consultations LAURALU ; limite la charge History API / quotas tout en restant « temps opérationnel ».
 2. **Download (+5 min)** — laisse le run sync précédent créer des `DISCOVERED` avant le drain PJ ; évite une collision systématique minute-à-minute avec le sync.
-3. **Recovery (horaire :40)** — reclaim / retry sont moins urgents ; fréquence basse pour limiter les transitions d’état hors flux principal ; créneau hors des ticks sync/download exacts.
+3. **Recovery (horaire :40)** — reclaim / retry moins urgents ; créneau hors des ticks sync/download exacts.
 4. **Isolation Booking** — pas de modification des crons logements ; pipelines distincts (Acquisition ≠ `gmail-scan`).
+5. **Hobby** — Vercel ne peut pas planifier ces fréquences ; externaliser plutôt que dégrader ou upgrader Pro dans ce lot.
 
 ## Dépendances
 
 | Prérequis | Rôle |
 |-----------|------|
-| `CRON_SECRET` (env Vercel) | Auth Bearer obligatoire sur chaque route |
-| Plan Vercel supportant ≥ 5 crons + `maxDuration` 300s | Hobby insuffisant pour ce lot |
+| `CRON_SECRET` (env déploiement) | Auth Bearer obligatoire sur chaque route |
+| Scheduler externe (futur) | Invoque les routes aux fréquences cibles ; **pas encore déployé** |
 | Flags OPS-001 | Master + capacités / crons ON pour exécution réelle |
 | Connexion Gmail saine (`GmailConnection`) | Sync uniquement |
 
-Sans flags ON : Vercel appelle quand même les routes → réponse `200` + `status: "SKIPPED"` + `skipReason` (`CRON_DISABLED` / master / capacité selon code déployé).
+Sans flags ON : un appel authentifié aux routes → `200` + `status: "SKIPPED"` + `skipReason` (`CRON_DISABLED` / master / capacité selon code déployé).
 
 ## Budget d’exécution
 
@@ -76,11 +93,13 @@ Plafonds batch (download / recovery) : `MAX_PER_COMPANY`, `MAX_PER_RUN`, `MAX_CO
 
 ## Activation progressive (hors code de ce lot)
 
-1. Déployer ce lot (schedules actifs, flags encore OFF) → smoke `SKIPPED`.
-2. Activer flags selon matrice OPS-001 / runbook OPS-007.
-3. Observer un run sync puis download avant d’élargir.
+1. Déployer les routes + `maxDuration` (sans cron Vercel Acquisition).
+2. Configurer le scheduler externe (Raspberry Pi / équivalent) avec les fréquences cibles — **étape non réalisée ici**.
+3. Smoke appel manuel / scheduler → `SKIPPED` tant que flags OFF.
+4. Activer flags selon matrice OPS-001 / runbook OPS-007.
+5. Observer un run sync puis download avant d’élargir.
 
 ## Tests
 
-- `tests/acquisition/acquisition-ops-002-scheduling.test.ts` — présence & schedules `vercel.json`, `maxDuration` routes
+- `tests/acquisition/acquisition-ops-002-scheduling.test.ts` — `vercel.json` sans Acquisition ; routes + `maxDuration` ; doc Hobby / fréquences externes
 - Routes existantes : 401 / SKIPPED (scripts `test:acquisition:scheduling` / `npm test`)
