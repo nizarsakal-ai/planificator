@@ -121,8 +121,49 @@ describe("runAcquisitionAttachmentDownloadOrchestrator", () => {
     assert.equal(download.calls.length, 0)
   })
 
+  it("cron ON + master OFF → MASTER_DISABLED sans listing", async () => {
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    delete process.env.PLANIFICATOR_ACQUISITION_ENABLED
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
+    let listed = false
+    const download = mockDownload(async () => ({ outcome: "STORED" }))
+    const result = await runAcquisitionAttachmentDownloadOrchestrator({
+      repository: mockRepo({
+        companyIds: async () => {
+          listed = true
+          return ["c1"]
+        },
+      }),
+      downloadAttachment: download.fn,
+      logger,
+      createRunId: () => "run-master-off",
+    })
+    assert.equal(result.status, "SKIPPED")
+    assert.equal(result.skipReason, "MASTER_DISABLED")
+    assert.equal(listed, false)
+    assert.equal(download.calls.length, 0)
+  })
+
+  it("cron ON + download OFF → DOWNLOAD_CAPABILITY_DISABLED", async () => {
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "false"
+    const download = mockDownload(async () => ({ outcome: "STORED" }))
+    const result = await runAcquisitionAttachmentDownloadOrchestrator({
+      repository: mockRepo({ companyIds: ["c1"] }),
+      downloadAttachment: download.fn,
+      logger,
+      createRunId: () => "run-cap-off",
+    })
+    assert.equal(result.status, "SKIPPED")
+    assert.equal(result.skipReason, "DOWNLOAD_CAPABILITY_DISABLED")
+    assert.equal(download.calls.length, 0)
+  })
+
   it("runId créé une seule fois et identique dans tous les logs", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     let createCalls = 0
     const download = mockDownload(async () => ({ outcome: "STORED" }))
     const result = await runAcquisitionAttachmentDownloadOrchestrator({
@@ -146,6 +187,8 @@ describe("runAcquisitionAttachmentDownloadOrchestrator", () => {
 
   it("zéro tenant → SUCCESS", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     const result = await runAcquisitionAttachmentDownloadOrchestrator({
       repository: mockRepo({ companyIds: [] }),
       downloadAttachment: mockDownload(async () => ({ outcome: "STORED" })).fn,
@@ -159,6 +202,8 @@ describe("runAcquisitionAttachmentDownloadOrchestrator", () => {
 
   it("listing initial throw → FAILED structuré", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     const result = await runAcquisitionAttachmentDownloadOrchestrator({
       repository: mockRepo({
         listCompanyThrow: new Error("postgresql://user:password@host/db"),
@@ -177,6 +222,8 @@ describe("runAcquisitionAttachmentDownloadOrchestrator", () => {
 
   it("un tenant / une PJ → bon appel service", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     const download = mockDownload(async () => ({ outcome: "STORED" }))
     const result = await runAcquisitionAttachmentDownloadOrchestrator({
       repository: mockRepo({
@@ -194,6 +241,8 @@ describe("runAcquisitionAttachmentDownloadOrchestrator", () => {
 
   it("plusieurs tenants traités séquentiellement", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     const order: string[] = []
     const download = mockDownload(async ({ companyId }) => {
       order.push(companyId)
@@ -216,6 +265,8 @@ describe("runAcquisitionAttachmentDownloadOrchestrator", () => {
 
   it("tenant A échoue listing, tenant B continue", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     let listedB = false
     const repo: AttachmentDownloadOrchestratorRepository = {
       listCompanyIdsWithDiscoveredAttachments: async () => ["co-a", "co-b"],
@@ -241,6 +292,8 @@ describe("runAcquisitionAttachmentDownloadOrchestrator", () => {
 
   it("agrégation de tous les outcomes", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     const outcomes: AttachmentDownloadOutcome[] = [
       "STORED",
       "ALREADY_STORED",
@@ -280,6 +333,8 @@ describe("runAcquisitionAttachmentDownloadOrchestrator", () => {
 
   it("plafond per-company batch volontaire → SUCCESS sans PARTIAL auto", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     const download = mockDownload(async () => ({ outcome: "STORED" }))
     const result = await runAcquisitionAttachmentDownloadOrchestrator({
       repository: mockRepo({
@@ -305,6 +360,8 @@ describe("runAcquisitionAttachmentDownloadOrchestrator", () => {
 
   it("exactement maxPerRun PJ, aucune supplémentaire → SUCCESS", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     const download = mockDownload(async () => ({ outcome: "STORED" }))
     const result = await runAcquisitionAttachmentDownloadOrchestrator({
       repository: mockRepo({
@@ -331,6 +388,8 @@ describe("runAcquisitionAttachmentDownloadOrchestrator", () => {
 
   it("plafond global avec PJ supplémentaire → PARTIAL", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     const download = mockDownload(async () => ({ outcome: "STORED" }))
     const result = await runAcquisitionAttachmentDownloadOrchestrator({
       repository: mockRepo({
@@ -358,6 +417,8 @@ describe("runAcquisitionAttachmentDownloadOrchestrator", () => {
 
   it("exactement maxCompaniesPerRun sociétés, aucune 3e → SUCCESS", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     const limitsSeen: number[] = []
     const download = mockDownload(async () => ({ outcome: "STORED" }))
     const result = await runAcquisitionAttachmentDownloadOrchestrator({
@@ -388,6 +449,8 @@ describe("runAcquisitionAttachmentDownloadOrchestrator", () => {
 
   it("overflow sociétés prouvé (limit+1) → PARTIAL / MAX_COMPANIES_PER_RUN", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     const download = mockDownload(async () => ({ outcome: "STORED" }))
     const result = await runAcquisitionAttachmentDownloadOrchestrator({
       repository: {
@@ -415,6 +478,8 @@ describe("runAcquisitionAttachmentDownloadOrchestrator", () => {
 
   it("downloadAttachment throw → failed + PARTIAL + tenants suivants continuent", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     const download = mockDownload(async ({ companyId }) => {
       if (companyId === "co-a") {
         throw Object.assign(new Error("postgresql://user:password@host/secret-stack"), {
@@ -461,6 +526,8 @@ describe("runAcquisitionAttachmentDownloadOrchestrator", () => {
 
   it("runId jamais passé au repository ni au download", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     const repoCalls: unknown[] = []
     const download = mockDownload(async (input) => {
       repoCalls.push({ kind: "download", input })
@@ -488,6 +555,8 @@ describe("runAcquisitionAttachmentDownloadOrchestrator", () => {
 
   it("budget temps avant prochaine PJ → PARTIAL sans annuler PJ en cours", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     let t = 0
     const clock = () => new Date(t)
     let inFlight = 0
@@ -526,6 +595,8 @@ describe("runAcquisitionAttachmentDownloadOrchestrator", () => {
 
   it("logs sans storagePublicId ni secret", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     await runAcquisitionAttachmentDownloadOrchestrator({
       repository: mockRepo({
         companyIds: ["co"],
@@ -543,6 +614,8 @@ describe("runAcquisitionAttachmentDownloadOrchestrator", () => {
 
   it("aucun appel Gmail/Cloudinary direct — uniquement downloadAttachment", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     const download = mockDownload(async () => ({ outcome: "ALREADY_IN_PROGRESS" }))
     await runAcquisitionAttachmentDownloadOrchestrator({
       repository: mockRepo({

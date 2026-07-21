@@ -62,8 +62,55 @@ describe("handleAcquisitionGmailSyncCron", () => {
     assert.equal(body.skipReason, "CRON_DISABLED")
   })
 
+  it("cron ON + master OFF → MASTER_DISABLED", async () => {
+    process.env.ACQUISITION_GMAIL_CRON_ENABLED = "true"
+    delete process.env.PLANIFICATOR_ACQUISITION_ENABLED
+    const res = await handleAcquisitionGmailSyncCron(request(`Bearer ${CRON_SECRET}`), {
+      runDriver: () =>
+        runAcquisitionGmailSyncDriver({
+          listCompanyIds: async () => {
+            throw new Error("should not list")
+          },
+          runSyncForCompany: async () => {
+            throw new Error("should not sync")
+          },
+        }),
+    })
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.equal(body.skipReason, "MASTER_DISABLED")
+  })
+
+  it("flags valides → driver appelé une fois", async () => {
+    process.env.ACQUISITION_GMAIL_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    let calls = 0
+    const res = await handleAcquisitionGmailSyncCron(request(`Bearer ${CRON_SECRET}`), {
+      runDriver: async () => {
+        calls += 1
+        return {
+          status: "SUCCESS",
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+          durationMs: 1,
+          companiesTotal: 0,
+          companiesSucceeded: 0,
+          companiesFailed: 0,
+          companiesPartial: 0,
+          companiesSkipped: 0,
+          globalStats: { fetched: 0, ingested: 0, skippedDuplicate: 0, rejected: 0, failed: 0 },
+          companies: [],
+        }
+      },
+    })
+    assert.equal(res.status, 200)
+    assert.equal(calls, 1)
+    assert.equal((await res.json()).status, "SUCCESS")
+  })
+
   it("erreur listing → FAILED structuré sans détail interne", async () => {
     process.env.ACQUISITION_GMAIL_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
 
     const res = await handleAcquisitionGmailSyncCron(request(`Bearer ${CRON_SECRET}`), {
       runDriver: () =>
@@ -90,6 +137,7 @@ describe("handleAcquisitionGmailSyncCron", () => {
 
   it("résultat PARTIAL → HTTP 200 et statut PARTIAL", async () => {
     process.env.ACQUISITION_GMAIL_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
 
     const res = await handleAcquisitionGmailSyncCron(request(`Bearer ${CRON_SECRET}`), {
       runDriver: () =>
@@ -124,6 +172,7 @@ describe("handleAcquisitionGmailSyncCron", () => {
 
   it("aucune erreur brute dans le JSON de réponse", async () => {
     process.env.ACQUISITION_GMAIL_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
 
     const res = await handleAcquisitionGmailSyncCron(request(`Bearer ${CRON_SECRET}`), {
       runDriver: () =>

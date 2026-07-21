@@ -65,6 +65,95 @@ describe("handleAcquisitionAttachmentDownloadCron", () => {
     assert.equal(body.runId, "route-skip")
   })
 
+  it("cron ON + master OFF → 200 MASTER_DISABLED", async () => {
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    delete process.env.PLANIFICATOR_ACQUISITION_ENABLED
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
+    const res = await handleAcquisitionAttachmentDownloadCron(request(`Bearer ${CRON_SECRET}`), {
+      runOrchestrator: () =>
+        runAcquisitionAttachmentDownloadOrchestrator({
+          repository: {
+            listCompanyIdsWithDiscoveredAttachments: async () => {
+              throw new Error("should not list")
+            },
+            listDiscoveredAttachmentsForCompany: async () => [],
+          },
+          downloadAttachment: async () => ({ outcome: "STORED" }),
+          createRunId: () => "route-master-off",
+        }),
+    })
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.equal(body.status, "SKIPPED")
+    assert.equal(body.skipReason, "MASTER_DISABLED")
+  })
+
+  it("cron ON + capability OFF → DOWNLOAD_CAPABILITY_DISABLED", async () => {
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "false"
+    const res = await handleAcquisitionAttachmentDownloadCron(request(`Bearer ${CRON_SECRET}`), {
+      runOrchestrator: () =>
+        runAcquisitionAttachmentDownloadOrchestrator({
+          repository: {
+            listCompanyIdsWithDiscoveredAttachments: async () => {
+              throw new Error("should not list")
+            },
+            listDiscoveredAttachmentsForCompany: async () => [],
+          },
+          downloadAttachment: async () => ({ outcome: "STORED" }),
+          createRunId: () => "route-cap-off",
+        }),
+    })
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.equal(body.status, "SKIPPED")
+    assert.equal(body.skipReason, "DOWNLOAD_CAPABILITY_DISABLED")
+  })
+
+  it("flags valides → orchestrateur appelé une fois", async () => {
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
+    let calls = 0
+    const res = await handleAcquisitionAttachmentDownloadCron(request(`Bearer ${CRON_SECRET}`), {
+      runOrchestrator: async () => {
+        calls += 1
+        return {
+          status: "SUCCESS",
+          runId: "route-once",
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+          durationMs: 1,
+          companiesTotal: 0,
+          companiesSucceeded: 0,
+          companiesPartial: 0,
+          companiesFailed: 0,
+          companiesSkipped: 0,
+          globalStats: {
+            attempted: 0,
+            stored: 0,
+            alreadyStored: 0,
+            alreadyInProgress: 0,
+            rejected: 0,
+            failed: 0,
+            skipped: 0,
+          },
+          companies: [],
+          config: {
+            maxPerCompany: DEFAULT_ATTACHMENT_MAX_PER_COMPANY,
+            maxPerRun: DEFAULT_ATTACHMENT_MAX_PER_RUN,
+            maxCompaniesPerRun: DEFAULT_ATTACHMENT_MAX_COMPANIES_PER_RUN,
+            maxDurationMs: DEFAULT_ATTACHMENT_CRON_MAX_DURATION_MS,
+          },
+        }
+      },
+    })
+    assert.equal(res.status, 200)
+    assert.equal(calls, 1)
+    assert.equal((await res.json()).runId, "route-once")
+  })
+
   it("succès → 200 SUCCESS", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
     const res = await handleAcquisitionAttachmentDownloadCron(request(`Bearer ${CRON_SECRET}`), {
@@ -143,6 +232,8 @@ describe("handleAcquisitionAttachmentDownloadCron", () => {
 
   it("erreur listing → 200 FAILED structuré", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
     const res = await handleAcquisitionAttachmentDownloadCron(request(`Bearer ${CRON_SECRET}`), {
       runOrchestrator: () =>
         runAcquisitionAttachmentDownloadOrchestrator({

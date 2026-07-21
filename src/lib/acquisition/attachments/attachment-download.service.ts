@@ -207,7 +207,11 @@ export async function downloadAcquisitionAttachment(
     return failureResult(input.attachmentId ?? "", "ATTACHMENT_NOT_FOUND")
   }
 
-  if (!isAcquisitionEnabled() || !isAttachmentDownloadEnabled()) {
+  if (!isAcquisitionEnabled()) {
+    log("DOWNLOAD_SKIPPED", { reason: "ACQUISITION_DISABLED" })
+    return { outcome: "SKIPPED", attachmentId: input.attachmentId, errorCode: "ACQUISITION_DISABLED" }
+  }
+  if (!isAttachmentDownloadEnabled()) {
     log("DOWNLOAD_SKIPPED", { reason: "ATTACHMENT_DOWNLOAD_DISABLED" })
     return { outcome: "SKIPPED", attachmentId: input.attachmentId, errorCode: "ATTACHMENT_DOWNLOAD_DISABLED" }
   }

@@ -82,7 +82,7 @@ export interface AttachmentDownloadCronCompanyResult {
 export interface AttachmentDownloadCronRunResult {
   status: AttachmentDownloadCronRunStatus
   runId: string
-  skipReason?: "CRON_DISABLED"
+  skipReason?: "CRON_DISABLED" | "MASTER_DISABLED" | "DOWNLOAD_CAPABILITY_DISABLED"
   error?: PublicAttachmentDownloadCronError
   errorCode?: string
   budgetReached?: AttachmentDownloadCronBudgetReason

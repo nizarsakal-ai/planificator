@@ -1,8 +1,11 @@
 import {
   getAttachmentDownloadCronConfig,
-  isAttachmentDownloadCronEnabled,
   type AttachmentDownloadCronConfig,
 } from "@/lib/acquisition/attachments/attachment-download-cron-feature-flag"
+import {
+  logAcquisitionFlagSkip,
+  resolveAcquisitionAttachmentDownloadCronGate,
+} from "@/lib/acquisition/acquisition-flag-matrix"
 import {
   emptyOutcomeStats,
   recordOutcome,
@@ -71,19 +74,26 @@ export async function runAcquisitionAttachmentDownloadOrchestrator(
     config,
   })
 
-  if (!isAttachmentDownloadCronEnabled()) {
+  const gate = resolveAcquisitionAttachmentDownloadCronGate()
+  if (!gate.allowed) {
     const finishedAt = clock()
     const durationMs = finishedAt.getTime() - startedAt.getTime()
+    const skipReason = gate.skipReason ?? "CRON_DISABLED"
+    logAcquisitionFlagSkip(log, {
+      scope: "acquisition-attachment-download-cron",
+      capability: "attachment_download_cron",
+      outcome: skipReason,
+    })
     log("DOWNLOAD_CRON_FINISHED", {
       runId,
       status: "SKIPPED",
-      skipReason: "CRON_DISABLED",
+      skipReason,
       durationMs,
     })
     return {
       status: "SKIPPED",
       runId,
-      skipReason: "CRON_DISABLED",
+      skipReason,
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
       durationMs,

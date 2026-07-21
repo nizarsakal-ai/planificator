@@ -31,7 +31,7 @@ export type AttachmentRecoveryCronCompanyResult = {
 export type AttachmentRecoveryCronRunResult = {
   status: AttachmentRecoveryCronRunStatus
   runId: string
-  skipReason?: "CRON_DISABLED"
+  skipReason?: "CRON_DISABLED" | "MASTER_DISABLED" | "DOWNLOAD_CAPABILITY_DISABLED"
   startedAt: string
   finishedAt: string
   durationMs: number

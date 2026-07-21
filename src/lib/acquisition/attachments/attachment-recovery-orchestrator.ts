@@ -1,8 +1,11 @@
 import {
   getAttachmentRecoveryCronConfig,
-  isAttachmentRecoveryCronEnabled,
   type AttachmentRecoveryCronConfig,
 } from "@/lib/acquisition/attachments/attachment-recovery-cron-feature-flag"
+import {
+  logAcquisitionFlagSkip,
+  resolveAcquisitionAttachmentRecoveryCronGate,
+} from "@/lib/acquisition/acquisition-flag-matrix"
 import { RETRYABLE_ATTACHMENT_ERROR_CODES } from "@/lib/acquisition/attachments/attachment-retry.policy"
 import {
   emptyPhaseStats,
@@ -86,19 +89,26 @@ export async function runAcquisitionAttachmentRecoveryOrchestrator(
     config: publicConfig,
   })
 
-  if (!isAttachmentRecoveryCronEnabled()) {
+  const gate = resolveAcquisitionAttachmentRecoveryCronGate()
+  if (!gate.allowed) {
     const finishedAt = clock()
     const durationMs = finishedAt.getTime() - startedAt.getTime()
+    const skipReason = gate.skipReason ?? "CRON_DISABLED"
+    logAcquisitionFlagSkip(log, {
+      scope: "acquisition-attachment-recovery",
+      capability: "attachment_recovery_cron",
+      outcome: skipReason,
+    })
     log("RECOVERY_CRON_FINISHED", {
       runId,
       status: "SKIPPED",
-      skipReason: "CRON_DISABLED",
+      skipReason,
       durationMs,
     })
     return {
       status: "SKIPPED",
       runId,
-      skipReason: "CRON_DISABLED",
+      skipReason,
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
       durationMs,
