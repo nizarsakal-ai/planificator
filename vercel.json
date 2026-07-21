@@ -7,6 +7,18 @@
     {
       "path": "/api/cron/gmail-scan",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/acquisition-gmail-sync",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/acquisition-attachment-download",
+      "schedule": "5,20,35,50 * * * *"
+    },
+    {
+      "path": "/api/cron/acquisition-attachment-recovery",
+      "schedule": "40 * * * *"
     }
   ]
 }
