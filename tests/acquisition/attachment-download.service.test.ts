@@ -113,6 +113,78 @@ describe("attachment-download.service", () => {
     else process.env.ACQUISITION_ATTACHMENT_MAX_BYTES = envBackup.maxBytes
   })
 
+  it("master OFF → ACQUISITION_DISABLED + zéro claim/Gmail/storage", async () => {
+    delete process.env.PLANIFICATOR_ACQUISITION_ENABLED
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
+    let claims = 0
+    let gmail = 0
+    let store = 0
+    const r = await downloadAcquisitionAttachment(
+      { companyId: "co-1", attachmentId: "att-1" },
+      {
+        repository: claimedRepo({
+          claimForDownload: async () => {
+            claims += 1
+            return { status: "CLAIMED", attachment: baseAttachment() }
+          },
+        }),
+        gmailSource: mockGmail({
+          fetchAttachment: async () => {
+            gmail += 1
+            return { data: PDF_BUFFER, sizeBytes: PDF_BUFFER.length }
+          },
+        }),
+        storage: mockStorage({
+          store: async () => {
+            store += 1
+            return { created: true, storagePublicId: "pid", storageUrl: "https://x" }
+          },
+        }),
+      }
+    )
+    assert.equal(r.outcome, "SKIPPED")
+    assert.equal(r.errorCode, "ACQUISITION_DISABLED")
+    assert.equal(claims, 0)
+    assert.equal(gmail, 0)
+    assert.equal(store, 0)
+  })
+
+  it("master ON + download OFF → ATTACHMENT_DOWNLOAD_DISABLED + zéro mutation", async () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "false"
+    let claims = 0
+    let gmail = 0
+    let store = 0
+    const r = await downloadAcquisitionAttachment(
+      { companyId: "co-1", attachmentId: "att-1" },
+      {
+        repository: claimedRepo({
+          claimForDownload: async () => {
+            claims += 1
+            return { status: "CLAIMED", attachment: baseAttachment() }
+          },
+        }),
+        gmailSource: mockGmail({
+          fetchAttachment: async () => {
+            gmail += 1
+            return { data: PDF_BUFFER, sizeBytes: PDF_BUFFER.length }
+          },
+        }),
+        storage: mockStorage({
+          store: async () => {
+            store += 1
+            return { created: true, storagePublicId: "pid", storageUrl: "https://x" }
+          },
+        }),
+      }
+    )
+    assert.equal(r.outcome, "SKIPPED")
+    assert.equal(r.errorCode, "ATTACHMENT_DOWNLOAD_DISABLED")
+    assert.equal(claims, 0)
+    assert.equal(gmail, 0)
+    assert.equal(store, 0)
+  })
+
   it("skip si feature flag désactivé", async () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "false"
     const r = await downloadAcquisitionAttachment(
@@ -120,6 +192,7 @@ describe("attachment-download.service", () => {
       { repository: claimedRepo(), gmailSource: mockGmail({}), storage: mockStorage({}) }
     )
     assert.equal(r.outcome, "SKIPPED")
+    assert.equal(r.errorCode, "ATTACHMENT_DOWNLOAD_DISABLED")
   })
 
   it("retourne ALREADY_STORED via claim", async () => {

@@ -47,11 +47,29 @@ describe("runAcquisitionGmailSyncDriver", () => {
     assert.equal(result.status, "SKIPPED")
     assert.equal(result.skipReason, "CRON_DISABLED")
     assert.equal(listCalled, false)
-    assert.deepEqual(events, ["SYNC_START", "SYNC_FINISHED"])
+    assert.deepEqual(events, ["SYNC_START", "FLAG_SKIP", "SYNC_FINISHED"])
+  })
+
+  it("cron ON + master OFF → MASTER_DISABLED sans listing", async () => {
+    process.env.ACQUISITION_GMAIL_CRON_ENABLED = "true"
+    delete process.env.PLANIFICATOR_ACQUISITION_ENABLED
+    let listCalled = false
+    const result = await runAcquisitionGmailSyncDriver({
+      listCompanyIds: async () => {
+        listCalled = true
+        return ["c1"]
+      },
+      runSyncForCompany: async () => syncResult(),
+      now: () => NOW,
+    })
+    assert.equal(result.status, "SKIPPED")
+    assert.equal(result.skipReason, "MASTER_DISABLED")
+    assert.equal(listCalled, false)
   })
 
   it("listCompanyIds() lève une exception → FAILED + SYNC_FINISHED", async () => {
     process.env.ACQUISITION_GMAIL_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
     const events: string[] = []
 
     const result = await runAcquisitionGmailSyncDriver({
@@ -82,6 +100,7 @@ describe("runAcquisitionGmailSyncDriver", () => {
 
   it("aucune entreprise → SUCCESS", async () => {
     process.env.ACQUISITION_GMAIL_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
 
     const result = await runAcquisitionGmailSyncDriver({
       listCompanyIds: async () => [],
@@ -96,6 +115,7 @@ describe("runAcquisitionGmailSyncDriver", () => {
 
   it("plusieurs entreprises SUCCESS → global SUCCESS", async () => {
     process.env.ACQUISITION_GMAIL_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
     const events: string[] = []
 
     const result = await runAcquisitionGmailSyncDriver({
@@ -112,6 +132,7 @@ describe("runAcquisitionGmailSyncDriver", () => {
 
   it("tenant SKIPPED → SYNC_COMPANY_SKIPPED", async () => {
     process.env.ACQUISITION_GMAIL_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
     const events: string[] = []
 
     const result = await runAcquisitionGmailSyncDriver({
@@ -130,6 +151,7 @@ describe("runAcquisitionGmailSyncDriver", () => {
 
   it("toutes entreprises SKIPPED → global SKIPPED", async () => {
     process.env.ACQUISITION_GMAIL_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
 
     const result = await runAcquisitionGmailSyncDriver({
       listCompanyIds: async () => ["c1", "c2"],
@@ -146,6 +168,7 @@ describe("runAcquisitionGmailSyncDriver", () => {
 
   it("tenant PARTIAL → SYNC_COMPANY_PARTIAL et global PARTIAL", async () => {
     process.env.ACQUISITION_GMAIL_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
     const events: string[] = []
 
     const result = await runAcquisitionGmailSyncDriver({
@@ -177,6 +200,7 @@ describe("runAcquisitionGmailSyncDriver", () => {
 
   it("tenant FAILED → les autres continuent, global PARTIAL", async () => {
     process.env.ACQUISITION_GMAIL_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
     const synced: string[] = []
     const events: string[] = []
 
@@ -208,6 +232,7 @@ describe("runAcquisitionGmailSyncDriver", () => {
 
   it("exception inattendue → erreur publique sanitizée", async () => {
     process.env.ACQUISITION_GMAIL_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
 
     const result = await runAcquisitionGmailSyncDriver({
       listCompanyIds: async () => ["c1"],
@@ -226,6 +251,7 @@ describe("runAcquisitionGmailSyncDriver", () => {
 
   it("statistiques globales agrégées", async () => {
     process.env.ACQUISITION_GMAIL_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
 
     const result = await runAcquisitionGmailSyncDriver({
       listCompanyIds: async () => ["c1", "c2"],

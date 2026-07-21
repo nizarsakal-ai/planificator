@@ -39,15 +39,25 @@ function mockRepo(
 }
 
 describe("attachment-recovery-orchestrator", () => {
-  const envBackup = process.env.ACQUISITION_ATTACHMENT_RECOVERY_CRON_ENABLED
+  const envBackup = {
+    recovery: process.env.ACQUISITION_ATTACHMENT_RECOVERY_CRON_ENABLED,
+    master: process.env.PLANIFICATOR_ACQUISITION_ENABLED,
+    download: process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED,
+  }
 
   beforeEach(() => {
     process.env.ACQUISITION_ATTACHMENT_RECOVERY_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
   })
 
   afterEach(() => {
-    if (envBackup === undefined) delete process.env.ACQUISITION_ATTACHMENT_RECOVERY_CRON_ENABLED
-    else process.env.ACQUISITION_ATTACHMENT_RECOVERY_CRON_ENABLED = envBackup
+    if (envBackup.recovery === undefined) delete process.env.ACQUISITION_ATTACHMENT_RECOVERY_CRON_ENABLED
+    else process.env.ACQUISITION_ATTACHMENT_RECOVERY_CRON_ENABLED = envBackup.recovery
+    if (envBackup.master === undefined) delete process.env.PLANIFICATOR_ACQUISITION_ENABLED
+    else process.env.PLANIFICATOR_ACQUISITION_ENABLED = envBackup.master
+    if (envBackup.download === undefined) delete process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED
+    else process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = envBackup.download
   })
 
   it("flag off → SKIPPED + runId", async () => {
@@ -60,9 +70,48 @@ describe("attachment-recovery-orchestrator", () => {
       config: baseConfig(),
     })
     assert.equal(result.status, "SKIPPED")
+    assert.equal(result.skipReason, "CRON_DISABLED")
     assert.equal(result.runId, "run-1")
     assert.ok(events.includes("RECOVERY_CRON_START"))
+    assert.ok(events.includes("FLAG_SKIP"))
     assert.ok(events.includes("RECOVERY_CRON_FINISHED"))
+  })
+
+  it("master OFF → MASTER_DISABLED + zéro listing", async () => {
+    delete process.env.PLANIFICATOR_ACQUISITION_ENABLED
+    let listed = false
+    const result = await runAcquisitionAttachmentRecoveryOrchestrator({
+      repository: mockRepo({
+        listCompanyIdsWithReclaimCandidates: async () => {
+          listed = true
+          return ["c1"]
+        },
+      }),
+      createRunId: () => "run-master-off",
+      config: baseConfig(),
+    })
+    assert.equal(result.status, "SKIPPED")
+    assert.equal(result.skipReason, "MASTER_DISABLED")
+    assert.equal(listed, false)
+    assert.equal(result.reclaim.transitioned, 0)
+  })
+
+  it("download OFF → DOWNLOAD_CAPABILITY_DISABLED + zéro transition", async () => {
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "false"
+    let reclaimCalled = false
+    const result = await runAcquisitionAttachmentRecoveryOrchestrator({
+      repository: mockRepo({
+        reclaimPendingDownload: async () => {
+          reclaimCalled = true
+          return "RECLAIMED"
+        },
+      }),
+      createRunId: () => "run-dl-off",
+      config: baseConfig(),
+    })
+    assert.equal(result.status, "SKIPPED")
+    assert.equal(result.skipReason, "DOWNLOAD_CAPABILITY_DISABLED")
+    assert.equal(reclaimCalled, false)
   })
 
   it("zéro candidat → SUCCESS", async () => {

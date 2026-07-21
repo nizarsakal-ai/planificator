@@ -1,5 +1,9 @@
 import type { MailSyncResult, MailSyncStats } from "@/lib/acquisition/connector/connector.types"
-import { isAcquisitionGmailCronEnabled } from "@/lib/acquisition/acquisition-gmail-cron-feature-flag"
+import {
+  logAcquisitionFlagSkip,
+  resolveAcquisitionGmailCronGate,
+  type AcquisitionCronSkipReason,
+} from "@/lib/acquisition/acquisition-flag-matrix"
 import {
   mapCompanySyncStatusToPublicError,
   safeInternalErrorCode,
@@ -23,7 +27,7 @@ export interface AcquisitionGmailCronCompanyResult {
 
 export interface AcquisitionGmailCronRunResult {
   status: AcquisitionGmailCronRunStatus
-  skipReason?: "CRON_DISABLED"
+  skipReason?: AcquisitionCronSkipReason
   error?: PublicCronError
   errorCode?: string
   startedAt: string
@@ -137,16 +141,23 @@ export async function runAcquisitionGmailSyncDriver(
 
   log("SYNC_START", { at: startedAt.toISOString() })
 
-  if (!isAcquisitionGmailCronEnabled()) {
+  const gate = resolveAcquisitionGmailCronGate()
+  if (!gate.allowed) {
     const finishedAt = now()
+    const skipReason = gate.skipReason ?? "CRON_DISABLED"
+    logAcquisitionFlagSkip(log, {
+      scope: "acquisition-gmail-cron",
+      capability: "gmail_sync",
+      outcome: skipReason,
+    })
     log("SYNC_FINISHED", {
       status: "SKIPPED",
-      skipReason: "CRON_DISABLED",
+      skipReason,
       durationMs: finishedAt.getTime() - startedAt.getTime(),
     })
     return {
       status: "SKIPPED",
-      skipReason: "CRON_DISABLED",
+      skipReason,
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
       durationMs: finishedAt.getTime() - startedAt.getTime(),

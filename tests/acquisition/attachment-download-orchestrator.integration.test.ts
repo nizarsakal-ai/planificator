@@ -151,9 +151,42 @@ describe("attachment download orchestrator — intégration PostgreSQL", RUN, ()
     process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
 
+    // Isolation scénario claim :
+    // - une seule PJ DISCOVERED (sinon 2 orchestrateurs maxPerRun=1 téléchargent 2 IDs) ;
+    // - repository borné à companyA (sinon le 2e run, après STORED sur A, drain companyB).
+    await db.acquisitionAttachment.update({
+      where: { id: attachmentIdsA[1] },
+      data: { status: "FAILED", lastErrorCode: "ATTACHMENT_FETCH_FAILED" },
+    })
+    await db.acquisitionAttachment.update({
+      where: { id: attachmentIdB },
+      data: { status: "FAILED", lastErrorCode: "ATTACHMENT_FETCH_FAILED" },
+    })
+
+    const targetId = attachmentIdsA[0]
+    const before = await db.acquisitionAttachment.findUniqueOrThrow({ where: { id: targetId } })
+    assert.equal(before.status, "DISCOVERED")
+    assert.equal(before.companyId, companyA)
+
+    const scopedRepo = {
+      listCompanyIdsWithDiscoveredAttachments: async ({ limit }: { limit: number }) => {
+        const ids = await repo.listCompanyIdsWithDiscoveredAttachments({ limit })
+        return ids.filter((id) => id === companyA).slice(0, limit)
+      },
+      listDiscoveredAttachmentsForCompany: async (input: {
+        companyId: string
+        limit: number
+      }) => {
+        if (input.companyId !== companyA) return []
+        return repo.listDiscoveredAttachmentsForCompany(input)
+      },
+    }
+
     let gmailCalls = 0
-    const download = (input: { companyId: string; attachmentId: string }) =>
-      downloadAcquisitionAttachment(input, {
+    const downloadedIds: string[] = []
+    const download = (input: { companyId: string; attachmentId: string }) => {
+      downloadedIds.push(input.attachmentId)
+      return downloadAcquisitionAttachment(input, {
         repository: repo,
         gmailSource: {
           fetchAttachment: async () => {
@@ -170,10 +203,11 @@ describe("attachment download orchestrator — intégration PostgreSQL", RUN, ()
           destroy: async () => {},
         },
       })
+    }
 
     const [r1, r2] = await Promise.all([
       runAcquisitionAttachmentDownloadOrchestrator({
-        repository: repo,
+        repository: scopedRepo,
         downloadAttachment: download,
         createRunId: () => "concurrent-1",
         config: {
@@ -184,7 +218,7 @@ describe("attachment download orchestrator — intégration PostgreSQL", RUN, ()
         },
       }),
       runAcquisitionAttachmentDownloadOrchestrator({
-        repository: repo,
+        repository: scopedRepo,
         downloadAttachment: download,
         createRunId: () => "concurrent-2",
         config: {
@@ -196,24 +230,26 @@ describe("attachment download orchestrator — intégration PostgreSQL", RUN, ()
       }),
     ])
 
-    const outcomes = [
-      ...r1.companies.flatMap(() => []),
-      r1.globalStats,
-      r2.globalStats,
-    ]
-    void outcomes
+    assert.ok(downloadedIds.every((id) => id === targetId))
     assert.equal(gmailCalls, 1)
-    const storedCount =
-      (await db.acquisitionAttachment.count({
-        where: { id: attachmentIdsA[0], status: "STORED" },
-      })) +
-      (await db.acquisitionAttachment.count({
-        where: { id: attachmentIdsA[1], status: "STORED" },
-      }))
-    assert.ok(storedCount >= 1)
+
+    const after = await db.acquisitionAttachment.findUniqueOrThrow({
+      where: { id: targetId, companyId: companyA },
+    })
+    assert.equal(after.status, "STORED")
+
+    const storedOnTarget = await db.acquisitionAttachment.count({
+      where: { id: targetId, companyId: companyA, status: "STORED" },
+    })
+    assert.equal(storedOnTarget, 1)
+
     assert.equal(
-      r1.globalStats.stored + r1.globalStats.alreadyInProgress + r1.globalStats.alreadyStored +
-        r2.globalStats.stored + r2.globalStats.alreadyInProgress + r2.globalStats.alreadyStored,
+      r1.globalStats.stored +
+        r1.globalStats.alreadyInProgress +
+        r1.globalStats.alreadyStored +
+        r2.globalStats.stored +
+        r2.globalStats.alreadyInProgress +
+        r2.globalStats.alreadyStored,
       r1.globalStats.attempted + r2.globalStats.attempted
     )
   })
