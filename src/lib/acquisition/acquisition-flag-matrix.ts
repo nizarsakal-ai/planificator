@@ -1,7 +1,7 @@
 /**
  * PLAN-ACQ-OPS-001 — Matrice des feature flags Acquisition.
  * Lecture env déterministe (`=== "true"`). Aucune dépendance Prisma/UI/provider.
- * Extension OPS-003 : content cron.
+ * Extensions : OPS-003 content cron ; OPS-004 extraction cron.
  */
 
 import { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
@@ -17,6 +17,7 @@ import {
   isAcquisitionExtractionEnabled,
   type ExtractionProviderId,
 } from "@/lib/acquisition/extraction/extraction-feature-flag"
+import { isAcquisitionExtractionCronEnabled } from "@/lib/acquisition/extraction/extraction-cron-feature-flag"
 import {
   isAcquisitionConversionEnabled,
   isAcquisitionConversionFullyEnabled,
@@ -32,16 +33,18 @@ export {
   isAcquisitionContentFetchEnabled,
   isAcquisitionContentCronEnabled,
   isAcquisitionExtractionEnabled,
+  isAcquisitionExtractionCronEnabled,
   isAcquisitionConversionFullyEnabled,
   getExtractionProviderId,
 }
 
-/** Skip contrôlé des crons Acquisition (compat + extensions OPS-001 / OPS-003). */
+/** Skip contrôlé des crons Acquisition (compat + extensions OPS-001 / OPS-003 / OPS-004). */
 export type AcquisitionCronSkipReason =
   | "CRON_DISABLED"
   | "MASTER_DISABLED"
   | "DOWNLOAD_CAPABILITY_DISABLED"
   | "CONTENT_FETCH_DISABLED"
+  | "EXTRACTION_DISABLED"
 
 export type AcquisitionFlagIssueCode =
   | "INV_EXTRACTION_WITHOUT_CONTENT"
@@ -56,6 +59,9 @@ export type AcquisitionFlagIssueCode =
   | "INV_CONTENT_CRON_WITHOUT_MASTER"
   | "INV_CONTENT_CRON_WITHOUT_CONTENT"
   | "INV_EXTRACTION_WITHOUT_MASTER"
+  | "INV_EXTRACTION_CRON_WITHOUT_MASTER"
+  | "INV_EXTRACTION_CRON_WITHOUT_CONTENT"
+  | "INV_EXTRACTION_CRON_WITHOUT_EXTRACTION"
   | "INV_DOWNLOAD_WITHOUT_MASTER"
 
 export interface AcquisitionFlagMatrix {
@@ -68,6 +74,7 @@ export interface AcquisitionFlagMatrix {
   contentFetch: boolean
   contentCron: boolean
   extraction: boolean
+  extractionCron: boolean
   extractionProvider: ExtractionProviderId
   conversion: boolean
   conversionFully: boolean
@@ -91,6 +98,7 @@ export function getAcquisitionFlagMatrix(): AcquisitionFlagMatrix {
     contentFetch: isAcquisitionContentFetchEnabled(),
     contentCron: isAcquisitionContentCronEnabled(),
     extraction: isAcquisitionExtractionEnabled(),
+    extractionCron: isAcquisitionExtractionCronEnabled(),
     extractionProvider: getExtractionProviderId(),
     conversion,
     conversionFully: isAcquisitionConversionFullyEnabled(),
@@ -175,6 +183,24 @@ export function validateAcquisitionFlagMatrix(
       message: "Extraction ON requires content fetch",
     })
   }
+  if (matrix.extractionCron && !matrix.master) {
+    issues.push({
+      code: "INV_EXTRACTION_CRON_WITHOUT_MASTER",
+      message: "Extraction cron ON requires PLANIFICATOR_ACQUISITION_ENABLED",
+    })
+  }
+  if (matrix.extractionCron && !matrix.contentFetch) {
+    issues.push({
+      code: "INV_EXTRACTION_CRON_WITHOUT_CONTENT",
+      message: "Extraction cron ON requires ACQUISITION_CONTENT_FETCH_ENABLED",
+    })
+  }
+  if (matrix.extractionCron && !matrix.extraction) {
+    issues.push({
+      code: "INV_EXTRACTION_CRON_WITHOUT_EXTRACTION",
+      message: "Extraction cron ON requires ACQUISITION_EXTRACTION_ENABLED",
+    })
+  }
   if (matrix.conversion && !matrix.master) {
     issues.push({
       code: "INV_CONVERSION_WITHOUT_MASTER",
@@ -242,6 +268,25 @@ export function resolveAcquisitionContentCronGate(): {
   }
   if (!isAcquisitionContentFetchEnabled()) {
     return { allowed: false, skipReason: "CONTENT_FETCH_DISABLED" }
+  }
+  return { allowed: true }
+}
+
+export function resolveAcquisitionExtractionCronGate(): {
+  allowed: boolean
+  skipReason?: AcquisitionCronSkipReason
+} {
+  if (!isAcquisitionExtractionCronEnabled()) {
+    return { allowed: false, skipReason: "CRON_DISABLED" }
+  }
+  if (!isAcquisitionEnabled()) {
+    return { allowed: false, skipReason: "MASTER_DISABLED" }
+  }
+  if (!isAcquisitionContentFetchEnabled()) {
+    return { allowed: false, skipReason: "CONTENT_FETCH_DISABLED" }
+  }
+  if (!isAcquisitionExtractionEnabled()) {
+    return { allowed: false, skipReason: "EXTRACTION_DISABLED" }
   }
   return { allowed: true }
 }

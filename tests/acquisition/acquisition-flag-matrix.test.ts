@@ -10,6 +10,7 @@ import {
   resolveAcquisitionAttachmentDownloadCronGate,
   resolveAcquisitionAttachmentRecoveryCronGate,
   resolveAcquisitionContentCronGate,
+  resolveAcquisitionExtractionCronGate,
   resolveAcquisitionGmailCronGate,
   validateAcquisitionFlagMatrix,
   type AcquisitionFlagIssueCode,
@@ -26,6 +27,7 @@ const FLAG_KEYS = [
   "ACQUISITION_CONTENT_FETCH_ENABLED",
   "ACQUISITION_CONTENT_CRON_ENABLED",
   "ACQUISITION_EXTRACTION_ENABLED",
+  "ACQUISITION_EXTRACTION_CRON_ENABLED",
   "ACQUISITION_EXTRACTION_PROVIDER",
   "ACQUISITION_CONVERSION_ENABLED",
 ] as const
@@ -223,5 +225,77 @@ describe("acquisition-flag-matrix", () => {
     process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
     assert.deepEqual(resolveAcquisitionContentCronGate(), { allowed: true })
     assert.equal(getAcquisitionFlagMatrix().contentCron, true)
+  })
+
+  it("INV: extraction cron ON + master OFF", () => {
+    process.env.ACQUISITION_EXTRACTION_CRON_ENABLED = "true"
+    assertExactIssues([
+      "INV_EXTRACTION_CRON_WITHOUT_MASTER",
+      "INV_EXTRACTION_CRON_WITHOUT_CONTENT",
+      "INV_EXTRACTION_CRON_WITHOUT_EXTRACTION",
+    ])
+  })
+
+  it("INV: extraction cron ON + content OFF (master+extraction ON)", () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_EXTRACTION_ENABLED = "true"
+    process.env.ACQUISITION_EXTRACTION_CRON_ENABLED = "true"
+    assertExactIssues([
+      "INV_EXTRACTION_WITHOUT_CONTENT",
+      "INV_EXTRACTION_CRON_WITHOUT_CONTENT",
+    ])
+  })
+
+  it("INV: extraction cron ON + extraction OFF (master+content ON)", () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
+    process.env.ACQUISITION_EXTRACTION_CRON_ENABLED = "true"
+    assertExactIssues(["INV_EXTRACTION_CRON_WITHOUT_EXTRACTION"])
+  })
+
+  it("gate extraction cron: OFF → CRON_DISABLED", () => {
+    assert.deepEqual(resolveAcquisitionExtractionCronGate(), {
+      allowed: false,
+      skipReason: "CRON_DISABLED",
+    })
+  })
+
+  it("gate extraction cron: ON + master OFF → MASTER_DISABLED", () => {
+    process.env.ACQUISITION_EXTRACTION_CRON_ENABLED = "true"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
+    process.env.ACQUISITION_EXTRACTION_ENABLED = "true"
+    assert.deepEqual(resolveAcquisitionExtractionCronGate(), {
+      allowed: false,
+      skipReason: "MASTER_DISABLED",
+    })
+  })
+
+  it("gate extraction cron: ON + content OFF → CONTENT_FETCH_DISABLED", () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_EXTRACTION_CRON_ENABLED = "true"
+    process.env.ACQUISITION_EXTRACTION_ENABLED = "true"
+    assert.deepEqual(resolveAcquisitionExtractionCronGate(), {
+      allowed: false,
+      skipReason: "CONTENT_FETCH_DISABLED",
+    })
+  })
+
+  it("gate extraction cron: ON + extraction OFF → EXTRACTION_DISABLED", () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
+    process.env.ACQUISITION_EXTRACTION_CRON_ENABLED = "true"
+    assert.deepEqual(resolveAcquisitionExtractionCronGate(), {
+      allowed: false,
+      skipReason: "EXTRACTION_DISABLED",
+    })
+  })
+
+  it("gate extraction cron: all ON → allowed", () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
+    process.env.ACQUISITION_EXTRACTION_ENABLED = "true"
+    process.env.ACQUISITION_EXTRACTION_CRON_ENABLED = "true"
+    assert.deepEqual(resolveAcquisitionExtractionCronGate(), { allowed: true })
+    assert.equal(getAcquisitionFlagMatrix().extractionCron, true)
   })
 })

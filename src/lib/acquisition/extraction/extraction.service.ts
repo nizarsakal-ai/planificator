@@ -96,8 +96,19 @@ function mapPersistOutcome(
   }) as Extract<ExtractDraftResult, { ok: false }>
 }
 
-export async function runDraftExtraction(
-  input: RunDraftExtractionInput,
+export type RunDraftExtractionCoreInput = {
+  companyId: string
+  draftId: string
+  force?: boolean
+  now?: () => Date
+}
+
+/**
+ * Cœur métier 005B — sans AuthZ Role.
+ * Appelé par le wrapper UI et le wrapper système OPS-004.
+ */
+export async function runDraftExtractionCore(
+  input: RunDraftExtractionCoreInput,
   deps: ExtractionServiceDeps = {}
 ): Promise<ExtractDraftResult> {
   const repository = deps.repository ?? draftExtractionRepository
@@ -115,10 +126,6 @@ export async function runDraftExtraction(
     return fail("DISABLED", "EXTRACTION_DISABLED", "Extraction désactivée")
   }
 
-  if (!ALLOWED_ROLES.has(input.actor.role) || !input.actor.companyId) {
-    return fail("FORBIDDEN", "EXTRACTION_FORBIDDEN", "Accès refusé")
-  }
-
   // Provider résolu AVANT claim (I2) — anthropic absent n'incrémente pas attemptCount.
   const provider = resolveProvider(deps.provider)
   if (!provider) {
@@ -129,7 +136,7 @@ export async function runDraftExtraction(
     )
   }
 
-  const companyId = input.actor.companyId
+  const companyId = input.companyId
   const draft = await repository.findDraft(companyId, input.draftId)
   if (!draft) {
     return fail("NOT_FOUND", "DRAFT_NOT_FOUND", "Brouillon introuvable")
@@ -425,4 +432,54 @@ export async function runDraftExtraction(
       maxAttempts,
     })
   }
+}
+
+/**
+ * Wrapper UI — ordre historique : flags capacité → AuthZ ADMIN|SUPER_ADMIN → core.
+ * Le wrapper système OPS-004 n’emprunte pas ce chemin.
+ */
+export async function runDraftExtraction(
+  input: RunDraftExtractionInput,
+  deps: ExtractionServiceDeps = {}
+): Promise<ExtractDraftResult> {
+  if (!isAcquisitionEnabled()) {
+    return fail("DISABLED", "ACQUISITION_DISABLED", "Acquisition désactivée")
+  }
+  if (!isAcquisitionContentFetchEnabled()) {
+    return fail("DISABLED", "CONTENT_FETCH_DISABLED", "Fetch contenu désactivé")
+  }
+  if (!isAcquisitionExtractionEnabled()) {
+    return fail("DISABLED", "EXTRACTION_DISABLED", "Extraction désactivée")
+  }
+  if (!ALLOWED_ROLES.has(input.actor.role) || !input.actor.companyId) {
+    return fail("FORBIDDEN", "EXTRACTION_FORBIDDEN", "Accès refusé")
+  }
+  return runDraftExtractionCore(
+    {
+      companyId: input.actor.companyId,
+      draftId: input.draftId,
+      force: input.force,
+      now: input.now,
+    },
+    deps
+  )
+}
+
+/**
+ * Wrapper système OPS-004 — aucun Role / faux ADMIN.
+ * force toujours false. Appel uniquement après auth cron réussie.
+ */
+export async function runDraftExtractionSystem(
+  input: { companyId: string; draftId: string; now?: () => Date },
+  deps: ExtractionServiceDeps = {}
+): Promise<ExtractDraftResult> {
+  return runDraftExtractionCore(
+    {
+      companyId: input.companyId,
+      draftId: input.draftId,
+      force: false,
+      now: input.now,
+    },
+    deps
+  )
 }

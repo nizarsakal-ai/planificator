@@ -20,6 +20,7 @@
 | `ACQUISITION_CONTENT_FETCH_ENABLED` | `isAcquisitionContentFetchEnabled` | |
 | `ACQUISITION_CONTENT_CRON_ENABLED` | `isAcquisitionContentCronEnabled` | OPS-003 — automatisation seule |
 | `ACQUISITION_EXTRACTION_ENABLED` | `isAcquisitionExtractionEnabled` | |
+| `ACQUISITION_EXTRACTION_CRON_ENABLED` | `isAcquisitionExtractionCronEnabled` | OPS-004 — automatisation seule |
 | `ACQUISITION_EXTRACTION_PROVIDER` | `getExtractionProviderId` | Défaut `deterministic` |
 | `ACQUISITION_CONVERSION_ENABLED` | `isAcquisitionConversionEnabled` | Flag **brut** conversion |
 
@@ -34,10 +35,12 @@ Convention booléenne : uniquement `=== "true"` (sensible à la casse).
 |-------|------|
 | 1 | `CRON_DISABLED` |
 | 2 | `MASTER_DISABLED` |
-| 3 | `DOWNLOAD_CAPABILITY_DISABLED` (download/recovery) ou `CONTENT_FETCH_DISABLED` (content cron) |
+| 3 | `DOWNLOAD_CAPABILITY_DISABLED` (download/recovery) ou `CONTENT_FETCH_DISABLED` (content / extraction cron) |
+| 4 | `EXTRACTION_DISABLED` (extraction cron uniquement) |
 
 Auth HTTP Bearer `CRON_SECRET` est **avant** ces gates (handlers).
 
+Gates extraction cron (OPS-004) : cron → master → content → extraction.
 ## Combinaisons invalides (matrice)
 
 `validateAcquisitionFlagMatrix()` détecte les combos incohérentes (`INV_*`) **sans** crasher le process.
