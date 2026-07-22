@@ -104,28 +104,26 @@ export async function getMessageContentForCompany(
 }
 
 /**
- * Fetch à la demande → sanitize → upsert idempotent.
- * N'écrit jamais de MIME brut ni de proposed* draft.
- * Aucune troncature : dépassement → ACQUISITION_CONTENT_TOO_LARGE.
+ * Core métier commun UI / système — aucun Role, aucun faux ADMIN.
+ * companyId fourni exclusivement par le wrapper appelant (session ou listing serveur).
  */
-export async function fetchAndStoreMessageContent(
+export async function fetchAndStoreMessageContentCore(
   input: {
-    actor: MessageContentActor
+    companyId: string
     acquisitionMessageId: string
+    /** Identifiant log uniquement (userId UI ou runId système). */
+    logActorId?: string
   },
   deps: MessageContentServiceDeps = {}
 ): Promise<FetchMessageContentResult> {
   if (!isAcquisitionEnabled() || !isAcquisitionContentFetchEnabled()) {
     return fail("DISABLED", "CONTENT_FETCH_DISABLED", publicMessage("CONTENT_FETCH_DISABLED"))
   }
-  if (!input.actor.userId) {
-    return fail("UNAUTHORIZED", "CONTENT_UNAUTHORIZED", publicMessage("CONTENT_UNAUTHORIZED"))
-  }
-  if (!canAccessMessageContent(input.actor) || !input.actor.companyId) {
-    return fail("FORBIDDEN", "CONTENT_FORBIDDEN", publicMessage("CONTENT_FORBIDDEN"))
+  if (!input.companyId?.trim() || !input.acquisitionMessageId?.trim()) {
+    return fail("NOT_FOUND", "CONTENT_NOT_FOUND", publicMessage("CONTENT_NOT_FOUND"))
   }
 
-  const companyId = input.actor.companyId
+  const companyId = input.companyId
   const db = deps.db ?? prisma
   const repository = deps.repository ?? new AcquisitionMessageContentRepository(db)
   const source = deps.source ?? gmailMessageContentSource
@@ -199,7 +197,7 @@ export async function fetchAndStoreMessageContent(
       outcome: upsert.outcome,
       byteLengthNormalized: sanitized.byteLengthNormalized,
       byteLengthOriginal: upsert.record.byteLengthOriginal,
-      actorId: input.actor.userId,
+      actorId: input.logActorId ?? "system",
     })
   )
 
@@ -209,4 +207,34 @@ export async function fetchAndStoreMessageContent(
     content: upsert.record,
     idempotent: upsert.outcome === "ALREADY_FETCHED",
   }
+}
+
+/**
+ * Wrapper UI — AuthZ ADMIN/SUPER_ADMIN + companyId session, puis core commun.
+ */
+export async function fetchAndStoreMessageContent(
+  input: {
+    actor: MessageContentActor
+    acquisitionMessageId: string
+  },
+  deps: MessageContentServiceDeps = {}
+): Promise<FetchMessageContentResult> {
+  if (!isAcquisitionEnabled() || !isAcquisitionContentFetchEnabled()) {
+    return fail("DISABLED", "CONTENT_FETCH_DISABLED", publicMessage("CONTENT_FETCH_DISABLED"))
+  }
+  if (!input.actor.userId) {
+    return fail("UNAUTHORIZED", "CONTENT_UNAUTHORIZED", publicMessage("CONTENT_UNAUTHORIZED"))
+  }
+  if (!canAccessMessageContent(input.actor) || !input.actor.companyId) {
+    return fail("FORBIDDEN", "CONTENT_FORBIDDEN", publicMessage("CONTENT_FORBIDDEN"))
+  }
+
+  return fetchAndStoreMessageContentCore(
+    {
+      companyId: input.actor.companyId,
+      acquisitionMessageId: input.acquisitionMessageId,
+      logActorId: input.actor.userId,
+    },
+    deps
+  )
 }

@@ -18,6 +18,7 @@
 | `ACQUISITION_ATTACHMENT_RECOVERY_CRON_ENABLED` | `isAcquisitionAttachmentRecoveryCronEnabled` | |
 | `ACQUISITION_ATTACHMENT_ACCESS_ENABLED` | `isAcquisitionAttachmentAccessEnabled` | N’ôte jamais AuthZ |
 | `ACQUISITION_CONTENT_FETCH_ENABLED` | `isAcquisitionContentFetchEnabled` | |
+| `ACQUISITION_CONTENT_CRON_ENABLED` | `isAcquisitionContentCronEnabled` | OPS-003 — automatisation seule |
 | `ACQUISITION_EXTRACTION_ENABLED` | `isAcquisitionExtractionEnabled` | |
 | `ACQUISITION_EXTRACTION_PROVIDER` | `getExtractionProviderId` | Défaut `deterministic` |
 | `ACQUISITION_CONVERSION_ENABLED` | `isAcquisitionConversionEnabled` | Flag **brut** conversion |
@@ -33,7 +34,7 @@ Convention booléenne : uniquement `=== "true"` (sensible à la casse).
 |-------|------|
 | 1 | `CRON_DISABLED` |
 | 2 | `MASTER_DISABLED` |
-| 3 | `DOWNLOAD_CAPABILITY_DISABLED` (download/recovery) |
+| 3 | `DOWNLOAD_CAPABILITY_DISABLED` (download/recovery) ou `CONTENT_FETCH_DISABLED` (content cron) |
 
 Auth HTTP Bearer `CRON_SECRET` est **avant** ces gates (handlers).
 

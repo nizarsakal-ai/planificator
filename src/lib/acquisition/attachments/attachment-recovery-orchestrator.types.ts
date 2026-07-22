@@ -1,3 +1,5 @@
+import type { AcquisitionCronSkipReason } from "@/lib/acquisition/acquisition-flag-matrix"
+
 export type AttachmentRecoveryCronRunStatus = "SKIPPED" | "SUCCESS" | "PARTIAL" | "FAILED"
 
 export type AttachmentRecoveryCronBudgetReason =
@@ -31,7 +33,7 @@ export type AttachmentRecoveryCronCompanyResult = {
 export type AttachmentRecoveryCronRunResult = {
   status: AttachmentRecoveryCronRunStatus
   runId: string
-  skipReason?: "CRON_DISABLED" | "MASTER_DISABLED" | "DOWNLOAD_CAPABILITY_DISABLED"
+  skipReason?: AcquisitionCronSkipReason
   startedAt: string
   finishedAt: string
   durationMs: number

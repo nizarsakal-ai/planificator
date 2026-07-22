@@ -1,5 +1,6 @@
 import type { AttachmentDownloadOutcome } from "@/lib/acquisition/attachments/attachment.types"
 import type { AttachmentDownloadCronConfig } from "@/lib/acquisition/attachments/attachment-download-cron-feature-flag"
+import type { AcquisitionCronSkipReason } from "@/lib/acquisition/acquisition-flag-matrix"
 
 /** Erreur publique cron download — jamais de détail interne. */
 export interface PublicAttachmentDownloadCronError {
@@ -82,7 +83,7 @@ export interface AttachmentDownloadCronCompanyResult {
 export interface AttachmentDownloadCronRunResult {
   status: AttachmentDownloadCronRunStatus
   runId: string
-  skipReason?: "CRON_DISABLED" | "MASTER_DISABLED" | "DOWNLOAD_CAPABILITY_DISABLED"
+  skipReason?: AcquisitionCronSkipReason
   error?: PublicAttachmentDownloadCronError
   errorCode?: string
   budgetReached?: AttachmentDownloadCronBudgetReason

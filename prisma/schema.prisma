@@ -251,6 +251,7 @@ model Company {
   acquisitionScanCursors  AcquisitionScanCursor[]
   acquisitionAttachmentAccessLogs AcquisitionAttachmentAccessLog[]
   acquisitionMessageContents AcquisitionMessageContent[]
+  acquisitionContentFetchStates AcquisitionContentFetchState[]
 
   @@map("companies")
 }
@@ -1148,6 +1149,7 @@ model AcquisitionMessage {
   draft       WorksiteImportDraft?
   attachments AcquisitionAttachment[]
   content     AcquisitionMessageContent?
+  contentFetchState AcquisitionContentFetchState?
 
   // Idempotence par tenant : le même id Gmail peut exister chez deux
   // entreprises, jamais deux fois pour la même entreprise et la même source.
@@ -1183,6 +1185,34 @@ model AcquisitionMessageContent {
   @@unique([acquisitionMessageId, companyId])
   @@index([companyId])
   @@map("acquisition_message_contents")
+}
+
+// PLAN-ACQ-OPS-003 — État retry / poison pill du fetch content (additif).
+// terminalAt non null ⇒ exclu de la file worker.
+// Colonnes previousTerminal*/reactivated* : réservées reset non destructif (runbook RB-PLAN-ACQ-003), non écrites par le runtime OPS-003.
+model AcquisitionContentFetchState {
+  id                        String    @id @default(cuid())
+  companyId                 String
+  acquisitionMessageId      String    @unique
+  attemptCount              Int       @default(0)
+  lastErrorCode             String?
+  lastErrorAt               DateTime?
+  nextRetryAt               DateTime?
+  terminalAt                DateTime?
+  previousTerminalAt        DateTime?
+  previousTerminalErrorCode String?
+  reactivatedAt             DateTime?
+  reactivatedBy             String?
+  reactivationReason        String?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  company            Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  acquisitionMessage AcquisitionMessage @relation(fields: [acquisitionMessageId, companyId], references: [id, companyId], onDelete: Cascade)
+
+  @@unique([acquisitionMessageId, companyId])
+  @@index([companyId, terminalAt, nextRetryAt])
+  @@map("acquisition_content_fetch_states")
 }
 
 model WorksiteImportDraft {
