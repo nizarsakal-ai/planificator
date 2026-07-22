@@ -9,6 +9,7 @@ import {
   getAcquisitionFlagMatrix,
   resolveAcquisitionAttachmentDownloadCronGate,
   resolveAcquisitionAttachmentRecoveryCronGate,
+  resolveAcquisitionContentCronGate,
   resolveAcquisitionGmailCronGate,
   validateAcquisitionFlagMatrix,
   type AcquisitionFlagIssueCode,
@@ -23,6 +24,7 @@ const FLAG_KEYS = [
   "ACQUISITION_ATTACHMENT_RECOVERY_CRON_ENABLED",
   "ACQUISITION_ATTACHMENT_ACCESS_ENABLED",
   "ACQUISITION_CONTENT_FETCH_ENABLED",
+  "ACQUISITION_CONTENT_CRON_ENABLED",
   "ACQUISITION_EXTRACTION_ENABLED",
   "ACQUISITION_EXTRACTION_PROVIDER",
   "ACQUISITION_CONVERSION_ENABLED",
@@ -115,6 +117,20 @@ describe("acquisition-flag-matrix", () => {
     assertExactIssues(["INV_CONTENT_WITHOUT_MASTER"])
   })
 
+  it("INV: content cron ON + master OFF", () => {
+    process.env.ACQUISITION_CONTENT_CRON_ENABLED = "true"
+    assertExactIssues([
+      "INV_CONTENT_CRON_WITHOUT_MASTER",
+      "INV_CONTENT_CRON_WITHOUT_CONTENT",
+    ])
+  })
+
+  it("INV: content cron ON + content OFF (master ON)", () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_CONTENT_CRON_ENABLED = "true"
+    assertExactIssues(["INV_CONTENT_CRON_WITHOUT_CONTENT"])
+  })
+
   it("INV: extraction ON + master OFF", () => {
     process.env.ACQUISITION_EXTRACTION_ENABLED = "true"
     assertExactIssues([
@@ -174,5 +190,38 @@ describe("acquisition-flag-matrix", () => {
       allowed: false,
       skipReason: "DOWNLOAD_CAPABILITY_DISABLED",
     })
+  })
+
+  it("gate content cron: OFF → CRON_DISABLED", () => {
+    assert.deepEqual(resolveAcquisitionContentCronGate(), {
+      allowed: false,
+      skipReason: "CRON_DISABLED",
+    })
+  })
+
+  it("gate content cron: ON + master OFF → MASTER_DISABLED", () => {
+    process.env.ACQUISITION_CONTENT_CRON_ENABLED = "true"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
+    assert.deepEqual(resolveAcquisitionContentCronGate(), {
+      allowed: false,
+      skipReason: "MASTER_DISABLED",
+    })
+  })
+
+  it("gate content cron: ON + content OFF → CONTENT_FETCH_DISABLED", () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_CONTENT_CRON_ENABLED = "true"
+    assert.deepEqual(resolveAcquisitionContentCronGate(), {
+      allowed: false,
+      skipReason: "CONTENT_FETCH_DISABLED",
+    })
+  })
+
+  it("gate content cron: all ON → allowed", () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_CONTENT_CRON_ENABLED = "true"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
+    assert.deepEqual(resolveAcquisitionContentCronGate(), { allowed: true })
+    assert.equal(getAcquisitionFlagMatrix().contentCron, true)
   })
 })

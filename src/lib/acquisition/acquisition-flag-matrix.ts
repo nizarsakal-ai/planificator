@@ -1,6 +1,7 @@
 /**
  * PLAN-ACQ-OPS-001 — Matrice des feature flags Acquisition.
  * Lecture env déterministe (`=== "true"`). Aucune dépendance Prisma/UI/provider.
+ * Extension OPS-003 : content cron.
  */
 
 import { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
@@ -10,6 +11,7 @@ import { isAttachmentDownloadCronEnabled } from "@/lib/acquisition/attachments/a
 import { isAttachmentRecoveryCronEnabled } from "@/lib/acquisition/attachments/attachment-recovery-cron-feature-flag"
 import { isAttachmentAccessEnabled } from "@/lib/acquisition/access/attachment-access.types"
 import { isAcquisitionContentFetchEnabled } from "@/lib/acquisition/content/content-fetch-feature-flag"
+import { isAcquisitionContentCronEnabled } from "@/lib/acquisition/content/content-cron-feature-flag"
 import {
   getExtractionProviderId,
   isAcquisitionExtractionEnabled,
@@ -28,16 +30,18 @@ export {
   isAttachmentRecoveryCronEnabled as isAcquisitionAttachmentRecoveryCronEnabled,
   isAttachmentAccessEnabled as isAcquisitionAttachmentAccessEnabled,
   isAcquisitionContentFetchEnabled,
+  isAcquisitionContentCronEnabled,
   isAcquisitionExtractionEnabled,
   isAcquisitionConversionFullyEnabled,
   getExtractionProviderId,
 }
 
-/** Skip contrôlé des crons Acquisition (compat + extensions OPS-001). */
+/** Skip contrôlé des crons Acquisition (compat + extensions OPS-001 / OPS-003). */
 export type AcquisitionCronSkipReason =
   | "CRON_DISABLED"
   | "MASTER_DISABLED"
   | "DOWNLOAD_CAPABILITY_DISABLED"
+  | "CONTENT_FETCH_DISABLED"
 
 export type AcquisitionFlagIssueCode =
   | "INV_EXTRACTION_WITHOUT_CONTENT"
@@ -49,6 +53,8 @@ export type AcquisitionFlagIssueCode =
   | "INV_ACCESS_WITHOUT_MASTER"
   | "INV_CONVERSION_WITHOUT_MASTER"
   | "INV_CONTENT_WITHOUT_MASTER"
+  | "INV_CONTENT_CRON_WITHOUT_MASTER"
+  | "INV_CONTENT_CRON_WITHOUT_CONTENT"
   | "INV_EXTRACTION_WITHOUT_MASTER"
   | "INV_DOWNLOAD_WITHOUT_MASTER"
 
@@ -60,6 +66,7 @@ export interface AcquisitionFlagMatrix {
   attachmentRecoveryCron: boolean
   attachmentAccess: boolean
   contentFetch: boolean
+  contentCron: boolean
   extraction: boolean
   extractionProvider: ExtractionProviderId
   conversion: boolean
@@ -82,6 +89,7 @@ export function getAcquisitionFlagMatrix(): AcquisitionFlagMatrix {
     attachmentRecoveryCron: isAttachmentRecoveryCronEnabled(),
     attachmentAccess: isAttachmentAccessEnabled(),
     contentFetch: isAcquisitionContentFetchEnabled(),
+    contentCron: isAcquisitionContentCronEnabled(),
     extraction: isAcquisitionExtractionEnabled(),
     extractionProvider: getExtractionProviderId(),
     conversion,
@@ -141,6 +149,18 @@ export function validateAcquisitionFlagMatrix(
     issues.push({
       code: "INV_CONTENT_WITHOUT_MASTER",
       message: "Content fetch ON requires master",
+    })
+  }
+  if (matrix.contentCron && !matrix.master) {
+    issues.push({
+      code: "INV_CONTENT_CRON_WITHOUT_MASTER",
+      message: "Content cron ON requires PLANIFICATOR_ACQUISITION_ENABLED",
+    })
+  }
+  if (matrix.contentCron && !matrix.contentFetch) {
+    issues.push({
+      code: "INV_CONTENT_CRON_WITHOUT_CONTENT",
+      message: "Content cron ON requires ACQUISITION_CONTENT_FETCH_ENABLED",
     })
   }
   if (matrix.extraction && !matrix.master) {
@@ -206,6 +226,22 @@ export function resolveAcquisitionAttachmentRecoveryCronGate(): {
   }
   if (!isAttachmentDownloadEnabled()) {
     return { allowed: false, skipReason: "DOWNLOAD_CAPABILITY_DISABLED" }
+  }
+  return { allowed: true }
+}
+
+export function resolveAcquisitionContentCronGate(): {
+  allowed: boolean
+  skipReason?: AcquisitionCronSkipReason
+} {
+  if (!isAcquisitionContentCronEnabled()) {
+    return { allowed: false, skipReason: "CRON_DISABLED" }
+  }
+  if (!isAcquisitionEnabled()) {
+    return { allowed: false, skipReason: "MASTER_DISABLED" }
+  }
+  if (!isAcquisitionContentFetchEnabled()) {
+    return { allowed: false, skipReason: "CONTENT_FETCH_DISABLED" }
   }
   return { allowed: true }
 }
