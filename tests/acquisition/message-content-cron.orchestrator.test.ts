@@ -381,6 +381,157 @@ describe("runAcquisitionContentCronOrchestrator", () => {
     assert.ok(logs.includes("CONTENT_RUN_FINISHED"))
   })
 
+  it("throw fetchContent → isole le candidat, traite le suivant, run PARTIAL", async () => {
+    process.env.ACQUISITION_CONTENT_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
+    const logs: string[] = []
+    const payloads: Array<Record<string, unknown> | undefined> = []
+
+    const result = await runAcquisitionContentCronOrchestrator({
+      repository: repo({
+        listEligibleCandidatesForCompany: async () => [
+          {
+            draftId: "d1",
+            acquisitionMessageId: "m1",
+            companyId: "co1",
+            draftCreatedAt: new Date(),
+          },
+          {
+            draftId: "d2",
+            acquisitionMessageId: "m2",
+            companyId: "co1",
+            draftCreatedAt: new Date(),
+          },
+        ],
+      }),
+      fetchContent: async ({ acquisitionMessageId }) => {
+        fetchCalls++
+        if (acquisitionMessageId === "m1") {
+          throw new Error("provider boom stack TOKEN=secret subject=private")
+        }
+        return ok("FETCHED")
+      },
+      logger: (event, payload) => {
+        logs.push(event)
+        payloads.push(payload)
+      },
+      createRunId: () => "run-throw",
+    })
+
+    assert.equal(fetchCalls, 2)
+    assert.equal(result.fetched, 1)
+    assert.equal(result.retryableFailed, 1)
+    assert.equal(markRetryCalls, 1)
+    assert.equal(result.status, "PARTIAL")
+    assert.ok(logs.includes("CONTENT_FETCH_UNEXPECTED_FAILURE"))
+    assert.ok(logs.includes("CONTENT_FETCH_RETRYABLE_FAILURE"))
+    assert.ok(logs.includes("CONTENT_RUN_FINISHED"))
+
+    const unexpected = payloads.find(
+      (_, i) => logs[i] === "CONTENT_FETCH_UNEXPECTED_FAILURE"
+    )
+    assert.ok(unexpected)
+    assert.equal(unexpected!.errorCode, "CONTENT_FETCH_FAILED")
+    assert.equal(unexpected!.acquisitionMessageId, "m1")
+    const serialized = JSON.stringify({ logs, payloads, result })
+    assert.ok(!serialized.includes("provider boom"))
+    assert.ok(!serialized.includes("TOKEN=secret"))
+    assert.ok(!serialized.includes("subject=private"))
+  })
+
+  it("throw fetchContent + markRetryableFailure échoue → MARK_FAILED, run continue", async () => {
+    process.env.ACQUISITION_CONTENT_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
+    const logs: string[] = []
+
+    const result = await runAcquisitionContentCronOrchestrator({
+      repository: repo({
+        listEligibleCandidatesForCompany: async () => [
+          {
+            draftId: "d1",
+            acquisitionMessageId: "m1",
+            companyId: "co1",
+            draftCreatedAt: new Date(),
+          },
+          {
+            draftId: "d2",
+            acquisitionMessageId: "m2",
+            companyId: "co1",
+            draftCreatedAt: new Date(),
+          },
+        ],
+        markRetryableFailure: async () => {
+          throw new Error("CONTENT_FETCH_STATE_INCREMENT_FAILED")
+        },
+      }),
+      fetchContent: async ({ acquisitionMessageId }) => {
+        fetchCalls++
+        if (acquisitionMessageId === "m1") {
+          throw new Error("unexpected provider failure")
+        }
+        return ok("FETCHED")
+      },
+      logger: (event) => {
+        logs.push(event)
+      },
+      createRunId: () => "run-throw-mark",
+    })
+
+    assert.equal(result.fetched, 1)
+    assert.equal(result.skipped, 1)
+    assert.equal(result.retryableFailed, 0)
+    assert.equal(result.status, "PARTIAL")
+    assert.ok(logs.includes("CONTENT_FETCH_UNEXPECTED_FAILURE"))
+    assert.ok(logs.includes("CONTENT_FETCH_STATE_MARK_FAILED"))
+    assert.ok(logs.includes("CONTENT_RUN_FINISHED"))
+  })
+
+  it("tenant A throw → tenant B traité normalement", async () => {
+    process.env.ACQUISITION_CONTENT_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
+    const logs: string[] = []
+    const fetchedIds: string[] = []
+
+    const result = await runAcquisitionContentCronOrchestrator({
+      repository: repo({
+        listCompanyIdsWithEligibleContentFetch: async () => ["coA", "coB"],
+        listEligibleCandidatesForCompany: async ({ companyId }) => [
+          {
+            draftId: `d-${companyId}`,
+            acquisitionMessageId: `m-${companyId}`,
+            companyId,
+            draftCreatedAt: new Date(),
+          },
+        ],
+      }),
+      fetchContent: async ({ companyId, acquisitionMessageId }) => {
+        fetchCalls++
+        if (companyId === "coA") {
+          throw new Error("tenant A provider crash")
+        }
+        fetchedIds.push(acquisitionMessageId)
+        return ok("FETCHED")
+      },
+      logger: (event) => {
+        logs.push(event)
+      },
+      createRunId: () => "run-throw-tenant",
+    })
+
+    assert.equal(fetchCalls, 2)
+    assert.deepEqual(fetchedIds, ["m-coB"])
+    assert.equal(result.fetched, 1)
+    assert.equal(result.retryableFailed, 1)
+    assert.equal(result.status, "PARTIAL")
+    assert.equal(result.companiesPartial, 1)
+    assert.equal(result.companiesSucceeded, 1)
+    assert.ok(logs.includes("CONTENT_FETCH_UNEXPECTED_FAILURE"))
+    assert.ok(!JSON.stringify(logs).includes("tenant A provider crash"))
+  })
+
   it("budget maxPerRun → PARTIAL", async () => {
     process.env.ACQUISITION_CONTENT_CRON_ENABLED = "true"
     process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"

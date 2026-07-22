@@ -1190,6 +1190,8 @@ model AcquisitionMessageContent {
 // PLAN-ACQ-OPS-003 — État retry / poison pill du fetch content (additif).
 // terminalAt non null ⇒ exclu de la file worker.
 // Colonnes previousTerminal*/reactivated* : réservées reset non destructif (runbook RB-PLAN-ACQ-003), non écrites par le runtime OPS-003.
+// id : TEXT opaque. Le défaut Prisma cuid() n’est pas utilisé par le repository OPS-003
+// (INSERT raw SQL avec crypto.randomUUID()). Aucune logique métier ne dépend du format.
 model AcquisitionContentFetchState {
   id                        String    @id @default(cuid())
   companyId                 String

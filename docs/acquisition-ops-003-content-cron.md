@@ -2,14 +2,21 @@
 
 | Champ | Valeur |
 |-------|--------|
-| **Version** | 1.2.0 |
+| **Version** | 1.2.1 |
 | **SPEC** | PLAN-ACQ-OPS-003-SPEC-R1 |
 | **Route** | `GET /api/cron/acquisition-content-fetch` |
 | **Hors périmètre** | Extraction OPS-004 ; orchestration OPS-005 ; `vercel.json` ; config Raspberry Pi ; Review / Conversion / Booking |
 
 ## Objectif
 
-Drainer automatiquement les messages Acquisition en `PENDING_EXTRACTION` **sans** `AcquisitionMessageContent` : fetch Gmail → sanitize → upsert idempotent.
+Drainer automatiquement les drafts Acquisition éligibles **sans** `AcquisitionMessageContent` : fetch Gmail → sanitize → upsert idempotent.
+
+Critères de file (exact) :
+
+- `WorksiteImportDraft.status = PENDING_EXTRACTION`
+- `AcquisitionMessage.status = DRAFT_CREATED`
+- content absent
+- FetchState absent ou (`terminalAt IS NULL` et retry dû)
 
 Indépendant du worker Extraction. Multi-tenant. Idempotent. Kill-switch OPS-001.
 
@@ -25,10 +32,20 @@ Inactifs par défaut (`=== "true"` uniquement).
 
 ## Activation
 
-1. **Appliquer la migration** `20260721220000_add_acquisition_content_fetch_state` sur l’environnement cible **avant** d’activer les flags.
+1. **Appliquer les migrations OPS-003** sur l’environnement cible **avant** d’activer les flags, via `prisma migrate deploy` (ordre automatique) :
+   1. `20260721220000_add_acquisition_content_fetch_state` — crée la table `acquisition_content_fetch_states` et ses contraintes / index.
+   2. `20260722001000_align_acquisition_content_fetch_state_names` — aligne les noms réellement créés par PostgreSQL (troncature à 63 caractères) sur les noms attendus par Prisma.
 2. Déployer le code route/worker.
 3. Activer flags (cron + master + content) selon OPS-001.
 4. Configurer le scheduler externe (hors ce lot).
+
+**Ne pas** exécuter manuellement uniquement la seconde migration. Prisma enregistre chaque migration dans `_prisma_migrations` et garantit une exécution unique ; les deux s’appliquent dans l’ordre lors d’un `migrate deploy` complet.
+
+**Aucune activation du worker** (flags / scheduler) avant l’application complète des deux migrations.
+
+### Identifiant FetchState
+
+La colonne `id` est un TEXT opaque. Le défaut Prisma `@default(cuid())` n’est **pas** utilisé par le repository OPS-003 : l’INSERT SQL runtime fournit `crypto.randomUUID()`. Aucune logique métier ne dépend du format (cuid vs UUID).
 
 ## Scheduler externe
 
@@ -61,13 +78,14 @@ La non-réentrance du scheduler est une **optimisation de coût Gmail**, **jamai
 - Un mark retryable **ne clear jamais** un `terminalAt` déjà posé (poison pill / reset = runbook uniquement).
 - Content : contrainte unique + upsert/P2002 → `ALREADY_FETCHED` / `UPDATED`.
 - Si un content apparaît pendant qu’un autre run reçoit une erreur : **re-check content** avant mark failure → outcome idempotent, **pas** de `terminalAt` ni d’incrément inutile.
-- Échec de mark FetchState : logué, message skippé, **run non aborté**.
+- Throw inattendu de `fetchContent` : log `CONTENT_FETCH_UNEXPECTED_FAILURE`, traité comme retryable (`CONTENT_FETCH_FAILED`), **candidat isolé**, run non aborté.
+- Échec de mark FetchState : logué (`CONTENT_FETCH_STATE_MARK_FAILED`), message skippé, **run non aborté**.
 - Double fetch Gmail toléré et mesuré (`duplicateFetchSuspected`).
 - Aucun lock global ; aucune dépendance au scheduler pour la sûreté.
 
 ### Coexistence content + FetchState
 
-Le **content existant** est l’autorité d’éligibilité (message non re-sélectionné).  
+Le **content existant** est l’autorité d’éligibilité (message non re-sélectionné).
 Un FetchState avec `terminalAt` / `nextRetryAt` / `attemptCount > 0` peut **coexister** comme trace historique. **Aucune suppression silencieuse** de FetchState. Reset opérateur = runbook futur uniquement.
 
 ## Poison pills / erreurs
@@ -77,6 +95,8 @@ Un FetchState avec `terminalAt` / `nextRetryAt` / `attemptCount > 0` peut **coex
 | Retryable | `attemptCount++` atomique, `nextRetryAt` (backoff `min(15, 2^n)` min), terminal au `maxAttempts` |
 | Permanente | `terminalAt` immédiat |
 | CONFIG_TENANT (`GMAIL_NOT_CONNECTED`, `GMAIL_UNAUTHORIZED`, `GMAIL_TOKEN_REFRESH_FAILED`) | skip company ; **ne terminalise pas** les messages ; log `CONTENT_FETCH_TENANT_CONFIGURATION_FAILURE` |
+| Throw inattendu `fetchContent` | log `CONTENT_FETCH_UNEXPECTED_FAILURE` ; même chemin retryable (`CONTENT_FETCH_FAILED`) |
+| Échec mark FetchState | log `CONTENT_FETCH_STATE_MARK_FAILED` ; candidat skippé ; run continue |
 
 ### Colonnes d’audit (nullable, réservées)
 

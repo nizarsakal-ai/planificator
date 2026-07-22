@@ -18,6 +18,7 @@ import {
   type ContentCronRunStats,
   type ContentFetchOrchestratorRepository,
 } from "@/lib/acquisition/content/message-content-cron.orchestrator.types"
+import type { FetchMessageContentResult } from "@/lib/acquisition/content/message-content.types"
 
 const LOG_PREFIX = "[acquisition-content-cron]"
 const BUDGET_MARGIN_MS = 5_000
@@ -242,11 +243,31 @@ export async function runAcquisitionContentCronOrchestrator(
       stats.selected++
       remainingRun--
 
-      const result = await input.fetchContent({
-        companyId: candidate.companyId,
-        acquisitionMessageId: candidate.acquisitionMessageId,
-        logActorId: `cron:${runId}`,
-      })
+      const fetchStartedAt = clock()
+      let result: FetchMessageContentResult
+      try {
+        result = await input.fetchContent({
+          companyId: candidate.companyId,
+          acquisitionMessageId: candidate.acquisitionMessageId,
+          logActorId: `cron:${runId}`,
+        })
+      } catch {
+        // Throw inattendu du port : isoler le candidat, traiter comme retryable sûr.
+        const durationMs = clock().getTime() - fetchStartedAt.getTime()
+        log("CONTENT_FETCH_UNEXPECTED_FAILURE", {
+          companyId,
+          acquisitionMessageId: candidate.acquisitionMessageId,
+          draftId: candidate.draftId,
+          errorCode: "CONTENT_FETCH_FAILED",
+          durationMs,
+        })
+        result = {
+          ok: false,
+          outcome: "FAILED",
+          code: "CONTENT_FETCH_FAILED",
+          message: "CONTENT_FETCH_FAILED",
+        }
+      }
 
       if (result.ok) {
         if (result.outcome === "FETCHED") {
