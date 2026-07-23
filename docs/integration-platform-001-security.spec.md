@@ -4,11 +4,11 @@
 |-------|--------|
 | **Identifiant** | PLAN-INTEGRATION-PLATFORM-001-SECURITY-SPEC |
 | **Version** | **1.1.0 (R1)** |
-| **Statut** | **READY FOR SECURITY SPEC REVIEW** |
+| **Statut** | **SECURITY SPEC CLOSED** |
 | **Programme** | PLAN-INTEGRATION-PLATFORM-001 — **LOT-0 SECURITY** |
 | **Fichier canonique** | `docs/integration-platform-001-security.spec.md` |
-| **Références** | Platform SPEC v1.1.0 (R1) ; IMPL-PLAN v1.1.0 (R1) ; SECURITY-SPEC-REVIEW-001 ; architecture Acquisition réelle ; GmailConnection legacy ; PLAN-GOVERNANCE-001 ; ENGINEERING-STANDARD-001 |
-| **Date** | 2026-07-23 |
+| **Références** | Platform SPEC v1.1.0 (R1) ; IMPL-PLAN v1.1.0 (R1) ; SECURITY-SPEC-REVIEW-001 ; SECURITY-SPEC-R1-REVIEW-002 ; architecture Acquisition réelle ; GmailConnection legacy ; PLAN-GOVERNANCE-001 ; ENGINEERING-STANDARD-001 |
+| **Date** | 2026-07-24 |
 | **Code** | **Aucun** |
 | **Migration** | **NO MIGRATION** |
 | **Secrets réels** | **Aucun lu, affiché ni documenté** |
@@ -767,13 +767,25 @@ Valeurs chiffrées avant prod ; voir §25.
 
 ## 32. Gates
 
+### Clôture formelle
+
+| Élément | Valeur |
+|---------|--------|
+| Revue indépendante finale | `PLAN-INTEGRATION-PLATFORM-001-SECURITY-SPEC-R1-REVIEW-002` |
+| Verdict de revue | `READY FOR SECURITY SPEC CLOSE` |
+| Merge documentaire fondation Platform | PR **#18** (`ae7f5e3` sur `main`) |
+| Effet | **LOT-1A** (contrats, sans secrets) **autorisé** |
+| Interdit persistant | Aucune manipulation réelle de secrets ou OAuth avant **`SECURITY IMPLEMENTATION READY`** |
+
+Les décisions normatives (KEK/DEK, `credentialsRef`, AuthZ, legacy Gmail, OAuth, sécurité) **ne sont pas** réouvertes par cette clôture.
+
 ### SECURITY SPEC CLOSED (documentaire)
 
 1. Décisions normatives validées (cette SPEC R1).
-2. Revue indépendante réussie.
+2. Revue indépendante réussie (`PLAN-INTEGRATION-PLATFORM-001-SECURITY-SPEC-R1-REVIEW-002`).
 3. Corrections terminées.
 4. Validation utilisateur.
-5. Document **mergé sur `main`**.
+5. Document **mergé sur `main`** (PR #18).
 
 → **LOT-1A** (contrats, sans secrets) peut commencer.
 
@@ -824,6 +836,6 @@ Nomenclature unifiée : `credentialsRef` · `IntegrationConnection` · `Credenti
 
 ## 36. Verdict
 
-**READY FOR SECURITY SPEC REVIEW**
+**SECURITY SPEC CLOSED**
 
 *Fin PLAN-INTEGRATION-PLATFORM-001-SECURITY-SPEC v1.1.0 (R1) — LOT-0 SECURITY — NO MIGRATION*
