@@ -4,12 +4,12 @@
 |-------|--------|
 | **Identifiant** | PLAN-INTEGRATION-PLATFORM-001-IMPL-PLAN |
 | **Version** | **1.1.0 (R1)** |
-| **Statut** | **READY FOR ARCHITECTURE REVIEW** |
+| **Statut** | **APPROVED — LOT-1A AUTHORIZED** |
 | **Programme** | PLAN-INTEGRATION-PLATFORM-001 |
 | **Fichier canonique** | `docs/integration-platform-001.impl-plan.md` |
 | **SPEC de référence** | `docs/integration-platform-001.spec.md` **v1.1.0 (R1)** |
-| **Bases** | PLAN-INTEGRATION-PLATFORM-001-AUDIT ; SPEC R1 ; IMPL-PLAN-REVIEW-001 ; architecture Acquisition `main` ; OPS-001→004 ; PLAN-ACQ-005 ; Conversion 005D ; Booking legacy ; ENGINEERING-STANDARD-001 ; PLAN-GOVERNANCE-001 |
-| **Date** | 2026-07-23 |
+| **Bases** | PLAN-INTEGRATION-PLATFORM-001-AUDIT ; SPEC R1 ; IMPL-PLAN-REVIEW-001 ; IMPL-PLAN-R1-REVIEW-001 ; SECURITY-SPEC CLOSED ; architecture Acquisition `main` ; OPS-001→004 ; PLAN-ACQ-005 ; Conversion 005D ; Booking legacy ; ENGINEERING-STANDARD-001 ; PLAN-GOVERNANCE-001 |
+| **Date** | 2026-07-24 |
 | **Code dans ce lot plan** | **Aucun** |
 | **Migration dans ce lot plan** | **Aucune** — migrations conceptuelles décrites lot par lot ; aucune SQL ici |
 
@@ -21,6 +21,16 @@ Ce document est le **seul plan d’implémentation** autorisé pour la Platform 
 Il découpe le travail en **sous-lots séquentiels** (strangler), avec dépendances, allowlists resserrées, contrats, idempotence, flags, validations et critères de fermeture.
 
 **Interdit :** réinterprétation de l’architecture SPEC ; big-bang ; fan-out V1 ; familles `DOCUMENT` / `EVENT` en runtime V1 ; toucher Review/Conversion métier ; brancher Booking ; coder partenaires/domaines en dur ; démarrer du code avant SECURITY-SPEC CLOSED.
+
+### Décision de gate (clôture documentaire)
+
+| Élément | Décision |
+|---------|----------|
+| IMPL-PLAN R1 | Validé par `PLAN-INTEGRATION-PLATFORM-001-IMPL-PLAN-R1-REVIEW-001` (`READY FOR IMPLEMENTATION`, portée limitée au LOT-0 SECURITY-SPEC) |
+| SECURITY-SPEC | Désormais **`SECURITY SPEC CLOSED`** (revue `…-SECURITY-SPEC-R1-REVIEW-002` ; merge fondation PR #18) |
+| Autorisé | **LOT-1A uniquement** (contrats Platform, sans migration, sans secrets) |
+| Interdit | **LOT-1B et suivants** tant que LOT-1A n’est pas validé et mergé sur `main` |
+| Interdit persistant | Toute manipulation réelle de secrets / OAuth sans **`SECURITY IMPLEMENTATION READY`** |
 
 ---
 
@@ -242,7 +252,7 @@ Migrations **additives** uniquement :
 - Lifecycle : `active` / `disabled` / `error` / `pending-auth` / `archived`.  
 - Suppression physique interdite tant que références historiques existent.  
 - Health **séparé** de la configuration.  
-- `secretRef` gouverné exclusivement par SECURITY-SPEC.
+- `credentialsRef` gouverné exclusivement par SECURITY-SPEC.
 
 ### 7.3 InboundEnvelope — états et transitions
 
@@ -889,8 +899,9 @@ Filet : `npm run test:acquisition` (sous-ensembles documentés) ; `tsc --noEmit`
 ## 29. Conformité gouvernance
 
 ```text
-SPEC v1.1.0 R1 ✓ → SPEC-REVIEW → SECURITY-SPEC CLOSED → IMPL-PLAN R1 (ce doc)
-  → ARCHITECTURE REVIEW → branche Platform dédiée → IMPL lots séquentiels
+SPEC v1.1.0 R1 ✓ → SPEC-REVIEW → SECURITY-SPEC CLOSED ✓ → IMPL-PLAN R1 (ce doc)
+  → ARCHITECTURE REVIEW ✓ (IMPL-PLAN-R1-REVIEW-001) → LOT-1A AUTHORIZED
+  → (après merge LOT-1A) lots séquentiels suivants
   → Independent Review par lot → … → PRR / MODULE CLOSED (séparé)
 ```
 
@@ -901,6 +912,6 @@ Docs Platform **jamais** dans une PR ACQ-005.
 
 ## 30. Verdict du plan
 
-**READY FOR ARCHITECTURE REVIEW**
+**APPROVED — LOT-1A AUTHORIZED**
 
 *Fin PLAN-INTEGRATION-PLATFORM-001-IMPL-PLAN v1.1.0 (R1)*
