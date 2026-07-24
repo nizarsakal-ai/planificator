@@ -71,6 +71,23 @@ enum PendingAccommodationStatus {
   DISMISSED  // Admin a ignoré
 }
 
+/// Cycle de vie d'un message Gmail Booking (table processed_gmail_messages).
+/// Les lignes historiques sans statut explicite sont migrées en SUCCEEDED.
+enum BookingGmailMessageStatus {
+  PROCESSING
+  SUCCEEDED
+  RETRYABLE_FAILURE
+  PERMANENTLY_IGNORED
+}
+
+/// Type de résultat produit par le scan Booking (traçabilité).
+enum BookingGmailResultType {
+  ACCOMMODATION
+  PENDING_ACCOMMODATION
+  CANCELLATION
+  IGNORED
+}
+
 enum NotificationType {
   ASSIGNMENT_CREATED      // Nouvelle affectation créée
   ASSIGNMENT_CONFIRMED    // Affectation confirmée
@@ -1010,8 +1027,11 @@ model Accommodation {
   notes        String?
 
   // Source & référence externe
-  bookingReference  String?  @unique  // Numéro de réservation Booking.com
-  source            String?  @default("manual")  // "manual" | "gmail-scan" | "n8n"
+  /// Numéro de réservation Booking.com (métier). Ne jamais y stocker un id Gmail technique.
+  bookingReference     String? @unique
+  /// Identité technique du message Gmail source (tenant-safe). Null si création manuelle / hors Gmail.
+  gmailSourceMessageId String?
+  source               String? @default("manual") // "manual" | "gmail-scan" | "n8n"
 
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
@@ -1020,6 +1040,7 @@ model Accommodation {
   company  Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   team     Team    @relation(fields: [teamId], references: [id])
 
+  @@unique([companyId, gmailSourceMessageId])
   @@index([companyId])
   @@index([teamId])
   @@index([startDate])
@@ -1049,19 +1070,39 @@ model GmailConnection {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PROCESSED GMAIL MESSAGE — Évite le retraitement des emails déjà analysés
+// PROCESSED GMAIL MESSAGE — Suivi cycle de vie emails Booking (pas Acquisition)
 // ═══════════════════════════════════════════════════════════════════════════
 
 model ProcessedGmailMessage {
-  id          String   @id @default(cuid())
-  companyId   String
-  messageId   String
+  id        String @id @default(cuid())
+  companyId String
+  messageId String
+
+  /// Instant de première observation (lignes historiques : date d'insertion initiale).
   processedAt DateTime @default(now())
+
+  status BookingGmailMessageStatus @default(SUCCEEDED)
+
+  attemptCount   Int       @default(0)
+  firstAttemptAt DateTime?
+  lastAttemptAt  DateTime?
+  nextRetryAt    DateTime?
+  succeededAt    DateTime?
+
+  errorCode    String?
+  errorMessage String?
+
+  resultType     BookingGmailResultType?
+  resultEntityId String?
+
+  updatedAt DateTime @updatedAt
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@unique([companyId, messageId])
   @@index([companyId])
+  @@index([status, nextRetryAt])
+  @@index([status, lastAttemptAt])
   @@map("processed_gmail_messages")
 }
 
@@ -1096,6 +1137,7 @@ model PendingAccommodation {
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
+  @@unique([companyId, gmailMessageId])
   @@index([companyId])
   @@index([status])
   @@map("pending_accommodations")
