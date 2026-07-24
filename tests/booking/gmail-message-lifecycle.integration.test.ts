@@ -13,6 +13,7 @@ import {
   BookingGmailMessageLifecycle,
   BOOKING_GMAIL_SUCCESS_STATUS_UPDATE_FAILED,
 } from "@/lib/booking/gmail-message-lifecycle"
+import { permanentBookingError } from "@/lib/booking/booking-gmail-errors"
 import { createOrGetBookingScanResult } from "@/lib/booking/booking-scan-result"
 
 const TEST_URL = process.env.TEST_ACQUISITION_DATABASE_URL
@@ -578,6 +579,212 @@ END $$;
     assert.equal(
       await db.pendingAccommodation.count({ where: { companyId, gmailMessageId: msg } }),
       0
+    )
+  })
+
+  it("12. stale reclaim PROCESSING → worker B → un seul résultat SUCCEEDED", async () => {
+    const msg = `stale_pg_${Date.now()}`
+    const claimA = await life().claimForProcessing(companyId, msg)
+    assert.equal(claimA.action, "CLAIMED")
+    if (claimA.action === "CLAIMED") {
+      assert.equal(claimA.record.status, "PROCESSING")
+      assert.equal(claimA.record.attemptCount, 1)
+    }
+
+    const staleAt = new Date(Date.now() - 20 * 60 * 1000)
+    await db.processedGmailMessage.update({
+      where: { companyId_messageId: { companyId, messageId: msg } },
+      data: { lastAttemptAt: staleAt, firstAttemptAt: staleAt },
+    })
+
+    // Worker A encore "en vol" frais serait IN_FLIGHT ; ici PROCESSING expiré → reclaim B
+    const stillFresh = await life().claimForProcessing(
+      companyId,
+      msg,
+      new Date(staleAt.getTime() + 60_000)
+    )
+    assert.equal(stillFresh.action, "SKIP")
+    assert.equal(stillFresh.action === "SKIP" && stillFresh.reason, "IN_FLIGHT")
+
+    const claimB = await life().claimForProcessing(companyId, msg)
+    assert.equal(claimB.action, "CLAIMED")
+    if (claimB.action === "CLAIMED") {
+      assert.equal(claimB.isNew, false)
+      assert.equal(claimB.record.attemptCount, 2)
+      assert.equal(claimB.record.status, "PROCESSING")
+    }
+
+    await life().markSucceededInTransaction(
+      { companyId, messageId: msg },
+      async (tx) => {
+        const r = await createOrGetBookingScanResult(tx, {
+          companyId,
+          messageId: msg,
+          snippet: "stale",
+          parsed: {
+            propertyName: "Stale Villa",
+            address: "4 rue Stale",
+            city: null,
+            zipCode: null,
+            startDate: "2026-12-10",
+            endDate: "2026-12-12",
+            doorCode: null,
+            contactName: null,
+            contactPhone: null,
+            notes: null,
+            teamName: null,
+          },
+          matchedTeamId: null,
+          adminId,
+        })
+        return { resultType: r.resultType, resultEntityId: r.resultEntityId }
+      },
+      db
+    )
+
+    const final = await db.processedGmailMessage.findUniqueOrThrow({
+      where: { companyId_messageId: { companyId, messageId: msg } },
+    })
+    assert.equal(final.status, "SUCCEEDED")
+    assert.equal(
+      await db.pendingAccommodation.count({ where: { companyId, gmailMessageId: msg } }),
+      1
+    )
+    assert.equal(
+      await db.accommodation.count({ where: { companyId, gmailSourceMessageId: msg } }),
+      0
+    )
+
+    const afterSuccess = await life().claimForProcessing(companyId, msg)
+    assert.deepEqual(afterSuccess, { action: "SKIP", reason: "SUCCEEDED" })
+  })
+
+  it("13. PERMANENTLY_IGNORED → nouveau passage cron → aucun retry ni création métier", async () => {
+    const msg = `perm_pg_${Date.now()}`
+    await life().claimForProcessing(companyId, msg)
+    await life().markPermanentIgnored(
+      companyId,
+      msg,
+      permanentBookingError("NO_USEFUL_BOOKING_DATA", "aucune donnée utile (test PG)")
+    )
+
+    const pass1 = await life().claimForProcessing(companyId, msg)
+    assert.deepEqual(pass1, { action: "SKIP", reason: "PERMANENTLY_IGNORED" })
+
+    const pass2 = await life().claimForProcessing(companyId, msg)
+    assert.deepEqual(pass2, { action: "SKIP", reason: "PERMANENTLY_IGNORED" })
+
+    const row = await db.processedGmailMessage.findUniqueOrThrow({
+      where: { companyId_messageId: { companyId, messageId: msg } },
+    })
+    assert.equal(row.status, "PERMANENTLY_IGNORED")
+    assert.equal(row.attemptCount, 1)
+    assert.equal(
+      await db.pendingAccommodation.count({ where: { companyId, gmailMessageId: msg } }),
+      0
+    )
+    assert.equal(
+      await db.accommodation.count({ where: { companyId, gmailSourceMessageId: msg } }),
+      0
+    )
+  })
+
+  it("2b. préflight Accommodation doublons → refus, aucune suppression", async () => {
+    const msg = `acc_dup_pg_${Date.now()}`
+    await db.$executeRawUnsafe(
+      `DROP INDEX IF EXISTS "accommodations_companyId_gmailSourceMessageId_key"`
+    )
+
+    const first = await db.accommodation.create({
+      data: {
+        companyId,
+        teamId,
+        createdById: adminId,
+        address: "10 rue Dup A",
+        startDate: new Date("2026-10-01"),
+        endDate: new Date("2026-10-05"),
+        gmailSourceMessageId: msg,
+        source: "gmail-scan",
+      },
+    })
+    const secondId = `acc_dup_${Date.now()}`
+    await db.$executeRaw`
+      INSERT INTO "accommodations"
+        (id, "companyId", "teamId", "createdById", status, "startDate", "endDate",
+         address, "gmailSourceMessageId", source, "createdAt", "updatedAt")
+      VALUES
+        (${secondId}, ${companyId}, ${teamId}, ${adminId},
+         'UPCOMING'::"AccommodationStatus",
+         ${new Date("2026-10-10")}, ${new Date("2026-10-15")},
+         ${"11 rue Dup B"}, ${msg}, ${"gmail-scan"}, NOW(), NOW())
+    `
+
+    const before = await db.accommodation.findMany({
+      where: { companyId, gmailSourceMessageId: msg },
+      orderBy: { createdAt: "asc" },
+    })
+    assert.equal(before.length, 2)
+
+    await assert.rejects(
+      () =>
+        db.$executeRawUnsafe(`
+DO $$
+DECLARE
+  dup_count integer;
+  sample text;
+BEGIN
+  SELECT COUNT(*) INTO dup_count
+  FROM (
+    SELECT 1
+    FROM "accommodations"
+    WHERE "gmailSourceMessageId" IS NOT NULL
+    GROUP BY "companyId", "gmailSourceMessageId"
+    HAVING COUNT(*) > 1
+  ) d;
+
+  IF dup_count > 0 THEN
+    SELECT string_agg(fmt, E'\\n') INTO sample
+    FROM (
+      SELECT format(
+        'companyId=%s gmailSourceMessageId=%s count=%s ids=%s',
+        "companyId",
+        "gmailSourceMessageId",
+        COUNT(*),
+        string_agg(id, ',' ORDER BY "createdAt", id)
+      ) AS fmt
+      FROM "accommodations"
+      WHERE "gmailSourceMessageId" IS NOT NULL
+      GROUP BY "companyId", "gmailSourceMessageId"
+      HAVING COUNT(*) > 1
+      LIMIT 20
+    ) s;
+
+    RAISE EXCEPTION
+      'C-BOOK-001: % groupe(s) de doublons accommodations(gmailSourceMessageId). Aucune suppression automatique. Consolider manuellement puis relancer. Diagnostic: %',
+      dup_count,
+      COALESCE(sample, '(vide)');
+  END IF;
+END $$;
+`),
+      /C-BOOK-001:.*doublons accommodations/
+    )
+
+    const after = await db.accommodation.findMany({
+      where: { companyId, gmailSourceMessageId: msg },
+    })
+    assert.equal(after.length, 2)
+    const byId = new Map(after.map((row) => [row.id, row]))
+    assert.equal(byId.get(first.id)?.address, "10 rue Dup A")
+    assert.equal(byId.get(secondId)?.address, "11 rue Dup B")
+    assert.equal(byId.get(first.id)?.gmailSourceMessageId, msg)
+    assert.equal(byId.get(secondId)?.gmailSourceMessageId, msg)
+
+    await db.accommodation.deleteMany({
+      where: { companyId, gmailSourceMessageId: msg },
+    })
+    await db.$executeRawUnsafe(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "accommodations_companyId_gmailSourceMessageId_key"
+       ON "accommodations"("companyId", "gmailSourceMessageId")`
     )
   })
 })
