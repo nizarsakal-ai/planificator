@@ -6,6 +6,8 @@ process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 
 import { describe, it, beforeEach } from "node:test"
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import type {
   BookingGmailMessageStatus,
   BookingGmailResultType,
@@ -13,6 +15,7 @@ import type {
 } from "@prisma/client"
 import {
   BookingGmailMessageLifecycle,
+  BOOKING_GMAIL_SUCCESS_STATUS_UPDATE_FAILED,
   computeNextRetryAt,
   getBookingGmailMaxAttempts,
 } from "@/lib/booking/gmail-message-lifecycle"
@@ -21,6 +24,14 @@ import {
   permanentBookingError,
   sanitizeBookingErrorMessage,
 } from "@/lib/booking/booking-gmail-errors"
+
+const ACCOMMODATION_GMAIL_SOURCE_SQL = readFileSync(
+  join(
+    process.cwd(),
+    "prisma/migrations/20260724120200_booking_accommodation_gmail_source/migration.sql"
+  ),
+  "utf8"
+)
 
 type Row = ProcessedGmailMessage
 
@@ -351,36 +362,63 @@ describe("booking gmail lifecycle", () => {
     assert.ok(t2.getTime() > t1.getTime())
   })
 
-  it("9+10. markSucceededInTransaction — succès et rollback statut", async () => {
-    // Use real prisma transaction path only when we can; with fake, simulate success updateMany
+  it("9+10. markSucceededInTransaction — appelle la fonction (résultat + SUCCEEDED conditionnel)", async () => {
     await life.claimForProcessing("coA", "tx1")
 
-    // Patch $transaction on fake to support success path used by markSucceededInTransaction
-    // which calls global prisma — for unit test we call updateMany directly mirroring success
-    const updated = await fake.api.processedGmailMessage.updateMany({
-      where: { companyId: "coA", messageId: "tx1", status: "PROCESSING" },
-      data: {
-        status: "SUCCEEDED",
-        succeededAt: new Date(),
-        resultType: "PENDING_ACCOMMODATION",
-        resultEntityId: "pending_1",
-        nextRetryAt: null,
-        errorCode: null,
-        errorMessage: null,
+    let sawTxClient = false
+    const row = await life.markSucceededInTransaction(
+      { companyId: "coA", messageId: "tx1" },
+      async (tx) => {
+        sawTxClient = Boolean(tx?.processedGmailMessage?.updateMany)
+        // Même contexte transactionnel que le marquage SUCCEEDED
+        assert.equal(typeof tx.processedGmailMessage.updateMany, "function")
+        return {
+          resultType: "PENDING_ACCOMMODATION",
+          resultEntityId: "pending_1",
+        }
       },
-    })
-    assert.equal(updated.count, 1)
-    const row = await fake.api.processedGmailMessage.findUnique({
-      where: { companyId_messageId: { companyId: "coA", messageId: "tx1" } },
-    })
-    assert.equal(row?.status, "SUCCEEDED")
+      fake.api as unknown as import("@prisma/client").PrismaClient
+    )
+    assert.equal(sawTxClient, true)
+    assert.equal(row.status, "SUCCEEDED")
+    assert.equal(row.resultType, "PENDING_ACCOMMODATION")
+    assert.equal(row.resultEntityId, "pending_1")
 
-    // Rollback simulation: updateMany count 0 if not PROCESSING
-    const fail = await fake.api.processedGmailMessage.updateMany({
-      where: { companyId: "coA", messageId: "tx1", status: "PROCESSING" },
-      data: { status: "SUCCEEDED" },
+    // SUCCEEDED conditionnel à PROCESSING : second passage échoue
+    await assert.rejects(
+      () =>
+        life.markSucceededInTransaction(
+          { companyId: "coA", messageId: "tx1" },
+          async () => ({
+            resultType: "PENDING_ACCOMMODATION",
+            resultEntityId: "pending_2",
+          }),
+          fake.api as unknown as import("@prisma/client").PrismaClient
+        ),
+      (err: unknown) =>
+        err instanceof Error &&
+        err.message === BOOKING_GMAIL_SUCCESS_STATUS_UPDATE_FAILED
+    )
+  })
+
+  it("9+10b. markSucceededInTransaction — erreur métier empêche SUCCEEDED", async () => {
+    await life.claimForProcessing("coA", "txFail")
+    await assert.rejects(
+      () =>
+        life.markSucceededInTransaction(
+          { companyId: "coA", messageId: "txFail" },
+          async () => {
+            throw new Error("SIMULATED_CREATE_FAIL")
+          },
+          fake.api as unknown as import("@prisma/client").PrismaClient
+        ),
+      /SIMULATED_CREATE_FAIL/
+    )
+    const row = await fake.api.processedGmailMessage.findUnique({
+      where: { companyId_messageId: { companyId: "coA", messageId: "txFail" } },
     })
-    assert.equal(fail.count, 0)
+    assert.equal(row?.status, "PROCESSING")
+    assert.equal(row?.resultEntityId, null)
   })
 
   it("markFailure n'écrase pas SUCCEEDED", async () => {
@@ -415,5 +453,28 @@ describe("booking gmail lifecycle", () => {
     })
     const again = await life.claimForProcessing("coA", "once")
     assert.deepEqual(again, { action: "SKIP", reason: "SUCCEEDED" })
+  })
+})
+
+describe("migration accommodations gmailSourceMessageId SQL (préflight)", () => {
+  it("préflight fail-closed, aucun DELETE, unicité tenant, NULL exclus", () => {
+    assert.equal(/^\s*DELETE\b/im.test(ACCOMMODATION_GMAIL_SOURCE_SQL), false)
+    assert.match(ACCOMMODATION_GMAIL_SOURCE_SQL, /RAISE EXCEPTION/)
+    assert.match(
+      ACCOMMODATION_GMAIL_SOURCE_SQL,
+      /gmailSourceMessageId"\s+IS NOT NULL/
+    )
+    assert.match(
+      ACCOMMODATION_GMAIL_SOURCE_SQL,
+      /CREATE UNIQUE INDEX "accommodations_companyId_gmailSourceMessageId_key"/
+    )
+    assert.match(
+      ACCOMMODATION_GMAIL_SOURCE_SQL,
+      /ON "accommodations"\("companyId", "gmailSourceMessageId"\)/
+    )
+    assert.match(
+      ACCOMMODATION_GMAIL_SOURCE_SQL,
+      /groupe\(s\) de doublons accommodations/
+    )
   })
 })

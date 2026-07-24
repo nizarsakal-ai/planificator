@@ -32,6 +32,14 @@ const PENDING_UNIQUE_SQL = readFileSync(
   "utf8"
 )
 
+const ACCOMMODATION_GMAIL_SOURCE_SQL = readFileSync(
+  join(
+    process.cwd(),
+    "prisma/migrations/20260724120200_booking_accommodation_gmail_source/migration.sql"
+  ),
+  "utf8"
+)
+
 describe("booking gmail lifecycle — intégration PG", RUN, () => {
   let companyId = ""
   let companyB = ""
@@ -105,6 +113,19 @@ describe("booking gmail lifecycle — intégration PG", RUN, () => {
     assert.equal(/^\s*DELETE\b/im.test(PENDING_UNIQUE_SQL), false)
     assert.match(PENDING_UNIQUE_SQL, /RAISE EXCEPTION/)
     assert.match(PENDING_UNIQUE_SQL, /Aucun(e)? suppression|Aucune suppression/i)
+  })
+
+  it("1b. migration accommodation gmailSource : préflight, pas de DELETE, NULL exclus", () => {
+    assert.equal(/^\s*DELETE\b/im.test(ACCOMMODATION_GMAIL_SOURCE_SQL), false)
+    assert.match(ACCOMMODATION_GMAIL_SOURCE_SQL, /RAISE EXCEPTION/)
+    assert.match(
+      ACCOMMODATION_GMAIL_SOURCE_SQL,
+      /gmailSourceMessageId"\s+IS NOT NULL/
+    )
+    assert.match(
+      ACCOMMODATION_GMAIL_SOURCE_SQL,
+      /CREATE UNIQUE INDEX "accommodations_companyId_gmailSourceMessageId_key"/
+    )
   })
 
   it("2. contrôle SQL doublons échoue proprement sans perdre de lignes", async () => {
