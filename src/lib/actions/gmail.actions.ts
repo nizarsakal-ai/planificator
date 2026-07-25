@@ -87,6 +87,8 @@ export async function confirmPendingAccommodation(id: string, teamId: string, ov
         contactName:  pending.contactName  || null,
         contactPhone: pending.contactPhone || null,
         notes:        notesValue,
+        gmailSourceMessageId: pending.gmailMessageId,
+        source: "gmail-scan",
       },
     })
 

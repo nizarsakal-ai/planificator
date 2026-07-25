@@ -319,6 +319,8 @@ Pour teamName: cherche un prénom/nom qui correspond à une équipe disponible.`
             contactName:  (extracted.contactName  as string) || pending.contactName  || null,
             contactPhone: (extracted.contactPhone as string) || pending.contactPhone || null,
             notes:        notesValue,
+            gmailSourceMessageId: pending.gmailMessageId,
+            source: "gmail-scan",
           },
         })
 
