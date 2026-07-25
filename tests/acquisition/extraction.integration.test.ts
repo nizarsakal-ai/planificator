@@ -10,6 +10,7 @@ import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { PrismaClient } from "@prisma/client"
 import { registerIncomingMessage } from "@/lib/acquisition/acquisition.service"
+import { seedLauraluPartnerForCompany } from "./helpers/seed-lauralu-partner"
 import { AcquisitionMessageContentRepository } from "@/lib/acquisition/content/message-content.repository"
 import { sanitizeMessageBodyParts } from "@/lib/acquisition/content/message-content-sanitizer"
 import { DraftExtractionRepository } from "@/lib/acquisition/extraction/extraction.repository"
@@ -92,6 +93,8 @@ describe("acquisition extraction — intégration PostgreSQL 005B", RUN, () => {
     })
     companyA = a.id
     companyB = b.id
+    await seedLauraluPartnerForCompany(db, companyA)
+    await seedLauraluPartnerForCompany(db, companyB)
   })
 
   after(async () => {

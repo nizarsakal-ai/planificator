@@ -1,7 +1,7 @@
 /**
  * PLAN-ACQ-012-LOT-1.3 — Accès persistant au registre partenaires d’acquisition.
  *
- * Hors chemin chaud : ne remplace PAS ELIGIBLE_SENDER_DOMAIN / isEligibleSenderDomain.
+ * Accès persistant seul. L’éligibilité runtime est dans PartnerEligibilityResolver.
  * Aucune logique métier, aucun fallback historique, aucun filtre « actif ».
  *
  * Normalisation domaine (lookup uniquement) : trim + lowercase.

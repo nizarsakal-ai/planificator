@@ -1,21 +1,13 @@
-// Tests unitaires — règle d'admissibilité LAURALU et normalisation expéditeur.
-// Exécution : npm run test:acquisition (node:test via tsx, aucune BDD requise).
+// Tests unitaires — normalisation expéditeur + Zod + PJ (éligibilité → resolver).
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
 import {
   normalizeSenderAddress,
-  isEligibleSenderDomain,
   categorizeAttachment,
-  ELIGIBLE_SENDER_DOMAIN,
 } from "@/lib/acquisition/acquisition.service"
 import { registerIncomingMessageSchema } from "@/lib/validations/acquisition"
-
-const isEligible = (raw: string): boolean => {
-  const n = normalizeSenderAddress(raw)
-  return n !== null && isEligibleSenderDomain(n.domain)
-}
 
 describe("normalizeSenderAddress", () => {
   it("normalise trim + minuscules", () => {
@@ -30,49 +22,10 @@ describe("normalizeSenderAddress", () => {
 
   it("rejette une adresse invalide", () => {
     assert.equal(normalizeSenderAddress("pas-une-adresse"), null)
-    assert.equal(normalizeSenderAddress("a@b"), null) // domaine sans point
+    assert.equal(normalizeSenderAddress("a@b"), null)
     assert.equal(normalizeSenderAddress("@lauralu.fr"), null)
     assert.equal(normalizeSenderAddress("user@"), null)
     assert.equal(normalizeSenderAddress("user @lauralu.fr"), null)
-  })
-})
-
-describe("admissibilité LAURALU (domaine exact)", () => {
-  it(`accepte carlenebourgine@${ELIGIBLE_SENDER_DOMAIN}`, () => {
-    assert.equal(isEligible("carlenebourgine@lauralu.fr"), true)
-  })
-
-  it("accepte une adresse LAURALU en majuscules après normalisation", () => {
-    assert.equal(isEligible("ELODIEAGEZ@LAURALU.FR"), true)
-  })
-
-  it("accepte un nouvel utilisateur futur du domaine lauralu.fr", () => {
-    assert.equal(isEligible("nouveau.collaborateur2027@lauralu.fr"), true)
-  })
-
-  it("rejette user@gmail.com", () => {
-    assert.equal(isEligible("user@gmail.com"), false)
-  })
-
-  it("rejette user@fake-lauralu.fr", () => {
-    assert.equal(isEligible("user@fake-lauralu.fr"), false)
-  })
-
-  it("rejette user@lauralu.fr.attacker.com", () => {
-    assert.equal(isEligible("user@lauralu.fr.attacker.com"), false)
-  })
-
-  it("rejette une adresse invalide", () => {
-    assert.equal(isEligible("lauralu.fr"), false)
-    assert.equal(isEligible("<lauralu.fr>"), false)
-  })
-
-  it("ne se fie pas au nom d'affichage contenant lauralu.fr", () => {
-    assert.equal(isEligible("Carlene (lauralu.fr) <carlene@evil.com>"), false)
-  })
-
-  it("rejette un sous-domaine (règle stricte V1)", () => {
-    assert.equal(isEligible("user@mail.lauralu.fr"), false)
   })
 })
 

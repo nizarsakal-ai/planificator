@@ -18,6 +18,7 @@ import {
   registerIncomingMessage,
   getImportDraftForCompany,
 } from "@/lib/acquisition/acquisition.service"
+import { seedLauraluPartnerForCompany } from "./helpers/seed-lauralu-partner"
 
 const TEST_URL = process.env.TEST_ACQUISITION_DATABASE_URL
 const enabled = Boolean(TEST_URL)
@@ -54,6 +55,8 @@ describe("acquisition — intégration (BDD de test)", RUN, () => {
     })
     companyA = a.id
     companyB = b.id
+    await seedLauraluPartnerForCompany(db, companyA)
+    await seedLauraluPartnerForCompany(db, companyB)
   })
 
   after(async () => {
