@@ -4,6 +4,7 @@ import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { PrismaClient } from "@prisma/client"
 import { registerIncomingMessage } from "@/lib/acquisition/acquisition.service"
+import { seedLauraluPartnerForCompany } from "./helpers/seed-lauralu-partner"
 import { AcquisitionContentFetchStateRepository } from "@/lib/acquisition/content/message-content-fetch-state.repository"
 import { AcquisitionMessageContentRepository } from "@/lib/acquisition/content/message-content.repository"
 import { sanitizeMessageBodyParts } from "@/lib/acquisition/content/message-content-sanitizer"
@@ -37,6 +38,8 @@ describe("OPS-003 content fetch state — intégration PostgreSQL", RUN, () => {
     })
     companyA = a.id
     companyB = b.id
+    await seedLauraluPartnerForCompany(db, companyA)
+    await seedLauraluPartnerForCompany(db, companyB)
 
     const regA = await registerIncomingMessage(
       {

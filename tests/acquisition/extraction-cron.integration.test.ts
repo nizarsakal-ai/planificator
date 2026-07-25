@@ -9,6 +9,7 @@ import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { PrismaClient } from "@prisma/client"
 import { registerIncomingMessage } from "@/lib/acquisition/acquisition.service"
+import { seedLauraluPartnerForCompany } from "./helpers/seed-lauralu-partner"
 import { AcquisitionMessageContentRepository } from "@/lib/acquisition/content/message-content.repository"
 import { sanitizeMessageBodyParts } from "@/lib/acquisition/content/message-content-sanitizer"
 import { AcquisitionExtractionCronSelectionRepository } from "@/lib/acquisition/extraction/extraction-cron.selection.repository"
@@ -99,6 +100,8 @@ describe("OPS-004 extraction cron — intégration PostgreSQL", RUN, () => {
     })
     companyA = a.id
     companyB = b.id
+    await seedLauraluPartnerForCompany(db, companyA)
+    await seedLauraluPartnerForCompany(db, companyB)
   })
 
   after(async () => {
@@ -302,6 +305,7 @@ describe("OPS-004 extraction cron — intégration PostgreSQL", RUN, () => {
         data: { name: "Starve Int", slug: `starve-int-${Date.now()}` },
       })
     ).id
+    await seedLauraluPartnerForCompany(db, company)
     try {
       const limit = 5
       for (let i = 0; i < limit * 5 + 3; i++) {
@@ -525,6 +529,7 @@ describe("OPS-004 extraction cron — stress concurrence", RUN, () => {
       data: { name: "Extract Stress", slug: `extract-stress-${Date.now()}` },
     })
     companyId = c.id
+    await seedLauraluPartnerForCompany(db, companyId)
   })
 
   after(async () => {

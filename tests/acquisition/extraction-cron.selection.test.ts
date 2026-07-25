@@ -9,6 +9,7 @@ import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { PrismaClient } from "@prisma/client"
 import { registerIncomingMessage } from "@/lib/acquisition/acquisition.service"
+import { seedLauraluPartnerForCompany } from "./helpers/seed-lauralu-partner"
 import { AcquisitionMessageContentRepository } from "@/lib/acquisition/content/message-content.repository"
 import { sanitizeMessageBodyParts } from "@/lib/acquisition/content/message-content-sanitizer"
 import { AcquisitionExtractionCronSelectionRepository } from "@/lib/acquisition/extraction/extraction-cron.selection.repository"
@@ -80,6 +81,9 @@ describe("OPS-004-R1 sélection — anti-starvation PostgreSQL", RUN, () => {
         data: { name: "Starve Hidden", slug: `starve-hidden-${stamp}` },
       })
     ).id
+    await seedLauraluPartnerForCompany(db, companyDue)
+    await seedLauraluPartnerForCompany(db, companyOnlyNondue)
+    await seedLauraluPartnerForCompany(db, companyHiddenDue)
   })
 
   after(async () => {
@@ -140,6 +144,7 @@ describe("OPS-004-R1 sélection — anti-starvation PostgreSQL", RUN, () => {
         data: { name: "Starve 500", slug: `starve-500-${Date.now()}` },
       })
     ).id
+    await seedLauraluPartnerForCompany(db, company)
     try {
       const bulk = 520
       const messageRows = Array.from({ length: bulk }, (_, i) => {

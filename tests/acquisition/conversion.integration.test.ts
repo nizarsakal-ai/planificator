@@ -9,6 +9,7 @@ import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { PrismaClient } from "@prisma/client"
 import { registerIncomingMessage } from "@/lib/acquisition/acquisition.service"
+import { seedLauraluPartnerForCompany } from "./helpers/seed-lauralu-partner"
 import { ImportDraftConversionService } from "@/lib/acquisition/conversion/conversion.service"
 
 const TEST_URL = process.env.TEST_ACQUISITION_DATABASE_URL
@@ -42,6 +43,8 @@ describe("acquisition conversion — intégration PostgreSQL 005D", RUN, () => {
     })
     companyA = a.id
     companyB = b.id
+    await seedLauraluPartnerForCompany(db, companyA)
+    await seedLauraluPartnerForCompany(db, companyB)
   })
 
   after(async () => {

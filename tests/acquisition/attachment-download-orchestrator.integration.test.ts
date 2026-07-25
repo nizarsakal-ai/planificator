@@ -4,6 +4,7 @@ import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { PrismaClient, type Role } from "@prisma/client"
 import { registerIncomingMessage } from "@/lib/acquisition/acquisition.service"
+import { seedLauraluPartnerForCompany } from "./helpers/seed-lauralu-partner"
 import { AcquisitionAttachmentRepository } from "@/lib/acquisition/attachments/acquisition-attachment.repository"
 import { runAcquisitionAttachmentDownloadOrchestrator } from "@/lib/acquisition/attachments/attachment-download-orchestrator"
 import { downloadAcquisitionAttachment } from "@/lib/acquisition/attachments/attachment-download.service"
@@ -37,6 +38,8 @@ describe("attachment download orchestrator — intégration PostgreSQL", RUN, ()
     })
     companyA = a.id
     companyB = b.id
+    await seedLauraluPartnerForCompany(db, companyA)
+    await seedLauraluPartnerForCompany(db, companyB)
 
     await db.user.create({
       data: {

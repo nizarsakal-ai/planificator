@@ -15,21 +15,25 @@ import {
   type RegisterIncomingMessageInput,
 } from "@/lib/validations/acquisition"
 import { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
+import { PartnerEligibilityResolver } from "@/lib/acquisition/partner-eligibility.resolver"
+import type { PartnerEligibilityResolverPort } from "@/lib/acquisition/partner-eligibility.resolver"
+import { PartnerRegistryRepository } from "@/lib/acquisition/persistence/partner-registry.repository"
 
 export { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
 
-// ─── Règle métier : domaine expéditeur admissible ────────────────────────────
-
-/**
- * V1 : seuls les emails dont l'adresse réelle de l'expéditeur appartient
- * exactement à ce domaine sont admissibles. La règle est le domaine, pas
- * une liste figée d'adresses.
- */
-export const ELIGIBLE_SENDER_DOMAIN = "lauralu.fr"
+// ─── Normalisation expéditeur (sans décision d’éligibilité) ───────────────────
+// Composition root local : wiring défaut Resolver→Repository ici uniquement.
+// Le chemin métier n’appelle que PartnerEligibilityResolverPort (voir
+// docs/acquisition-partner-registry-cutover.md). Pas de conteneur DI.
 
 export interface NormalizedSender {
   email: string
   domain: string
+}
+
+export type RegisterIncomingMessageDeps = {
+  /** Injecté en tests ; défaut = resolver registre sur le même `db`. */
+  eligibilityResolver?: PartnerEligibilityResolverPort
 }
 
 /**
@@ -60,17 +64,6 @@ export function normalizeSenderAddress(raw: string): NormalizedSender | null {
   if (!match) return null
 
   return { email: candidate, domain: match[1] }
-}
-
-/**
- * Admissibilité LAURALU : égalité STRICTE du domaine réel.
- * - « LAURALU.FR » est accepté après normalisation ;
- * - « fake-lauralu.fr » est rejeté ;
- * - « lauralu.fr.attacker.com » est rejeté ;
- * - le corps, l'objet et le nom d'affichage ne sont jamais consultés.
- */
-export function isEligibleSenderDomain(domain: string): boolean {
-  return domain === ELIGIBLE_SENDER_DOMAIN
 }
 
 // ─── Enregistrement idempotent d'un message entrant ──────────────────────────
@@ -106,7 +99,8 @@ export type RegisterIncomingMessageResult =
  */
 export async function registerIncomingMessage(
   input: RegisterIncomingMessageInput,
-  db: PrismaClient = prisma
+  db: PrismaClient = prisma,
+  deps: RegisterIncomingMessageDeps = {}
 ): Promise<RegisterIncomingMessageResult> {
   const data = registerIncomingMessageSchema.parse(input)
 
@@ -124,8 +118,14 @@ export async function registerIncomingMessage(
   if (existing)
     return toResult(existing.id, existing.draft?.id ?? null, existing.status, false, existing.lastErrorCode)
 
+  const eligibilityResolver =
+    deps.eligibilityResolver ??
+    new PartnerEligibilityResolver(new PartnerRegistryRepository(db))
+
   const normalized = normalizeSenderAddress(data.senderEmail)
-  const eligible = normalized !== null && isEligibleSenderDomain(normalized.domain)
+  const eligible =
+    normalized !== null &&
+    (await eligibilityResolver.isDomainEligible(data.companyId, normalized.domain))
   const errorCode: "INVALID_SENDER" | "SENDER_NOT_ELIGIBLE" | null =
     normalized === null ? "INVALID_SENDER" : eligible ? null : "SENDER_NOT_ELIGIBLE"
 
@@ -146,7 +146,7 @@ export async function registerIncomingMessage(
             errorCode === "INVALID_SENDER"
               ? "Adresse expéditeur invalide"
               : errorCode === "SENDER_NOT_ELIGIBLE"
-                ? `Domaine expéditeur non admissible (attendu : ${ELIGIBLE_SENDER_DOMAIN})`
+                ? "Domaine expéditeur non admissible"
                 : null,
           rawMetadata: (data.rawMetadata ?? undefined) as Prisma.InputJsonValue | undefined,
         },

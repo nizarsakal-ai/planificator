@@ -5,6 +5,7 @@ import assert from "node:assert/strict"
 import { PrismaClient } from "@prisma/client"
 import type { Role } from "@prisma/client"
 import { registerIncomingMessage } from "@/lib/acquisition/acquisition.service"
+import { seedLauraluPartnerForCompany } from "./helpers/seed-lauralu-partner"
 import { accessAcquisitionAttachment } from "@/lib/acquisition/access/attachment-access.service"
 import { AttachmentAccessRepository } from "@/lib/acquisition/access/attachment-access.repository"
 import { AttachmentAccessAuditRepository } from "@/lib/acquisition/access/attachment-access-audit.repository"
@@ -45,6 +46,8 @@ describe("acquisition attachment access — intégration PostgreSQL", RUN, () =>
     })
     companyA = a.id
     companyB = b.id
+    await seedLauraluPartnerForCompany(db, companyA)
+    await seedLauraluPartnerForCompany(db, companyB)
 
     const user = await db.user.create({
       data: {
