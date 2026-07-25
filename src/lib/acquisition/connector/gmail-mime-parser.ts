@@ -2,16 +2,75 @@ import type { CanonicalMailAttachment } from "@/lib/acquisition/connector/connec
 import type { GmailMessagePart, GmailMessagePayload } from "@/lib/acquisition/connector/gmail-api.types"
 
 const DEFAULT_MAX_DEPTH = 20
+const MAX_FILENAME_LEN = 255
 
-function isAttachmentPart(part: GmailMessagePart): boolean {
-  const filename = part.filename?.trim()
-  const attachmentId = part.body?.attachmentId?.trim()
-  return Boolean(filename || attachmentId)
+/** Extensions fiables uniquement — pas de guess hasardeux. */
+const MIME_TO_EXT: Record<string, string> = {
+  "application/pdf": "pdf",
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/svg+xml": "svg",
+  "text/plain": "txt",
+  "text/csv": "csv",
+  "application/zip": "zip",
+  "application/json": "json",
+}
+
+/**
+ * Pièce jointe téléchargeable uniquement si Gmail fournit un attachmentId non vide.
+ * Les parties inline (filename seul, Content-ID, body.data sans attachmentId) sont ignorées.
+ */
+export function isDownloadableGmailAttachmentPart(part: GmailMessagePart): boolean {
+  return Boolean(part.body?.attachmentId?.trim())
+}
+
+/** Nettoie un filename Gmail : basename, sans contrôles, longueur bornée. */
+export function sanitizeAttachmentFilename(raw: string): string {
+  const base = raw.replace(/\\/g, "/").split("/").pop() ?? ""
+  const cleaned = base
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/[/\\]/g, "_")
+    .trim()
+  if (!cleaned) return ""
+  return cleaned.slice(0, MAX_FILENAME_LEN)
+}
+
+function safePartLabel(partId: string | undefined, ordinal: number): string {
+  const trimmed = partId?.trim()
+  if (trimmed) {
+    // Identifiant MIME stable — caractères sûrs seulement pour le nom généré.
+    const safe = trimmed.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64)
+    return safe || `ord-${ordinal}`
+  }
+  return `ord-${ordinal}`
+}
+
+function extensionForMime(mimeType: string): string | null {
+  return MIME_TO_EXT[mimeType.trim().toLowerCase()] ?? null
+}
+
+/**
+ * Nom déterministe si filename Gmail absent/vide après sanitize.
+ * Forme : attachment-<partId|ord-n>[.ext]
+ */
+export function buildDeterministicAttachmentFilename(input: {
+  partId?: string
+  ordinal: number
+  mimeType: string
+}): string {
+  const label = safePartLabel(input.partId, input.ordinal)
+  const ext = extensionForMime(input.mimeType)
+  const base = `attachment-${label}`
+  const withExt = ext ? `${base}.${ext}` : base
+  return withExt.slice(0, MAX_FILENAME_LEN)
 }
 
 /**
  * Parcourt récursivement la structure MIME Gmail et extrait les métadonnées
- * des pièces jointes (sans décoder le binaire).
+ * des pièces jointes téléchargeables (sans décoder le binaire).
  */
 export function extractAttachmentMetadataFromPayload(
   payload: GmailMessagePayload | GmailMessagePart | undefined,
@@ -25,19 +84,28 @@ export function extractAttachmentMetadataFromPayload(
   function walk(part: GmailMessagePart, depth: number, ordinal: number): void {
     if (depth > maxDepth) return
 
-    if (isAttachmentPart(part)) {
-      const partId = part.partId ?? `ord:${ordinal}`
-      const externalId = part.body?.attachmentId?.trim()
-      const filename = part.filename?.trim() || (externalId ? `attachment-${externalId}` : `part-${partId}`)
-      const dedupeKey = externalId ? `ext:${externalId}` : `part:${partId}:${filename}`
+    if (isDownloadableGmailAttachmentPart(part)) {
+      const externalId = part.body!.attachmentId!.trim()
+      const mimeType = (part.mimeType?.trim() || "application/octet-stream").slice(0, 127)
+      const partIdRaw = part.partId?.trim()
+      const sanitizedName = sanitizeAttachmentFilename(part.filename ?? "")
+      const filename =
+        sanitizedName ||
+        buildDeterministicAttachmentFilename({
+          partId: partIdRaw,
+          ordinal,
+          mimeType,
+        })
+
+      const dedupeKey = `ext:${externalId}`
       if (!seen.has(dedupeKey)) {
         seen.add(dedupeKey)
         results.push({
           externalAttachmentId: externalId,
-          partId: part.partId,
+          ...(partIdRaw ? { partId: partIdRaw.slice(0, 64) } : {}),
           filename,
-          mimeType: part.mimeType ?? "application/octet-stream",
-          sizeBytes: part.body?.size ?? 0,
+          mimeType,
+          sizeBytes: Math.max(0, Math.floor(part.body?.size ?? 0)),
         })
       }
     }
