@@ -2,6 +2,11 @@ import type { MailProviderPort } from "@/lib/acquisition/ports/mail-provider.por
 import type { AcquisitionIngestionPort } from "@/lib/acquisition/ports/acquisition-ingestion.port"
 import type { AcquisitionScanCursorRepositoryPort } from "@/lib/acquisition/persistence/acquisition-scan-cursor.repository"
 import { mapGmailMessageToAcquisitionInput } from "@/lib/acquisition/connector/gmail-message.mapper"
+import {
+  buildAcquisitionIngestionFailureLogPayload,
+  type AcquisitionIngestionFailureLogPayload,
+  type AcquisitionIngestionFailureStep,
+} from "@/lib/acquisition/connector/acquisition-ingestion-error"
 import type {
   MailPaginationMode,
   MailSyncResult,
@@ -15,6 +20,8 @@ export const MAX_GMAIL_PAGE_SIZE = 500
 /** Garde-fou défensif — ne remplace pas la pagination normale. */
 export const DEFAULT_MAX_PAGES_PER_RUN = 100
 
+const LOG_PREFIX = "[acquisition-gmail-sync]"
+
 const emptyStats = (): MailSyncStats => ({
   fetched: 0,
   ingested: 0,
@@ -27,6 +34,13 @@ function clampPageSize(pageSize: number): number {
   return Math.min(Math.max(1, pageSize), MAX_GMAIL_PAGE_SIZE)
 }
 
+function defaultIngestionFailureLog(
+  event: string,
+  payload: AcquisitionIngestionFailureLogPayload
+): void {
+  console.log(`${LOG_PREFIX} ${event}`, payload)
+}
+
 export interface SyncAcquisitionMailForCompanyInput {
   companyId: string
   provider: MailProviderPort
@@ -37,6 +51,11 @@ export interface SyncAcquisitionMailForCompanyInput {
   /** Limite défensive de pages par exécution (anti-boucle infinie). */
   maxPagesPerRun?: number
   now?: () => Date
+  /** Hook de log injectable (tests) — payload déjà sanitizé. */
+  logIngestionFailure?: (
+    event: string,
+    payload: AcquisitionIngestionFailureLogPayload
+  ) => void
 }
 
 /**
@@ -52,6 +71,7 @@ export async function syncAcquisitionMailForCompany(
   const pageSize = clampPageSize(input.pageSize ?? DEFAULT_GMAIL_PAGE_SIZE)
   const maxPagesPerRun = input.maxPagesPerRun ?? DEFAULT_MAX_PAGES_PER_RUN
   const now = input.now ?? (() => new Date())
+  const logIngestionFailure = input.logIngestionFailure ?? defaultIngestionFailureLog
 
   if (!companyId) throw new Error("companyId requis")
 
@@ -121,8 +141,11 @@ export async function syncAcquisitionMailForCompany(
     base.nextHistoryId = finalHistoryId
 
     for (const message of page.messages) {
+      let step: AcquisitionIngestionFailureStep = "MAP_GMAIL_MESSAGE"
       try {
+        step = "MAP_GMAIL_MESSAGE"
         const registerInput = mapGmailMessageToAcquisitionInput(message, companyId)
+        step = "REGISTER_INCOMING_MESSAGE"
         const result = await ingestion.registerIncomingMessage(registerInput)
 
         if (result.outcome === "DRAFT_CREATED") {
@@ -133,8 +156,15 @@ export async function syncAcquisitionMailForCompany(
         } else {
           base.stats.skippedDuplicate++
         }
-      } catch {
+      } catch (error) {
         base.stats.failed++
+        const diagnostic = buildAcquisitionIngestionFailureLogPayload({
+          companyId,
+          externalMessageId: message.externalMessageId,
+          step,
+          error,
+        })
+        logIngestionFailure("MESSAGE_INGESTION_FAILED", diagnostic)
         return {
           ...base,
           status: "PARTIAL",
@@ -143,6 +173,8 @@ export async function syncAcquisitionMailForCompany(
             code: "MESSAGE_INGESTION_FAILED",
             message: "Au moins un message n'a pas pu être persisté",
             retryable: true,
+            causeCode: diagnostic.causeCode,
+            failedMessageRef: diagnostic.messageIdHash,
           },
         }
       }

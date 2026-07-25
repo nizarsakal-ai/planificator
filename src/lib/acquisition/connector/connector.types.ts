@@ -55,8 +55,13 @@ export interface MailSyncStats {
 
 export interface MailSyncError {
   code: string
+  /** Message public générique — jamais d'exception brute ni de contenu email. */
   message: string
   retryable: boolean
+  /** Classification sûre (MESSAGE_INGESTION_FAILED) — optionnel, sans donnée sensible. */
+  causeCode?: string
+  /** Référence hashée du message externe (jamais l'id Gmail complet). */
+  failedMessageRef?: string
 }
 
 export type MailSyncPartialReason =

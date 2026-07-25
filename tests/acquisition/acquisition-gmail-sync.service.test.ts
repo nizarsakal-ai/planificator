@@ -455,10 +455,12 @@ describe("syncAcquisitionMailForCompany", () => {
     assert.equal(call, 2)
   })
 
-  it("erreur sur un message → PARTIAL et curseur non avancé", async () => {
+  it("erreur sur un message → PARTIAL, curseur non avancé, diagnostic sûr", async () => {
+    const GMAIL_ID = "fail-gmail-full-id-secret"
+    const logs: { event: string; payload: Record<string, unknown> }[] = []
     const { ingestion } = mockIngestion({
       handler: (id) => {
-        if (id === "fail-1") throw new Error("INGESTION_DOWN")
+        if (id === GMAIL_ID) throw new Error("INGESTION_DOWN secret=should-never-log")
         return {
           created: true,
           outcome: "DRAFT_CREATED",
@@ -470,7 +472,7 @@ describe("syncAcquisitionMailForCompany", () => {
     const { repo, getCursor } = mockRepository(makeCursor({ lastHistoryId: "hist-before" }))
     const { provider } = mockProvider([
       {
-        messages: [mail({ externalMessageId: "ok-1" }), mail({ externalMessageId: "fail-1" })],
+        messages: [mail({ externalMessageId: "ok-1" }), mail({ externalMessageId: GMAIL_ID })],
         nextPageToken: null,
         nextHistoryId: "hist-after",
         hasMore: false,
@@ -484,11 +486,173 @@ describe("syncAcquisitionMailForCompany", () => {
       ingestion,
       cursorRepository: repo,
       now: () => NOW,
+      logIngestionFailure: (event, payload) => {
+        logs.push({ event, payload: { ...payload } })
+      },
     })
 
     assert.equal(result.status, "PARTIAL")
     assert.equal(result.partialReason, "MESSAGE_INGESTION_FAILED")
+    assert.equal(result.error?.code, "MESSAGE_INGESTION_FAILED")
+    assert.equal(result.error?.message, "Au moins un message n'a pas pu être persisté")
+    assert.equal(result.error?.causeCode, "UNKNOWN_ERROR")
+    assert.equal(typeof result.error?.failedMessageRef, "string")
+    assert.equal(result.error?.failedMessageRef?.length, 12)
     assert.equal(getCursor().lastHistoryId, "hist-before")
+
+    assert.equal(logs.length, 1)
+    assert.equal(logs[0].event, "MESSAGE_INGESTION_FAILED")
+    assert.equal(logs[0].payload.companyId, COMPANY)
+    assert.equal(logs[0].payload.step, "REGISTER_INCOMING_MESSAGE")
+    assert.equal(logs[0].payload.causeCode, "UNKNOWN_ERROR")
+    assert.equal(logs[0].payload.messageIdHash, result.error?.failedMessageRef)
+    const serialized = JSON.stringify(logs) + JSON.stringify(result.error)
+    assert.equal(serialized.includes(GMAIL_ID), false)
+    assert.equal(serialized.includes("INGESTION_DOWN"), false)
+    assert.equal(serialized.includes("should-never-log"), false)
+  })
+
+  it("ZodError à l'enregistrement → causeCode ZOD_VALIDATION + chemins sans valeurs", async () => {
+    const { ZodError, z } = await import("zod")
+    const logs: Record<string, unknown>[] = []
+    const schema = z.object({ senderEmail: z.string().min(3) })
+    let zodErr: InstanceType<typeof ZodError>
+    try {
+      schema.parse({ senderEmail: "xy" })
+      assert.fail("expected ZodError")
+    } catch (e) {
+      assert.ok(e instanceof ZodError)
+      zodErr = e
+    }
+    const { ingestion } = mockIngestion({
+      handler: () => {
+        throw zodErr
+      },
+    })
+    const { repo, getCursor } = mockRepository(makeCursor({ lastHistoryId: "hist-z" }))
+    const { provider } = mockProvider([
+      {
+        messages: [mail({ externalMessageId: "zod-msg-1" })],
+        nextPageToken: null,
+        nextHistoryId: "hist-z-after",
+        hasMore: false,
+        paginationMode: "lookback",
+      },
+    ])
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+      logIngestionFailure: (_e, payload) => logs.push({ ...payload }),
+    })
+
+    assert.equal(result.status, "PARTIAL")
+    assert.equal(result.error?.causeCode, "ZOD_VALIDATION")
+    assert.deepEqual(logs[0].zodIssuePaths, ["senderEmail"])
+    assert.equal(JSON.stringify(logs).includes("xy"), false)
+    assert.equal(getCursor().lastHistoryId, "hist-z")
+  })
+
+  it("Prisma P2002 non résolu → PRISMA_UNIQUE_CONSTRAINT dans le diagnostic", async () => {
+    const logs: Record<string, unknown>[] = []
+    const prismaErr = Object.assign(new Error("Unique constraint failed on secret-field"), {
+      name: "PrismaClientKnownRequestError",
+      code: "P2002",
+    })
+    const { ingestion } = mockIngestion({
+      handler: () => {
+        throw prismaErr
+      },
+    })
+    const { repo } = mockRepository()
+    const { provider } = mockProvider([
+      {
+        messages: [mail({ externalMessageId: "p2002-msg" })],
+        nextPageToken: null,
+        nextHistoryId: "h1",
+        hasMore: false,
+        paginationMode: "lookback",
+      },
+    ])
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+      logIngestionFailure: (_e, payload) => logs.push({ ...payload }),
+    })
+
+    assert.equal(result.error?.causeCode, "PRISMA_UNIQUE_CONSTRAINT")
+    assert.equal(logs[0].prismaCode, "P2002")
+    assert.equal(JSON.stringify(logs).includes("secret-field"), false)
+    assert.equal(JSON.stringify(result.error).includes("Unique constraint"), false)
+  })
+
+  it("régression : duplicate → skippedDuplicate ; inéligible → rejected ; succès OK", async () => {
+    const { ingestion } = mockIngestion({
+      handler: (id) => {
+        if (id === "dup-1") {
+          return {
+            created: false,
+            outcome: "DRAFT_CREATED",
+            messageId: "m-dup",
+            draftId: "d-dup",
+          }
+        }
+        if (id === "rej-1") {
+          return {
+            created: true,
+            outcome: "REJECTED",
+            messageId: "m-rej",
+            draftId: null,
+            errorCode: "SENDER_NOT_ELIGIBLE",
+          }
+        }
+        return {
+          created: true,
+          outcome: "DRAFT_CREATED",
+          messageId: "m-ok",
+          draftId: "d-ok",
+        }
+      },
+    })
+    const { repo, getCursor, getSaveCount } = mockRepository(
+      makeCursor({ lastHistoryId: "hist-0" })
+    )
+    const { provider } = mockProvider([
+      {
+        messages: [
+          mail({ externalMessageId: "ok-new" }),
+          mail({ externalMessageId: "dup-1" }),
+          mail({ externalMessageId: "rej-1" }),
+        ],
+        nextPageToken: null,
+        nextHistoryId: "hist-done",
+        hasMore: false,
+        paginationMode: "history",
+      },
+    ])
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "SUCCESS")
+    assert.equal(result.stats.ingested, 1)
+    assert.equal(result.stats.skippedDuplicate, 1)
+    assert.equal(result.stats.rejected, 1)
+    assert.equal(result.stats.failed, 0)
+    assert.equal(getSaveCount(), 1)
+    assert.equal(getCursor().lastHistoryId, "hist-done")
   })
 
   it("history.list deux pages — pagination complète puis curseur avancé une seule fois", async () => {
