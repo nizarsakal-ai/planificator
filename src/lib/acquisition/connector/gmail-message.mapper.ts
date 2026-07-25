@@ -1,5 +1,9 @@
 import type { CanonicalMailMessage } from "@/lib/acquisition/connector/connector.types"
 import type { RegisterIncomingMessageInput } from "@/lib/validations/acquisition"
+import {
+  buildDeterministicAttachmentFilename,
+  sanitizeAttachmentFilename,
+} from "@/lib/acquisition/connector/gmail-mime-parser"
 
 const FORBIDDEN_METADATA_KEYS = [
   "accesstoken",
@@ -18,6 +22,42 @@ function sanitizeProviderMetadata(
     const lower = key.toLowerCase()
     if (FORBIDDEN_METADATA_KEYS.some((f) => lower.includes(f))) continue
     out[key] = value
+  }
+  return out
+}
+
+/**
+ * Normalise les métadonnées PJ pour le schéma Zod Acquisition.
+ * Ignore toute entrée sans attachmentId Gmail exploitable (défense en profondeur).
+ */
+function mapCanonicalAttachments(
+  attachments: CanonicalMailMessage["attachments"]
+): RegisterIncomingMessageInput["attachments"] {
+  const out: NonNullable<RegisterIncomingMessageInput["attachments"]> = []
+  let ordinal = 0
+  for (const a of attachments) {
+    const externalAttachmentId = a.externalAttachmentId?.trim()
+    if (!externalAttachmentId) continue
+
+    const mimeType = (a.mimeType?.trim() || "application/octet-stream").slice(0, 127)
+    const partId = a.partId?.trim() || undefined
+    const sanitized = sanitizeAttachmentFilename(a.filename ?? "")
+    const filename =
+      sanitized ||
+      buildDeterministicAttachmentFilename({
+        partId,
+        ordinal,
+        mimeType,
+      })
+
+    out.push({
+      externalAttachmentId: externalAttachmentId.slice(0, 255),
+      ...(partId ? { partId: partId.slice(0, 64) } : {}),
+      filename: filename.slice(0, 255),
+      mimeType,
+      sizeBytes: Math.max(0, Math.floor(a.sizeBytes ?? 0)),
+    })
+    ordinal++
   }
   return out
 }
@@ -45,12 +85,6 @@ export function mapGmailMessageToAcquisitionInput(
     subject: message.subject,
     receivedAt: message.receivedAt,
     rawMetadata,
-    attachments: message.attachments.map((a) => ({
-      externalAttachmentId: a.externalAttachmentId,
-      partId: a.partId,
-      filename: a.filename,
-      mimeType: a.mimeType,
-      sizeBytes: a.sizeBytes,
-    })),
+    attachments: mapCanonicalAttachments(message.attachments),
   }
 }

@@ -23,6 +23,7 @@ const baseMessage = (): CanonicalMailMessage => ({
       sizeBytes: 4096,
     },
     {
+      externalAttachmentId: "att-gmail-2",
       partId: "1.3",
       filename: "photo.jpg",
       mimeType: "image/jpeg",
@@ -56,7 +57,7 @@ describe("mapGmailMessageToAcquisitionInput", () => {
     assert.equal(parsed.attachments[0].externalAttachmentId, "att-gmail-1")
     assert.equal(parsed.attachments[0].partId, "1.2")
     assert.equal(parsed.attachments[1].partId, "1.3")
-    assert.equal(parsed.attachments[1].externalAttachmentId, undefined)
+    assert.equal(parsed.attachments[1].externalAttachmentId, "att-gmail-2")
   })
 
   it("préserve l'ordre MIME des pièces jointes (ordinal stable)", () => {
