@@ -8,6 +8,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { confirmPendingAccommodation, dismissPendingAccommodation } from "@/lib/actions/gmail.actions"
+import { normalizeBookingDisplayTextOrNull } from "@/lib/booking/normalize-booking-display-text"
 import { toast } from "sonner"
 
 interface Team { id: string; name: string }
@@ -87,12 +88,19 @@ export function PendingBookingsDialog({ open, onClose, pendings, teams }: Props)
           </div>
         ) : (
           <div className="space-y-4">
-            {visible.map((p) => (
+            {visible.map((p) => {
+              const propertyName = normalizeBookingDisplayTextOrNull(p.propertyName)
+              const address = normalizeBookingDisplayTextOrNull(p.address)
+              const city = normalizeBookingDisplayTextOrNull(p.city)
+              const zipCode = normalizeBookingDisplayTextOrNull(p.zipCode)
+              const snippet = normalizeBookingDisplayTextOrNull(p.rawEmailSnippet)
+
+              return (
               <div key={p.id} className="border border-slate-100 rounded-xl p-4 space-y-3 bg-slate-50">
                 {/* Nom + dates */}
                 <div className="flex items-start justify-between gap-2">
                   <div className="font-medium text-sm text-slate-800 leading-tight">
-                    {p.propertyName ?? "Logement Booking.com"}
+                    {propertyName ?? "Logement Booking.com"}
                   </div>
                   <Badge variant="secondary" className="text-xs shrink-0">Nouveau</Badge>
                 </div>
@@ -104,16 +112,16 @@ export function PendingBookingsDialog({ open, onClose, pendings, teams }: Props)
                   </div>
                 )}
 
-                {p.address && (
+                {address && (
                   <div className="flex items-start gap-1.5 text-xs text-slate-500">
                     <MapPin className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                    <span>{p.address}{p.city ? `, ${p.city}` : ""}{p.zipCode ? ` ${p.zipCode}` : ""}</span>
+                    <span>{address}{city ? `, ${city}` : ""}{zipCode ? ` ${zipCode}` : ""}</span>
                   </div>
                 )}
 
-                {p.rawEmailSnippet && (
+                {snippet && (
                   <p className="text-xs text-slate-400 italic line-clamp-2 bg-white px-2 py-1.5 rounded border border-slate-100">
-                    {p.rawEmailSnippet}
+                    {snippet}
                   </p>
                 )}
 
@@ -152,7 +160,8 @@ export function PendingBookingsDialog({ open, onClose, pendings, teams }: Props)
                   </Button>
                 </div>
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </DialogContent>
