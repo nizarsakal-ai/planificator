@@ -252,6 +252,8 @@ model Company {
   acquisitionAttachmentAccessLogs AcquisitionAttachmentAccessLog[]
   acquisitionMessageContents AcquisitionMessageContent[]
   acquisitionContentFetchStates AcquisitionContentFetchState[]
+  acquisitionPartners         AcquisitionPartner[]
+  acquisitionPartnerDomains   AcquisitionPartnerDomain[]
 
   @@map("companies")
 }
@@ -1352,6 +1354,56 @@ model AcquisitionScanCursor {
 
   @@unique([companyId, source])
   @@map("acquisition_scan_cursors")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PLAN-ACQ-012-LOT-1.1 — Registre Sources d'acquisition (partenaires)
+// Structure seule. Bootstrap lauralu.fr → LOT-1.2. Gate runtime → LOT-1.4.
+// Ne pas confondre avec l'enum AcquisitionSource (canal Gmail / futur Outlook).
+// ═══════════════════════════════════════════════════════════════════════════
+
+model AcquisitionPartner {
+  id         String            @id @default(cuid())
+  companyId  String
+  name       String
+  // Code interne stable par tenant (slug) — ex. "lauralu"
+  code       String
+  // Canal connecteur : enum existant AcquisitionSource (GMAIL V1) — pas un nouveau type
+  connector  AcquisitionSource @default(GMAIL)
+  // Clé technique contrôlée (V1: "consultations") — pas une chaîne libre utilisateur
+  pipeline   String            @default("consultations")
+  active     Boolean           @default(true)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  company Company                    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  domains AcquisitionPartnerDomain[]
+
+  @@unique([companyId, code])
+  // Cible FK composite domaines → partenaire (anti inter-tenant)
+  @@unique([id, companyId])
+  @@index([companyId, active])
+  @@map("acquisition_partners")
+}
+
+model AcquisitionPartnerDomain {
+  id               String   @id @default(cuid())
+  companyId        String
+  partnerId        String
+  // Domaine normalisé (lowercase, exact) — ex. "lauralu.fr"
+  domainNormalized String
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  company Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  // FK composite : le domaine ne peut pas pointer un partenaire d'un autre tenant
+  partner AcquisitionPartner @relation(fields: [partnerId, companyId], references: [id, companyId], onDelete: Cascade)
+
+  @@unique([companyId, domainNormalized])
+  @@index([companyId, active])
+  @@index([partnerId])
+  @@map("acquisition_partner_domains")
 }
 
 // Historique des affectations camion : qui conduisait quel camion, dans
