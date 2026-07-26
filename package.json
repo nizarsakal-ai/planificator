@@ -20,6 +20,7 @@
     "test:chantiers": "node --import tsx --test tests/chantiers/assignment-ui-policy.test.ts",
     "test:booking": "node --import tsx --test tests/booking/gmail-message-lifecycle.test.ts tests/booking/extract-booking-fields.test.ts tests/booking/gmail-message-lifecycle.integration.test.ts",
     "test:booking:unit": "node --import tsx --test tests/booking/gmail-message-lifecycle.test.ts tests/booking/extract-booking-fields.test.ts",
+    "test:integration": "node --import tsx --test tests/integration/contracts/contracts.shapes.test.ts tests/integration/contracts/normalized-inbound.discriminant.test.ts tests/integration/contracts/pipeline-admission.no-connector-type.test.ts tests/integration/architecture/no-forbidden-imports.test.ts tests/integration/architecture/integration-exports-surface.test.ts",
     "test:acquisition:flags": "node --import tsx --test tests/acquisition/acquisition-flag-matrix.test.ts tests/acquisition/acquisition-gmail-sync.driver.test.ts tests/acquisition/attachment-download-orchestrator.test.ts tests/acquisition/attachment-recovery-orchestrator.test.ts tests/acquisition/attachment-download-cron.route.test.ts tests/acquisition/attachment-recovery-cron.route.test.ts tests/acquisition/acquisition-gmail-sync.route.test.ts tests/acquisition/message-content-cron.orchestrator.test.ts tests/acquisition/message-content-cron.route.test.ts tests/acquisition/message-content-fetch-state.repository.test.ts tests/acquisition/extraction-cron.orchestrator.test.ts tests/acquisition/extraction-cron.route.test.ts"
   },
   "prisma": {
