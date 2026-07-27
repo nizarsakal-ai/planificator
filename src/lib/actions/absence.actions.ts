@@ -3,7 +3,12 @@
 import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
-import { createAbsenceSchema } from "@/lib/validations/absence"
+import {
+  parseCreateAbsenceFormData,
+  parseCreateAbsenceInput,
+  formDataString,
+  toAbsencePersistenceData,
+} from "@/lib/validations/absence"
 import { sendAbsenceApprovedEmail, sendAbsenceRejectedEmail } from "@/lib/email"
 
 const TYPE_LABELS: Record<string, string> = {
@@ -27,15 +32,7 @@ async function requireAdmin() {
 export async function createAbsence(formData: FormData) {
   const user = await requireAdmin()
 
-  const raw = {
-    employeeId: formData.get("employeeId") as string,
-    type:       formData.get("type")       as string,
-    startDate:  formData.get("startDate")  as string,
-    endDate:    formData.get("endDate")    as string,
-    reason:     formData.get("reason")     as string,
-  }
-
-  const parsed = createAbsenceSchema.safeParse(raw)
+  const parsed = parseCreateAbsenceFormData(formData)
   if (!parsed.success) return { error: parsed.error.errors[0].message }
 
   const employee = await prisma.employee.findFirst({
@@ -43,26 +40,25 @@ export async function createAbsence(formData: FormData) {
   })
   if (!employee) return { error: "Employé introuvable." }
 
-  const start = new Date(parsed.data.startDate)
-  const end   = new Date(parsed.data.endDate)
+  const persistence = toAbsencePersistenceData(parsed.data)
 
   // Détection de conflits avec les affectations
   const conflicts = await prisma.employeeAssignment.count({
     where: {
-      employeeId: parsed.data.employeeId,
-      date: { gte: start, lte: end },
+      employeeId: persistence.employeeId,
+      date: { gte: persistence.startDate, lte: persistence.endDate },
       assignment: { status: { in: ["CONFIRMED", "PENDING"] } },
     },
   })
 
   await prisma.absence.create({
     data: {
-      employeeId:  parsed.data.employeeId,
+      employeeId:  persistence.employeeId,
       companyId:   user.companyId!,
-      type:        parsed.data.type,
-      startDate:   start,
-      endDate:     end,
-      reason:      parsed.data.reason || null,
+      type:        persistence.type,
+      startDate:   persistence.startDate,
+      endDate:     persistence.endDate,
+      reason:      persistence.reason,
       status:      "PENDING",
       createdById: user.id,
     },
@@ -88,28 +84,25 @@ export async function demanderAbsence(formData: FormData) {
   })
   if (!employee) return { error: "Profil employé introuvable." }
 
-  const raw = {
+  const parsed = parseCreateAbsenceInput({
     employeeId: employee.id,
-    type:       formData.get("type")       as string,
-    startDate:  formData.get("startDate")  as string,
-    endDate:    formData.get("endDate")    as string,
-    reason:     formData.get("reason")     as string,
-  }
-
-  const parsed = createAbsenceSchema.safeParse(raw)
+    type: formDataString(formData, "type"),
+    startDate: formDataString(formData, "startDate"),
+    endDate: formDataString(formData, "endDate"),
+    reason: formDataString(formData, "reason"),
+  })
   if (!parsed.success) return { error: parsed.error.errors[0].message }
 
-  const start = new Date(parsed.data.startDate)
-  const end   = new Date(parsed.data.endDate)
+  const persistence = toAbsencePersistenceData(parsed.data)
 
   await prisma.absence.create({
     data: {
       employeeId:  employee.id,
       companyId:   employee.companyId,
-      type:        parsed.data.type,
-      startDate:   start,
-      endDate:     end,
-      reason:      parsed.data.reason || null,
+      type:        persistence.type,
+      startDate:   persistence.startDate,
+      endDate:     persistence.endDate,
+      reason:      persistence.reason,
       status:      "PENDING",
       createdById: session.user.id,
     },

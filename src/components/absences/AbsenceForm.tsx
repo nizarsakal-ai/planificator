@@ -7,7 +7,7 @@ import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { createAbsenceSchema, type CreateAbsenceInput } from "@/lib/validations/absence"
+import { createAbsenceSchema, type CreateAbsenceInput, appendCreateAbsenceFormData } from "@/lib/validations/absence"
 import { createAbsence } from "@/lib/actions/absence.actions"
 
 interface Employee { id: string; firstName: string; lastName: string }
@@ -30,16 +30,27 @@ export function AbsenceForm({ employees, onSuccess }: { employees: Employee[]; o
     reset,
   } = useForm<CreateAbsenceInput>({
     resolver: zodResolver(createAbsenceSchema),
-    defaultValues: { startDate: today, endDate: today },
+    defaultValues: {
+      employeeId: "",
+      // type laissé non initialisé → placeholder "" via select
+      startDate: today,
+      endDate: today,
+      reason: undefined,
+    },
   })
 
   const onSubmit = async (data: CreateAbsenceInput) => {
     const fd = new FormData()
-    Object.entries(data).forEach(([k, v]) => { if (v) fd.append(k, String(v)) })
+    appendCreateAbsenceFormData(fd, data)
     const result = await createAbsence(fd)
     if (result?.error) { toast.error(result.error); return }
     toast.success("Absence enregistrée.")
-    reset()
+    reset({
+      employeeId: "",
+      startDate: today,
+      endDate: today,
+      reason: undefined,
+    })
     onSuccess()
   }
 
