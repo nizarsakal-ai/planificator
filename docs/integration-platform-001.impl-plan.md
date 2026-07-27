@@ -238,6 +238,8 @@ Migrations **additives** uniquement :
 - `InboundEnvelope` + métadonnées normalisées techniques (sous-migration **LOT-1B2**)  
 - lifecycle, idempotence, FK composites tenant  
 
+**Séquençage de fermeture :** LOT-1B1 (Connection) et LOT-1B2 (Envelope) sont des **sous-lots séparés**. La branche `feature/plan-integration-platform-001-lot-1b-persistence` traite **uniquement LOT-1B1 — IntegrationConnection Persistence**. LOT-1B2 Envelope reste **hors périmètre** jusqu’à fermeture et revue indépendante de LOT-1B1.
+
 **Aucun** bridge fournisseur ; **aucun** draft ; **aucune** modification Booking.
 
 ### 7.2 Connection — exigences
