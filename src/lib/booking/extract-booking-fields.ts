@@ -102,10 +102,19 @@ export function regexFallbackParser(text: string): BookingParsedFields {
   )
   if (propMatch) result.propertyName = propMatch[1].trim()
 
-  const addrMatch = text.match(
-    /(\d{1,4}[\s,]+(?:rue|avenue|av\.|boulevard|bd\.?|chemin|impasse|allée|place|route|voie)[^\n,]{3,60})/i
-  )
-  if (addrMatch) result.address = addrMatch[1].trim()
+  const STREET =
+    "rue|avenue|av\\.|boulevard|bd\\.?|chemin|impasse|all[ée]e|place|route|voie|cours|quai|square|passage|résidence|residence"
+  // Priorité : adresse étiquetée (logement) avant un match libre (évite footer/expéditeur).
+  // Première occurrence déterministe ; segment jusqu’à virgule ou fin de ligne.
+  const labeled = text.match(/(?:adresse|address)\s*[:\-]\s*([^\n,]{5,80})/i)
+  if (labeled) {
+    result.address = labeled[1].trim()
+  } else {
+    const addrMatch = text.match(
+      new RegExp(`(\\d{1,4}[\\s,]+(?:${STREET})[^\\n,]{2,80})`, "i")
+    )
+    if (addrMatch) result.address = addrMatch[1].trim()
+  }
 
   const zipMatch = text.match(/\b((?:0[1-9]|[1-8]\d|9[0-5])\d{3})\b/)
   if (zipMatch) result.zipCode = zipMatch[1]
@@ -229,8 +238,31 @@ function throwProviderTemporaryOrContinueWithRegex(
 }
 
 /**
+ * Fusionne un parse IA avec le fallback regex : comble uniquement les champs null/vides.
+ * Cas critique : JSON IA valide avec address=null → regex peut fournir l’adresse.
+ */
+export function mergeAiWithRegexFallback(
+  ai: BookingParsedFields,
+  emailText: string
+): BookingParsedFields {
+  const needsAddress = !ai.address?.trim()
+  const needsAnyNull = BOOKING_FIELD_KEYS.some((k) => !ai[k]?.trim())
+  if (!needsAddress && !needsAnyNull) return ai
+
+  const regex = regexFallbackParser(emailText)
+  const out = { ...ai }
+  for (const key of BOOKING_FIELD_KEYS) {
+    if (!out[key]?.trim() && regex[key]?.trim()) {
+      out[key] = regex[key]
+    }
+  }
+  return out
+}
+
+/**
  * Extraction Booking : IA si disponible, sinon regex.
- * - Réponse IA valide (même sans donnée utile) → retourne le parse (permanent décidé en aval).
+ * - Réponse IA valide avec adresse → retourne le parse.
+ * - Réponse IA valide sans adresse → merge regex sur champs vides.
  * - Réponse IA inexploitable + regex utile → fallback.
  * - Réponse IA inexploitable + regex vide → RETRYABLE (jamais NO_USEFUL ici).
  */
@@ -284,7 +316,7 @@ Format (toutes les valeurs peuvent être null si non trouvées) :
 
     const normalized = tryParseAiBookingContent(aiContent)
     if (normalized) {
-      return normalized
+      return mergeAiWithRegexFallback(normalized, emailText)
     }
 
     const reason =

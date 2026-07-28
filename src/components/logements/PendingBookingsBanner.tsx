@@ -16,7 +16,8 @@ interface PendingAccommodation {
   zipCode:         string | null
   startDate:       Date   | null
   endDate:         Date   | null
-  rawEmailSnippet: string | null
+  /** Aperçu UI borné (≤500) — jamais le corps complet. */
+  emailPreview:    string | null
 }
 
 interface Props {

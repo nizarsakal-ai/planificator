@@ -8,6 +8,7 @@ import { BedDouble, MapPin, KeyRound, Phone, User, CalendarDays, FileText } from
 import { NouveauLogementDialog } from "@/components/logements/NouveauLogementDialog"
 import { LogementDeleteButton } from "@/components/logements/LogementDeleteButton"
 import { PendingBookingsBanner } from "@/components/logements/PendingBookingsBanner"
+import { toBookingUiEmailPreview } from "@/lib/booking/booking-pending-merge"
 
 export const metadata: Metadata = { title: "Logements" }
 
@@ -43,10 +44,31 @@ export default async function LogementsPage() {
     }),
     prisma.pendingAccommodation.findMany({
       where:   { companyId: session.user.companyId!, status: "PENDING" },
-      select:  { id: true, propertyName: true, address: true, city: true, zipCode: true, startDate: true, endDate: true, rawEmailSnippet: true },
+      select:  {
+        id: true,
+        propertyName: true,
+        address: true,
+        city: true,
+        zipCode: true,
+        startDate: true,
+        endDate: true,
+        rawEmailSnippet: true,
+      },
       orderBy: { createdAt: "desc" },
     }),
   ])
+
+  const pendingsForUi = pendingAccommodations.map((p) => ({
+    id: p.id,
+    propertyName: p.propertyName,
+    address: p.address,
+    city: p.city,
+    zipCode: p.zipCode,
+    startDate: p.startDate,
+    endDate: p.endDate,
+    /** Aperçu borné — jamais le corps complet (rawEmailSnippet serveur). */
+    emailPreview: toBookingUiEmailPreview(p.rawEmailSnippet),
+  }))
 
   // Auto-update statuses for display (without DB write)
   const enriched = accommodations.map((acc) => {
@@ -79,8 +101,8 @@ export default async function LogementsPage() {
       </div>
 
       {/* Réservations Booking.com en attente */}
-      {pendingAccommodations.length > 0 && (
-        <PendingBookingsBanner pendings={pendingAccommodations} teams={teams} />
+      {pendingsForUi.length > 0 && (
+        <PendingBookingsBanner pendings={pendingsForUi} teams={teams} />
       )}
 
       {/* KPI */}

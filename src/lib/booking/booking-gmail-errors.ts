@@ -48,6 +48,23 @@ export function classifyBookingError(error: unknown): ClassifiedBookingError {
       message: "Date d'arrivée antérieure à la règle métier documentée",
     }
   }
+  if (msg === "MISSING_ADDRESS" || name === "MISSING_ADDRESS") {
+    return {
+      kind: "RETRYABLE",
+      code: "MISSING_ADDRESS",
+      message: "Adresse absente après extraction",
+    }
+  }
+  if (
+    msg === "ADDRESS_NOT_FOUND_AFTER_RETRY" ||
+    name === "ADDRESS_NOT_FOUND_AFTER_RETRY"
+  ) {
+    return {
+      kind: "PERMANENT",
+      code: "ADDRESS_NOT_FOUND_AFTER_RETRY",
+      message: "Adresse absente après une nouvelle tentative",
+    }
+  }
 
   if (
     lower.includes("fetch failed") ||

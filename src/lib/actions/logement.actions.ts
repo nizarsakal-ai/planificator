@@ -215,6 +215,18 @@ export async function autoProcessPendingAccommodations() {
 
   if (pendings.length === 0) return { success: true, processed: 0, failed: 0 }
 
+  const { fetchBookingGmailMessageBody } = await import(
+    "@/lib/booking/booking-gmail-body.service"
+  )
+  const {
+    pickEmailTextForReprocess,
+    BOOKING_EMAIL_BODY_PERSIST_MAX,
+    BOOKING_SNIPPET_RICH_MIN,
+  } = await import("@/lib/booking/booking-pending-merge")
+  const { mergeAiWithRegexFallback, tryParseAiBookingContent } = await import(
+    "@/lib/booking/extract-booking-fields"
+  )
+
   const Anthropic = (await import("@anthropic-ai/sdk")).default
   const client    = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   const teamNames = teams.map((t) => t.name).join(", ")
@@ -224,8 +236,39 @@ export async function autoProcessPendingAccommodations() {
   let failed    = 0
 
   for (const pending of pendings) {
-    const emailText = [pending.propertyName, pending.rawEmailSnippet].filter(Boolean).join("\n")
-    if (!emailText) { failed++; continue }
+    let gmailBody: string | null = null
+    const persisted = pending.rawEmailSnippet
+    const needsGmail =
+      !persisted || persisted.trim().length < BOOKING_SNIPPET_RICH_MIN
+
+    if (needsGmail && pending.gmailMessageId) {
+      const fetched = await fetchBookingGmailMessageBody(
+        user.companyId!,
+        pending.gmailMessageId
+      )
+      if (fetched.ok) {
+        gmailBody = fetched.text
+        // Persister le corps riche pour éviter les re-fetch inutiles (même tenant).
+        if (fetched.text.length > (persisted?.length ?? 0)) {
+          await prisma.pendingAccommodation.updateMany({
+            where: { id: pending.id, companyId: user.companyId! },
+            data: {
+              rawEmailSnippet: fetched.text.substring(0, BOOKING_EMAIL_BODY_PERSIST_MAX),
+            },
+          })
+        }
+      }
+    }
+
+    const chosen = pickEmailTextForReprocess({
+      propertyName: pending.propertyName,
+      persistedText: pending.rawEmailSnippet,
+      gmailBody,
+      snippetFallback: pending.rawEmailSnippet,
+    })
+    const emailText = chosen.text
+
+    if (!emailText.trim()) { failed++; continue }
 
     try {
       const msg = await client.messages.create({
@@ -251,19 +294,39 @@ Pour teamName: cherche un prénom/nom qui correspond à une équipe disponible.`
       const content = msg.content[0]
       if (content.type !== "text") { failed++; continue }
 
-      const extracted = JSON.parse(content.text)
-      const finalAddress = pending.address || (extracted.address as string)?.trim() || null
+      const aiParsed = tryParseAiBookingContent(content)
+      const extracted = aiParsed
+        ? mergeAiWithRegexFallback(aiParsed, emailText)
+        : mergeAiWithRegexFallback(
+            {
+              propertyName: null,
+              address: null,
+              city: null,
+              zipCode: null,
+              startDate: null,
+              endDate: null,
+              doorCode: null,
+              contactName: null,
+              contactPhone: null,
+              notes: null,
+              teamName: null,
+            },
+            emailText
+          )
 
-      // Enrichir le pending avec les données extraites
-      await prisma.pendingAccommodation.update({
-        where: { id: pending.id },
+      const finalAddress =
+        pending.address?.trim() || extracted.address?.trim() || null
+
+      // Enrichir le pending avec les données extraites (ne pas écraser une adresse existante)
+      await prisma.pendingAccommodation.updateMany({
+        where: { id: pending.id, companyId: user.companyId! },
         data: {
           address:      finalAddress,
-          city:         (extracted.city         as string) || pending.city         || null,
-          zipCode:      (extracted.zipCode      as string) || pending.zipCode      || null,
-          doorCode:     (extracted.doorCode     as string) || pending.doorCode     || null,
-          contactPhone: (extracted.contactPhone as string) || pending.contactPhone || null,
-          contactName:  (extracted.contactName  as string) || pending.contactName  || null,
+          city:         extracted.city?.trim() || pending.city || null,
+          zipCode:      extracted.zipCode?.trim() || pending.zipCode || null,
+          doorCode:     extracted.doorCode?.trim() || pending.doorCode || null,
+          contactPhone: extracted.contactPhone?.trim() || pending.contactPhone || null,
+          contactName:  extracted.contactName?.trim() || pending.contactName || null,
         },
       })
 
@@ -285,7 +348,7 @@ Pour teamName: cherche un prénom/nom qui correspond à une équipe disponible.`
 
       // Fallback : nom d'équipe extrait par l'IA
       if (!teamId) {
-        const teamName = extracted.teamName as string | null
+        const teamName = extracted.teamName
         if (teamName) {
           const match = teams.find((t) =>
             t.name.toLowerCase() === teamName.toLowerCase() ||
@@ -313,19 +376,19 @@ Pour teamName: cherche un prénom/nom qui correspond à une équipe disponible.`
             startDate:    pending.startDate!,
             endDate:      pending.endDate!,
             address:      finalAddress!,
-            city:         (extracted.city         as string) || pending.city         || null,
-            zipCode:      (extracted.zipCode      as string) || pending.zipCode      || null,
-            doorCode:     (extracted.doorCode     as string) || pending.doorCode     || null,
-            contactName:  (extracted.contactName  as string) || pending.contactName  || null,
-            contactPhone: (extracted.contactPhone as string) || pending.contactPhone || null,
+            city:         extracted.city?.trim() || pending.city || null,
+            zipCode:      extracted.zipCode?.trim() || pending.zipCode || null,
+            doorCode:     extracted.doorCode?.trim() || pending.doorCode || null,
+            contactName:  extracted.contactName?.trim() || pending.contactName || null,
+            contactPhone: extracted.contactPhone?.trim() || pending.contactPhone || null,
             notes:        notesValue,
             gmailSourceMessageId: pending.gmailMessageId,
             source: "gmail-scan",
           },
         })
 
-        await tx.pendingAccommodation.update({
-          where: { id: pending.id },
+        await tx.pendingAccommodation.updateMany({
+          where: { id: pending.id, companyId: user.companyId! },
           data: {
             status:          "CONFIRMED",
             accommodationId: created.id,
