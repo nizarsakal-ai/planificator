@@ -17,9 +17,19 @@ import {
 } from "@/lib/booking/extract-booking-fields"
 import { extractNormalizedGmailBody } from "@/lib/booking/booking-gmail-body.service"
 import {
-  BOOKING_EMAIL_BODY_PERSIST_MAX,
   hasBookingAddress,
+  truncateBookingEmailForExtract,
+  truncateBookingEmailForPersist,
 } from "@/lib/booking/booking-pending-merge"
+import { getBookingGmailScanEarlyResponse } from "@/lib/booking/booking-gmail-scan-gate"
+import { getBookingScanCutoffDate } from "@/lib/booking/booking-scan-cutoff"
+import {
+  BookingGmailListError,
+  getBookingGmailMaxFullFetchesPerConnection,
+  getBookingGmailMaxFullFetchesPerRun,
+  iterateBookingGmailMessagePages,
+  runBookingGmailClaimLoop,
+} from "@/lib/booking/booking-gmail-pagination"
 
 /**
  * Lifecycle adresse (PLAN-BOOKING-ADDRESS-RELIABILITY-001-R1) :
@@ -31,10 +41,10 @@ import {
  */
 
 export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization")
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const early = getBookingGmailScanEarlyResponse(req)
+  if (early) return early
+
+  const scanCutoff = getBookingScanCutoffDate()
 
   const connections = await prisma.gmailConnection.findMany()
   const stats = {
@@ -45,13 +55,23 @@ export async function GET(req: Request) {
     retryable: 0,
     permanent: 0,
     missingAddress: 0,
+    pagesFetched: 0,
+    idsExamined: 0,
+    fullFetches: 0,
   }
   const anthropic = process.env.ANTHROPIC_API_KEY
     ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
     : null
   const lifecycle = bookingGmailMessageLifecycle
 
+  let globalFetchesRemaining = getBookingGmailMaxFullFetchesPerRun()
+
   for (const conn of connections) {
+    // Codex : budget global épuisé → sortir de la boucle globale immédiatement.
+    if (globalFetchesRemaining <= 0) {
+      break
+    }
+
     try {
       let accessToken = decrypt(conn.accessToken)
       const expirySoon = conn.tokenExpiry < new Date(Date.now() + 5 * 60 * 1000)
@@ -83,29 +103,20 @@ export async function GET(req: Request) {
         })
       }
 
-      const listRes  = await fetch(
-        "https://gmail.googleapis.com/gmail/v1/users/me/messages?q=from:noreply@booking.com&maxResults=50",
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      )
-      if (!listRes.ok) {
-        console.error(`[gmail-scan] Gmail list HTTP ${listRes.status} for company ${conn.companyId}`)
-        stats.errors++
+      const connectionFetchesRemaining = getBookingGmailMaxFullFetchesPerConnection()
+      // Codex : pas de pagination / claim si budget connexion déjà à 0.
+      if (connectionFetchesRemaining <= 0) {
         continue
       }
-      const listData = await listRes.json()
-      if (!listData.messages?.length) continue
+      if (globalFetchesRemaining <= 0) {
+        break
+      }
 
-      for (const msg of listData.messages as { id: string }[]) {
-        const claim = await lifecycle.claimForProcessing(conn.companyId, msg.id)
-        if (claim.action === "SKIP") {
-          stats.skipped++
-          continue
-        }
-
+      const processClaimedMessage = async (messageId: string) => {
         stats.scanned++
         try {
-          const msgRes  = await fetch(
-            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
+          const msgRes = await fetch(
+            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
             { headers: { Authorization: `Bearer ${accessToken}` } }
           )
           if (!msgRes.ok) {
@@ -113,54 +124,55 @@ export async function GET(req: Request) {
           }
           const msgData = await msgRes.json()
           const bodyText = extractNormalizedGmailBody(msgData.payload)
-          const snippet  = (msgData.snippet ?? "") as string
+          const snippet = (msgData.snippet ?? "") as string
 
           if (!bodyText && !snippet) {
             await lifecycle.markPermanentIgnored(
               conn.companyId,
-              msg.id,
+              messageId,
               permanentBookingError("EMPTY_MESSAGE_BODY", "Corps et snippet vides")
             )
             stats.permanent++
-            console.log(`[gmail-scan] PERMANENTLY_IGNORED empty body messageId=${msg.id}`)
-            continue
+            console.log(`[gmail-scan] PERMANENTLY_IGNORED empty body messageId=${messageId}`)
+            return
           }
 
-          const emailText = (bodyText || snippet).substring(0, BOOKING_EMAIL_BODY_PERSIST_MAX)
+          const fullText = bodyText || snippet
+          const emailTextForExtract = truncateBookingEmailForExtract(fullText)
+          const emailTextForPersist = truncateBookingEmailForPersist(fullText)
           const parsed = await extractBookingFields(
-            emailText,
-            msg.id,
+            emailTextForExtract,
+            messageId,
             anthropic as import("@/lib/booking/extract-booking-fields").BookingAiClient | null
           )
 
           if (parsed.startDate) {
             const startDate = new Date(parsed.startDate as string)
-            const cutoff = new Date("2026-06-17")
-            if (startDate < cutoff) {
+            if (startDate < scanCutoff) {
               await lifecycle.markPermanentIgnored(
                 conn.companyId,
-                msg.id,
+                messageId,
                 permanentBookingError("BEFORE_CUTOFF_DATE", "Avant le 17/06/2026")
               )
               stats.permanent++
-              console.log(`[gmail-scan] PERMANENTLY_IGNORED cutoff messageId=${msg.id}`)
-              continue
+              console.log(`[gmail-scan] PERMANENTLY_IGNORED cutoff messageId=${messageId}`)
+              return
             }
           }
 
           if (!hasUsefulBookingData(parsed)) {
             await lifecycle.markPermanentIgnored(
               conn.companyId,
-              msg.id,
+              messageId,
               permanentBookingError("NO_USEFUL_BOOKING_DATA", "Parsing sans donnée utile")
             )
             stats.permanent++
-            console.log(`[gmail-scan] PERMANENTLY_IGNORED no useful data messageId=${msg.id}`)
-            continue
+            console.log(`[gmail-scan] PERMANENTLY_IGNORED no useful data messageId=${messageId}`)
+            return
           }
 
           const admin = await prisma.user.findFirst({
-            where:  { companyId: conn.companyId, role: { in: ["SUPER_ADMIN", "ADMIN"] } },
+            where: { companyId: conn.companyId, role: { in: ["SUPER_ADMIN", "ADMIN"] } },
             select: { id: true },
           })
 
@@ -169,22 +181,21 @@ export async function GET(req: Request) {
             const team = await prisma.team.findFirst({
               where: {
                 companyId: conn.companyId,
-                active:    true,
-                name:      { contains: parsed.teamName, mode: "insensitive" },
+                active: true,
+                name: { contains: parsed.teamName, mode: "insensitive" },
               },
               select: { id: true },
             })
             matchedTeamId = team?.id ?? null
           }
 
-          // Adresse absente : persister/enrichir le pending puis RETRYABLE (pas SUCCEEDED métier).
           if (!hasBookingAddress(parsed)) {
             await prisma.$transaction(async (tx) => {
               await createOrGetBookingScanResult(tx, {
                 companyId: conn.companyId,
-                messageId: msg.id,
+                messageId,
                 snippet,
-                emailBody: emailText,
+                emailBody: emailTextForPersist,
                 parsed,
                 matchedTeamId,
                 adminId: admin?.id ?? null,
@@ -192,7 +203,7 @@ export async function GET(req: Request) {
             })
             const failed = await lifecycle.markFailure({
               companyId: conn.companyId,
-              messageId: msg.id,
+              messageId,
               error: retryableBookingError(
                 "MISSING_ADDRESS",
                 "Adresse absente après extraction — rejeu limité"
@@ -202,26 +213,26 @@ export async function GET(req: Request) {
               stats.retryable++
               stats.missingAddress++
               console.warn(
-                `[gmail-scan] RETRYABLE_FAILURE MISSING_ADDRESS messageId=${msg.id} nextRetryAt=${failed.nextRetryAt?.toISOString() ?? "n/a"}`
+                `[gmail-scan] RETRYABLE_FAILURE MISSING_ADDRESS messageId=${messageId} nextRetryAt=${failed.nextRetryAt?.toISOString() ?? "n/a"}`
               )
             } else if (failed.status === "PERMANENTLY_IGNORED") {
               stats.permanent++
               stats.missingAddress++
               console.warn(
-                `[gmail-scan] PERMANENTLY_IGNORED messageId=${msg.id} code=${failed.errorCode}`
+                `[gmail-scan] PERMANENTLY_IGNORED messageId=${messageId} code=${failed.errorCode}`
               )
             }
-            continue
+            return
           }
 
           await lifecycle.markSucceededInTransaction(
-            { companyId: conn.companyId, messageId: msg.id },
+            { companyId: conn.companyId, messageId },
             async (tx) => {
               const result = await createOrGetBookingScanResult(tx, {
                 companyId: conn.companyId,
-                messageId: msg.id,
+                messageId,
                 snippet,
-                emailBody: emailText,
+                emailBody: emailTextForPersist,
                 parsed,
                 matchedTeamId,
                 adminId: admin?.id ?? null,
@@ -235,7 +246,6 @@ export async function GET(req: Request) {
 
           stats.detected++
         } catch (msgErr) {
-          // Course : un autre worker a déjà commit SUCCEEDED — ne pas marquer échec
           if (
             msgErr instanceof Error &&
             msgErr.message === BOOKING_GMAIL_SUCCESS_STATUS_UPDATE_FAILED
@@ -244,37 +254,73 @@ export async function GET(req: Request) {
               where: {
                 companyId_messageId: {
                   companyId: conn.companyId,
-                  messageId: msg.id,
+                  messageId,
                 },
               },
             })
             if (row?.status === "SUCCEEDED") {
               stats.detected++
-              continue
+              return
             }
           }
           const failed = await lifecycle.markFailure({
             companyId: conn.companyId,
-            messageId: msg.id,
+            messageId,
             error: msgErr,
           })
           if (failed.status === "SUCCEEDED") {
             stats.detected++
-            continue
+            return
           }
           if (failed.status === "RETRYABLE_FAILURE") {
             stats.retryable++
             console.warn(
-              `[gmail-scan] RETRYABLE_FAILURE messageId=${msg.id} code=${failed.errorCode} nextRetryAt=${failed.nextRetryAt?.toISOString() ?? "n/a"}`
+              `[gmail-scan] RETRYABLE_FAILURE messageId=${messageId} code=${failed.errorCode} nextRetryAt=${failed.nextRetryAt?.toISOString() ?? "n/a"}`
             )
           } else if (failed.status === "PERMANENTLY_IGNORED") {
             stats.permanent++
             console.warn(
-              `[gmail-scan] PERMANENTLY_IGNORED messageId=${msg.id} code=${failed.errorCode}`
+              `[gmail-scan] PERMANENTLY_IGNORED messageId=${messageId} code=${failed.errorCode}`
             )
           }
           stats.errors++
         }
+      }
+
+      try {
+        const loopResult = await runBookingGmailClaimLoop({
+          pages: iterateBookingGmailMessagePages({ accessToken }),
+          budget: {
+            connectionRemaining: connectionFetchesRemaining,
+            globalRemaining: globalFetchesRemaining,
+          },
+          claim: async (messageId) => {
+            const claim = await lifecycle.claimForProcessing(conn.companyId, messageId)
+            return claim.action === "SKIP" ? "SKIP" : "CLAIMED"
+          },
+          onClaimed: processClaimedMessage,
+        })
+
+        stats.skipped += loopResult.skipped
+        stats.pagesFetched += loopResult.pagesFetched
+        stats.idsExamined += loopResult.idsExamined
+        stats.fullFetches += loopResult.claimed
+        globalFetchesRemaining = loopResult.budget.globalRemaining
+
+        if (loopResult.stopReason === "budget" && globalFetchesRemaining <= 0) {
+          break
+        }
+      } catch (listErr) {
+        if (listErr instanceof BookingGmailListError) {
+          stats.errors++
+          console.error(
+            `[gmail-scan] Gmail list ${listErr.kind}` +
+              (listErr.httpStatus != null ? ` HTTP ${listErr.httpStatus}` : "") +
+              ` for company ${conn.companyId}`
+          )
+          continue
+        }
+        throw listErr
       }
     } catch (connErr) {
       console.error(`[gmail-scan] Error for company ${conn.companyId}`)
@@ -283,7 +329,7 @@ export async function GET(req: Request) {
   }
 
   console.log(
-    `[CRON gmail-scan] scanned=${stats.scanned} detected=${stats.detected} skipped=${stats.skipped} retryable=${stats.retryable} permanent=${stats.permanent} missingAddress=${stats.missingAddress} errors=${stats.errors}`
+    `[CRON gmail-scan] scanned=${stats.scanned} detected=${stats.detected} skipped=${stats.skipped} retryable=${stats.retryable} permanent=${stats.permanent} missingAddress=${stats.missingAddress} errors=${stats.errors} pagesFetched=${stats.pagesFetched} idsExamined=${stats.idsExamined} fullFetches=${stats.fullFetches}`
   )
   return NextResponse.json({ ok: true, ...stats })
 }

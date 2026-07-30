@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import Anthropic from "@anthropic-ai/sdk"
 import { z } from "zod"
+import { assertCronBearerAuth } from "@/lib/cron/assert-cron-bearer-auth"
 
 // Retry helper for Neon cold-start: up to 3 attempts with 1s/2s backoff
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
@@ -23,10 +24,8 @@ const AgentSchema = z.object({
 })
 
 export async function POST(req: Request) {
-  const authHeader = req.headers.get("authorization")
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const unauthorized = assertCronBearerAuth(req)
+  if (unauthorized) return unauthorized
 
   let body: unknown
   try { body = await req.json() }
