@@ -92,8 +92,37 @@ export const renamePartnerSchema = z
   })
   .strict()
 
+/**
+ * Mise à jour explicite des policies partenaire (Lot F / R3).
+ * Création reste défaut OFF — pas d’activation auto accidentelle à la create.
+ * Au moins un champ policy doit être fourni.
+ */
+export const updatePartnerPolicySchema = z
+  .object({
+    companyId: companyIdSchema,
+    partnerId: z.string().min(1),
+    autoApproveEnabled: z.boolean().optional(),
+    autoConvertEnabled: z.boolean().optional(),
+    allowCreateClient: z.boolean().optional(),
+    minConfidence: z.number().min(0).max(1).nullable().optional(),
+    requireExactEmail: z.boolean().optional(),
+    priority: z.number().int().min(0).max(10_000).optional(),
+  })
+  .strict()
+  .refine(
+    (v) =>
+      v.autoApproveEnabled !== undefined ||
+      v.autoConvertEnabled !== undefined ||
+      v.allowCreateClient !== undefined ||
+      v.minConfidence !== undefined ||
+      v.requireExactEmail !== undefined ||
+      v.priority !== undefined,
+    { message: "au moins un champ policy requis" }
+  )
+
 export type CreatePartnerParsed = z.infer<typeof createPartnerSchema>
 export type AddDomainParsed = z.infer<typeof addDomainSchema>
 export type PartnerRefParsed = z.infer<typeof partnerRefSchema>
 export type DomainRefParsed = z.infer<typeof domainRefSchema>
 export type RenamePartnerParsed = z.infer<typeof renamePartnerSchema>
+export type UpdatePartnerPolicyParsed = z.infer<typeof updatePartnerPolicySchema>

@@ -61,6 +61,11 @@ export const anthropicExtractionRawSchema = z
         consultationReference: optionalField,
         description: optionalField,
         attachmentClassifications: optionalField,
+        interventionNature: optionalField,
+        constraints: optionalField,
+        clientReference: optionalField,
+        requestClassification: optionalField,
+        estimatedDurationHours: optionalField,
       })
       .strict(),
     warnings: z
@@ -110,6 +115,11 @@ export const EXTRACTION_TOOL_INPUT_JSON_SCHEMA: {
           "consultationReference",
           "description",
           "attachmentClassifications",
+          "interventionNature",
+          "constraints",
+          "clientReference",
+          "requestClassification",
+          "estimatedDurationHours",
         ].map((k) => [
           k,
           {

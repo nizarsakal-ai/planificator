@@ -28,12 +28,21 @@ import {
   evaluateExtractionGate,
   normalizeProviderResult,
 } from "@/lib/acquisition/extraction/extraction-normalize"
+import {
+  appendAttachmentTextToBody,
+  buildAttachmentTextExcerpts,
+} from "@/lib/acquisition/extraction/attachment-text-excerpts"
+import {
+  defaultAttachmentBytesLoader,
+  type AttachmentBytesLoader,
+} from "@/lib/acquisition/extraction/attachment-bytes-loader"
 import { catalogWarning } from "@/lib/acquisition/extraction/extraction.schema"
 import type {
   ExtractDraftResult,
   ExtractionErrorCode,
   RunDraftExtractionInput,
 } from "@/lib/acquisition/extraction/extraction.types"
+import { maybeRunAutoDecisionAfterExtraction } from "@/lib/acquisition/policy/auto-decision.service"
 
 const LOG_PREFIX = "[acquisition-extraction]"
 const ALLOWED_ROLES = new Set<Role>(["ADMIN", "SUPER_ADMIN"])
@@ -43,6 +52,8 @@ export interface ExtractionServiceDeps {
   provider?: ExtractionProviderPort
   /** Override timeout (tests). Prod : getExtractionTimeoutMs(). */
   timeoutMs?: number
+  /** Charge bytes PDF STORED — injectable (tests). */
+  loadAttachmentBytes?: AttachmentBytesLoader
   log?: (event: string, payload?: Record<string, unknown>) => void
 }
 
@@ -248,13 +259,82 @@ export async function runDraftExtractionCore(
   })
 
   try {
+    const loadBytes = deps.loadAttachmentBytes ?? defaultAttachmentBytesLoader
+    const withBytes = await Promise.all(
+      attachments.map(async (a) => {
+        const isPdf =
+          (a.mimeType || "").toLowerCase() === "application/pdf" ||
+          a.filename.toLowerCase().endsWith(".pdf")
+        let bytes: Buffer | null = null
+        if (isPdf) {
+          try {
+            bytes = await loadBytes({
+              filename: a.filename,
+              mimeType: a.mimeType,
+              storagePublicId: a.storagePublicId,
+              status: a.status,
+            })
+          } catch {
+            bytes = null
+          }
+        }
+        return {
+          filename: a.filename,
+          mimeType: a.mimeType,
+          category: a.category,
+          bytes,
+        }
+      })
+    )
+
+    const { excerpts, outcomes } = await buildAttachmentTextExcerpts(withBytes)
+    const enrichedText = appendAttachmentTextToBody(content.normalizedText, excerpts)
+
+    const pdfWarnings = outcomes.flatMap((o) => {
+      const code = o.status
+      if (
+        code !== "PDF_TEXT_EXTRACTED" &&
+        code !== "PDF_NO_TEXT_LAYER" &&
+        code !== "PDF_PARSE_FAILED" &&
+        code !== "PDF_TEXT_TRUNCATED"
+      ) {
+        return []
+      }
+      const att = attachments.find((a) => a.filename === o.filename)
+      const isPlan = att?.category === "PLAN"
+      const warnings = [
+        catalogWarning(code, {
+          field: isPlan ? "PLAN" : o.filename,
+          source: "SERVICE",
+        }),
+      ]
+      if (
+        isPlan &&
+        (code === "PDF_NO_TEXT_LAYER" || code === "PDF_PARSE_FAILED")
+      ) {
+        warnings.push(
+          catalogWarning("REQUIRED_DOCUMENT_UNREADABLE", {
+            field: "PLAN",
+            source: "SERVICE",
+          })
+        )
+      }
+      return warnings
+    })
+
     const raw = await withTimeout(
       provider.extract({
         subject: message?.subject ?? null,
-        normalizedText: content.normalizedText,
+        normalizedText: enrichedText,
         locale: "fr-FR",
-        attachmentMetadata: attachments,
-        extractionSchemaVersion: "1",
+        attachmentMetadata: attachments.map((a) => ({
+          filename: a.filename,
+          mimeType: a.mimeType,
+          category: a.category,
+          sizeBytes: a.sizeBytes,
+        })),
+        attachmentTextExcerpts: excerpts,
+        extractionSchemaVersion: EXTRACTION_SCHEMA_VERSION,
       }),
       deps.timeoutMs ?? getExtractionTimeoutMs()
     )
@@ -280,7 +360,10 @@ export async function runDraftExtractionCore(
       })
     }
 
-    const gate = evaluateExtractionGate(normalized.fields, normalized.warnings)
+    const gate = evaluateExtractionGate(normalized.fields, [
+      ...normalized.warnings,
+      ...pdfWarnings,
+    ])
     const completedAt = nowFn()
     const extractedData = buildExtractedDataPayload(
       normalized.fields,
@@ -365,7 +448,7 @@ export async function runDraftExtractionCore(
       warningCount: gate.warnings.length,
     })
 
-    return {
+    const extractedResult: ExtractDraftResult = {
       ok: true,
       outcome: "EXTRACTED",
       draftId: draft.id,
@@ -373,6 +456,21 @@ export async function runDraftExtractionCore(
       contentHashAtExtraction: contentHashAtClaim,
       warningCount: gate.warnings.length,
     }
+
+    // Lot F — policy non bloquante : échec auto ≠ échec extraction.
+    try {
+      await maybeRunAutoDecisionAfterExtraction({
+        companyId,
+        draftId: draft.id,
+      })
+    } catch (autoErr) {
+      log("AUTO_DECISION_HOOK_FAILED", {
+        draftId: draft.id,
+        message: autoErr instanceof Error ? autoErr.message : "unknown",
+      })
+    }
+
+    return extractedResult
   } catch (error) {
     const completedAt = nowFn()
     let code: ExtractionErrorCode = "INTERNAL_ERROR"
@@ -451,7 +549,10 @@ export async function runDraftExtraction(
   if (!isAcquisitionExtractionEnabled()) {
     return fail("DISABLED", "EXTRACTION_DISABLED", "Extraction désactivée")
   }
-  if (!ALLOWED_ROLES.has(input.actor.role) || !input.actor.companyId) {
+  if (
+    (input.actor.role !== "SYSTEM" && !ALLOWED_ROLES.has(input.actor.role)) ||
+    !input.actor.companyId
+  ) {
     return fail("FORBIDDEN", "EXTRACTION_FORBIDDEN", "Accès refusé")
   }
   return runDraftExtractionCore(

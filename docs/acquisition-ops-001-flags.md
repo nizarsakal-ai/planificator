@@ -23,6 +23,11 @@
 | `ACQUISITION_EXTRACTION_CRON_ENABLED` | `isAcquisitionExtractionCronEnabled` | OPS-004 — automatisation seule |
 | `ACQUISITION_EXTRACTION_PROVIDER` | `getExtractionProviderId` | Défaut `deterministic` |
 | `ACQUISITION_CONVERSION_ENABLED` | `isAcquisitionConversionEnabled` | Flag **brut** conversion |
+| `ACQUISITION_ORCHESTRATOR_CRON_ENABLED` | `isAcquisitionOrchestratorCronEnabled` | Orchestrateur V2 (hors vercel.json) |
+| `ACQUISITION_AUTO_APPROVE_ENABLED` | `isAcquisitionAutoApproveEnabled` | Lot F — auto-approve post-extraction |
+| `ACQUISITION_AUTO_CONVERT_ENABLED` | `isAcquisitionAutoConvertEnabled` | Lot F — auto-convert (nécessite approve + conversion) |
+| `ACQUISITION_SYSTEM_ACTOR_USER_ID` | `getAcquisitionSystemActorUserId` | User id système pour reviewedBy/createdBy |
+| `ACQUISITION_AUTO_MIN_CONFIDENCE` | `getAcquisitionAutoMinConfidence` | Seuil défaut `0.75` |
 
 **Conversion fully enabled** = `isAcquisitionConversionFullyEnabled()` = master **ET** flag conversion brut.
 Ne pas confondre le flag env seul avec l’état fully enabled.

@@ -12,6 +12,7 @@ import {
   resolveAcquisitionContentCronGate,
   resolveAcquisitionExtractionCronGate,
   resolveAcquisitionGmailCronGate,
+  resolveAcquisitionOrchestratorCronGate,
   validateAcquisitionFlagMatrix,
   type AcquisitionFlagIssueCode,
 } from "@/lib/acquisition/acquisition-flag-matrix"
@@ -30,6 +31,9 @@ const FLAG_KEYS = [
   "ACQUISITION_EXTRACTION_CRON_ENABLED",
   "ACQUISITION_EXTRACTION_PROVIDER",
   "ACQUISITION_CONVERSION_ENABLED",
+  "ACQUISITION_ORCHESTRATOR_CRON_ENABLED",
+  "ACQUISITION_AUTO_APPROVE_ENABLED",
+  "ACQUISITION_AUTO_CONVERT_ENABLED",
 ] as const
 
 function issueCodes(): AcquisitionFlagIssueCode[] {
@@ -297,5 +301,44 @@ describe("acquisition-flag-matrix", () => {
     process.env.ACQUISITION_EXTRACTION_CRON_ENABLED = "true"
     assert.deepEqual(resolveAcquisitionExtractionCronGate(), { allowed: true })
     assert.equal(getAcquisitionFlagMatrix().extractionCron, true)
+  })
+
+  it("INV: orchestrator cron ON + master OFF", () => {
+    process.env.ACQUISITION_ORCHESTRATOR_CRON_ENABLED = "true"
+    assertExactIssues(["INV_ORCHESTRATOR_WITHOUT_MASTER"])
+  })
+
+  it("gate orchestrator: OFF → CRON_DISABLED", () => {
+    assert.deepEqual(resolveAcquisitionOrchestratorCronGate(), {
+      allowed: false,
+      skipReason: "CRON_DISABLED",
+    })
+  })
+
+  it("gate orchestrator: ON + master OFF → MASTER_DISABLED", () => {
+    process.env.ACQUISITION_ORCHESTRATOR_CRON_ENABLED = "true"
+    assert.deepEqual(resolveAcquisitionOrchestratorCronGate(), {
+      allowed: false,
+      skipReason: "MASTER_DISABLED",
+    })
+  })
+
+  it("gate orchestrator: all ON → allowed", () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_ORCHESTRATOR_CRON_ENABLED = "true"
+    assert.deepEqual(resolveAcquisitionOrchestratorCronGate(), { allowed: true })
+    assert.equal(getAcquisitionFlagMatrix().orchestratorCron, true)
+  })
+
+  it("INV: auto-convert sans auto-approve", () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_CONVERSION_ENABLED = "true"
+    process.env.ACQUISITION_AUTO_CONVERT_ENABLED = "true"
+    assertExactIssues(["INV_AUTO_CONVERT_WITHOUT_AUTO_APPROVE"])
+  })
+
+  it("INV: auto-approve sans master", () => {
+    process.env.ACQUISITION_AUTO_APPROVE_ENABLED = "true"
+    assertExactIssues(["INV_AUTO_APPROVE_WITHOUT_MASTER"])
   })
 })

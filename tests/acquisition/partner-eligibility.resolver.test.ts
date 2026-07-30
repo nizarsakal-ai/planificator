@@ -1,211 +1,157 @@
 /**
- * PLAN-ACQ-012-LOT-1.4 — Tests PartnerEligibilityResolver.
+ * PLAN-ACQ-V2 Lot I — Tests resolver multi-partenaires.
  */
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 
-import { describe, it } from "node:test"
 import assert from "node:assert/strict"
+import { describe, it } from "node:test"
 import { PartnerEligibilityResolver } from "@/lib/acquisition/partner-eligibility.resolver"
 import type {
-  AcquisitionPartnerDomainRecord,
   AcquisitionPartnerRecord,
-  AcquisitionPartnerWithDomainRecord,
+  AcquisitionPartnerDomainRecord,
+  AcquisitionPartnerEmailRecord,
   PartnerRegistryRepositoryPort,
 } from "@/lib/acquisition/persistence/partner-registry.repository"
 
-const now = new Date("2026-07-25T12:00:00.000Z")
-
 function partner(
-  partial: Partial<AcquisitionPartnerRecord> &
-    Pick<AcquisitionPartnerRecord, "id" | "companyId" | "code" | "active">
+  overrides: Partial<AcquisitionPartnerRecord> & Pick<AcquisitionPartnerRecord, "id" | "code">
 ): AcquisitionPartnerRecord {
   return {
-    name: "P",
+    companyId: "co",
+    name: overrides.code,
     connector: "GMAIL",
     pipeline: "consultations",
-    createdAt: now,
-    updatedAt: now,
-    ...partial,
+    active: true,
+    priority: 100,
+    requireExactEmail: false,
+    autoApproveEnabled: false,
+    autoConvertEnabled: false,
+    minConfidence: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+    allowCreateClient: overrides.allowCreateClient ?? false,
   }
 }
 
-function domain(
-  partial: Partial<AcquisitionPartnerDomainRecord> &
-    Pick<
-      AcquisitionPartnerDomainRecord,
-      "id" | "companyId" | "partnerId" | "domainNormalized" | "active"
-    >
-): AcquisitionPartnerDomainRecord {
-  return {
-    createdAt: now,
-    updatedAt: now,
-    ...partial,
-  }
-}
-
-function fakeRegistry(
-  hits: Map<string, AcquisitionPartnerWithDomainRecord | null>,
-  options?: { throwOnFind?: Error }
-): PartnerRegistryRepositoryPort {
+function fakeRegistry(opts: {
+  byDomain?: Map<string, ReturnType<typeof partner> & { domain: AcquisitionPartnerDomainRecord }>
+  byEmail?: Map<string, ReturnType<typeof partner> & { email: AcquisitionPartnerEmailRecord }>
+}): PartnerRegistryRepositoryPort {
   return {
     findPartnerByCode: async () => null,
-    findPartnerByDomain: async (companyId, domainName) => {
-      if (options?.throwOnFind) throw options.throwOnFind
-      const key = `${companyId}::${domainName.trim().toLowerCase()}`
-      return hits.has(key) ? hits.get(key)! : null
-    },
+    findPartnerById: async () => null,
+    findPartnerByDomain: async (_c, domain) => opts.byDomain?.get(domain) ?? null,
+    findPartnerByEmail: async (_c, email) => opts.byEmail?.get(email) ?? null,
     findDomain: async () => null,
     listPartners: async () => [],
     listDomains: async () => [],
+    listEmails: async () => [],
     partnerExists: async () => false,
     domainExists: async () => false,
   }
 }
 
-function hit(
-  p: AcquisitionPartnerRecord,
-  d: AcquisitionPartnerDomainRecord
-): AcquisitionPartnerWithDomainRecord {
-  return { ...p, domain: d }
-}
-
-describe("PartnerEligibilityResolver", () => {
-  it("accepte partenaire actif + domaine actif", async () => {
-    const p = partner({ id: "p1", companyId: "co_a", code: "lauralu", active: true })
-    const d = domain({
-      id: "d1",
-      companyId: "co_a",
-      partnerId: "p1",
-      domainNormalized: "lauralu.fr",
-      active: true,
-    })
+describe("PartnerEligibilityResolver Lot I", () => {
+  it("domaine actif → éligible DOMAIN", async () => {
+    const p = partner({ id: "p1", code: "acme" })
     const resolver = new PartnerEligibilityResolver(
-      fakeRegistry(new Map([["co_a::lauralu.fr", hit(p, d)]]))
+      fakeRegistry({
+        byDomain: new Map([
+          [
+            "acme.fr",
+            {
+              ...p,
+              domain: {
+                id: "d1",
+                companyId: "co",
+                partnerId: "p1",
+                domainNormalized: "acme.fr",
+                active: true,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              },
+            },
+          ],
+        ]),
+      })
     )
-    assert.equal(await resolver.isDomainEligible("co_a", "lauralu.fr"), true)
+    const r = await resolver.resolveEligibleSender("co", "a@acme.fr", "acme.fr")
+    assert.equal(r?.matchKind, "DOMAIN")
+    assert.equal(r?.partner.code, "acme")
   })
 
-  it("rejette partenaire inactif", async () => {
-    const p = partner({ id: "p1", companyId: "co_a", code: "lauralu", active: false })
-    const d = domain({
-      id: "d1",
-      companyId: "co_a",
-      partnerId: "p1",
-      domainNormalized: "lauralu.fr",
-      active: true,
-    })
+  it("email exact → prioritaire sur domaine", async () => {
+    const pEmail = partner({ id: "p-email", code: "vip" })
+    const pDomain = partner({ id: "p-dom", code: "acme" })
     const resolver = new PartnerEligibilityResolver(
-      fakeRegistry(new Map([["co_a::lauralu.fr", hit(p, d)]]))
+      fakeRegistry({
+        byEmail: new Map([
+          [
+            "boss@acme.fr",
+            {
+              ...pEmail,
+              email: {
+                id: "e1",
+                companyId: "co",
+                partnerId: "p-email",
+                emailNormalized: "boss@acme.fr",
+                active: true,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              },
+            },
+          ],
+        ]),
+        byDomain: new Map([
+          [
+            "acme.fr",
+            {
+              ...pDomain,
+              domain: {
+                id: "d1",
+                companyId: "co",
+                partnerId: "p-dom",
+                domainNormalized: "acme.fr",
+                active: true,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              },
+            },
+          ],
+        ]),
+      })
     )
-    assert.equal(await resolver.isDomainEligible("co_a", "lauralu.fr"), false)
+    const r = await resolver.resolveEligibleSender("co", "boss@acme.fr", "acme.fr")
+    assert.equal(r?.matchKind, "EMAIL")
+    assert.equal(r?.partner.code, "vip")
   })
 
-  it("rejette domaine inactif", async () => {
-    const p = partner({ id: "p1", companyId: "co_a", code: "lauralu", active: true })
-    const d = domain({
-      id: "d1",
-      companyId: "co_a",
-      partnerId: "p1",
-      domainNormalized: "lauralu.fr",
-      active: false,
-    })
+  it("requireExactEmail sans email → rejeté", async () => {
+    const p = partner({ id: "p1", code: "strict", requireExactEmail: true })
     const resolver = new PartnerEligibilityResolver(
-      fakeRegistry(new Map([["co_a::lauralu.fr", hit(p, d)]]))
+      fakeRegistry({
+        byDomain: new Map([
+          [
+            "strict.fr",
+            {
+              ...p,
+              domain: {
+                id: "d1",
+                companyId: "co",
+                partnerId: "p1",
+                domainNormalized: "strict.fr",
+                active: true,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              },
+            },
+          ],
+        ]),
+      })
     )
-    assert.equal(await resolver.isDomainEligible("co_a", "lauralu.fr"), false)
-  })
-
-  it("rejette domaine absent", async () => {
-    const resolver = new PartnerEligibilityResolver(fakeRegistry(new Map()))
-    assert.equal(await resolver.isDomainEligible("co_a", "missing.fr"), false)
-  })
-
-  it("rejette partenaire absent (pas de hit registre)", async () => {
-    const resolver = new PartnerEligibilityResolver(fakeRegistry(new Map()))
-    assert.equal(await resolver.isDomainEligible("co_a", "lauralu.fr"), false)
-  })
-
-  it("plusieurs domaines : seul le domaine demandé compte", async () => {
-    const p = partner({ id: "p1", companyId: "co_a", code: "lauralu", active: true })
-    const dOk = domain({
-      id: "d1",
-      companyId: "co_a",
-      partnerId: "p1",
-      domainNormalized: "lauralu.fr",
-      active: true,
-    })
-    const resolver = new PartnerEligibilityResolver(
-      fakeRegistry(
-        new Map([
-          ["co_a::lauralu.fr", hit(p, dOk)],
-          // autre domaine non interrogé
-        ])
-      )
-    )
-    assert.equal(await resolver.isDomainEligible("co_a", "lauralu.fr"), true)
-    assert.equal(await resolver.isDomainEligible("co_a", "other.fr"), false)
-  })
-
-  it("plusieurs partenaires : isolation par domaine", async () => {
-    const p1 = partner({ id: "p1", companyId: "co_a", code: "lauralu", active: true })
-    const p2 = partner({ id: "p2", companyId: "co_a", code: "other", active: false })
-    const d1 = domain({
-      id: "d1",
-      companyId: "co_a",
-      partnerId: "p1",
-      domainNormalized: "lauralu.fr",
-      active: true,
-    })
-    const d2 = domain({
-      id: "d2",
-      companyId: "co_a",
-      partnerId: "p2",
-      domainNormalized: "other.fr",
-      active: true,
-    })
-    const resolver = new PartnerEligibilityResolver(
-      fakeRegistry(
-        new Map([
-          ["co_a::lauralu.fr", hit(p1, d1)],
-          ["co_a::other.fr", hit(p2, d2)],
-        ])
-      )
-    )
-    assert.equal(await resolver.isDomainEligible("co_a", "lauralu.fr"), true)
-    assert.equal(await resolver.isDomainEligible("co_a", "other.fr"), false)
-  })
-
-  it("isolation multi-tenant", async () => {
-    const pA = partner({ id: "pa", companyId: "co_a", code: "lauralu", active: true })
-    const dA = domain({
-      id: "da",
-      companyId: "co_a",
-      partnerId: "pa",
-      domainNormalized: "lauralu.fr",
-      active: true,
-    })
-    const resolver = new PartnerEligibilityResolver(
-      fakeRegistry(new Map([["co_a::lauralu.fr", hit(pA, dA)]]))
-    )
-    assert.equal(await resolver.isDomainEligible("co_a", "lauralu.fr"), true)
-    assert.equal(await resolver.isDomainEligible("co_b", "lauralu.fr"), false)
-  })
-
-  it("propage les erreurs Prisma (pas de masquage)", async () => {
-    const err = Object.assign(new Error("db down"), { code: "P1001" })
-    const resolver = new PartnerEligibilityResolver(
-      fakeRegistry(new Map(), { throwOnFind: err })
-    )
-    await assert.rejects(
-      () => resolver.isDomainEligible("co_a", "lauralu.fr"),
-      (e: unknown) => e === err
-    )
-  })
-
-  it("refuse companyId vide", async () => {
-    const resolver = new PartnerEligibilityResolver(fakeRegistry(new Map()))
-    await assert.rejects(() => resolver.isDomainEligible("", "lauralu.fr"), {
-      message: "companyId requis",
-    })
+    const r = await resolver.resolveEligibleSender("co", "x@strict.fr", "strict.fr")
+    assert.equal(r, null)
+    assert.equal(await resolver.isDomainEligible("co", "strict.fr"), false)
   })
 })

@@ -12,7 +12,7 @@ import type {
 
 export type ExtractionActor = {
   userId: string
-  role: Role
+  role: Role | "SYSTEM"
   companyId: string | null
 }
 

@@ -1,21 +1,35 @@
 /**
- * PLAN-ACQ-012-LOT-1.4 — Résolution d’éligibilité via le registre partenaires.
+ * PLAN-ACQ-V2 Lot I — Résolution d’éligibilité multi-partenaires via registre.
  *
- * Le runtime Acquisition consomme uniquement ce service (pas le repository).
- * Éligible ⇔ domaine trouvé pour le tenant + domaine.active + partenaire.active.
- * Aucun fallback historique, aucune constante hardcodée.
+ * Règles :
+ * 1. Match email exact actif → partenaire actif → éligible
+ * 2. Sinon match domaine actif → partenaire actif :
+ *    - si requireExactEmail → non éligible sans match email
+ *    - sinon éligible
+ * 3. Sinon non éligible
+ *
+ * Aucune constante partenaire / domaine hardcodée.
  */
 
-import type { PartnerRegistryRepositoryPort } from "@/lib/acquisition/persistence/partner-registry.repository"
+import type {
+  AcquisitionPartnerRecord,
+  PartnerRegistryRepositoryPort,
+} from "@/lib/acquisition/persistence/partner-registry.repository"
+
+export type ResolvedEligiblePartner = {
+  partner: AcquisitionPartnerRecord
+  matchKind: "EMAIL" | "DOMAIN"
+}
 
 export interface PartnerEligibilityResolverPort {
-  /**
-   * @param companyId tenant obligatoire
-   * @param domain domaine déjà normalisé (ex. sortie de normalizeSenderAddress)
-   * @returns true si domaine + partenaire actifs existent pour ce tenant
-   * @throws erreurs Prisma du repository (jamais masquées)
-   */
+  /** @deprecated préférer resolveEligibleSender — conservé pour compat tests. */
   isDomainEligible(companyId: string, domain: string): Promise<boolean>
+
+  resolveEligibleSender(
+    companyId: string,
+    senderEmail: string,
+    senderDomain: string
+  ): Promise<ResolvedEligiblePartner | null>
 }
 
 export class PartnerEligibilityResolver implements PartnerEligibilityResolverPort {
@@ -24,9 +38,32 @@ export class PartnerEligibilityResolver implements PartnerEligibilityResolverPor
   async isDomainEligible(companyId: string, domain: string): Promise<boolean> {
     if (!companyId) throw new Error("companyId requis")
     if (!domain) return false
-
     const hit = await this.registry.findPartnerByDomain(companyId, domain)
     if (!hit) return false
-    return hit.active === true && hit.domain.active === true
+    if (!hit.active || !hit.domain.active) return false
+    if (hit.requireExactEmail) return false
+    return true
+  }
+
+  async resolveEligibleSender(
+    companyId: string,
+    senderEmail: string,
+    senderDomain: string
+  ): Promise<ResolvedEligiblePartner | null> {
+    if (!companyId) throw new Error("companyId requis")
+
+    const byEmail = await this.registry.findPartnerByEmail(companyId, senderEmail)
+    if (byEmail && byEmail.active && byEmail.email.active) {
+      return { partner: byEmail, matchKind: "EMAIL" }
+    }
+
+    const byDomain = await this.registry.findPartnerByDomain(companyId, senderDomain)
+    if (!byDomain || !byDomain.active || !byDomain.domain.active) {
+      return null
+    }
+    if (byDomain.requireExactEmail) {
+      return null
+    }
+    return { partner: byDomain, matchKind: "DOMAIN" }
   }
 }

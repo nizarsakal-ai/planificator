@@ -37,6 +37,10 @@ export interface SyncAcquisitionMailForCompanyInput {
   /** Limite défensive de pages par exécution (anti-boucle infinie). */
   maxPagesPerRun?: number
   now?: () => Date
+  /** Deadline budget orchestrateur (ms epoch) — arrêt coopératif. */
+  deadlineAtMs?: number
+  /** Fence : false → stop immédiat (lease perdu). */
+  shouldContinue?: () => boolean | Promise<boolean>
 }
 
 /**
@@ -87,10 +91,44 @@ export async function syncAcquisitionMailForCompany(
   let paginationMode: MailPaginationMode | undefined = undefined
   let finalHistoryId: string | null = null
   let pagesProcessed = 0
+  const deadlineAtMs = input.deadlineAtMs
+  const shouldContinue = input.shouldContinue
 
   // Pagination complète : parcourir toutes les pages jusqu'à absence de nextPageToken.
   // pageSize borne uniquement chaque appel Gmail — jamais de limite globale de messages.
   while (true) {
+    if (deadlineAtMs != null && Date.now() >= deadlineAtMs) {
+      return {
+        ...base,
+        status: pagesProcessed > 0 ? "PARTIAL" : "SKIPPED",
+        ...(pagesProcessed > 0
+          ? { partialReason: "BUDGET_EXHAUSTED" as const }
+          : { skipReason: "BUDGET_EXHAUSTED" as const }),
+        nextHistoryId: finalHistoryId,
+        error: {
+          code: "BUDGET_EXHAUSTED",
+          message: "Budget orchestrateur épuisé pendant sync Gmail",
+          retryable: true,
+        },
+      }
+    }
+    if (shouldContinue) {
+      const ok = await shouldContinue()
+      if (!ok) {
+        return {
+          ...base,
+          status: "PARTIAL",
+          partialReason: "BUDGET_EXHAUSTED",
+          nextHistoryId: finalHistoryId,
+          error: {
+            code: "LEASE_STOLEN",
+            message: "Lease orchestrateur perdu pendant sync Gmail",
+            retryable: true,
+          },
+        }
+      }
+    }
+
     let page
     try {
       page = await provider.listMessagesPage({
@@ -101,6 +139,22 @@ export async function syncAcquisitionMailForCompany(
         paginationMode,
       })
     } catch (e) {
+      const code =
+        e && typeof e === "object" && "code" in e
+          ? String((e as { code: unknown }).code)
+          : "PROVIDER_LIST_FAILED"
+      if (code === "NO_ACTIVE_PARTNER_IDENTITIES") {
+        return {
+          ...base,
+          status: "SKIPPED",
+          skipReason: "NO_ACTIVE_PARTNER_IDENTITIES",
+          error: {
+            code: "NO_ACTIVE_PARTNER_IDENTITIES",
+            message: "Aucune identité partenaire active — scan Gmail refusé",
+            retryable: false,
+          },
+        }
+      }
       const message = e instanceof Error ? e.message : "PROVIDER_LIST_FAILED"
       await cursorRepository.recordFailure(companyId, provider.source, "PROVIDER_LIST_FAILED", now())
       return {

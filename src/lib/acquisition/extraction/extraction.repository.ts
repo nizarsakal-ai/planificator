@@ -39,6 +39,8 @@ export type AttachmentMetaRow = {
   mimeType: string
   category: string
   sizeBytes: number
+  status: string
+  storagePublicId: string | null
 }
 
 export type ClaimDraftInput = {
@@ -118,7 +120,14 @@ export class DraftExtractionRepository {
   ): Promise<AttachmentMetaRow[]> {
     const rows = await this.db.acquisitionAttachment.findMany({
       where: { companyId, acquisitionMessageId },
-      select: { filename: true, mimeType: true, category: true, sizeBytes: true },
+      select: {
+        filename: true,
+        mimeType: true,
+        category: true,
+        sizeBytes: true,
+        status: true,
+        storagePublicId: true,
+      },
       take: 50,
       orderBy: { createdAt: "asc" },
     })
@@ -127,6 +136,8 @@ export class DraftExtractionRepository {
       mimeType: r.mimeType,
       category: r.category,
       sizeBytes: r.sizeBytes,
+      status: r.status,
+      storagePublicId: r.storagePublicId,
     }))
   }
 

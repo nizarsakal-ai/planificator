@@ -9,7 +9,14 @@ export const EXTRACTION_EVIDENCE_SOURCES = [
   "BODY",
   "SUBJECT",
   "ATTACHMENT_META",
+  "ATTACHMENT_TEXT",
   "HEURISTIC",
+] as const
+
+export const REQUEST_CLASSIFICATIONS = [
+  "CONSULTATION",
+  "INTERVENTION",
+  "TRAVAUX",
 ] as const
 
 export const EXTRACTION_WARNING_CODES = [
@@ -29,6 +36,11 @@ export const EXTRACTION_WARNING_CODES = [
   "PROVIDER_UNAVAILABLE",
   "STALE_CONTENT",
   "INPUT_TRUNCATED_FOR_PROVIDER",
+  "PDF_TEXT_EXTRACTED",
+  "PDF_NO_TEXT_LAYER",
+  "PDF_PARSE_FAILED",
+  "PDF_TEXT_TRUNCATED",
+  "REQUIRED_DOCUMENT_UNREADABLE",
 ] as const
 
 export const EXTRACTION_WARNING_SEVERITIES = ["INFO", "WARNING", "ERROR"] as const
@@ -87,6 +99,12 @@ export const extractionProviderFieldsSchema = z
     consultationReference: optionalField,
     description: optionalField,
     attachmentClassifications: optionalField,
+    /** Lot E — nature / contraintes / classification / durée. */
+    interventionNature: optionalField,
+    constraints: optionalField,
+    clientReference: optionalField,
+    requestClassification: optionalField,
+    estimatedDurationHours: optionalField,
   })
   .strict()
 
@@ -212,6 +230,20 @@ export const extractionCanonicalFieldsSchema = z.object({
     .max(50)
     .optional()
     .default([]),
+  interventionNature: optionalTrimmed(200),
+  constraints: optionalTrimmed(2000),
+  clientReference: optionalTrimmed(64),
+  requestClassification: z
+    .enum(REQUEST_CLASSIFICATIONS)
+    .nullish()
+    .transform((v) => v ?? null),
+  estimatedDurationHours: z
+    .number()
+    .finite()
+    .min(0)
+    .max(1000)
+    .nullish()
+    .transform((v) => (v == null || Number.isNaN(v) ? null : Math.round(v * 10) / 10)),
 })
 
 export const extractionConfidenceMapSchema = z.record(
@@ -315,6 +347,31 @@ export const EXTRACTION_WARNING_CATALOG: Record<
     severity: "WARNING",
     blocking: false,
     message: "Contenu tronqué avant envoi au fournisseur",
+  },
+  PDF_TEXT_EXTRACTED: {
+    severity: "INFO",
+    blocking: false,
+    message: "Texte PDF extrait (couche texte)",
+  },
+  PDF_NO_TEXT_LAYER: {
+    severity: "WARNING",
+    blocking: false,
+    message: "PDF sans couche texte (pas d’OCR)",
+  },
+  PDF_PARSE_FAILED: {
+    severity: "WARNING",
+    blocking: false,
+    message: "Échec parse PDF",
+  },
+  PDF_TEXT_TRUNCATED: {
+    severity: "WARNING",
+    blocking: false,
+    message: "Texte PDF tronqué",
+  },
+  REQUIRED_DOCUMENT_UNREADABLE: {
+    severity: "WARNING",
+    blocking: true,
+    message: "Pièce indispensable non lisible",
   },
 }
 

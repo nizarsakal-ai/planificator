@@ -33,8 +33,11 @@ Présence des routes ≠ activation effective. **Aucun cron Acquisition n’est 
 | `/api/cron/acquisition-gmail-sync` | `*/15 * * * *` | Toutes les 15 minutes |
 | `/api/cron/acquisition-attachment-download` | `5,20,35,50 * * * *` | Toutes les 15 minutes, décalé de +5 min |
 | `/api/cron/acquisition-attachment-recovery` | `40 * * * *` | Toutes les heures à :40 |
+| `/api/cron/acquisition-content-fetch` | (voir OPS-003) | Content |
+| `/api/cron/acquisition-extraction` | (voir OPS-004) | Extraction |
+| `/api/cron/acquisition-orchestrator` | `*/10 * * * *` (cible) | **V2** — 5 workers in-process ; **hors** vercel.json |
 
-Ces expressions restent la **cible opérationnelle** ; elles ne figurent **pas** dans `vercel.json`.
+Préférer l’orchestrateur V2 en staging Agent 2 (voir `docs/acquisition-ops-v2-staging-activation.md`) plutôt que d’empiler les 5 crons unitaires.
 
 ### Schedules Vercel inchangés (Hobby-compatibles)
 

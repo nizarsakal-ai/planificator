@@ -37,4 +37,4 @@ export function getExtractionReclaimTtlMs(): number {
   return Math.min(Math.max(Math.floor(raw), 60_000), 30 * 60_000)
 }
 
-export const EXTRACTION_SCHEMA_VERSION = "1" as const
+export const EXTRACTION_SCHEMA_VERSION = "2" as const

@@ -6,7 +6,8 @@ import type { Role } from "@prisma/client"
 
 export type ConversionActorContext = {
   actorUserId: string
-  actorRole: Role
+  /** SYSTEM = acteur pipeline auto (Lot F). */
+  actorRole: Role | "SYSTEM"
   companyId: string
 }
 
@@ -31,8 +32,10 @@ export type ConvertImportDraftFailure = {
     | "FORBIDDEN"
     | "DISABLED"
     | "INTERNAL_ERROR"
+    | "DUPLICATE_REQUIRES_ACK"
   code: string
   message: string
+  existingWorksiteId?: string
 }
 
 export type ConvertImportDraftResult = ConvertImportDraftSuccess | ConvertImportDraftFailure

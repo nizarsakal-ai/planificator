@@ -68,8 +68,8 @@ export interface MailSyncResult {
   companyId: string
   source: AcquisitionSource
   status: MailSyncStatus
-  skipReason?: "FEATURE_DISABLED"
-  partialReason?: MailSyncPartialReason
+  skipReason?: "FEATURE_DISABLED" | "NO_ACTIVE_PARTNER_IDENTITIES" | "BUDGET_EXHAUSTED"
+  partialReason?: MailSyncPartialReason | "BUDGET_EXHAUSTED"
   stats: MailSyncStats
   error?: MailSyncError
   nextHistoryId: string | null

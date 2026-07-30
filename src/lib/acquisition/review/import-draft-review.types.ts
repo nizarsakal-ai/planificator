@@ -6,7 +6,8 @@ import type { Role, WorksiteImportDraftStatus } from "@prisma/client"
 
 export type ReviewActorContext = {
   actorUserId: string
-  actorRole: Role
+  /** SYSTEM = acteur pipeline auto (Lot F). */
+  actorRole: Role | "SYSTEM"
   companyId: string
 }
 

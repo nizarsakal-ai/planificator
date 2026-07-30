@@ -1,6 +1,7 @@
 /**
  * PLAN-ACQ-005D — Autorité conversion APPROVED → Client/Worksite/Documents → CONVERTED.
- * Une seule transaction interactive. Pas de Gmail / IA / Cloudinary write / géocodage.
+ * Une seule transaction interactive. Pas de Gmail / IA / Cloudinary write.
+ * Géocodage Nominatim : post-conversion hors TX (Lot G), non bloquant.
  */
 
 import type {
@@ -21,6 +22,11 @@ import {
   type ConvertImportDraftFailure,
   type ConvertImportDraftResult,
 } from "@/lib/acquisition/conversion/conversion.types"
+import { defaultGeocodePort, type GeocodePort } from "@/lib/geo/geocode.port"
+import {
+  findDuplicateWorksite,
+  normalizeAddressKey,
+} from "@/lib/acquisition/matching/client-match.service"
 
 const LOG_PREFIX = "[acquisition-conversion]"
 const ALLOWED_ROLES = new Set<Role>(["ADMIN", "SUPER_ADMIN"])
@@ -33,12 +39,17 @@ function defaultLog(event: string, payload?: Record<string, unknown>): void {
 export type ImportDraftConversionServiceDeps = {
   db?: PrismaClient
   log?: (event: string, payload?: Record<string, unknown>) => void
+  geocode?: GeocodePort
 }
 
 function authorize(
   ctx: ConversionActorContext
 ): { ok: true } | { ok: false; outcome: "FORBIDDEN"; code: string; message: string } {
-  if (!ALLOWED_ROLES.has(ctx.actorRole) || !ctx.companyId) {
+  if (!ctx.companyId || !ctx.actorUserId) {
+    return { ok: false, outcome: "FORBIDDEN", code: "CONVERSION_FORBIDDEN", message: "Accès refusé" }
+  }
+  if (ctx.actorRole === "SYSTEM") return { ok: true }
+  if (!ALLOWED_ROLES.has(ctx.actorRole)) {
     return { ok: false, outcome: "FORBIDDEN", code: "CONVERSION_FORBIDDEN", message: "Accès refusé" }
   }
   return { ok: true }
@@ -105,10 +116,12 @@ async function resolveAlreadyConverted(
 export class ImportDraftConversionService {
   private readonly db: PrismaClient
   private readonly log: (event: string, payload?: Record<string, unknown>) => void
+  private readonly geocode: GeocodePort
 
   constructor(deps: ImportDraftConversionServiceDeps = {}) {
     this.db = deps.db ?? prisma
     this.log = deps.log ?? defaultLog
+    this.geocode = deps.geocode ?? defaultGeocodePort
   }
 
   async convertImportDraft(
@@ -206,6 +219,32 @@ export class ImportDraftConversionService {
         }
         if (draft.proposedStartDate > draft.proposedEndDate) {
           throw Object.assign(new Error("DATE_RANGE_INVALID"), { code: "VALIDATION_ERROR" })
+        }
+
+        const addressKey = normalizeAddressKey({
+          address: draft.proposedAddress,
+          postalCode: draft.proposedPostalCode,
+          city: draft.proposedCity,
+        })
+        const dup = await findDuplicateWorksite({
+          companyId: ctx.companyId,
+          addressKey,
+          postalCode: draft.proposedPostalCode,
+          db: tx,
+        })
+        if (dup.worksiteId) {
+          if (ctx.actorRole === "SYSTEM" || !input.acknowledgeDuplicateWorksite) {
+            throw Object.assign(new Error("DUPLICATE_REQUIRES_ACK"), {
+              code: "DUPLICATE_REQUIRES_ACK",
+              existingWorksiteId: dup.worksiteId,
+            })
+          }
+          this.log("DUPLICATE_WORKSITE_ACKNOWLEDGED", {
+            companyId: ctx.companyId,
+            draftId: input.draftId,
+            existingWorksiteId: dup.worksiteId,
+            actorUserId: ctx.actorUserId,
+          })
         }
 
         let clientId: string
@@ -329,6 +368,12 @@ export class ImportDraftConversionService {
         documentCount: result.documentCount,
         skippedAttachmentCount: result.skippedAttachmentCount,
       })
+
+      // Lot G — géocodage post-conversion (hors TX, non bloquant).
+      if (result.outcome === "CONVERTED") {
+        void this.applyGeocodeAfterConvert(ctx.companyId, result.worksiteId)
+      }
+
       return result
     } catch (err) {
       if (err instanceof ConversionClaimConflictError) {
@@ -358,6 +403,20 @@ export class ImportDraftConversionService {
       if (code === "CLIENT_NOT_FOUND") {
         return fail("CLIENT_NOT_FOUND", "CLIENT_NOT_FOUND", "Client introuvable")
       }
+      if (code === "DUPLICATE_REQUIRES_ACK") {
+        const existingWorksiteId =
+          err && typeof err === "object" && "existingWorksiteId" in err
+            ? String((err as { existingWorksiteId: unknown }).existingWorksiteId)
+            : undefined
+        return {
+          ok: false,
+          outcome: "DUPLICATE_REQUIRES_ACK",
+          code: "DUPLICATE_REQUIRES_ACK",
+          message:
+            "Chantier probable déjà existant — confirmer acknowledgeDuplicateWorksite",
+          ...(existingWorksiteId ? { existingWorksiteId } : {}),
+        }
+      }
       if (code === "VALIDATION_ERROR" || code === "MISSING_WORKSITE_NAME" || code === "MISSING_DATES" || code === "DATE_RANGE_INVALID") {
         return fail("VALIDATION_ERROR", code || "VALIDATION_ERROR", "Données de conversion invalides")
       }
@@ -369,6 +428,28 @@ export class ImportDraftConversionService {
         code: "INTERNAL_ERROR",
       })
       return fail("INTERNAL_ERROR", "INTERNAL_ERROR", "Erreur interne de conversion")
+    }
+  }
+
+  private async applyGeocodeAfterConvert(
+    companyId: string,
+    worksiteId: string
+  ): Promise<void> {
+    try {
+      const worksite = await this.db.worksite.findFirst({
+        where: { id: worksiteId, companyId },
+        select: { id: true, address: true },
+      })
+      if (!worksite?.address) return
+      const geo = await this.geocode.geocodeAddress(worksite.address)
+      if (!geo) return
+      await this.db.worksite.updateMany({
+        where: { id: worksiteId, companyId },
+        data: { latitude: geo.latitude, longitude: geo.longitude },
+      })
+      this.log("GEOCODE_OK", { companyId, worksiteId })
+    } catch {
+      this.log("GEOCODE_SKIPPED", { companyId, worksiteId })
     }
   }
 }

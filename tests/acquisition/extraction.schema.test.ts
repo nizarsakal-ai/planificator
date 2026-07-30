@@ -115,6 +115,11 @@ describe("extraction-normalize gate R1", () => {
         consultationReference: null,
         description: "Signature commerciale très longue de plus de vingt caractères",
         attachmentClassifications: [],
+        interventionNature: null,
+        constraints: null,
+        clientReference: null,
+        requestClassification: null,
+        estimatedDurationHours: null,
       }),
       false
     )
@@ -234,6 +239,11 @@ describe("extraction-normalize gate R1", () => {
         consultationReference: "REF-99",
         description: null,
         attachmentClassifications: [],
+        interventionNature: null,
+        constraints: null,
+        clientReference: null,
+        requestClassification: null,
+        estimatedDurationHours: null,
       }),
       true
     )

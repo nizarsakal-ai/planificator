@@ -28,6 +28,7 @@ import {
   domainRefSchema,
   partnerRefSchema,
   renamePartnerSchema,
+  updatePartnerPolicySchema,
 } from "@/lib/acquisition/admin/partner-admin.schema"
 import {
   DomainAlreadyExistsError,
@@ -48,10 +49,12 @@ import type {
   PartnerAdminPartner,
   PartnerRefInput,
   RenamePartnerInput,
+  UpdatePartnerPolicyInput,
 } from "@/lib/acquisition/admin/partner-admin.types"
 
 const DEFAULT_CONNECTOR: AcquisitionSource = "GMAIL"
 const DEFAULT_PIPELINE = "consultations"
+const LOG_PREFIX = "[acquisition-partner-admin]"
 
 type PartnerRow = PartnerAdminPartner
 type DomainRow = PartnerAdminDomain
@@ -227,6 +230,84 @@ export class AcquisitionPartnerAdminService {
           where: { id: data.partnerId, companyId: data.companyId },
         })
         if (!row) throw new PartnerNotFoundError()
+        return row
+      })
+    } catch (e) {
+      if (e instanceof PartnerNotFoundError) throw e
+      mapPersistence(e)
+    }
+  }
+
+  /**
+   * Met à jour les policies auto / matching d’un partenaire (tenant-scoped).
+   * Ne touche pas `active` — activation séparée (activatePartner / deactivatePartner).
+   * Défauts create restent OFF ; cette méthode est le seul chemin admin pour ON.
+   */
+  async updatePartnerPolicy(
+    input: UpdatePartnerPolicyInput
+  ): Promise<PartnerAdminPartner> {
+    const data = parseOrThrow(() => updatePartnerPolicySchema.parse(input))
+
+    const patch: Partial<PartnerAdminPartner> = {}
+    if (data.autoApproveEnabled !== undefined) {
+      patch.autoApproveEnabled = data.autoApproveEnabled
+    }
+    if (data.autoConvertEnabled !== undefined) {
+      patch.autoConvertEnabled = data.autoConvertEnabled
+    }
+    if (data.allowCreateClient !== undefined) {
+      patch.allowCreateClient = data.allowCreateClient
+    }
+    if (data.minConfidence !== undefined) {
+      patch.minConfidence = data.minConfidence
+    }
+    if (data.requireExactEmail !== undefined) {
+      patch.requireExactEmail = data.requireExactEmail
+    }
+    if (data.priority !== undefined) {
+      patch.priority = data.priority
+    }
+
+    try {
+      return await this.db.$transaction(async (tx) => {
+        const before = await tx.acquisitionPartner.findFirst({
+          where: { id: data.partnerId, companyId: data.companyId },
+        })
+        if (!before) throw new PartnerNotFoundError()
+
+        const updated = await tx.acquisitionPartner.updateMany({
+          where: { id: data.partnerId, companyId: data.companyId },
+          data: patch,
+        })
+        if (updated.count === 0) throw new PartnerNotFoundError()
+
+        const row = await tx.acquisitionPartner.findFirst({
+          where: { id: data.partnerId, companyId: data.companyId },
+        })
+        if (!row) throw new PartnerNotFoundError()
+
+        console.log(`${LOG_PREFIX} POLICY_UPDATED`, {
+          companyId: data.companyId,
+          partnerId: data.partnerId,
+          partnerCode: row.code,
+          before: {
+            autoApproveEnabled: before.autoApproveEnabled,
+            autoConvertEnabled: before.autoConvertEnabled,
+            allowCreateClient: before.allowCreateClient,
+            minConfidence: before.minConfidence,
+            requireExactEmail: before.requireExactEmail,
+            priority: before.priority,
+          },
+          after: {
+            autoApproveEnabled: row.autoApproveEnabled,
+            autoConvertEnabled: row.autoConvertEnabled,
+            allowCreateClient: row.allowCreateClient,
+            minConfidence: row.minConfidence,
+            requireExactEmail: row.requireExactEmail,
+            priority: row.priority,
+          },
+        })
+
         return row
       })
     } catch (e) {

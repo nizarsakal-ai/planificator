@@ -106,11 +106,45 @@ function formatDate(date: Date) {
 
 export function ChantiersView({ chantiers }: ChantiersViewProps) {
   const [view, setView] = useState<"grid" | "mosaic" | "list" | "map">("grid")
+  const [assignmentFilter, setAssignmentFilter] = useState<"all" | "unassigned">("all")
+
+  const filtered = chantiers.filter((c) => {
+    if (assignmentFilter !== "unassigned") return true
+    return c.status === "PLANNED" && c._count.assignments === 0
+  })
+
+  const unassignedCount = chantiers.filter(
+    (c) => c.status === "PLANNED" && c._count.assignments === 0
+  ).length
 
   return (
     <div className="space-y-4">
       {/* Toggle */}
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex bg-slate-100 rounded-lg p-1 gap-1">
+          <button
+            type="button"
+            onClick={() => setAssignmentFilter("all")}
+            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              assignmentFilter === "all"
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            Tous
+          </button>
+          <button
+            type="button"
+            onClick={() => setAssignmentFilter("unassigned")}
+            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              assignmentFilter === "unassigned"
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            À affecter{unassignedCount > 0 ? ` (${unassignedCount})` : ""}
+          </button>
+        </div>
         <div className="flex bg-slate-100 rounded-lg p-1 gap-1">
           <button
             onClick={() => setView("grid")}
@@ -152,7 +186,7 @@ export function ChantiersView({ chantiers }: ChantiersViewProps) {
       </div>
 
       {view === "map" ? (
-        <ChantiersMap chantiers={chantiers} />
+        <ChantiersMap chantiers={filtered} />
       ) : view === "list" ? (
         /* Vue Liste — tableau Chantier / Date / Client / Équipe */
         <Card>
@@ -166,7 +200,7 @@ export function ChantiersView({ chantiers }: ChantiersViewProps) {
             </div>
             {/* Lignes */}
             <div className="divide-y divide-slate-50">
-              {chantiers.map((chantier) => {
+              {filtered.map((chantier) => {
                 const status = statusLabels[chantier.status] ?? { label: chantier.status, variant: "secondary" as const }
                 const teams = getUniqueTeams(chantier.assignments)
                 return (
@@ -208,7 +242,7 @@ export function ChantiersView({ chantiers }: ChantiersViewProps) {
       ) : view === "mosaic" ? (
         /* Vue Mosaïque — grille compacte */
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-          {chantiers.map((chantier) => {
+          {filtered.map((chantier) => {
             const status = statusLabels[chantier.status] ?? { label: chantier.status, variant: "secondary" as const }
             const teams = getUniqueTeams(chantier.assignments)
             return (
@@ -241,7 +275,7 @@ export function ChantiersView({ chantiers }: ChantiersViewProps) {
       ) : (
         /* Vue Grille */
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {chantiers.map((chantier) => {
+          {filtered.map((chantier) => {
             const status = statusLabels[chantier.status] ?? { label: chantier.status, variant: "secondary" as const }
             const teams = getUniqueTeams(chantier.assignments)
             return (
@@ -260,6 +294,11 @@ export function ChantiersView({ chantiers }: ChantiersViewProps) {
                       </div>
                       <div className="flex items-center gap-1">
                         <Badge variant={status.variant} className="text-xs shrink-0">{status.label}</Badge>
+                        {chantier.status === "PLANNED" && chantier._count.assignments === 0 && (
+                          <Badge variant="outline" className="text-xs shrink-0 border-amber-300 text-amber-800">
+                            À affecter
+                          </Badge>
+                        )}
                         <ChevronRight className="h-4 w-4 text-slate-300" />
                       </div>
                     </div>
