@@ -20,6 +20,7 @@ import {
   BOOKING_EMAIL_BODY_PERSIST_MAX,
   hasBookingAddress,
 } from "@/lib/booking/booking-pending-merge"
+import { getBookingGmailScanEarlyResponse } from "@/lib/booking/booking-gmail-scan-gate"
 
 /**
  * Lifecycle adresse (PLAN-BOOKING-ADDRESS-RELIABILITY-001-R1) :
@@ -31,10 +32,8 @@ import {
  */
 
 export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization")
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const early = getBookingGmailScanEarlyResponse(req)
+  if (early) return early
 
   const connections = await prisma.gmailConnection.findMany()
   const stats = {

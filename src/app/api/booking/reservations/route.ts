@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { z } from "zod"
+import { assertCronBearerAuth } from "@/lib/cron/assert-cron-bearer-auth"
 
 // ── Schéma de validation du payload N8N ──────────────────────────────────────
 const ReservationSchema = z.object({
@@ -31,11 +32,9 @@ const ReservationSchema = z.object({
 })
 
 export async function POST(req: Request) {
-  // ── Auth : Bearer CRON_SECRET ────────────────────────────────────────────
-  const authHeader = req.headers.get("authorization")
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  // ── Auth : Bearer CRON_SECRET (fail-closed) ───────────────────────────────
+  const unauthorized = assertCronBearerAuth(req)
+  if (unauthorized) return unauthorized
 
   // ── Parse & validation ────────────────────────────────────────────────────
   let body: unknown
