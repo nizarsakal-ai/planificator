@@ -9,7 +9,7 @@ import type { Role, WorksiteImportDraftStatus } from "@prisma/client"
 import { isAcquisitionEnabled as defaultIsAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
 import { isAcquisitionExtractionEnabled as defaultIsExtractionEnabled } from "@/lib/acquisition/extraction/extraction-feature-flag"
 import { runDraftExtraction as defaultRunDraftExtraction } from "@/lib/acquisition/extraction/extraction.service"
-import type { ExtractDraftResult } from "@/lib/acquisition/extraction/extraction.types"
+import type { ExtractDraftResult, ExtractionActor } from "@/lib/acquisition/extraction/extraction.types"
 import { importDraftReadRepository } from "@/lib/acquisition/review/import-draft-read.repository"
 import { importDraftReviewService } from "@/lib/acquisition/review/import-draft-review.service"
 import { getReExtractPolicy } from "@/lib/acquisition/review/consultation-ui"
@@ -41,7 +41,7 @@ export type AcquisitionReviewActionDeps = {
     draftId: string
   }) => Promise<ImportDraftStatusSnapshot | null>
   runDraftExtraction?: (input: {
-    actor: { userId: string; role: Role; companyId: string }
+    actor: ExtractionActor
     draftId: string
     force?: boolean
   }) => Promise<ExtractDraftResult>

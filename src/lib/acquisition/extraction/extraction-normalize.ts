@@ -30,6 +30,11 @@ const CANONICAL_KEYS = [
   "consultationReference",
   "description",
   "attachmentClassifications",
+  "interventionNature",
+  "constraints",
+  "clientReference",
+  "requestClassification",
+  "estimatedDurationHours",
 ] as const
 
 type CanonicalKey = (typeof CANONICAL_KEYS)[number]
@@ -230,13 +235,18 @@ export function buildExtractedDataPayload(
   contentHashAtExtraction: string
 ): Record<string, unknown> {
   return {
-    schemaVersion: "1",
+    schemaVersion: "2",
     postalCode: fields.postalCode,
     city: fields.city,
     consultationReference: fields.consultationReference,
     contactEmail: fields.contactEmail,
     contactPhone: fields.contactPhone,
     attachmentClassifications: fields.attachmentClassifications,
+    interventionNature: fields.interventionNature,
+    constraints: fields.constraints,
+    clientReference: fields.clientReference,
+    requestClassification: fields.requestClassification,
+    estimatedDurationHours: fields.estimatedDurationHours,
     evidence: evidenceData,
     contentHashAtExtraction,
   }

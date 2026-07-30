@@ -19,7 +19,7 @@ const withPWA = withPWAInit({
 })
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["@react-pdf/renderer"],
+  serverExternalPackages: ["@react-pdf/renderer", "unpdf"],
   experimental: {
     serverActions: {
       bodySizeLimit: "20mb",

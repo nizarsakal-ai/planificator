@@ -110,6 +110,12 @@ function createFakeDb(
             connector: data.connector,
             pipeline: data.pipeline,
             active: data.active,
+            priority: 100,
+            requireExactEmail: false,
+            autoApproveEnabled: false,
+            autoConvertEnabled: false,
+            allowCreateClient: false,
+            minConfidence: null,
             createdAt: now,
             updatedAt: now,
           }
@@ -281,6 +287,12 @@ describe("AcquisitionPartnerAdminService", () => {
           connector: "GMAIL",
           pipeline: "consultations",
           active: true,
+          priority: 100,
+          requireExactEmail: false,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+          minConfidence: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -308,6 +320,12 @@ describe("AcquisitionPartnerAdminService", () => {
           connector: "GMAIL",
           pipeline: "consultations",
           active: true,
+          priority: 100,
+          requireExactEmail: false,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+          minConfidence: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -331,6 +349,12 @@ describe("AcquisitionPartnerAdminService", () => {
           connector: "GMAIL",
           pipeline: "consultations",
           active: true,
+          priority: 100,
+          requireExactEmail: false,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+          minConfidence: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -375,6 +399,12 @@ describe("AcquisitionPartnerAdminService", () => {
           connector: "GMAIL",
           pipeline: "consultations",
           active: true,
+          priority: 100,
+          requireExactEmail: false,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+          minConfidence: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -398,6 +428,12 @@ describe("AcquisitionPartnerAdminService", () => {
           connector: "GMAIL",
           pipeline: "consultations",
           active: true,
+          priority: 100,
+          requireExactEmail: false,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+          minConfidence: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -432,6 +468,12 @@ describe("AcquisitionPartnerAdminService", () => {
           connector: "GMAIL",
           pipeline: "consultations",
           active: true,
+          priority: 100,
+          requireExactEmail: false,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+          minConfidence: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -489,6 +531,12 @@ describe("AcquisitionPartnerAdminService", () => {
           connector: "GMAIL",
           pipeline: "consultations",
           active: true,
+          priority: 100,
+          requireExactEmail: false,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+          minConfidence: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -520,6 +568,12 @@ describe("AcquisitionPartnerAdminService", () => {
             connector: "GMAIL",
             pipeline: "consultations",
             active: true,
+            priority: 100,
+            requireExactEmail: false,
+            autoApproveEnabled: false,
+            autoConvertEnabled: false,
+            allowCreateClient: false,
+            minConfidence: null,
             createdAt: new Date(),
             updatedAt: new Date(),
           },
@@ -548,6 +602,12 @@ describe("AcquisitionPartnerAdminService", () => {
             connector: "GMAIL",
             pipeline: "consultations",
             active: true,
+            priority: 100,
+            requireExactEmail: false,
+            autoApproveEnabled: false,
+            autoConvertEnabled: false,
+            allowCreateClient: false,
+            minConfidence: null,
             createdAt: new Date(),
             updatedAt: new Date(),
           },
@@ -576,6 +636,12 @@ describe("AcquisitionPartnerAdminService", () => {
             connector: "GMAIL",
             pipeline: "consultations",
             active: true,
+            priority: 100,
+            requireExactEmail: false,
+            autoApproveEnabled: false,
+            autoConvertEnabled: false,
+            allowCreateClient: false,
+            minConfidence: null,
             createdAt: new Date(),
             updatedAt: new Date(),
           },
@@ -608,6 +674,12 @@ describe("AcquisitionPartnerAdminService", () => {
           connector: "GMAIL",
           pipeline: "consultations",
           active: true,
+          priority: 100,
+          requireExactEmail: false,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+          minConfidence: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -619,6 +691,12 @@ describe("AcquisitionPartnerAdminService", () => {
           connector: "GMAIL",
           pipeline: "consultations",
           active: false,
+          priority: 100,
+          requireExactEmail: false,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+          minConfidence: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -668,6 +746,12 @@ describe("AcquisitionPartnerAdminService", () => {
           connector: "GMAIL",
           pipeline: "consultations",
           active: true,
+          priority: 100,
+          requireExactEmail: false,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+          minConfidence: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -750,6 +834,12 @@ describe("AcquisitionPartnerAdminService", () => {
           connector: "GMAIL",
           pipeline: "consultations",
           active: true,
+          priority: 100,
+          requireExactEmail: false,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+          minConfidence: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -788,5 +878,101 @@ describe("AcquisitionPartnerAdminService", () => {
     assert.equal(store.partners.length, 2)
     assert.equal(store.partners[0]?.companyId, "co_a")
     assert.equal(store.partners[1]?.companyId, "co_b")
+  })
+
+  it("updatePartnerPolicy tenant-scoped + defaults OFF à la create", async () => {
+    const { db, store } = createFakeDb()
+    const svc = new AcquisitionPartnerAdminService({ db })
+    const created = await svc.createPartner({
+      companyId: "co_a",
+      name: "Acme",
+      code: "acme",
+    })
+    assert.equal(created.autoApproveEnabled, false)
+    assert.equal(created.autoConvertEnabled, false)
+    assert.equal(created.allowCreateClient, false)
+
+    const updated = await svc.updatePartnerPolicy({
+      companyId: "co_a",
+      partnerId: created.id,
+      autoApproveEnabled: true,
+      minConfidence: 0.8,
+      allowCreateClient: true,
+      priority: 50,
+      requireExactEmail: true,
+    })
+    assert.equal(updated.autoApproveEnabled, true)
+    assert.equal(updated.allowCreateClient, true)
+    assert.equal(updated.minConfidence, 0.8)
+    assert.equal(updated.priority, 50)
+    assert.equal(updated.requireExactEmail, true)
+    assert.equal(updated.active, true)
+    assert.equal(store.partners[0]?.autoConvertEnabled, false)
+  })
+
+  it("updatePartnerPolicy cross-tenant → PartnerNotFound", async () => {
+    const { db } = createFakeDb({
+      partners: [
+        {
+          id: "p1",
+          companyId: "co_a",
+          name: "A",
+          code: "a",
+          connector: "GMAIL",
+          pipeline: "consultations",
+          active: true,
+          priority: 100,
+          requireExactEmail: false,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+          minConfidence: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    })
+    const svc = new AcquisitionPartnerAdminService({ db })
+    await assert.rejects(
+      () =>
+        svc.updatePartnerPolicy({
+          companyId: "co_other",
+          partnerId: "p1",
+          autoApproveEnabled: true,
+        }),
+      PartnerNotFoundError
+    )
+  })
+
+  it("updatePartnerPolicy minConfidence hors bornes → erreur validation", async () => {
+    const { db } = createFakeDb({
+      partners: [
+        {
+          id: "p1",
+          companyId: "co_a",
+          name: "A",
+          code: "a",
+          connector: "GMAIL",
+          pipeline: "consultations",
+          active: true,
+          priority: 100,
+          requireExactEmail: false,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+          minConfidence: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    })
+    const svc = new AcquisitionPartnerAdminService({ db })
+    await assert.rejects(() =>
+      svc.updatePartnerPolicy({
+        companyId: "co_a",
+        partnerId: "p1",
+        minConfidence: 1.5,
+      })
+    )
   })
 })

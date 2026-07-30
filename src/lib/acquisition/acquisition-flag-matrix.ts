@@ -22,6 +22,12 @@ import {
   isAcquisitionConversionEnabled,
   isAcquisitionConversionFullyEnabled,
 } from "@/lib/acquisition/conversion/conversion-feature-flag"
+import { isAcquisitionOrchestratorCronEnabled } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-feature-flag"
+import { resolveAcquisitionOrchestratorCronGate } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-gate"
+import {
+  isAcquisitionAutoApproveEnabled,
+  isAcquisitionAutoConvertEnabled,
+} from "@/lib/acquisition/policy/auto-decision-feature-flag"
 
 export {
   isAcquisitionEnabled as isAcquisitionMasterEnabled,
@@ -36,6 +42,10 @@ export {
   isAcquisitionExtractionCronEnabled,
   isAcquisitionConversionFullyEnabled,
   getExtractionProviderId,
+  isAcquisitionOrchestratorCronEnabled,
+  resolveAcquisitionOrchestratorCronGate,
+  isAcquisitionAutoApproveEnabled,
+  isAcquisitionAutoConvertEnabled,
 }
 
 /** Skip contrôlé des crons Acquisition (compat + extensions OPS-001 / OPS-003 / OPS-004). */
@@ -63,6 +73,10 @@ export type AcquisitionFlagIssueCode =
   | "INV_EXTRACTION_CRON_WITHOUT_CONTENT"
   | "INV_EXTRACTION_CRON_WITHOUT_EXTRACTION"
   | "INV_DOWNLOAD_WITHOUT_MASTER"
+  | "INV_ORCHESTRATOR_WITHOUT_MASTER"
+  | "INV_AUTO_CONVERT_WITHOUT_AUTO_APPROVE"
+  | "INV_AUTO_APPROVE_WITHOUT_MASTER"
+  | "INV_AUTO_CONVERT_WITHOUT_CONVERSION"
 
 export interface AcquisitionFlagMatrix {
   master: boolean
@@ -78,6 +92,9 @@ export interface AcquisitionFlagMatrix {
   extractionProvider: ExtractionProviderId
   conversion: boolean
   conversionFully: boolean
+  orchestratorCron: boolean
+  autoApprove: boolean
+  autoConvert: boolean
 }
 
 export interface AcquisitionFlagIssue {
@@ -102,6 +119,9 @@ export function getAcquisitionFlagMatrix(): AcquisitionFlagMatrix {
     extractionProvider: getExtractionProviderId(),
     conversion,
     conversionFully: isAcquisitionConversionFullyEnabled(),
+    orchestratorCron: isAcquisitionOrchestratorCronEnabled(),
+    autoApprove: isAcquisitionAutoApproveEnabled(),
+    autoConvert: isAcquisitionAutoConvertEnabled(),
   }
 }
 
@@ -205,6 +225,30 @@ export function validateAcquisitionFlagMatrix(
     issues.push({
       code: "INV_CONVERSION_WITHOUT_MASTER",
       message: "Conversion ON without master is not Fully enabled",
+    })
+  }
+  if (matrix.orchestratorCron && !matrix.master) {
+    issues.push({
+      code: "INV_ORCHESTRATOR_WITHOUT_MASTER",
+      message: "Orchestrator cron ON requires PLANIFICATOR_ACQUISITION_ENABLED",
+    })
+  }
+  if (matrix.autoApprove && !matrix.master) {
+    issues.push({
+      code: "INV_AUTO_APPROVE_WITHOUT_MASTER",
+      message: "Auto-approve ON requires PLANIFICATOR_ACQUISITION_ENABLED",
+    })
+  }
+  if (matrix.autoConvert && !matrix.autoApprove) {
+    issues.push({
+      code: "INV_AUTO_CONVERT_WITHOUT_AUTO_APPROVE",
+      message: "Auto-convert ON requires ACQUISITION_AUTO_APPROVE_ENABLED",
+    })
+  }
+  if (matrix.autoConvert && !matrix.conversion) {
+    issues.push({
+      code: "INV_AUTO_CONVERT_WITHOUT_CONVERSION",
+      message: "Auto-convert ON requires ACQUISITION_CONVERSION_ENABLED",
     })
   }
 

@@ -123,9 +123,17 @@ export async function registerIncomingMessage(
     new PartnerEligibilityResolver(new PartnerRegistryRepository(db))
 
   const normalized = normalizeSenderAddress(data.senderEmail)
-  const eligible =
-    normalized !== null &&
-    (await eligibilityResolver.isDomainEligible(data.companyId, normalized.domain))
+  let resolvedPartnerId: string | null = null
+  let eligible = false
+  if (normalized) {
+    const resolved = await eligibilityResolver.resolveEligibleSender(
+      data.companyId,
+      normalized.email,
+      normalized.domain
+    )
+    eligible = resolved !== null
+    resolvedPartnerId = resolved?.partner.id ?? null
+  }
   const errorCode: "INVALID_SENDER" | "SENDER_NOT_ELIGIBLE" | null =
     normalized === null ? "INVALID_SENDER" : eligible ? null : "SENDER_NOT_ELIGIBLE"
 
@@ -136,6 +144,8 @@ export async function registerIncomingMessage(
           companyId: data.companyId,
           source: data.source,
           externalMessageId: data.externalMessageId,
+          threadId: data.threadId ?? null,
+          resolvedPartnerId: eligible ? resolvedPartnerId : null,
           senderEmail: normalized?.email ?? data.senderEmail.trim().toLowerCase().slice(0, 320),
           senderDomain: normalized?.domain ?? "",
           subject: data.subject,
@@ -146,7 +156,7 @@ export async function registerIncomingMessage(
             errorCode === "INVALID_SENDER"
               ? "Adresse expéditeur invalide"
               : errorCode === "SENDER_NOT_ELIGIBLE"
-                ? "Domaine expéditeur non admissible"
+                ? "Expéditeur non admissible (registre partenaires)"
                 : null,
           rawMetadata: (data.rawMetadata ?? undefined) as Prisma.InputJsonValue | undefined,
         },

@@ -42,18 +42,11 @@ export async function createChantier(formData: FormData) {
   let latitude: number | null = null
   let longitude: number | null = null
   if (parsed.data.address) {
-    try {
-      const geoRes = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(parsed.data.address)}&format=json&limit=1`,
-        { headers: { "User-Agent": "Planificator/1.0" } }
-      )
-      const geoData = await geoRes.json()
-      if (geoData.length > 0) {
-        latitude  = parseFloat(geoData[0].lat)
-        longitude = parseFloat(geoData[0].lon)
-      }
-    } catch {
-      // Géocodage échoué, on continue sans coordonnées
+    const { defaultGeocodePort } = await import("@/lib/geo/geocode.port")
+    const geo = await defaultGeocodePort.geocodeAddress(parsed.data.address)
+    if (geo) {
+      latitude = geo.latitude
+      longitude = geo.longitude
     }
   }
 
@@ -109,17 +102,12 @@ export async function updateChantier(worksiteId: string, formData: FormData) {
   let latitude: number | null = worksite.latitude
   let longitude: number | null = worksite.longitude
   if (parsed.data.address && parsed.data.address !== worksite.address) {
-    try {
-      const geoRes = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(parsed.data.address)}&format=json&limit=1`,
-        { headers: { "User-Agent": "Planificator/1.0" } }
-      )
-      const geoData = await geoRes.json()
-      if (geoData[0]) {
-        latitude  = parseFloat(geoData[0].lat)
-        longitude = parseFloat(geoData[0].lon)
-      }
-    } catch { /* géocodage non bloquant */ }
+    const { defaultGeocodePort } = await import("@/lib/geo/geocode.port")
+    const geo = await defaultGeocodePort.geocodeAddress(parsed.data.address)
+    if (geo) {
+      latitude = geo.latitude
+      longitude = geo.longitude
+    }
   }
 
   await prisma.worksite.update({

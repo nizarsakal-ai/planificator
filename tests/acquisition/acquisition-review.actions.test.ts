@@ -136,7 +136,7 @@ describe("acquisition-review.actions sécurité tenant + Zod", () => {
   })
 
   it("companyId vient exclusivement de la session", async () => {
-    let extractionCompany: string | undefined
+    let extractionCompany: string | null | undefined
     await reExtractImportDraftAction(
       { draftId: "d1" },
       baseDeps({

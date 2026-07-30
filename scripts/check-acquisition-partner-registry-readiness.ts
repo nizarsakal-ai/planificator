@@ -30,6 +30,7 @@ function asReadinessDb(client: PrismaClient): PartnerRegistryReadinessDb {
     company: client.company,
     acquisitionPartner: client.acquisitionPartner,
     acquisitionPartnerDomain: client.acquisitionPartnerDomain,
+    acquisitionPartnerEmail: client.acquisitionPartnerEmail,
   }
 }
 
@@ -41,7 +42,7 @@ async function main() {
   }
 
   console.log(
-    "PLAN-ACQ-012-LOT-1.4 — preflight readiness registre partenaires (lecture seule)…"
+    "PLAN-ACQ-V2 Lot I — preflight readiness multi-partenaires (lecture seule)…"
   )
   console.log(
     "Vérifiez explicitement que DATABASE_URL pointe vers la cible voulue (valeur jamais affichée)."
@@ -57,11 +58,8 @@ async function main() {
           companiesTotal: report.companiesTotal,
           companiesReady: report.companiesReady,
           companiesNotReady: report.companiesNotReady,
-          missingLauraluPartner: report.missingLauraluPartner,
-          inactiveLauraluPartner: report.inactiveLauraluPartner,
-          missingLauraluDomain: report.missingLauraluDomain,
-          inactiveLauraluDomain: report.inactiveLauraluDomain,
-          lauraluDomainLinkedToWrongPartner: report.lauraluDomainLinkedToWrongPartner,
+          missingActivePartner: report.missingActivePartner,
+          missingActiveIdentity: report.missingActiveIdentity,
           databaseErrors: report.databaseErrors,
         },
         null,
@@ -73,7 +71,7 @@ async function main() {
     process.exitCode = code
     if (code === 0) {
       console.log(
-        "✓ Preflight OK — Companies prêtes pour le cutover runtime (transition LAURALU)."
+        "✓ Preflight OK — ≥1 partenaire actif + identité (domaine|email) par Company."
       )
     } else {
       const noCompanies = report.databaseErrors.some(

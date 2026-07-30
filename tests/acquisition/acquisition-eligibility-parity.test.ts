@@ -36,6 +36,12 @@ function lauraluOnlyRegistry(): PartnerRegistryRepositoryPort {
     connector: "GMAIL",
     pipeline: "consultations",
     active: true,
+    priority: 100,
+    requireExactEmail: false,
+    autoApproveEnabled: false,
+    autoConvertEnabled: false,
+    allowCreateClient: false,
+    minConfidence: null,
     createdAt: now,
     updatedAt: now,
   }
@@ -52,6 +58,8 @@ function lauraluOnlyRegistry(): PartnerRegistryRepositoryPort {
 
   return {
     findPartnerByCode: async () => null,
+    findPartnerById: async () => null,
+    findPartnerByEmail: async () => null,
     findPartnerByDomain: async (companyId, domain) => {
       if (companyId !== "co_parity") return null
       if (domain.trim().toLowerCase() !== "lauralu.fr") return null
@@ -60,6 +68,7 @@ function lauraluOnlyRegistry(): PartnerRegistryRepositoryPort {
     findDomain: async () => null,
     listPartners: async () => [],
     listDomains: async () => [],
+    listEmails: async () => [],
     partnerExists: async () => false,
     domainExists: async () => false,
   }

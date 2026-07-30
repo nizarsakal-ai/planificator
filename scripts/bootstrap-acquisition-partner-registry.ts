@@ -33,6 +33,7 @@ function asBootstrapDb(client: PrismaClient): PartnerRegistryBootstrapDb {
     company: client.company,
     acquisitionPartner: client.acquisitionPartner,
     acquisitionPartnerDomain: client.acquisitionPartnerDomain,
+    acquisitionPartnerEmail: client.acquisitionPartnerEmail,
     $transaction: (fn) =>
       client.$transaction((tx) => fn(tx as unknown as PartnerRegistryBootstrapTx)),
   }
@@ -45,7 +46,7 @@ async function main() {
     return
   }
 
-  console.log("PLAN-ACQ-012-LOT-1.2 — bootstrap registre partenaires (LAURALU)…")
+  console.log("PLAN-ACQ-V2 — bootstrap registre partenaires (seeds data-driven)…")
   try {
     const result = await bootstrapLauraluPartnerRegistry(asBootstrapDb(prisma))
     console.log(

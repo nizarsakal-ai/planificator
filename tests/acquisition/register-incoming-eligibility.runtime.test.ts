@@ -28,9 +28,15 @@ function partner(
     name: "P",
     connector: "GMAIL",
     pipeline: "consultations",
+    priority: 100,
+    requireExactEmail: false,
+    autoApproveEnabled: false,
+    autoConvertEnabled: false,
+    minConfidence: null,
     createdAt: now,
     updatedAt: now,
     ...partial,
+    allowCreateClient: partial.allowCreateClient ?? false,
   }
 }
 
@@ -65,6 +71,8 @@ function trackingRegistry(
   return {
     findCalls,
     findPartnerByCode: async () => null,
+    findPartnerById: async () => null,
+    findPartnerByEmail: async () => null,
     findPartnerByDomain: async (companyId, domainName) => {
       findCalls.push({ companyId, domain: domainName })
       if (options?.throwOnFind) throw options.throwOnFind
@@ -74,6 +82,7 @@ function trackingRegistry(
     findDomain: async () => null,
     listPartners: async () => [],
     listDomains: async () => [],
+    listEmails: async () => [],
     partnerExists: async () => false,
     domainExists: async () => false,
   }
@@ -184,7 +193,7 @@ describe("registerIncomingMessage × éligibilité (R2)", () => {
     assert.equal(track.messageCreateCalls, 1)
     assert.equal(track.created[0]?.status, "REJECTED")
     assert.equal(track.created[0]?.lastErrorCode, "SENDER_NOT_ELIGIBLE")
-    assert.equal(track.created[0]?.lastErrorMessage, "Domaine expéditeur non admissible")
+    assert.equal(track.created[0]?.lastErrorMessage, "Expéditeur non admissible (registre partenaires)")
     assert.equal(
       track.created[0]?.lastErrorMessage?.includes("attendu"),
       false,
@@ -390,7 +399,10 @@ describe("registerIncomingMessage × éligibilité (R2)", () => {
   it("panne Prisma via port injecté : jamais de rejet métier persisté", async () => {
     const err = Object.assign(new Error("timeout"), { code: "P2024" })
     const eligibilityResolver: PartnerEligibilityResolverPort = {
-      isDomainEligible: async (companyId, domainName) => {
+      isDomainEligible: async () => {
+        throw err
+      },
+      resolveEligibleSender: async (companyId, _email, domainName) => {
         assert.equal(companyId, "co_a")
         assert.equal(domainName, "lauralu.fr")
         throw err

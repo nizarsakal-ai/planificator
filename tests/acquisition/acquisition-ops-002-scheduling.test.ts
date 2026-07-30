@@ -27,12 +27,14 @@ const ACQUISITION_PATHS = [
   "/api/cron/acquisition-gmail-sync",
   "/api/cron/acquisition-attachment-download",
   "/api/cron/acquisition-attachment-recovery",
+  "/api/cron/acquisition-orchestrator",
 ] as const
 
 const ACQUISITION_ROUTES = [
   "src/app/api/cron/acquisition-gmail-sync/route.ts",
   "src/app/api/cron/acquisition-attachment-download/route.ts",
   "src/app/api/cron/acquisition-attachment-recovery/route.ts",
+  "src/app/api/cron/acquisition-orchestrator/route.ts",
 ] as const
 
 const DOC = "docs/acquisition-ops-002-scheduling.md"

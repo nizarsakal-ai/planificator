@@ -305,6 +305,8 @@ model Company {
   acquisitionContentFetchStates AcquisitionContentFetchState[]
   acquisitionPartners         AcquisitionPartner[]
   acquisitionPartnerDomains   AcquisitionPartnerDomain[]
+  acquisitionPartnerEmails    AcquisitionPartnerEmail[]
+  acquisitionDecisionJournals AcquisitionDecisionJournal[]
   integrationConnections      IntegrationConnection[]
 
   @@map("companies")
@@ -1212,6 +1214,10 @@ model AcquisitionMessage {
   companyId          String
   source             AcquisitionSource
   externalMessageId  String
+  /// Gmail thread id (Lot H) — indexé pour regroupement / observabilité.
+  threadId           String?
+  /// Partenaire résolu à l’ingestion (Lot I) — null si REJECTED.
+  resolvedPartnerId  String?
   senderEmail        String
   senderDomain       String
   subject            String
@@ -1224,10 +1230,11 @@ model AcquisitionMessage {
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
 
-  company     Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  draft       WorksiteImportDraft?
-  attachments AcquisitionAttachment[]
-  content     AcquisitionMessageContent?
+  company          Company                  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  resolvedPartner  AcquisitionPartner?      @relation(fields: [resolvedPartnerId], references: [id], onDelete: SetNull)
+  draft            WorksiteImportDraft?
+  attachments      AcquisitionAttachment[]
+  content          AcquisitionMessageContent?
   contentFetchState AcquisitionContentFetchState?
 
   // Idempotence par tenant : le même id Gmail peut exister chez deux
@@ -1238,6 +1245,8 @@ model AcquisitionMessage {
   @@unique([id, companyId])
   @@index([companyId, status])
   @@index([companyId, receivedAt])
+  @@index([companyId, threadId])
+  @@index([companyId, resolvedPartnerId])
   @@map("acquisition_messages")
 }
 
@@ -1349,6 +1358,26 @@ model WorksiteImportDraft {
   @@map("worksite_import_drafts")
 }
 
+/// PLAN-ACQ-V2 Lot F — Journal des décisions auto-approve / auto-convert / human.
+model AcquisitionDecisionJournal {
+  id           String   @id @default(cuid())
+  companyId    String
+  draftId      String
+  decisionCode String
+  reasons      Json
+  scores       Json
+  actorUserId  String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@index([companyId, draftId])
+  @@index([companyId, decisionCode])
+  @@map("acquisition_decision_journals")
+}
+
 model AcquisitionAttachment {
   id                   String                        @id @default(cuid())
   companyId            String
@@ -1443,23 +1472,37 @@ model AcquisitionPartner {
   id         String            @id @default(cuid())
   companyId  String
   name       String
-  // Code interne stable par tenant (slug) — ex. "lauralu"
+  // Code interne stable par tenant (slug) — ex. "lauralu" (donnée, pas constante pipeline)
   code       String
   // Canal connecteur : enum existant AcquisitionSource (GMAIL V1) — pas un nouveau type
   connector  AcquisitionSource @default(GMAIL)
   // Clé technique contrôlée (V1: "consultations") — pas une chaîne libre utilisateur
   pipeline   String            @default("consultations")
   active     Boolean           @default(true)
+  /// Priorité relative (plus petit = plus prioritaire) — Lot I
+  priority   Int               @default(100)
+  /// Si true : domaine seul insuffisant, email allowlist obligatoire
+  requireExactEmail  Boolean   @default(false)
+  /// Politique auto (Lot I / F) — défaut OFF (revue humaine)
+  autoApproveEnabled Boolean   @default(false)
+  autoConvertEnabled Boolean   @default(false)
+  /// Autorise création client NEW en auto-convert — défaut OFF (R2)
+  allowCreateClient  Boolean   @default(false)
+  /// Seuil confiance [0..1] ; null = fallback env global
+  minConfidence      Float?
   createdAt  DateTime          @default(now())
   updatedAt  DateTime          @updatedAt
 
-  company Company                    @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  domains AcquisitionPartnerDomain[]
+  company  Company                     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  domains  AcquisitionPartnerDomain[]
+  emails   AcquisitionPartnerEmail[]
+  messages AcquisitionMessage[]
 
   @@unique([companyId, code])
   // Cible FK composite domaines → partenaire (anti inter-tenant)
   @@unique([id, companyId])
   @@index([companyId, active])
+  @@index([companyId, priority])
   @@map("acquisition_partners")
 }
 
@@ -1481,6 +1524,39 @@ model AcquisitionPartnerDomain {
   @@index([companyId, active])
   @@index([partnerId])
   @@map("acquisition_partner_domains")
+}
+
+/// PLAN-ACQ-V2 Lot I — Adresses email autorisées (allowlist optionnelle par partenaire).
+model AcquisitionPartnerEmail {
+  id              String   @id @default(cuid())
+  companyId       String
+  partnerId       String
+  emailNormalized String
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  company Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  partner AcquisitionPartner @relation(fields: [partnerId, companyId], references: [id, companyId], onDelete: Cascade)
+
+  @@unique([companyId, emailNormalized])
+  @@unique([id, companyId])
+  @@index([companyId, active])
+  @@index([partnerId])
+  @@map("acquisition_partner_emails")
+}
+
+// PLAN-ACQ-V2-001 — Lease durable multi-instance (Neon / Vercel).
+// Verrou nommé global : pas de FK tenant. ownerRunId null = libre.
+model AcquisitionOrchestratorLease {
+  key            String    @id
+  ownerRunId     String?
+  leaseExpiresAt DateTime?
+  acquiredAt     DateTime?
+  updatedAt      DateTime  @updatedAt
+
+  @@index([leaseExpiresAt])
+  @@map("acquisition_orchestrator_leases")
 }
 
 // Historique des affectations camion : qui conduisait quel camion, dans

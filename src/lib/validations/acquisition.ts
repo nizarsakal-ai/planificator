@@ -49,6 +49,8 @@ export const registerIncomingMessageSchema = z.object({
   companyId: z.string().min(1, "companyId requis"),
   source: z.enum(["GMAIL"]),
   externalMessageId: z.string().min(1, "Identifiant externe requis").max(255),
+  /** Gmail thread id (Lot H) — optionnel. */
+  threadId: z.string().min(1).max(255).nullish(),
   /**
    * Adresse réelle de l'expéditeur telle que fournie par le connecteur
    * (header From). La normalisation et l'extraction stricte du domaine

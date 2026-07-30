@@ -50,6 +50,12 @@ type FakeDb = {
     }) => Promise<{ id: string }>
   }
   worksite: {
+    findMany: (args: {
+      where: Record<string, unknown>
+      select?: Record<string, unknown>
+      orderBy?: unknown
+      take?: number
+    }) => Promise<unknown[]>
     create: (args: {
       data: { clientId: string; companyId: string; name: string }
       select?: { id: boolean }
@@ -80,6 +86,13 @@ function createFakeDb(seed: {
   draft: Draft
   clients?: Array<{ id: string; companyId: string }>
   forceClaimFail?: boolean
+  existingWorksites?: Array<{
+    id: string
+    companyId: string
+    address: string | null
+    name: string
+    status?: "PLANNED" | "IN_PROGRESS" | "EXTENDED"
+  }>
   attachments?: Array<{
     id: string
     companyId: string
@@ -95,6 +108,7 @@ function createFakeDb(seed: {
   let draft = { ...seed.draft }
   const clients = [...(seed.clients ?? [])]
   const attachments = [...(seed.attachments ?? [])]
+  const existingWorksites = [...(seed.existingWorksites ?? [])]
   const worksites: Array<{ id: string; clientId: string; companyId: string }> = []
   const documents: Array<{
     id: string
@@ -161,6 +175,34 @@ function createFakeDb(seed: {
       },
     },
     worksite: {
+      async findMany(args: {
+        where: Record<string, unknown>
+        select?: Record<string, unknown>
+        orderBy?: unknown
+        take?: number
+      }) {
+        const where = args.where as {
+          companyId: string
+          status?: { in: string[] }
+          address?: { contains: string; mode?: string }
+        }
+        const statuses = where.status?.in ?? ["PLANNED", "IN_PROGRESS", "EXTENDED"]
+        let rows = existingWorksites.filter(
+          (w) =>
+            w.companyId === where.companyId &&
+            statuses.includes(w.status ?? "PLANNED")
+        )
+        if (where.address?.contains) {
+          const needle = where.address.contains.toLowerCase()
+          rows = rows.filter((w) => (w.address ?? "").toLowerCase().includes(needle))
+        }
+        const take = args.take ?? rows.length
+        return rows.slice(0, take).map((w) => ({
+          id: w.id,
+          address: w.address,
+          name: w.name,
+        }))
+      },
       async create(args: {
         data: { clientId: string; companyId: string; name: string }
         select?: { id: boolean }
@@ -466,5 +508,102 @@ describe("ImportDraftConversionService", () => {
     )
     assert.equal(r.ok, false)
     if (!r.ok) assert.equal(r.outcome, "FORBIDDEN")
+  })
+
+  it("doublon sans acknowledge → DUPLICATE_REQUIRES_ACK", async () => {
+    const db = createFakeDb({
+      draft: baseDraft({
+        proposedAddress: "1 rue X",
+        proposedPostalCode: "75001",
+        proposedCity: "Paris",
+      }),
+      clients: [{ id: "c1", companyId: "co1" }],
+      existingWorksites: [
+        {
+          id: "ws-dup",
+          companyId: "co1",
+          address: "1 rue X, 75001, Paris",
+          name: "Existant",
+          status: "PLANNED",
+        },
+      ],
+    })
+    const svc = new ImportDraftConversionService({ db: db as never })
+    const r = await svc.convertImportDraft(admin, {
+      draftId: "d1",
+      expectedVersion: 2,
+      clientMode: "EXISTING",
+      existingClientId: "c1",
+      acknowledgeDuplicateWorksite: false,
+    })
+    assert.equal(r.ok, false)
+    if (!r.ok) assert.equal(r.outcome, "DUPLICATE_REQUIRES_ACK")
+    assert.equal(db.worksites.length, 0)
+    assert.equal(db.draft.status, "APPROVED")
+  })
+
+  it("doublon avec ack humain → conversion OK", async () => {
+    const db = createFakeDb({
+      draft: baseDraft({
+        proposedAddress: "1 rue X",
+        proposedPostalCode: "75001",
+        proposedCity: "Paris",
+      }),
+      clients: [{ id: "c1", companyId: "co1" }],
+      existingWorksites: [
+        {
+          id: "ws-dup",
+          companyId: "co1",
+          address: "1 rue X, 75001, Paris",
+          name: "Existant",
+          status: "PLANNED",
+        },
+      ],
+    })
+    const svc = new ImportDraftConversionService({ db: db as never })
+    const r = await svc.convertImportDraft(admin, {
+      draftId: "d1",
+      expectedVersion: 2,
+      clientMode: "EXISTING",
+      existingClientId: "c1",
+      acknowledgeDuplicateWorksite: true,
+    })
+    assert.equal(r.ok, true)
+    if (r.ok) assert.equal(r.outcome, "CONVERTED")
+    assert.equal(db.draft.status, "CONVERTED")
+  })
+
+  it("SYSTEM ne peut jamais ack un doublon", async () => {
+    const db = createFakeDb({
+      draft: baseDraft({
+        proposedAddress: "1 rue X",
+        proposedPostalCode: "75001",
+        proposedCity: "Paris",
+      }),
+      clients: [{ id: "c1", companyId: "co1" }],
+      existingWorksites: [
+        {
+          id: "ws-dup",
+          companyId: "co1",
+          address: "1 rue X, 75001, Paris",
+          name: "Existant",
+          status: "PLANNED",
+        },
+      ],
+    })
+    const svc = new ImportDraftConversionService({ db: db as never })
+    const r = await svc.convertImportDraft(
+      { actorUserId: "sys", actorRole: "SYSTEM", companyId: "co1" },
+      {
+        draftId: "d1",
+        expectedVersion: 2,
+        clientMode: "EXISTING",
+        existingClientId: "c1",
+        acknowledgeDuplicateWorksite: true,
+      }
+    )
+    assert.equal(r.ok, false)
+    if (!r.ok) assert.equal(r.outcome, "DUPLICATE_REQUIRES_ACK")
+    assert.equal(db.worksites.length, 0)
   })
 })

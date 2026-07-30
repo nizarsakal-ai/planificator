@@ -47,7 +47,16 @@ export type ImportDraftReviewServiceDeps = {
 function authorize(
   ctx: ReviewActorContext
 ): { ok: true } | { ok: false; outcome: "FORBIDDEN"; code: string; message: string } {
-  if (!ALLOWED_ROLES.has(ctx.actorRole) || !ctx.companyId) {
+  if (!ctx.companyId || !ctx.actorUserId) {
+    return {
+      ok: false,
+      outcome: "FORBIDDEN",
+      code: "REVIEW_FORBIDDEN",
+      message: "Accès refusé",
+    }
+  }
+  if (ctx.actorRole === "SYSTEM") return { ok: true }
+  if (!ALLOWED_ROLES.has(ctx.actorRole)) {
     return {
       ok: false,
       outcome: "FORBIDDEN",

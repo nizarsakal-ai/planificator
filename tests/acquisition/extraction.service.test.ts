@@ -121,7 +121,7 @@ function createFakeRepo(seed?: {
         status: input.status,
         version: draft.version + 1,
         contentHashAtExtraction: input.expectedContentHash,
-        extractionSchemaVersion: "1",
+        extractionSchemaVersion: "2",
         proposedWorksiteName: input.fields.worksiteName,
       }
       return "OK"
@@ -238,7 +238,7 @@ describe("extraction.service R1", () => {
         extractionAttemptCount: 1,
         extractionStartedAt: new Date(),
         contentHashAtExtraction: "hash-abc",
-        extractionSchemaVersion: "1",
+        extractionSchemaVersion: "2",
       },
     })
     const result = await runDraftExtraction(

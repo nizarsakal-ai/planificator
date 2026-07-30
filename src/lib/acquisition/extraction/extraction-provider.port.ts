@@ -7,6 +7,7 @@ export type ExtractionEvidenceSource =
   | "BODY"
   | "SUBJECT"
   | "ATTACHMENT_META"
+  | "ATTACHMENT_TEXT"
   | "HEURISTIC"
 
 export type NormalizedExtractAttachmentMeta = {
@@ -16,12 +17,21 @@ export type NormalizedExtractAttachmentMeta = {
   sizeBytes: number
 }
 
+/** Extraits texte PJ (PDF progressif Lot E) — jamais binaire. */
+export type AttachmentTextExcerpt = {
+  filename: string
+  mimeType: string
+  text: string
+}
+
 export type NormalizedExtractInput = {
   subject: string | null
   normalizedText: string
   locale: "fr-FR"
   attachmentMetadata: NormalizedExtractAttachmentMeta[]
-  extractionSchemaVersion: "1"
+  /** Extraits texte PJ optionnels (multimodal progressif). */
+  attachmentTextExcerpts?: AttachmentTextExcerpt[]
+  extractionSchemaVersion: "1" | "2"
 }
 
 export type ExtractionProviderFieldValue = {

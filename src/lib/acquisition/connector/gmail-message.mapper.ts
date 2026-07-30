@@ -41,6 +41,7 @@ export function mapGmailMessageToAcquisitionInput(
     companyId,
     source: "GMAIL",
     externalMessageId: message.externalMessageId,
+    threadId: message.threadId,
     senderEmail: message.fromHeader,
     subject: message.subject,
     receivedAt: message.receivedAt,

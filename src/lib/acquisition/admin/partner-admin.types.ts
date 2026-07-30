@@ -12,6 +12,12 @@ export type PartnerAdminPartner = {
   connector: AcquisitionSource
   pipeline: string
   active: boolean
+  priority: number
+  requireExactEmail: boolean
+  autoApproveEnabled: boolean
+  autoConvertEnabled: boolean
+  allowCreateClient: boolean
+  minConfidence: number | null
   createdAt: Date
   updatedAt: Date
 }
@@ -56,4 +62,15 @@ export type RenamePartnerInput = {
   companyId: string
   partnerId: string
   name: string
+}
+
+export type UpdatePartnerPolicyInput = {
+  companyId: string
+  partnerId: string
+  autoApproveEnabled?: boolean
+  autoConvertEnabled?: boolean
+  allowCreateClient?: boolean
+  minConfidence?: number | null
+  requireExactEmail?: boolean
+  priority?: number
 }

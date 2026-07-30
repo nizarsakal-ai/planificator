@@ -32,20 +32,16 @@
  *
  * ## Readiness exacte (transition)
  *
- * Pour chaque Company existante :
- * - partenaire `code=lauralu`, même `companyId`, `active=true` ;
- * - domaine `domainNormalized=lauralu.fr`, même `companyId`, `active=true` ;
- * - `partnerId` = id de ce partenaire lauralu.
+ * Pour chaque Company existante (critère **cutover historique**, remplacé Lot I) :
+ * - ~~partenaire `code=lauralu` + domaine `lauralu.fr`~~
+ * - **Lot I durable** : ≥1 partenaire actif + ≥1 identité (domaine|email) active
+ *   (`checkAcquisitionPartnerRegistryReadiness`).
  *
  * ## Caractère temporaire de la règle LAURALU
  *
- * Cette exigence concerne **uniquement** le cutover depuis l’ancien gate
- * hardcodé `lauralu.fr`. Elle garantit la continuité du flux historique
- * pendant cette migration. Elle **n’est pas** une règle permanente de la
- * plateforme. Après cutover validé, les nouveaux tenants et partenaires
- * seront gérés par le registre administrable. Une Company future n’utilisant
- * jamais LAURALU ne devra pas être obligée d’avoir ce partenaire dans le
- * modèle durable.
+ * Cette exigence concernait **uniquement** le cutover depuis l’ancien gate
+ * hardcodé `lauralu.fr`. Elle **n’est pas** une obligation permanente.
+ * Après Lot I, LAURALU n’est qu’un seed data optionnel parmi d’autres partenaires.
  *
  * ### Company ayant désactivé volontairement LAURALU
  *

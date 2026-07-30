@@ -116,27 +116,68 @@ describe("GmailMailProviderAdapter", () => {
     )
   })
 
-  it("scan initial — requête lookback sans préfiltre expéditeur", async () => {
+  it("scan initial — fail-closed si aucune identité partenaire", async () => {
     const adapter = new GmailMailProviderAdapter({
       connectionClient,
       apiClient,
       lookbackDays: 14,
+      domainListing: {
+        listActiveIdentities: async () => ({ domains: [], emails: [] }),
+        listActiveDomains: async () => [],
+      },
     })
 
-    const page = await adapter.listMessagesPage({ companyId: COMPANY, cursor: null, pageSize: 5 })
+    await assert.rejects(
+      () =>
+        adapter.listMessagesPage({ companyId: COMPANY, cursor: null, pageSize: 5 }),
+      (err: unknown) => {
+        assert.ok(err instanceof GmailProviderError)
+        assert.equal(err.code, "NO_ACTIVE_PARTNER_IDENTITIES")
+        return true
+      }
+    )
+    assert.equal(listMessagesCalls.length, 0)
+  })
+
+  it("scan initial — préfiltre from:@domaine si domaines actifs", async () => {
+    const adapter = new GmailMailProviderAdapter({
+      connectionClient,
+      apiClient,
+      lookbackDays: 14,
+      domainListing: {
+        listActiveIdentities: async () => ({
+          domains: ["lauralu.fr"],
+          emails: [],
+        }),
+        listActiveDomains: async () => ["lauralu.fr"],
+      },
+    })
+
+    const page = await adapter.listMessagesPage({
+      companyId: COMPANY,
+      cursor: null,
+      pageSize: 5,
+    })
 
     assert.equal(page.messages.length, 1)
-    assert.equal(listMessagesCalls[0].query, buildAcquisitionGmailLookbackQuery(14))
-    assert.ok(!listMessagesCalls[0].query.includes("from:"))
-    assert.ok(listMessagesCalls[0].query.startsWith("after:"))
+    const expected = buildAcquisitionGmailLookbackQuery(14, {
+      domains: ["lauralu.fr"],
+      emails: [],
+    })
+    assert.equal(expected.ok, true)
+    if (expected.ok) {
+      assert.equal(listMessagesCalls[0].query, expected.query)
+    }
+    assert.ok(listMessagesCalls[0].query.includes("from:@lauralu.fr"))
     assert.equal(page.nextHistoryId, "profile-hist-99")
-    assert.equal(page.nextPageToken, "page-2")
-    assert.equal(page.hasMore, true)
     assert.equal(page.paginationMode, "lookback")
   })
 
   it("messages.list deux pages — nextPageToken transmis", async () => {
-    const adapter = new GmailMailProviderAdapter({ connectionClient, apiClient })
+    const adapter = new GmailMailProviderAdapter({ connectionClient, apiClient, domainListing: {
+        listActiveIdentities: async () => ({ domains: ["lauralu.fr"], emails: [] }),
+        listActiveDomains: async () => ["lauralu.fr"],
+      } })
 
     const page1 = await adapter.listMessagesPage({ companyId: COMPANY, cursor: null, pageSize: 5 })
     const page2 = await adapter.listMessagesPage({
@@ -154,7 +195,10 @@ describe("GmailMailProviderAdapter", () => {
   })
 
   it("mapping From, Subject, Date, labels et snippet", async () => {
-    const adapter = new GmailMailProviderAdapter({ connectionClient, apiClient })
+    const adapter = new GmailMailProviderAdapter({ connectionClient, apiClient, domainListing: {
+        listActiveIdentities: async () => ({ domains: ["lauralu.fr"], emails: [] }),
+        listActiveDomains: async () => ["lauralu.fr"],
+      } })
     const page = await adapter.listMessagesPage({ companyId: COMPANY, cursor: null, pageSize: 10 })
     const msg = page.messages[0]
 
@@ -167,7 +211,10 @@ describe("GmailMailProviderAdapter", () => {
   })
 
   it("body.data et headers sensibles absents du modèle canonique", async () => {
-    const adapter = new GmailMailProviderAdapter({ connectionClient, apiClient })
+    const adapter = new GmailMailProviderAdapter({ connectionClient, apiClient, domainListing: {
+        listActiveIdentities: async () => ({ domains: ["lauralu.fr"], emails: [] }),
+        listActiveDomains: async () => ["lauralu.fr"],
+      } })
     const page = await adapter.listMessagesPage({ companyId: COMPANY, cursor: null, pageSize: 10 })
     const msg = page.messages[0]
     const serialized = JSON.stringify(msg)
@@ -188,7 +235,10 @@ describe("GmailMailProviderAdapter", () => {
         },
       })
 
-    const adapter = new GmailMailProviderAdapter({ connectionClient, apiClient })
+    const adapter = new GmailMailProviderAdapter({ connectionClient, apiClient, domainListing: {
+        listActiveIdentities: async () => ({ domains: ["lauralu.fr"], emails: [] }),
+        listActiveDomains: async () => ["lauralu.fr"],
+      } })
     const page = await adapter.listMessagesPage({ companyId: COMPANY, cursor: null, pageSize: 5 })
 
     assert.equal(page.messages[0].fromHeader, "attacker@gmail.com")
@@ -204,7 +254,15 @@ describe("GmailMailProviderAdapter", () => {
       })
     }
 
-    const adapter = new GmailMailProviderAdapter({ connectionClient, apiClient, lookbackDays: 30 })
+    const adapter = new GmailMailProviderAdapter({
+      connectionClient,
+      apiClient,
+      lookbackDays: 30,
+      domainListing: {
+        listActiveIdentities: async () => ({ domains: ["lauralu.fr"], emails: [] }),
+        listActiveDomains: async () => ["lauralu.fr"],
+      },
+    })
     const page = await adapter.listMessagesPage({
       companyId: COMPANY,
       cursor: "stale-history",
@@ -213,7 +271,7 @@ describe("GmailMailProviderAdapter", () => {
 
     assert.equal(page.messages.length, 1)
     assert.equal(listMessagesCalls.length, 1)
-    assert.ok(!listMessagesCalls[0].query.includes("from:"))
+    assert.ok(listMessagesCalls[0].query.includes("from:@lauralu.fr"))
     assert.equal(page.paginationMode, "lookback")
     assert.equal(page.nextPageToken, "page-2")
   })
@@ -252,7 +310,10 @@ describe("GmailMailProviderAdapter", () => {
       return sampleMessage(id)
     }
 
-    const adapter = new GmailMailProviderAdapter({ connectionClient, apiClient })
+    const adapter = new GmailMailProviderAdapter({ connectionClient, apiClient, domainListing: {
+        listActiveIdentities: async () => ({ domains: ["lauralu.fr"], emails: [] }),
+        listActiveDomains: async () => ["lauralu.fr"],
+      } })
 
     const page1 = await adapter.listMessagesPage({
       companyId: COMPANY,
@@ -285,7 +346,10 @@ describe("GmailMailProviderAdapter", () => {
       messages: [{ id: "good-msg" }, { id: "bad-msg" }],
     })
 
-    const adapter = new GmailMailProviderAdapter({ connectionClient, apiClient })
+    const adapter = new GmailMailProviderAdapter({ connectionClient, apiClient, domainListing: {
+        listActiveIdentities: async () => ({ domains: ["lauralu.fr"], emails: [] }),
+        listActiveDomains: async () => ["lauralu.fr"],
+      } })
     const page = await adapter.listMessagesPage({ companyId: COMPANY, cursor: null, pageSize: 10 })
 
     assert.equal(page.messages.length, 1)
@@ -302,7 +366,10 @@ describe("GmailMailProviderAdapter", () => {
       })
     }
 
-    const adapter = new GmailMailProviderAdapter({ connectionClient, apiClient })
+    const adapter = new GmailMailProviderAdapter({ connectionClient, apiClient, domainListing: {
+        listActiveIdentities: async () => ({ domains: ["lauralu.fr"], emails: [] }),
+        listActiveDomains: async () => ["lauralu.fr"],
+      } })
     await assert.rejects(
       () => adapter.listMessagesPage({ companyId: COMPANY, cursor: null, pageSize: 5 }),
       (err: unknown) => {

@@ -39,6 +39,17 @@ function createFakeDb(seed: {
         )
         return hit ? { ...hit } : null
       },
+      findFirst: async ({
+        where,
+      }: {
+        where: { id: string; companyId: string }
+      }) => {
+        calls.push({ model: "partner.first", where })
+        const hit = partners.find(
+          (p) => p.id === where.id && p.companyId === where.companyId
+        )
+        return hit ? { ...hit } : null
+      },
       findMany: async ({
         where,
       }: {
@@ -49,7 +60,12 @@ function createFakeDb(seed: {
         return partners
           .filter((p) => p.companyId === where.companyId)
           .map((p) => ({ ...p }))
-          .sort((a, b) => a.code.localeCompare(b.code) || a.id.localeCompare(b.id))
+          .sort(
+            (a, b) =>
+              a.priority - b.priority ||
+              a.code.localeCompare(b.code) ||
+              a.id.localeCompare(b.id)
+          )
       },
     },
     acquisitionPartnerDomain: {
@@ -100,6 +116,10 @@ function createFakeDb(seed: {
           )
       },
     },
+    acquisitionPartnerEmail: {
+      findUnique: async () => null,
+      findMany: async () => [],
+    },
   }
 
   return { db, partners, domains, calls }
@@ -115,9 +135,15 @@ function partner(
     connector: partial.connector ?? "GMAIL",
     pipeline: partial.pipeline ?? "consultations",
     active: partial.active ?? true,
+    priority: partial.priority ?? 100,
+    requireExactEmail: partial.requireExactEmail ?? false,
+    autoApproveEnabled: partial.autoApproveEnabled ?? false,
+    autoConvertEnabled: partial.autoConvertEnabled ?? false,
+    minConfidence: partial.minConfidence ?? null,
     createdAt: partial.createdAt ?? now,
     updatedAt: partial.updatedAt ?? now,
     ...partial,
+    allowCreateClient: partial.allowCreateClient ?? false,
   }
 }
 

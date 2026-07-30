@@ -38,6 +38,8 @@ export const convertImportDraftSchema = z
       })
       .strict()
       .optional(),
+    /** Conversion manuelle : accepter explicitement un doublon probable. */
+    acknowledgeDuplicateWorksite: z.boolean().optional().default(false),
   })
   .strict()
   .superRefine((data, ctx) => {
