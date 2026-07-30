@@ -78,11 +78,30 @@ function baseDraft(over: Partial<DraftRow> = {}): DraftRow {
   }
 }
 
-function emptyRegistry(p: AcquisitionPartnerRecord | null): PartnerRegistryRepositoryPort {
+function emptyRegistry(
+  p: AcquisitionPartnerRecord | null,
+  opts?: { domainFallback?: AcquisitionPartnerRecord | null }
+): PartnerRegistryRepositoryPort {
+  const byDomain = opts?.domainFallback ?? null
   return {
     findPartnerByCode: async () => null,
     findPartnerById: async () => p,
-    findPartnerByDomain: async () => null,
+    findPartnerByDomain: async (companyId, domain) => {
+      if (!byDomain) return null
+      if (byDomain.companyId !== companyId) return null
+      return {
+        ...byDomain,
+        domain: {
+          id: "dom1",
+          companyId,
+          partnerId: byDomain.id,
+          domainNormalized: domain.trim().toLowerCase(),
+          active: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      }
+    },
     findPartnerByEmail: async () => null,
     findDomain: async () => null,
     listPartners: async () => (p ? [p] : []),
@@ -117,6 +136,8 @@ describe("maybeRunAutoDecisionAfterExtraction R3", () => {
 
   function deps(opts: {
     partner?: AcquisitionPartnerRecord | null
+    /** Partenaire résolu uniquement via findPartnerByDomain (resolvedPartnerId null). */
+    domainFallbackPartner?: AcquisitionPartnerRecord | null
     duplicate?: boolean
     clientAmbiguous?: boolean
     systemOk?: boolean
@@ -147,7 +168,9 @@ describe("maybeRunAutoDecisionAfterExtraction R3", () => {
           return { ok: true, outcome: "CONVERTED" }
         },
       } as never,
-      registry: emptyRegistry(p),
+      registry: emptyRegistry(p, {
+        domainFallback: opts.domainFallbackPartner ?? null,
+      }),
       resolveSystemActor: async () =>
         opts.systemOk === false
           ? ({ ok: false, code: "SYSTEM_ACTOR_INVALID", reason: "user_inactive" } as const)
@@ -279,6 +302,55 @@ describe("maybeRunAutoDecisionAfterExtraction R3", () => {
       companyId: "co1",
       draftId: "d1",
       deps: deps({}),
+    })
+    assert.equal(approveCalls, 1)
+    assert.equal(convertCalls, 1)
+    assert.equal(draft.status, "CONVERTED")
+    assert.ok(journalEntries.some((j) => j.decisionCode === "AUTO_APPROVE_CONVERT"))
+  })
+
+  it("PR34-M3: resolvedPartnerId null + requireExactEmail=true → aucune auto", async () => {
+    draft = baseDraft({
+      acquisitionMessage: { resolvedPartnerId: null, senderDomain: "partner.fr" },
+    })
+    const exactPartner = partner({
+      requireExactEmail: true,
+      autoApproveEnabled: true,
+      autoConvertEnabled: true,
+    })
+    await maybeRunAutoDecisionAfterExtraction({
+      companyId: "co1",
+      draftId: "d1",
+      deps: deps({
+        partner: null,
+        domainFallbackPartner: exactPartner,
+      }),
+    })
+    assert.equal(approveCalls, 0)
+    assert.equal(convertCalls, 0)
+    assert.equal(draft.status, "PENDING_REVIEW")
+    assert.ok(journalEntries.some((j) => j.decisionCode === "HUMAN_REVIEW_REQUIRED"))
+    assert.ok(
+      journalEntries.some((j) => j.reasons.includes("AUTO_APPROVE_DISABLED"))
+    )
+  })
+
+  it("PR34-M3: resolvedPartnerId null + requireExactEmail=false → fallback domaine OK", async () => {
+    draft = baseDraft({
+      acquisitionMessage: { resolvedPartnerId: null, senderDomain: "partner.fr" },
+    })
+    const domainPartner = partner({
+      requireExactEmail: false,
+      autoApproveEnabled: true,
+      autoConvertEnabled: true,
+    })
+    await maybeRunAutoDecisionAfterExtraction({
+      companyId: "co1",
+      draftId: "d1",
+      deps: deps({
+        partner: null,
+        domainFallbackPartner: domainPartner,
+      }),
     })
     assert.equal(approveCalls, 1)
     assert.equal(convertCalls, 1)

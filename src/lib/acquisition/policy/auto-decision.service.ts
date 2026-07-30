@@ -152,11 +152,14 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
       partnerCode = partner.code
     }
   } else if (draft.acquisitionMessage?.senderDomain) {
+    // Fallback domaine uniquement si le partenaire n’exige pas l’email exact
+    // (aligné éligibilité : requireExactEmail=true → domaine seul insuffisant).
+    // Fail-closed : pas de rétention ambiguë / partielle des flags auto.
     const byDomain = await registry.findPartnerByDomain(
       input.companyId,
       draft.acquisitionMessage.senderDomain
     )
-    if (byDomain?.active) {
+    if (byDomain?.active && byDomain.requireExactEmail !== true) {
       partnerId = byDomain.id
       partnerAutoApprove = byDomain.autoApproveEnabled
       partnerAutoConvert = byDomain.autoConvertEnabled
