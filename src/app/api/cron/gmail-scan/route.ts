@@ -89,7 +89,22 @@ export async function GET(req: Request) {
         })
         const refreshData = await refreshRes.json()
         if (!refreshData.access_token) {
-          console.error(`[gmail-scan] Token refresh failed for company ${conn.companyId}`)
+          // Observabilité OAuth uniquement — pas de tokens / secrets dans les logs.
+          const oauthError =
+            typeof refreshData.error === "string" ? refreshData.error : undefined
+          const oauthDescription =
+            typeof refreshData.error_description === "string"
+              ? refreshData.error_description
+              : undefined
+          console.error(
+            [
+              "[gmail-scan] Token refresh failed",
+              `company=${conn.companyId}`,
+              `status=${refreshRes.status}`,
+              ...(oauthError ? [`error=${oauthError}`] : []),
+              ...(oauthDescription ? [`description=${oauthDescription}`] : []),
+            ].join("\n")
+          )
           stats.errors++
           continue
         }
