@@ -16,12 +16,22 @@ import {
   type ClassifiedBookingError,
 } from "@/lib/booking/booking-gmail-errors"
 
-/** Tentatives max avant PERMANENTLY_IGNORED (configurable via env). */
+/** Tentatives max génériques (réseau, provider…). */
 export function getBookingGmailMaxAttempts(): number {
   const raw = Number(process.env.BOOKING_GMAIL_MAX_ATTEMPTS)
   if (Number.isFinite(raw) && raw >= 1 && raw <= 20) return Math.floor(raw)
   return 5
 }
+
+/**
+ * Politique MISSING_ADDRESS (PLAN-BOOKING-ADDRESS-RELIABILITY-001-R1) :
+ * - tentative 1 : extraction normale → RETRYABLE / MISSING_ADDRESS
+ * - tentative 2 (une seule reprise auto) : si toujours sans adresse →
+ *   PERMANENTLY_IGNORED / ADDRESS_NOT_FOUND_AFTER_RETRY
+ * Différent d’un échec technique retryable (réseau / provider).
+ * Le PendingAccommodation reste PENDING pour UI / fallback manuel.
+ */
+export const BOOKING_MISSING_ADDRESS_MAX_ATTEMPTS = 2
 
 /** TTL d'un PROCESSING abandonné (ms). Défaut 15 min. */
 export function getBookingGmailProcessingStaleMs(): number {
@@ -297,11 +307,25 @@ export class BookingGmailMessageLifecycle {
     const attempts = existing.attemptCount
     let status: BookingGmailMessageStatus
     let nextRetryAt: Date | null = null
+    let errorCode = classified.code
+    let errorMessage = classified.message
 
-    if (classified.kind === "PERMANENT") {
+    // Absence probable d’adresse dans le contenu ≠ échec technique générique.
+    if (classified.code === "MISSING_ADDRESS") {
+      if (attempts >= BOOKING_MISSING_ADDRESS_MAX_ATTEMPTS) {
+        status = "PERMANENTLY_IGNORED"
+        errorCode = "ADDRESS_NOT_FOUND_AFTER_RETRY"
+        errorMessage = "Adresse absente après une nouvelle tentative"
+      } else {
+        status = "RETRYABLE_FAILURE"
+        nextRetryAt = computeNextRetryAt(attempts, now)
+      }
+    } else if (classified.kind === "PERMANENT") {
       status = "PERMANENTLY_IGNORED"
     } else if (attempts >= maxAttempts) {
       status = "PERMANENTLY_IGNORED"
+      errorCode = "MAX_ATTEMPTS_EXCEEDED"
+      errorMessage = `Max tentatives (${maxAttempts}) — ${classified.message}`
     } else {
       status = "RETRYABLE_FAILURE"
       nextRetryAt = computeNextRetryAt(attempts, now)
@@ -317,14 +341,8 @@ export class BookingGmailMessageLifecycle {
         status,
         lastAttemptAt: now,
         nextRetryAt,
-        errorCode:
-          status === "PERMANENTLY_IGNORED" && classified.kind === "RETRYABLE"
-            ? "MAX_ATTEMPTS_EXCEEDED"
-            : classified.code,
-        errorMessage:
-          status === "PERMANENTLY_IGNORED" && classified.kind === "RETRYABLE"
-            ? `Max tentatives (${maxAttempts}) — ${classified.message}`
-            : classified.message,
+        errorCode,
+        errorMessage,
         resultType: status === "PERMANENTLY_IGNORED" ? "IGNORED" : existing.resultType,
       },
     })

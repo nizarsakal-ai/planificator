@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { CalendarDays, MapPin, CheckCircle, X, Loader2, BedDouble } from "lucide-react"
+import { CalendarDays, MapPin, CheckCircle, X, Loader2, BedDouble, AlertTriangle } from "lucide-react"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
@@ -20,7 +20,8 @@ interface PendingAccommodation {
   zipCode:         string | null
   startDate:       Date   | null
   endDate:         Date   | null
-  rawEmailSnippet: string | null
+  /** Aperçu UI borné (≤500) — jamais le corps complet. */
+  emailPreview:    string | null
 }
 
 interface Props {
@@ -37,11 +38,16 @@ function fmtDate(d: Date | null) {
 
 export function PendingBookingsDialog({ open, onClose, pendings, teams }: Props) {
   const [teamSelections, setTeamSelections] = useState<Record<string, string>>({})
+  const [addressOverrides, setAddressOverrides] = useState<Record<string, string>>({})
   const [dismissed, setDismissed]           = useState<Set<string>>(new Set())
   const [confirmed, setConfirmed]           = useState<Set<string>>(new Set())
   const [isPending, startTransition]        = useTransition()
 
   const visible = pendings.filter((p) => !dismissed.has(p.id) && !confirmed.has(p.id))
+
+  function effectiveAddress(p: PendingAccommodation): string {
+    return (p.address?.trim() || addressOverrides[p.id]?.trim() || "")
+  }
 
   function handleConfirm(id: string) {
     const teamId = teamSelections[id]
@@ -49,12 +55,23 @@ export function PendingBookingsDialog({ open, onClose, pendings, teams }: Props)
       toast.error("Sélectionnez une équipe d'abord.")
       return
     }
+    const pending = visible.find((p) => p.id === id)
+    if (!pending) return
+    const override = addressOverrides[id]?.trim() || undefined
+    if (!pending.address?.trim() && !override) {
+      toast.error("Adresse manquante — saisissez l'adresse du logement (fallback exceptionnel).")
+      return
+    }
     startTransition(async () => {
-      const res = await confirmPendingAccommodation(id, teamId)
-      if (res.error) {
+      const res = await confirmPendingAccommodation(id, teamId, override)
+      if ("error" in res) {
         toast.error(res.error)
       } else {
-        toast.success("Logement créé et équipe notifiée.")
+        toast.success(
+          res.idempotent
+            ? "Logement déjà confirmé."
+            : "Logement créé et équipe notifiée."
+        )
         setConfirmed((prev) => new Set([...prev, id]))
       }
     })
@@ -87,7 +104,10 @@ export function PendingBookingsDialog({ open, onClose, pendings, teams }: Props)
           </div>
         ) : (
           <div className="space-y-4">
-            {visible.map((p) => (
+            {visible.map((p) => {
+              const hasExtractedAddress = Boolean(p.address?.trim())
+              const canAssign = Boolean(teamSelections[p.id] && effectiveAddress(p))
+              return (
               <div key={p.id} className="border border-slate-100 rounded-xl p-4 space-y-3 bg-slate-50">
                 {/* Nom + dates */}
                 <div className="flex items-start justify-between gap-2">
@@ -104,16 +124,38 @@ export function PendingBookingsDialog({ open, onClose, pendings, teams }: Props)
                   </div>
                 )}
 
-                {p.address && (
+                {hasExtractedAddress ? (
                   <div className="flex items-start gap-1.5 text-xs text-slate-500">
                     <MapPin className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                     <span>{p.address}{p.city ? `, ${p.city}` : ""}{p.zipCode ? ` ${p.zipCode}` : ""}</span>
                   </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-2 py-1.5">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                      <span>
+                        Adresse non extraite automatiquement. Saisie manuelle exceptionnelle requise avant affectation.
+                      </span>
+                    </div>
+                    <label className="block text-xs text-slate-600">
+                      Adresse du logement
+                      <input
+                        type="text"
+                        value={addressOverrides[p.id] ?? ""}
+                        onChange={(e) =>
+                          setAddressOverrides((prev) => ({ ...prev, [p.id]: e.target.value }))
+                        }
+                        placeholder="Ex. 12 rue de la Paix, 75002 Paris"
+                        className="mt-1 w-full h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#0f3460]"
+                        autoComplete="street-address"
+                      />
+                    </label>
+                  </div>
                 )}
 
-                {p.rawEmailSnippet && (
+                {p.emailPreview && (
                   <p className="text-xs text-slate-400 italic line-clamp-2 bg-white px-2 py-1.5 rounded border border-slate-100">
-                    {p.rawEmailSnippet}
+                    {p.emailPreview}
                   </p>
                 )}
 
@@ -135,7 +177,7 @@ export function PendingBookingsDialog({ open, onClose, pendings, teams }: Props)
                     size="sm"
                     className="flex-1 h-8 bg-[#0f3460] hover:bg-[#0f3460]/90 text-xs"
                     onClick={() => handleConfirm(p.id)}
-                    disabled={isPending || !teamSelections[p.id]}
+                    disabled={isPending || !canAssign}
                   >
                     {isPending
                       ? <Loader2 className="h-3 w-3 animate-spin" />
@@ -152,7 +194,8 @@ export function PendingBookingsDialog({ open, onClose, pendings, teams }: Props)
                   </Button>
                 </div>
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </DialogContent>

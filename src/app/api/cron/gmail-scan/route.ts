@@ -15,29 +15,20 @@ import {
   extractBookingFields,
   hasUsefulBookingData,
 } from "@/lib/booking/extract-booking-fields"
+import { extractNormalizedGmailBody } from "@/lib/booking/booking-gmail-body.service"
+import {
+  BOOKING_EMAIL_BODY_PERSIST_MAX,
+  hasBookingAddress,
+} from "@/lib/booking/booking-pending-merge"
 
-// Helper : extrait le texte d'un message Gmail (payload récursif)
-function extractTextFromParts(parts: { mimeType?: string; body?: { data?: string }; parts?: unknown[] }[]): string {
-  let text = ""
-  for (const part of parts ?? []) {
-    if (part.mimeType === "text/plain" && part.body?.data) {
-      text += Buffer.from(part.body.data, "base64url").toString("utf8")
-    } else if (part.mimeType === "text/html" && part.body?.data && !text) {
-      const html = Buffer.from(part.body.data, "base64url").toString("utf8")
-      text += html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
-    } else if (part.parts) {
-      text += extractTextFromParts(part.parts as { mimeType?: string; body?: { data?: string }; parts?: unknown[] }[])
-    }
-  }
-  return text
-}
-
-function extractMessageBody(payload: { body?: { data?: string }; parts?: unknown[] } | undefined): string {
-  if (!payload) return ""
-  if (payload.parts) return extractTextFromParts(payload.parts as { mimeType?: string; body?: { data?: string }; parts?: unknown[] }[])
-  if (payload.body?.data) return Buffer.from(payload.body.data, "base64url").toString("utf8")
-  return ""
-}
+/**
+ * Lifecycle adresse (PLAN-BOOKING-ADDRESS-RELIABILITY-001-R1) :
+ * - adresse présente → SUCCEEDED (pending ou Accommodation)
+ * - utile sans adresse → persist/enrich pending + RETRYABLE_FAILURE / MISSING_ADDRESS
+ *   (1 seule reprise auto ; 2ᵉ échec → PERMANENTLY_IGNORED / ADDRESS_NOT_FOUND_AFTER_RETRY)
+ * - PendingAccommodation reste PENDING pour UI / fallback manuel
+ * - échec technique (réseau/provider) ≠ absence d’adresse (politique distincte)
+ */
 
 export async function GET(req: Request) {
   const authHeader = req.headers.get("authorization")
@@ -53,6 +44,7 @@ export async function GET(req: Request) {
     skipped: 0,
     retryable: 0,
     permanent: 0,
+    missingAddress: 0,
   }
   const anthropic = process.env.ANTHROPIC_API_KEY
     ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -120,7 +112,7 @@ export async function GET(req: Request) {
             throw retryableBookingError("GMAIL_TEMPORARY", `Gmail get HTTP ${msgRes.status}`)
           }
           const msgData = await msgRes.json()
-          const bodyText = extractMessageBody(msgData.payload)
+          const bodyText = extractNormalizedGmailBody(msgData.payload)
           const snippet  = (msgData.snippet ?? "") as string
 
           if (!bodyText && !snippet) {
@@ -134,7 +126,7 @@ export async function GET(req: Request) {
             continue
           }
 
-          const emailText = (bodyText || snippet).substring(0, 4000)
+          const emailText = (bodyText || snippet).substring(0, BOOKING_EMAIL_BODY_PERSIST_MAX)
           const parsed = await extractBookingFields(
             emailText,
             msg.id,
@@ -185,6 +177,43 @@ export async function GET(req: Request) {
             matchedTeamId = team?.id ?? null
           }
 
+          // Adresse absente : persister/enrichir le pending puis RETRYABLE (pas SUCCEEDED métier).
+          if (!hasBookingAddress(parsed)) {
+            await prisma.$transaction(async (tx) => {
+              await createOrGetBookingScanResult(tx, {
+                companyId: conn.companyId,
+                messageId: msg.id,
+                snippet,
+                emailBody: emailText,
+                parsed,
+                matchedTeamId,
+                adminId: admin?.id ?? null,
+              })
+            })
+            const failed = await lifecycle.markFailure({
+              companyId: conn.companyId,
+              messageId: msg.id,
+              error: retryableBookingError(
+                "MISSING_ADDRESS",
+                "Adresse absente après extraction — rejeu limité"
+              ),
+            })
+            if (failed.status === "RETRYABLE_FAILURE") {
+              stats.retryable++
+              stats.missingAddress++
+              console.warn(
+                `[gmail-scan] RETRYABLE_FAILURE MISSING_ADDRESS messageId=${msg.id} nextRetryAt=${failed.nextRetryAt?.toISOString() ?? "n/a"}`
+              )
+            } else if (failed.status === "PERMANENTLY_IGNORED") {
+              stats.permanent++
+              stats.missingAddress++
+              console.warn(
+                `[gmail-scan] PERMANENTLY_IGNORED messageId=${msg.id} code=${failed.errorCode}`
+              )
+            }
+            continue
+          }
+
           await lifecycle.markSucceededInTransaction(
             { companyId: conn.companyId, messageId: msg.id },
             async (tx) => {
@@ -192,6 +221,7 @@ export async function GET(req: Request) {
                 companyId: conn.companyId,
                 messageId: msg.id,
                 snippet,
+                emailBody: emailText,
                 parsed,
                 matchedTeamId,
                 adminId: admin?.id ?? null,
@@ -253,7 +283,7 @@ export async function GET(req: Request) {
   }
 
   console.log(
-    `[CRON gmail-scan] scanned=${stats.scanned} detected=${stats.detected} skipped=${stats.skipped} retryable=${stats.retryable} permanent=${stats.permanent} errors=${stats.errors}`
+    `[CRON gmail-scan] scanned=${stats.scanned} detected=${stats.detected} skipped=${stats.skipped} retryable=${stats.retryable} permanent=${stats.permanent} missingAddress=${stats.missingAddress} errors=${stats.errors}`
   )
   return NextResponse.json({ ok: true, ...stats })
 }

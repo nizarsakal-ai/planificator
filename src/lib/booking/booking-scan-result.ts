@@ -4,9 +4,14 @@
  * - bookingReference : uniquement la vraie référence Booking.com (si connue).
  * - Accommodation.gmailSourceMessageId : clé technique tenant-safe (companyId + messageId).
  * - PendingAccommodation : unique (companyId, gmailMessageId).
+ * - Rejeu : enrichit un pending PENDING sans doublon ni écrasement d’adresse.
  */
 
-import type { BookingGmailResultType, Prisma } from "@prisma/client"
+import type { BookingGmailResultType, PendingAccommodation, Prisma } from "@prisma/client"
+import {
+  BOOKING_EMAIL_BODY_PERSIST_MAX,
+  buildPendingEnrichmentUpdate,
+} from "@/lib/booking/booking-pending-merge"
 
 export type ParsedBookingFields = Record<string, string | null>
 
@@ -19,6 +24,26 @@ function isUniqueViolation(error: unknown): boolean {
   )
 }
 
+async function enrichExistingPending(
+  tx: Prisma.TransactionClient,
+  existingPending: PendingAccommodation,
+  parsed: ParsedBookingFields,
+  emailBody: string
+): Promise<{ resultType: BookingGmailResultType; resultEntityId: string; createdNew: boolean }> {
+  const patch = buildPendingEnrichmentUpdate(existingPending, parsed, emailBody)
+  if (patch) {
+    await tx.pendingAccommodation.update({
+      where: { id: existingPending.id },
+      data: patch,
+    })
+  }
+  return {
+    resultType: "PENDING_ACCOMMODATION",
+    resultEntityId: existingPending.id,
+    createdNew: false,
+  }
+}
+
 export async function createOrGetBookingScanResult(
   tx: Prisma.TransactionClient,
   input: {
@@ -28,10 +53,16 @@ export async function createOrGetBookingScanResult(
     parsed: ParsedBookingFields
     matchedTeamId: string | null
     adminId: string | null
+    /** Corps normalisé (préféré au snippet Gmail pour persistance / rejeu). */
+    emailBody?: string | null
   }
 ): Promise<{ resultType: BookingGmailResultType; resultEntityId: string | null; createdNew: boolean }> {
   const { companyId, messageId, snippet, parsed, matchedTeamId, adminId } = input
   const bookingRef = parsed.bookingReference?.trim() || null
+  const emailBody = (input.emailBody?.trim() || snippet || "").substring(
+    0,
+    BOOKING_EMAIL_BODY_PERSIST_MAX
+  )
 
   // Annulation (chemin existant — rarement déclenché faute de champs dans le prompt)
   if (parsed.status === "cancelled" && bookingRef) {
@@ -59,14 +90,9 @@ export async function createOrGetBookingScanResult(
   })
 
   if (matchedTeamId && adminId && parsed.address && parsed.startDate && parsed.endDate) {
-    // Si un pending existe déjà pour ce message (rejeu après crash partiel legacy),
-    // on ne crée pas d'Accommodation en double : on rattache le succès au pending.
+    // Pending déjà présent : enrichir si PENDING, ne jamais créer d’Accommodation en double.
     if (existingPending) {
-      return {
-        resultType: "PENDING_ACCOMMODATION",
-        resultEntityId: existingPending.id,
-        createdNew: false,
-      }
+      return enrichExistingPending(tx, existingPending, parsed, emailBody)
     }
 
     const existingAcc = await tx.accommodation.findFirst({
@@ -142,11 +168,7 @@ export async function createOrGetBookingScanResult(
   }
 
   if (existingPending) {
-    return {
-      resultType: "PENDING_ACCOMMODATION",
-      resultEntityId: existingPending.id,
-      createdNew: false,
-    }
+    return enrichExistingPending(tx, existingPending, parsed, emailBody)
   }
 
   let pending
@@ -165,7 +187,7 @@ export async function createOrGetBookingScanResult(
         contactName: parsed.contactName ?? null,
         contactPhone: parsed.contactPhone ?? null,
         notes: parsed.notes ?? null,
-        rawEmailSnippet: snippet.substring(0, 500),
+        rawEmailSnippet: emailBody.substring(0, BOOKING_EMAIL_BODY_PERSIST_MAX),
       },
     })
   } catch (error) {
@@ -175,11 +197,7 @@ export async function createOrGetBookingScanResult(
       orderBy: { createdAt: "asc" },
     })
     if (!raced) throw error
-    return {
-      resultType: "PENDING_ACCOMMODATION",
-      resultEntityId: raced.id,
-      createdNew: false,
-    }
+    return enrichExistingPending(tx, raced, parsed, emailBody)
   }
 
   const admins = await tx.user.findMany({
