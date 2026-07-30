@@ -6,7 +6,7 @@
 import { prisma } from "@/lib/prisma"
 import { decrypt, encrypt } from "@/lib/encryption"
 import { decodeHtmlEntities, htmlToPlainText } from "@/lib/text/html-to-plain-text"
-import { BOOKING_EMAIL_BODY_PERSIST_MAX } from "@/lib/booking/booking-pending-merge"
+import { truncateBookingEmailForExtract } from "@/lib/booking/booking-pending-merge"
 
 const TOKEN_REFRESH_URL = "https://oauth2.googleapis.com/token"
 const EXPIRY_MARGIN_MS = 5 * 60 * 1000
@@ -146,7 +146,9 @@ export async function fetchBookingGmailMessageBody(
     }
     const msgData = (await msgRes.json()) as { payload?: GmailPayloadPart; snippet?: string }
     const body = extractNormalizedGmailBody(msgData.payload)
-    const text = (body || msgData.snippet || "").trim().substring(0, BOOKING_EMAIL_BODY_PERSIST_MAX)
+    const text = truncateBookingEmailForExtract(
+      (body || msgData.snippet || "").trim()
+    )
     if (!text) {
       return {
         ok: false,

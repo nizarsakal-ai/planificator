@@ -17,10 +17,12 @@ import {
 } from "@/lib/booking/extract-booking-fields"
 import { extractNormalizedGmailBody } from "@/lib/booking/booking-gmail-body.service"
 import {
-  BOOKING_EMAIL_BODY_PERSIST_MAX,
   hasBookingAddress,
+  truncateBookingEmailForExtract,
+  truncateBookingEmailForPersist,
 } from "@/lib/booking/booking-pending-merge"
 import { getBookingGmailScanEarlyResponse } from "@/lib/booking/booking-gmail-scan-gate"
+import { getBookingScanCutoffDate } from "@/lib/booking/booking-scan-cutoff"
 
 /**
  * Lifecycle adresse (PLAN-BOOKING-ADDRESS-RELIABILITY-001-R1) :
@@ -34,6 +36,8 @@ import { getBookingGmailScanEarlyResponse } from "@/lib/booking/booking-gmail-sc
 export async function GET(req: Request) {
   const early = getBookingGmailScanEarlyResponse(req)
   if (early) return early
+
+  const scanCutoff = getBookingScanCutoffDate()
 
   const connections = await prisma.gmailConnection.findMany()
   const stats = {
@@ -125,17 +129,18 @@ export async function GET(req: Request) {
             continue
           }
 
-          const emailText = (bodyText || snippet).substring(0, BOOKING_EMAIL_BODY_PERSIST_MAX)
+          const fullText = bodyText || snippet
+          const emailTextForExtract = truncateBookingEmailForExtract(fullText)
+          const emailTextForPersist = truncateBookingEmailForPersist(fullText)
           const parsed = await extractBookingFields(
-            emailText,
+            emailTextForExtract,
             msg.id,
             anthropic as import("@/lib/booking/extract-booking-fields").BookingAiClient | null
           )
 
           if (parsed.startDate) {
             const startDate = new Date(parsed.startDate as string)
-            const cutoff = new Date("2026-06-17")
-            if (startDate < cutoff) {
+            if (startDate < scanCutoff) {
               await lifecycle.markPermanentIgnored(
                 conn.companyId,
                 msg.id,
@@ -183,7 +188,7 @@ export async function GET(req: Request) {
                 companyId: conn.companyId,
                 messageId: msg.id,
                 snippet,
-                emailBody: emailText,
+                emailBody: emailTextForPersist,
                 parsed,
                 matchedTeamId,
                 adminId: admin?.id ?? null,
@@ -220,7 +225,7 @@ export async function GET(req: Request) {
                 companyId: conn.companyId,
                 messageId: msg.id,
                 snippet,
-                emailBody: emailText,
+                emailBody: emailTextForPersist,
                 parsed,
                 matchedTeamId,
                 adminId: admin?.id ?? null,

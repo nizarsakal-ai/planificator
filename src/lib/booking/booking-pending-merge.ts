@@ -17,11 +17,52 @@ export type BookingFieldPatch = Record<string, string | null>
 /** Persistance serveur (reprise) — pas pour le client. */
 export const BOOKING_EMAIL_BODY_PERSIST_MAX = 4000
 
+/**
+ * Défaut / bornes pour le texte passé à l’extraction (≠ persistance).
+ * Configurable via `BOOKING_EMAIL_EXTRACT_MAX` (entier positif borné).
+ */
+export const BOOKING_EMAIL_EXTRACT_MAX_DEFAULT = 16000
+export const BOOKING_EMAIL_EXTRACT_MAX_MIN = 4000
+export const BOOKING_EMAIL_EXTRACT_MAX_CEILING = 64000
+
 /** Aperçu UI uniquement — jamais le corps complet. */
 export const BOOKING_UI_EMAIL_PREVIEW_MAX = 500
 
 /** Snippet Gmail trop court pour une 2ᵉ extraction fiable. */
 export const BOOKING_SNIPPET_RICH_MIN = 501
+
+/**
+ * Limite d’extraction : entier positif dans [MIN, CEILING], sinon défaut 16000.
+ * N’utilise jamais une valeur illimitée.
+ */
+export function getBookingEmailExtractMax(
+  env: NodeJS.ProcessEnv = process.env
+): number {
+  const raw = env.BOOKING_EMAIL_EXTRACT_MAX
+  if (raw === undefined) return BOOKING_EMAIL_EXTRACT_MAX_DEFAULT
+  const trimmed = raw.trim()
+  if (!trimmed) return BOOKING_EMAIL_EXTRACT_MAX_DEFAULT
+  const n = Number(trimmed)
+  if (
+    !Number.isFinite(n) ||
+    !Number.isInteger(n) ||
+    n < BOOKING_EMAIL_EXTRACT_MAX_MIN ||
+    n > BOOKING_EMAIL_EXTRACT_MAX_CEILING
+  ) {
+    return BOOKING_EMAIL_EXTRACT_MAX_DEFAULT
+  }
+  return n
+}
+
+/** Tronque pour `extractBookingFields` / rejeu d’extraction. */
+export function truncateBookingEmailForExtract(text: string): string {
+  return text.substring(0, getBookingEmailExtractMax())
+}
+
+/** Tronque pour `rawEmailSnippet` / persistance serveur. */
+export function truncateBookingEmailForPersist(text: string): string {
+  return text.substring(0, BOOKING_EMAIL_BODY_PERSIST_MAX)
+}
 
 /**
  * Représentation UI bornée du contenu email (aperçu).
@@ -121,7 +162,10 @@ export function buildPendingEnrichmentUpdate(
   const endDate = preferExistingDate(existing.endDate, parsed.endDate)
   if (endDate !== undefined) data.endDate = endDate
 
-  const incomingBody = nonEmpty(emailBodyForPersist)?.substring(0, BOOKING_EMAIL_BODY_PERSIST_MAX)
+  const incomingRaw = nonEmpty(emailBodyForPersist)
+  const incomingBody = incomingRaw
+    ? truncateBookingEmailForPersist(incomingRaw)
+    : undefined
   if (incomingBody) {
     const current = existing.rawEmailSnippet ?? ""
     if (incomingBody.length > current.length) {
@@ -158,21 +202,21 @@ export function pickEmailTextForReprocess(input: {
 }): { text: string; source: "persisted" | "gmail" | "snippet" | "empty" } {
   const persisted = nonEmpty(input.persistedText)
   if (persisted && persisted.length >= BOOKING_SNIPPET_RICH_MIN) {
-    return { text: persisted.substring(0, BOOKING_EMAIL_BODY_PERSIST_MAX), source: "persisted" }
+    return { text: truncateBookingEmailForExtract(persisted), source: "persisted" }
   }
 
   const gmail = nonEmpty(input.gmailBody)
   if (gmail) {
-    return { text: gmail.substring(0, BOOKING_EMAIL_BODY_PERSIST_MAX), source: "gmail" }
+    return { text: truncateBookingEmailForExtract(gmail), source: "gmail" }
   }
 
   if (persisted) {
-    return { text: persisted.substring(0, BOOKING_EMAIL_BODY_PERSIST_MAX), source: "persisted" }
+    return { text: truncateBookingEmailForExtract(persisted), source: "persisted" }
   }
 
   const parts = [nonEmpty(input.propertyName), nonEmpty(input.snippetFallback)].filter(
     Boolean
   ) as string[]
   if (parts.length === 0) return { text: "", source: "empty" }
-  return { text: parts.join("\n").substring(0, BOOKING_EMAIL_BODY_PERSIST_MAX), source: "snippet" }
+  return { text: truncateBookingEmailForExtract(parts.join("\n")), source: "snippet" }
 }
