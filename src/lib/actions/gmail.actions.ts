@@ -5,6 +5,11 @@ import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
 import { sendLogementCreatedEmail } from "@/lib/email"
 import { resolveConfirmAddress } from "@/lib/booking/booking-pending-merge"
+import { isCalendarRangeValid } from "@/lib/booking/booking-date-only"
+import {
+  updatePendingAccommodationImpl,
+  type UpdatePendingAccommodationPatch,
+} from "@/lib/actions/gmail-pending-update.core"
 import {
   ACCOMMODATION_GMAIL_SOURCE_UNIQUE_HINTS,
   isAnyPrismaUniqueViolation,
@@ -13,10 +18,22 @@ import {
   runConfirmCreateTransaction,
 } from "@/lib/booking/booking-confirm-idempotency"
 
+export type { UpdatePendingAccommodationPatch }
+
+/** Auth large (Paramètres Gmail, etc.) — ne pas élargir au centre de validation. */
 async function requireAdmin() {
   const session = await auth()
   if (!session?.user) throw new Error("Non authentifié")
   if (!["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)) throw new Error("Accès refusé")
+  if (!session.user.companyId) throw new Error("Entreprise introuvable")
+  return session.user
+}
+
+/** Centre de validation Booking — ADMIN / SUPER_ADMIN uniquement. */
+async function requireBookingValidationAdmin() {
+  const session = await auth()
+  if (!session?.user) throw new Error("Non authentifié")
+  if (!["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) throw new Error("Accès refusé")
   if (!session.user.companyId) throw new Error("Entreprise introuvable")
   return session.user
 }
@@ -29,9 +46,9 @@ export async function disconnectGmail() {
 }
 
 export async function getPendingAccommodations() {
-  const user = await requireAdmin()
+  const user = await requireBookingValidationAdmin()
   const rows = await prisma.pendingAccommodation.findMany({
-    where:   { companyId: user.companyId!, status: "PENDING" },
+    where: { companyId: user.companyId!, status: "PENDING" },
     orderBy: { createdAt: "desc" },
   })
   const { toBookingUiEmailPreview } = await import("@/lib/booking/booking-pending-merge")
@@ -41,8 +58,27 @@ export async function getPendingAccommodations() {
   }))
 }
 
-export async function confirmPendingAccommodation(id: string, teamId: string, overrideAddress?: string) {
-  const user = await requireAdmin()
+/**
+ * Met à jour les champs métier d’un pending PENDING du tenant courant.
+ * Ne touche jamais companyId, gmailMessageId, rawEmailSnippet, status, audit confirm.
+ */
+export async function updatePendingAccommodation(
+  id: string,
+  patch: UpdatePendingAccommodationPatch
+) {
+  return updatePendingAccommodationImpl(id, patch, {
+    auth,
+    db: prisma,
+    revalidatePath,
+  })
+}
+
+export async function confirmPendingAccommodation(
+  id: string,
+  teamId: string,
+  overrideAddress?: string
+) {
+  const user = await requireBookingValidationAdmin()
   const companyId = user.companyId!
 
   const pending = await prisma.pendingAccommodation.findFirst({
@@ -60,11 +96,14 @@ export async function confirmPendingAccommodation(id: string, teamId: string, ov
   }
 
   if (!pending.startDate || !pending.endDate) return { error: "Dates manquantes dans l'email." }
+  if (!isCalendarRangeValid(pending.startDate, pending.endDate)) {
+    return { error: "La date de départ doit être après la date d'arrivée" }
+  }
   const finalAddress = resolveConfirmAddress(pending.address, overrideAddress)
   if (!finalAddress) return { error: "Veuillez saisir l'adresse du logement." }
 
   const team = await prisma.team.findFirst({
-    where: { id: teamId, companyId },
+    where: { id: teamId, companyId, active: true },
     include: {
       leader: { select: { userId: true } },
       members: {
@@ -72,9 +111,9 @@ export async function confirmPendingAccommodation(id: string, teamId: string, ov
         include: {
           employee: {
             select: {
-              userId:    true,
+              userId: true,
               firstName: true,
-              lastName:  true,
+              lastName: true,
               user: { select: { email: true } },
             },
           },
@@ -87,7 +126,7 @@ export async function confirmPendingAccommodation(id: string, teamId: string, ov
   const fmtDate = (d: Date) =>
     new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long", year: "numeric" }).format(d)
   const startLabel = fmtDate(pending.startDate)
-  const endLabel   = fmtDate(pending.endDate)
+  const endLabel = fmtDate(pending.endDate)
 
   const userIds = [
     team.leader.userId,
@@ -119,10 +158,8 @@ export async function confirmPendingAccommodation(id: string, teamId: string, ov
 
   let createdNew = true
   try {
-    // Chemin normal : TX atomique. Aucun catch P2002 *dans* ce callback.
     await runConfirmCreateTransaction(prisma, createInput)
   } catch (error) {
-    // P2002 ciblé : la TX ci-dessus a rollback — résolution dans un *nouveau* contexte.
     if (isPrismaUniqueViolation(error, ACCOMMODATION_GMAIL_SOURCE_UNIQUE_HINTS)) {
       const resolved = await resolveConfirmAfterGmailSourceConflict(prisma, {
         companyId,
@@ -136,7 +173,6 @@ export async function confirmPendingAccommodation(id: string, teamId: string, ov
       revalidatePath("/planning/moi")
       return resolved
     }
-    // Autre contrainte unique : ne pas masquer.
     if (isAnyPrismaUniqueViolation(error)) {
       throw error
     }
@@ -152,15 +188,15 @@ export async function confirmPendingAccommodation(id: string, teamId: string, ov
       const email = membre.employee.user?.email
       if (!email) continue
       sendLogementCreatedEmail({
-        to:            email,
+        to: email,
         recipientName: `${membre.employee.firstName} ${membre.employee.lastName}`,
-        teamName:      team.name,
-        address:       `${finalAddress}${pending.city ? `, ${pending.city}` : ""}`,
+        teamName: team.name,
+        address: `${finalAddress}${pending.city ? `, ${pending.city}` : ""}`,
         startLabel,
         endLabel,
-        doorCode:      pending.doorCode  ?? undefined,
-        contactPhone:  pending.contactPhone ?? undefined,
-        companyName:   company?.name ?? "",
+        doorCode: pending.doorCode ?? undefined,
+        contactPhone: pending.contactPhone ?? undefined,
+        companyName: company?.name ?? "",
       }).catch(() => {})
     }
   }
@@ -171,15 +207,21 @@ export async function confirmPendingAccommodation(id: string, teamId: string, ov
 }
 
 export async function dismissPendingAccommodation(id: string) {
-  const user = await requireAdmin()
+  const user = await requireBookingValidationAdmin()
   const pending = await prisma.pendingAccommodation.findFirst({
     where: { id, companyId: user.companyId! },
   })
   if (!pending) return { error: "Réservation introuvable." }
-  await prisma.pendingAccommodation.update({
-    where: { id },
-    data:  { status: "DISMISSED" },
+  if (pending.status !== "PENDING") {
+    return { error: "Réservation déjà traitée." }
+  }
+  const updated = await prisma.pendingAccommodation.updateMany({
+    where: { id, companyId: user.companyId!, status: "PENDING" },
+    data: { status: "DISMISSED" },
   })
+  if (updated.count === 0) {
+    return { error: "Réservation déjà traitée." }
+  }
   revalidatePath("/logements")
   return { success: true }
 }

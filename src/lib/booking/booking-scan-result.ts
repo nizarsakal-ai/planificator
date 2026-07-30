@@ -12,6 +12,7 @@ import {
   BOOKING_EMAIL_BODY_PERSIST_MAX,
   buildPendingEnrichmentUpdate,
 } from "@/lib/booking/booking-pending-merge"
+import { isBookingScanPendingOnly } from "@/lib/booking/booking-scan-pending-only-flag"
 
 export type ParsedBookingFields = Record<string, string | null>
 
@@ -89,7 +90,15 @@ export async function createOrGetBookingScanResult(
     orderBy: { createdAt: "asc" },
   })
 
-  if (matchedTeamId && adminId && parsed.address && parsed.startDate && parsed.endDate) {
+  // Auto-Accommodation historique — désactivé si BOOKING_SCAN_PENDING_ONLY=true.
+  if (
+    !isBookingScanPendingOnly() &&
+    matchedTeamId &&
+    adminId &&
+    parsed.address &&
+    parsed.startDate &&
+    parsed.endDate
+  ) {
     // Pending déjà présent : enrichir si PENDING, ne jamais créer d’Accommodation en double.
     if (existingPending) {
       return enrichExistingPending(tx, existingPending, parsed, emailBody)

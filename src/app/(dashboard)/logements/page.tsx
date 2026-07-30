@@ -43,8 +43,8 @@ export default async function LogementsPage() {
       orderBy: { name: "asc" },
     }),
     prisma.pendingAccommodation.findMany({
-      where:   { companyId: session.user.companyId!, status: "PENDING" },
-      select:  {
+      where: { companyId: session.user.companyId!, status: "PENDING" },
+      select: {
         id: true,
         propertyName: true,
         address: true,
@@ -52,6 +52,12 @@ export default async function LogementsPage() {
         zipCode: true,
         startDate: true,
         endDate: true,
+        doorCode: true,
+        contactName: true,
+        contactPhone: true,
+        notes: true,
+        createdAt: true,
+        gmailMessageId: true,
         rawEmailSnippet: true,
       },
       orderBy: { createdAt: "desc" },
@@ -66,6 +72,12 @@ export default async function LogementsPage() {
     zipCode: p.zipCode,
     startDate: p.startDate,
     endDate: p.endDate,
+    doorCode: p.doorCode,
+    contactName: p.contactName,
+    contactPhone: p.contactPhone,
+    notes: p.notes,
+    createdAt: p.createdAt,
+    gmailMessageId: p.gmailMessageId,
     /** Aperçu borné — jamais le corps complet (rawEmailSnippet serveur). */
     emailPreview: toBookingUiEmailPreview(p.rawEmailSnippet),
   }))
