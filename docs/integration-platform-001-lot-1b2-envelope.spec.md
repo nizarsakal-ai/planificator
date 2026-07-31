@@ -56,24 +56,33 @@ Ce document **MUST NOT** republier intégralement les schémas Zod LOT-1A. Il fi
 | Nom Prisma | `InboundEnvelope` |
 | Nom SQL | `integration_inbound_envelopes` |
 
+### 3.0 Convention SQL (alignement LOT-1B1)
+
+Les identifiants PostgreSQL de ce lot **MUST** suivre la convention déjà fusionnée pour `integration_connections` (LOT-1B1) :
+
+- colonnes **camelCase** quotées (`"companyId"`, `"connectionId"`, …) — **MUST NOT** `snake_case` (`company_id`) ;
+- `DateTime` Prisma → `TIMESTAMP(3)` (comme LOT-1B1) ;
+- FK Envelope → Connection : colonnes `("connectionId", "companyId")` → `integration_connections("id", "companyId")` (composite déjà figé en 1B1 via `@@unique([id, companyId])`) ;
+- champ Prisma / contrat LOT-1A : `connectionId` (réf. `IntegrationConnection.id`) — **MUST NOT** renommer en `integrationConnectionId`.
+
 ### 3.1 Colonnes
 
-| Colonne | Type Prisma | SQL | Null | Défaut | Public / technique | Mutabilité |
-|---------|-------------|-----|------|--------|--------------------|------------|
+| Colonne | Type Prisma | Type SQL | Null | Défaut | Public / technique | Mutabilité |
+|---------|-------------|----------|------|--------|--------------------|------------|
 | `id` | `String` `@id` `@default(cuid())` | `TEXT` PK | non | cuid | public | immuable après insert |
 | `companyId` | `String` | `TEXT` | non | — | public | immuable |
 | `connectionId` | `String` | `TEXT` | non | — | public | immuable |
 | `connectorType` | `String` | `TEXT` | non | — | public (snapshot) | immuable |
 | `externalId` | `String` | `TEXT` | non | — | public | immuable |
 | `idempotencyKey` | `String` | `TEXT` | non | — | public | immuable |
-| `receivedAt` | `DateTime` | `TIMESTAMPTZ` | non | fourni à la création | public | immuable (1ʳᵉ écriture) |
+| `receivedAt` | `DateTime` | `TIMESTAMP(3)` | non | fourni à la création | public | immuable (1ʳᵉ écriture) |
 | `payloadRef` | `String` | `TEXT` | non | — | public opaque | immuable |
 | `contentType` | `String` | `TEXT` | non | — | public | immuable |
 | `schemaVersion` | `String` | `TEXT` | non | `"1.0.0"` | public | immuable |
 | `lifecycleStatus` | enum `EnvelopeLifecycleStatus` | enum PG | non | `RECEIVED` | public | **seule** colonne métier mutable |
 | `rawPayloadHash` | `String?` | `TEXT` | oui | — | public optionnel | immuable |
-| `createdAt` | `DateTime` | `TIMESTAMPTZ` | non | `now()` | technique | immuable |
-| `updatedAt` | `DateTime` `@updatedAt` | `TIMESTAMPTZ` | non | auto | technique | auto |
+| `createdAt` | `DateTime` | `TIMESTAMP(3)` | non | `now()` | technique | immuable |
+| `updatedAt` | `DateTime` `@updatedAt` | `TIMESTAMP(3)` | non | auto | technique | auto |
 
 ### 3.2 Enum lifecycle (Prisma / SQL)
 
@@ -83,25 +92,27 @@ Valeurs **MUST** : `RECEIVED`, `NORMALIZED`, `NORMALIZE_FAILED`, `ROUTED`, `NO_M
 
 ### 3.3 Uniques (MUST — ordre des champs figé)
 
-| Contrainte SQL (nom) | Colonnes |
-|----------------------|----------|
-| `integration_inbound_envelopes_id_company_id_key` | `(id, company_id)` |
-| `integration_inbound_envelopes_id_company_id_connection_id_key` | `(id, company_id, connection_id)` |
-| `integration_inbound_envelopes_idempotency_key` | `(company_id, connection_id, idempotency_key)` |
+Noms alignés sur le style LOT-1B1 (`integration_connections_id_companyId_key`).
+
+| Contrainte SQL (nom) | Colonnes SQL |
+|----------------------|--------------|
+| `integration_inbound_envelopes_id_companyId_key` | `("id", "companyId")` |
+| `integration_inbound_envelopes_id_companyId_connectionId_key` | `("id", "companyId", "connectionId")` |
+| `integration_inbound_envelopes_idempotency_key` | `("companyId", "connectionId", "idempotencyKey")` |
 
 Prisma :
 
-- `@@unique([id, companyId])`
-- `@@unique([id, companyId, connectionId])`
+- `@@unique([id, companyId], map: "integration_inbound_envelopes_id_companyId_key")`
+- `@@unique([id, companyId, connectionId], map: "integration_inbound_envelopes_id_companyId_connectionId_key")`
 - `@@unique([companyId, connectionId, idempotencyKey], map: "integration_inbound_envelopes_idempotency_key")`
 
 ### 3.4 Indexes (MUST)
 
-| Index SQL (nom proposé) | Colonnes |
-|-------------------------|----------|
-| `integration_inbound_envelopes_company_id_lifecycle_status_idx` | `(company_id, lifecycle_status)` |
-| `integration_inbound_envelopes_company_id_connection_id_received_at_idx` | `(company_id, connection_id, received_at)` |
-| `integration_inbound_envelopes_company_id_connection_id_external_id_idx` | `(company_id, connection_id, external_id)` |
+| Index SQL (nom proposé) | Colonnes SQL |
+|-------------------------|--------------|
+| `integration_inbound_envelopes_companyId_lifecycleStatus_idx` | `("companyId", "lifecycleStatus")` |
+| `integration_inbound_envelopes_companyId_connectionId_receivedAt_idx` | `("companyId", "connectionId", "receivedAt")` |
+| `integration_inbound_envelopes_companyId_connectionId_externalId_idx` | `("companyId", "connectionId", "externalId")` |
 
 `externalId` **MUST NOT** être unique seul.
 
@@ -130,21 +141,21 @@ Le repository **MUST NOT** exposer de delete physique. La suppression n’interv
 
 ### 4.1 Colonnes
 
-| Colonne | Type Prisma | SQL | Null | Défaut | Public / technique | Mutabilité |
-|---------|-------------|-----|------|--------|--------------------|------------|
+| Colonne | Type Prisma | Type SQL | Null | Défaut | Public / technique | Mutabilité |
+|---------|-------------|----------|------|--------|--------------------|------------|
 | `id` | `String` `@id` `@default(cuid())` | `TEXT` PK | non | cuid | public | immuable |
 | `companyId` | `String` | `TEXT` | non | — | public | immuable |
 | `connectionId` | `String` | `TEXT` | non | — | public | immuable |
 | `envelopeId` | `String` | `TEXT` | non | — | public | immuable |
 | `family` | enum `InboundFamily` | enum PG | non | — | public | immuable |
-| `occurredAt` | `DateTime` | `TIMESTAMPTZ` | non | — | public | immuable |
-| `receivedAt` | `DateTime` | `TIMESTAMPTZ` | non | — | public | immuable |
+| `occurredAt` | `DateTime` | `TIMESTAMP(3)` | non | — | public | immuable |
+| `receivedAt` | `DateTime` | `TIMESTAMP(3)` | non | — | public | immuable |
 | `normalizedHash` | `String` | `TEXT` | non | — | public | immuable |
 | `artifactRefs` | `String[]` | `TEXT[]` | non | `{}` / `[]` | public opaque | immuable |
 | `schemaVersion` | `String` | `TEXT` | non | `"1.0.0"` | public | immuable |
 | `message` | `Json` | `JSONB` | non | — | public (MESSAGE) | immuable |
-| `createdAt` | `DateTime` | `TIMESTAMPTZ` | non | `now()` | technique | immuable |
-| `updatedAt` | `DateTime` `@updatedAt` | `TIMESTAMPTZ` | non | auto | technique | auto |
+| `createdAt` | `DateTime` | `TIMESTAMP(3)` | non | `now()` | technique | immuable |
+| `updatedAt` | `DateTime` `@updatedAt` | `TIMESTAMP(3)` | non | auto | technique | auto |
 
 ### 4.2 Enum family
 
@@ -154,22 +165,22 @@ Extension future = migration additive d’enum + révision contrat — hors ce l
 
 ### 4.3 Uniques (MUST)
 
-| Contrainte SQL (nom) | Colonnes |
-|----------------------|----------|
-| `integration_normalized_inbounds_id_company_id_key` | `(id, company_id)` |
-| `integration_normalized_inbounds_envelope_version_key` | `(envelope_id, company_id, family, schema_version)` |
+| Contrainte SQL (nom) | Colonnes SQL |
+|----------------------|--------------|
+| `integration_normalized_inbounds_id_companyId_key` | `("id", "companyId")` |
+| `integration_normalized_inbounds_envelope_version_key` | `("envelopeId", "companyId", "family", "schemaVersion")` |
 
 Prisma :
 
-- `@@unique([id, companyId])`
+- `@@unique([id, companyId], map: "integration_normalized_inbounds_id_companyId_key")`
 - `@@unique([envelopeId, companyId, family, schemaVersion], map: "integration_normalized_inbounds_envelope_version_key")`
 
 ### 4.4 Indexes (MUST)
 
-| Index SQL (nom proposé) | Colonnes |
-|-------------------------|----------|
-| `integration_normalized_inbounds_company_id_connection_id_received_at_idx` | `(company_id, connection_id, received_at)` |
-| `integration_normalized_inbounds_company_id_envelope_id_idx` | `(company_id, envelope_id)` |
+| Index SQL (nom proposé) | Colonnes SQL |
+|-------------------------|--------------|
+| `integration_normalized_inbounds_companyId_connectionId_receivedAt_idx` | `("companyId", "connectionId", "receivedAt")` |
+| `integration_normalized_inbounds_companyId_envelopeId_idx` | `("companyId", "envelopeId")` |
 
 ### 4.5 Relations et suppression
 
@@ -198,7 +209,7 @@ Les règles suivantes sont **normatives** :
 3. **MUST** : une Envelope appartient à une `IntegrationConnection` du **même** `companyId` (FK composite Envelope → Connection).
 4. **MUST** : un `NormalizedInbound` porte le **même** `companyId` et le **même** `connectionId` que son `InboundEnvelope`.
 5. **MUST** : la FK ternaire  
-   `NormalizedInbound(envelope_id, company_id, connection_id) → InboundEnvelope(id, company_id, connection_id)`  
+   `NormalizedInbound("envelopeId", "companyId", "connectionId") → InboundEnvelope("id", "companyId", "connectionId")`  
    garantit (4) **au niveau base** : un drift de `connectionId` est refusé par PostgreSQL.
 6. **MUST NOT** : l’isolation multi-tenant ne repose **pas uniquement** sur le code repository ou sur Prisma client ; les contraintes SQL sont obligatoires.
 
@@ -257,7 +268,7 @@ La première écriture conserve sa valeur.
 - Écriture **MUST** être insert-only.
 - **MUST NOT** : fusion, replace, update métier, retour silencieux de l’existante sur conflit de version.
 - Contrainte SQL de version **MUST** s’appeler : `integration_normalized_inbounds_envelope_version_key`
-- Colonnes : `(envelope_id, company_id, family, schema_version)`
+- Colonnes SQL : `("envelopeId", "companyId", "family", "schemaVersion")`
 - Violation de cette contrainte **MUST** → `NORMALIZED_VERSION_CONFLICT`
 - Tout autre incident Prisma (autres uniques, FK, infra) **MUST** → `PERSISTENCE` (sauf `VALIDATION` / `PAYLOAD_TOO_LARGE` détectés avant Prisma)
 
@@ -405,14 +416,19 @@ Préfixe d’implémentation recommandé (non contractuel public) : `INTEGRATION
 
 | Objet | Nom SQL |
 |-------|---------|
-| Unique ternaire Envelope (cible FK) | `integration_inbound_envelopes_id_company_id_connection_id_key` |
+| Unique ternaire Envelope (cible FK) | `integration_inbound_envelopes_id_companyId_connectionId_key` |
+| Unique tenant Envelope | `integration_inbound_envelopes_id_companyId_key` |
 | Idempotence Envelope | `integration_inbound_envelopes_idempotency_key` |
+| Unique tenant Normalized | `integration_normalized_inbounds_id_companyId_key` |
 | Version Normalized | `integration_normalized_inbounds_envelope_version_key` |
 | FK ternaire Normalized → Envelope | `integration_normalized_inbounds_envelope_tenant_connection_fkey` |
+| FK Envelope → Connection (composite) | `integration_inbound_envelopes_connectionId_companyId_fkey` |
 
-FK Envelope → Connection (nom proposé) : `integration_inbound_envelopes_connection_tenant_fkey`  
-Colonnes FK ternaire :  
-`(envelope_id, company_id, connection_id) REFERENCES integration_inbound_envelopes (id, company_id, connection_id) ON DELETE CASCADE`
+FK Envelope → `IntegrationConnection` (aligné unique 1B1) :  
+`("connectionId", "companyId") REFERENCES "integration_connections" ("id", "companyId") ON DELETE CASCADE`
+
+Colonnes FK ternaire Normalized → Envelope :  
+`("envelopeId", "companyId", "connectionId") REFERENCES "integration_inbound_envelopes" ("id", "companyId", "connectionId") ON DELETE CASCADE`
 
 ---
 
@@ -501,3 +517,4 @@ Le lot **MUST NOT** être déclaré fermé tant que **tous** les points suivants
 | Version | Date | Statut |
 |---------|------|--------|
 | 0.1.0 | 2026-07-27 | DRAFT FOR IMPLEMENTATION |
+| 0.1.1 | 2026-08-01 | DRAFT — alignement doc SQL camelCase / LOT-1B1 (R1) ; aucune règle métier changée |
