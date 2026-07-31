@@ -11,18 +11,15 @@ import {
   retryableBookingError,
 } from "@/lib/booking/booking-gmail-errors"
 import { createOrGetBookingScanResult } from "@/lib/booking/booking-scan-result"
-import {
-  extractBookingFields,
-  hasUsefulBookingData,
-} from "@/lib/booking/extract-booking-fields"
+import { extractBookingFields } from "@/lib/booking/extract-booking-fields"
 import { extractNormalizedGmailBody } from "@/lib/booking/booking-gmail-body.service"
 import {
-  hasBookingAddress,
   truncateBookingEmailForExtract,
   truncateBookingEmailForPersist,
 } from "@/lib/booking/booking-pending-merge"
 import { getBookingGmailScanEarlyResponse } from "@/lib/booking/booking-gmail-scan-gate"
 import { getBookingScanCutoffDate } from "@/lib/booking/booking-scan-cutoff"
+import { evaluatePendingCreationGate } from "@/lib/booking/booking-scan-pending-gate"
 import {
   BookingGmailListError,
   getBookingGmailMaxFullFetchesPerConnection,
@@ -32,12 +29,11 @@ import {
 } from "@/lib/booking/booking-gmail-pagination"
 
 /**
- * Lifecycle adresse (PLAN-BOOKING-ADDRESS-RELIABILITY-001-R1) :
- * - adresse présente → SUCCEEDED (pending ou Accommodation)
- * - utile sans adresse → persist/enrich pending + RETRYABLE_FAILURE / MISSING_ADDRESS
- *   (1 seule reprise auto ; 2ᵉ échec → PERMANENTLY_IGNORED / ADDRESS_NOT_FOUND_AFTER_RETRY)
- * - PendingAccommodation reste PENDING pour UI / fallback manuel
- * - échec technique (réseau/provider) ≠ absence d’adresse (politique distincte)
+ * Critères avant Pending / Acc (PLAN-BOOKING-FILTER-001) :
+ * - ACCEPT : dates calendaires valides, adresse, plage, start >= cutoff
+ * - PERMANENT_IGNORE : uniquement BEFORE_CUTOFF
+ * - RETRYABLE_REJECT : champs manquants/invalides → markFailure, pas de Pending/Acc
+ * - l’équipe n’est pas un critère (choix manuel à la confirmation)
  */
 
 export async function GET(req: Request) {
@@ -161,28 +157,39 @@ export async function GET(req: Request) {
             anthropic as import("@/lib/booking/extract-booking-fields").BookingAiClient | null
           )
 
-          if (parsed.startDate) {
-            const startDate = new Date(parsed.startDate as string)
-            if (startDate < scanCutoff) {
-              await lifecycle.markPermanentIgnored(
-                conn.companyId,
-                messageId,
-                permanentBookingError("BEFORE_CUTOFF_DATE", "Avant le 17/06/2026")
-              )
-              stats.permanent++
-              console.log(`[gmail-scan] PERMANENTLY_IGNORED cutoff messageId=${messageId}`)
-              return
-            }
-          }
-
-          if (!hasUsefulBookingData(parsed)) {
+          const gate = evaluatePendingCreationGate(parsed, scanCutoff)
+          if (gate.decision === "PERMANENT_IGNORE") {
             await lifecycle.markPermanentIgnored(
               conn.companyId,
               messageId,
-              permanentBookingError("NO_USEFUL_BOOKING_DATA", "Parsing sans donnée utile")
+              permanentBookingError(gate.code, gate.message)
             )
             stats.permanent++
-            console.log(`[gmail-scan] PERMANENTLY_IGNORED no useful data messageId=${messageId}`)
+            console.log(
+              `[gmail-scan] PERMANENTLY_IGNORED ${gate.code} messageId=${messageId}`
+            )
+            return
+          }
+          if (gate.decision === "RETRYABLE_REJECT") {
+            const failed = await lifecycle.markFailure({
+              companyId: conn.companyId,
+              messageId,
+              error: retryableBookingError(gate.code, gate.message),
+            })
+            if (gate.code === "MISSING_ADDRESS") {
+              stats.missingAddress++
+            }
+            if (failed.status === "RETRYABLE_FAILURE") {
+              stats.retryable++
+              console.warn(
+                `[gmail-scan] RETRYABLE_FAILURE ${gate.code} messageId=${messageId} nextRetryAt=${failed.nextRetryAt?.toISOString() ?? "n/a"}`
+              )
+            } else if (failed.status === "PERMANENTLY_IGNORED") {
+              stats.permanent++
+              console.warn(
+                `[gmail-scan] PERMANENTLY_IGNORED messageId=${messageId} code=${failed.errorCode}`
+              )
+            }
             return
           }
 
@@ -202,42 +209,6 @@ export async function GET(req: Request) {
               select: { id: true },
             })
             matchedTeamId = team?.id ?? null
-          }
-
-          if (!hasBookingAddress(parsed)) {
-            await prisma.$transaction(async (tx) => {
-              await createOrGetBookingScanResult(tx, {
-                companyId: conn.companyId,
-                messageId,
-                snippet,
-                emailBody: emailTextForPersist,
-                parsed,
-                matchedTeamId,
-                adminId: admin?.id ?? null,
-              })
-            })
-            const failed = await lifecycle.markFailure({
-              companyId: conn.companyId,
-              messageId,
-              error: retryableBookingError(
-                "MISSING_ADDRESS",
-                "Adresse absente après extraction — rejeu limité"
-              ),
-            })
-            if (failed.status === "RETRYABLE_FAILURE") {
-              stats.retryable++
-              stats.missingAddress++
-              console.warn(
-                `[gmail-scan] RETRYABLE_FAILURE MISSING_ADDRESS messageId=${messageId} nextRetryAt=${failed.nextRetryAt?.toISOString() ?? "n/a"}`
-              )
-            } else if (failed.status === "PERMANENTLY_IGNORED") {
-              stats.permanent++
-              stats.missingAddress++
-              console.warn(
-                `[gmail-scan] PERMANENTLY_IGNORED messageId=${messageId} code=${failed.errorCode}`
-              )
-            }
-            return
           }
 
           await lifecycle.markSucceededInTransaction(

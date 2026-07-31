@@ -48,6 +48,48 @@ export function classifyBookingError(error: unknown): ClassifiedBookingError {
       message: "Date d'arrivée antérieure à la règle métier documentée",
     }
   }
+  if (msg === "BEFORE_CUTOFF" || name === "BEFORE_CUTOFF") {
+    return {
+      kind: "PERMANENT",
+      code: "BEFORE_CUTOFF",
+      message: "Date d'arrivée antérieure à la coupure de scan",
+    }
+  }
+  if (msg === "MISSING_START_DATE" || name === "MISSING_START_DATE") {
+    return {
+      kind: "RETRYABLE",
+      code: "MISSING_START_DATE",
+      message: "Date d'arrivée absente après extraction",
+    }
+  }
+  if (msg === "MISSING_END_DATE" || name === "MISSING_END_DATE") {
+    return {
+      kind: "RETRYABLE",
+      code: "MISSING_END_DATE",
+      message: "Date de départ absente après extraction",
+    }
+  }
+  if (msg === "INVALID_START_DATE" || name === "INVALID_START_DATE") {
+    return {
+      kind: "RETRYABLE",
+      code: "INVALID_START_DATE",
+      message: "Date d'arrivée invalide",
+    }
+  }
+  if (msg === "INVALID_END_DATE" || name === "INVALID_END_DATE") {
+    return {
+      kind: "RETRYABLE",
+      code: "INVALID_END_DATE",
+      message: "Date de départ invalide",
+    }
+  }
+  if (msg === "INVALID_DATE_RANGE" || name === "INVALID_DATE_RANGE") {
+    return {
+      kind: "RETRYABLE",
+      code: "INVALID_DATE_RANGE",
+      message: "Date de départ antérieure à la date d'arrivée",
+    }
+  }
   if (msg === "MISSING_ADDRESS" || name === "MISSING_ADDRESS") {
     return {
       kind: "RETRYABLE",
