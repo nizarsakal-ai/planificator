@@ -257,6 +257,24 @@ enum IntegrationSecretBackend {
   PLATFORM_ENCRYPTED
 }
 
+/// PLAN-INTEGRATION-PLATFORM-001 — LOT-1B2 — Lifecycle InboundEnvelope.
+enum EnvelopeLifecycleStatus {
+  RECEIVED
+  NORMALIZED
+  NORMALIZE_FAILED
+  ROUTED
+  NO_MATCH
+  AMBIGUOUS
+  DISPATCHED
+  DISCARDED
+  ARCHIVED
+}
+
+/// PLAN-INTEGRATION-PLATFORM-001 — LOT-1B2 — Famille NormalizedInbound (V1 MESSAGE-only).
+enum InboundFamily {
+  MESSAGE
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // COMPANY — Tenant racine
 // Toutes les données métier sont isolées par companyId
@@ -308,6 +326,8 @@ model Company {
   acquisitionPartnerEmails    AcquisitionPartnerEmail[]
   acquisitionDecisionJournals AcquisitionDecisionJournal[]
   integrationConnections      IntegrationConnection[]
+  inboundEnvelopes            InboundEnvelope[]
+  normalizedInbounds          NormalizedInbound[]
 
   @@map("companies")
 }
@@ -1609,8 +1629,71 @@ model IntegrationConnection {
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
+  inboundEnvelopes InboundEnvelope[]
+
   @@unique([id, companyId])
   @@index([companyId, status])
   @@index([companyId, connectorType])
   @@map("integration_connections")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INTEGRATION PLATFORM — LOT-1B2 — InboundEnvelope + NormalizedInbound
+// Additive. Convention colonnes camelCase (alignée LOT-1B1).
+// ═══════════════════════════════════════════════════════════════════════════
+
+model InboundEnvelope {
+  id               String                  @id @default(cuid())
+  companyId        String
+  connectionId     String
+  connectorType    String
+  externalId       String
+  idempotencyKey   String
+  receivedAt       DateTime
+  payloadRef       String
+  contentType      String
+  schemaVersion    String                  @default("1.0.0")
+  lifecycleStatus  EnvelopeLifecycleStatus @default(RECEIVED)
+  rawPayloadHash   String?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  company            Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  connection         IntegrationConnection @relation(fields: [connectionId, companyId], references: [id, companyId], onDelete: Cascade, map: "integration_inbound_envelopes_connectionId_companyId_fkey")
+  normalizedInbounds NormalizedInbound[]
+
+  @@unique([id, companyId], map: "integration_inbound_envelopes_id_companyId_key")
+  @@unique([id, companyId, connectionId], map: "integration_inbound_envelopes_id_companyId_connectionId_key")
+  @@unique([companyId, connectionId, idempotencyKey], map: "integration_inbound_envelopes_idempotency_key")
+  @@index([companyId, lifecycleStatus], map: "integration_inbound_envelopes_companyId_lifecycleStatus_idx")
+  // Noms ≤63 octets (limite PG) — colonnes = SPEC §3.4
+  @@index([companyId, connectionId, receivedAt], map: "integration_inbound_envelopes_co_conn_receivedAt_idx")
+  @@index([companyId, connectionId, externalId], map: "integration_inbound_envelopes_co_conn_externalId_idx")
+  @@map("integration_inbound_envelopes")
+}
+
+model NormalizedInbound {
+  id             String        @id @default(cuid())
+  companyId      String
+  connectionId   String
+  envelopeId     String
+  family         InboundFamily
+  occurredAt     DateTime
+  receivedAt     DateTime
+  normalizedHash String
+  artifactRefs   String[]      @default([])
+  schemaVersion  String        @default("1.0.0")
+  message        Json
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  company  Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  envelope InboundEnvelope @relation(fields: [envelopeId, companyId, connectionId], references: [id, companyId, connectionId], onDelete: Cascade, map: "integration_normalized_inbounds_envelope_tenant_connection_fkey")
+
+  @@unique([id, companyId], map: "integration_normalized_inbounds_id_companyId_key")
+  @@unique([envelopeId, companyId, family, schemaVersion], map: "integration_normalized_inbounds_envelope_version_key")
+  // Nom ≤63 octets (limite PG) — colonnes = SPEC §4.4
+  @@index([companyId, connectionId, receivedAt], map: "integration_normalized_inbounds_co_conn_receivedAt_idx")
+  @@index([companyId, envelopeId], map: "integration_normalized_inbounds_companyId_envelopeId_idx")
+  @@map("integration_normalized_inbounds")
 }

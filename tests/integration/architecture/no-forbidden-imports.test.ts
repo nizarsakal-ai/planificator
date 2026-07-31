@@ -190,19 +190,19 @@ function scanLayerViolations(
   return violations
 }
 
-describe("Integration architecture — frontières LOT-1A / LOT-1B1", () => {
+describe("Integration architecture — frontières LOT-1A / LOT-1B1 / LOT-1B2", () => {
   const files = collectTsFiles(ROOT)
   const abstractFiles = files.filter((f) => layerOf(f) !== "persistence")
   const persistenceFiles = files.filter((f) => layerOf(f) === "persistence")
 
-  it("scanne le périmètre integration (LOT-1A + persistence LOT-1B1)", () => {
+  it("scanne le périmètre integration (LOT-1A + persistence LOT-1B1/1B2)", () => {
     assert.ok(files.length >= 24)
     for (const file of files) {
       assert.ok(file.startsWith(ROOT))
     }
     assert.ok(
-      persistenceFiles.length >= 3,
-      "LOT-1B1 persistence attendue sous src/lib/integration/persistence/"
+      persistenceFiles.length >= 8,
+      "LOT-1B1+1B2 persistence attendue sous src/lib/integration/persistence/"
     )
   })
 
@@ -317,25 +317,28 @@ describe("Integration architecture — frontières LOT-1A / LOT-1B1", () => {
     )
   })
 
-  it("le repository LOT-1B1 réel n’est pas un faux positif Prisma", () => {
-    const repo = path.join(
-      ROOT,
-      "persistence",
-      "integration-connection.repository.ts"
-    )
-    assert.ok(fs.existsSync(repo), "repository LOT-1B1 attendu")
-    const source = fs.readFileSync(repo, "utf8")
-    const specs = extractImportSpecifiers(source)
-    assert.ok(
-      specs.some((s) => s === "@prisma/client" || s === "@/lib/prisma"),
-      "le repository doit importer Prisma"
-    )
-    for (const spec of specs) {
-      assert.equal(
-        violationForImport("persistence", repo, spec),
-        null,
-        `faux positif: ${spec}`
+  it("les repositories LOT-1B1 / LOT-1B2 réels ne sont pas des faux positifs Prisma", () => {
+    const repos = [
+      "integration-connection.repository.ts",
+      "inbound-envelope.repository.ts",
+      "normalized-inbound.repository.ts",
+    ]
+    for (const name of repos) {
+      const repo = path.join(ROOT, "persistence", name)
+      assert.ok(fs.existsSync(repo), `repository attendu: ${name}`)
+      const source = fs.readFileSync(repo, "utf8")
+      const specs = extractImportSpecifiers(source)
+      assert.ok(
+        specs.some((s) => s === "@prisma/client" || s === "@/lib/prisma"),
+        `${name} doit importer Prisma`
       )
+      for (const spec of specs) {
+        assert.equal(
+          violationForImport("persistence", repo, spec),
+          null,
+          `faux positif ${name}: ${spec}`
+        )
+      }
     }
   })
 
