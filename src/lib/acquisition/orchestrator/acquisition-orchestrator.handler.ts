@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { assertCronBearerAuth } from "@/lib/cron/assert-cron-bearer-auth"
 import {
   getAcquisitionOrchestratorConfig,
   isAcquisitionOrchestratorStubsAllowed,
@@ -37,15 +38,8 @@ export async function handleAcquisitionOrchestratorCron(
   req: Request,
   deps: AcquisitionOrchestratorRouteDeps = {}
 ): Promise<Response> {
-  const secret = process.env.CRON_SECRET
-  if (!secret) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
-  const auth = req.headers.get("authorization")
-  if (auth !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const unauthorized = assertCronBearerAuth(req)
+  if (unauthorized) return unauthorized
 
   const createRunId = deps.createRunId ?? (() => crypto.randomUUID())
   const runId = createRunId()

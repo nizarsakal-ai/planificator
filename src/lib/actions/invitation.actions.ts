@@ -5,18 +5,14 @@ import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
 import { sendInvitationEmail } from "@/lib/email"
 import bcrypt from "bcryptjs"
-import crypto from "crypto"
 import { z } from "zod"
-
-const inviteSchema = z.object({
-  email: z.string().email("Email invalide"),
-  role:  z.enum(["ADMIN", "TEAM_LEADER", "EMPLOYEE"]),
-})
+import { inviterMembreImpl } from "@/lib/actions/invitation-invite.core"
 
 async function requireAdmin() {
   const session = await auth()
   if (!session?.user) throw new Error("Non authentifié")
-  if (!["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)) throw new Error("Accès refusé")
+  if (!["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role))
+    throw new Error("Accès refusé")
   if (!session.user.companyId) throw new Error("Entreprise introuvable")
   return session.user
 }
@@ -24,74 +20,43 @@ async function requireAdmin() {
 // ─── Inviter un membre ────────────────────────────────────────────────────────
 
 export async function inviterMembre(formData: FormData) {
-  const user = await requireAdmin()
-
-  const raw = {
-    email: formData.get("email") as string,
-    role:  formData.get("role")  as string,
-  }
-
-  const parsed = inviteSchema.safeParse(raw)
-  if (!parsed.success) return { error: parsed.error.errors[0].message }
-
-  // Vérifier que l'utilisateur n'appartient pas déjà à cette entreprise avec un profil actif
-  const existing = await prisma.user.findFirst({
-    where: { email: parsed.data.email, companyId: user.companyId! },
-    include: { employeeProfile: { select: { id: true, active: true } } },
-  })
-  if (existing) {
-    if (existing.employeeProfile?.active) {
-      return { error: "Cet employé fait déjà partie de votre entreprise." }
-    }
-    // Compte fantôme (sans profil employé actif) → on le supprime pour permettre la réinvitation
-    await prisma.user.delete({ where: { id: existing.id } })
-  }
-
-  // Supprimer toute invitation en attente existante pour cet email
-  await prisma.invitation.deleteMany({
-    where: { email: parsed.data.email, status: "PENDING" },
-  })
-
-  const company = await prisma.company.findUnique({
-    where: { id: user.companyId! },
-    select: { name: true },
-  })
-
-  const token   = crypto.randomBytes(32).toString("hex")
-  const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 jours
-
-  await prisma.invitation.create({
-    data: {
-      email:       parsed.data.email,
-      role:        parsed.data.role,
-      companyId:   user.companyId!,
-      invitedById: user.id,
-      token,
-      expiresAt:   expires,
-      status:      "PENDING",
-    },
-  })
-
-  // Envoyer l'email (erreur non bloquante)
-  if (process.env.RESEND_API_KEY) {
-    try {
-      await sendInvitationEmail({
-        to:            parsed.data.email,
-        token,
-        companyName:   company?.name ?? "votre entreprise",
-        invitedByName: user.name ?? user.email ?? "Admin",
-        role:          parsed.data.role,
+  return inviterMembreImpl(formData, {
+    requireSession: requireAdmin,
+    findExistingUser: (email, companyId) =>
+      prisma.user.findFirst({
+        where: { email, companyId },
+        include: { employeeProfile: { select: { id: true, active: true } } },
+      }),
+    deleteUser: (id) => prisma.user.delete({ where: { id } }),
+    deletePendingInvitations: (email) =>
+      prisma.invitation.deleteMany({
+        where: { email, status: "PENDING" },
+      }),
+    findCompanyName: async (companyId) => {
+      const company = await prisma.company.findUnique({
+        where: { id: companyId },
+        select: { name: true },
       })
-    } catch (e) {
-      console.error("Erreur envoi email invitation:", e)
-    }
-  }
-
-  const appUrl = process.env.NEXTAUTH_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
-  const invitationUrl = `${appUrl}/invitation?token=${token}`
-
-  revalidatePath("/employes")
-  return { success: true, invitationUrl }
+      return company?.name ?? null
+    },
+    createInvitation: (data) =>
+      prisma.invitation.create({
+        data: {
+          ...data,
+          status: "PENDING",
+        },
+      }),
+    sendEmail: async ({ to, token, companyName, invitedByName, role }) => {
+      await sendInvitationEmail({
+        to,
+        token,
+        companyName,
+        invitedByName,
+        role,
+      })
+    },
+    revalidate: () => revalidatePath("/employes"),
+  })
 }
 
 // ─── Accepter une invitation ──────────────────────────────────────────────────
@@ -105,15 +70,15 @@ export async function getInvitation(token: string) {
 }
 
 const acceptSchema = z.object({
-  token:    z.string().min(1),
-  name:     z.string().min(1, "Le nom est requis"),
+  token: z.string().min(1),
+  name: z.string().min(1, "Le nom est requis"),
   password: z.string().min(8, "8 caractères minimum"),
 })
 
 export async function acceptInvitation(formData: FormData) {
   const raw = {
-    token:    formData.get("token")    as string,
-    name:     formData.get("name")     as string,
+    token: formData.get("token") as string,
+    name: formData.get("name") as string,
     password: formData.get("password") as string,
   }
 
@@ -121,11 +86,17 @@ export async function acceptInvitation(formData: FormData) {
   if (!parsed.success) return { error: parsed.error.errors[0].message }
 
   const invitation = await prisma.invitation.findFirst({
-    where: { token: parsed.data.token, status: "PENDING", expiresAt: { gt: new Date() } },
+    where: {
+      token: parsed.data.token,
+      status: "PENDING",
+      expiresAt: { gt: new Date() },
+    },
   })
   if (!invitation) return { error: "Invitation invalide ou expirée." }
 
-  const existingUser = await prisma.user.findUnique({ where: { email: invitation.email } })
+  const existingUser = await prisma.user.findUnique({
+    where: { email: invitation.email },
+  })
   if (existingUser) return { error: "Un compte existe déjà avec cet email." }
 
   const hashed = await bcrypt.hash(parsed.data.password, 12)
@@ -133,10 +104,10 @@ export async function acceptInvitation(formData: FormData) {
   await prisma.$transaction(async (tx) => {
     const newUser = await tx.user.create({
       data: {
-        email:     invitation.email,
-        name:      parsed.data.name,
-        password:  hashed,
-        role:      invitation.role,
+        email: invitation.email,
+        name: parsed.data.name,
+        password: hashed,
+        role: invitation.role,
         companyId: invitation.companyId,
       },
     })
@@ -146,17 +117,17 @@ export async function acceptInvitation(formData: FormData) {
       const [firstName, ...rest] = parsed.data.name.split(" ")
       await tx.employee.create({
         data: {
-          userId:    newUser.id,
+          userId: newUser.id,
           companyId: invitation.companyId,
           firstName: firstName || parsed.data.name,
-          lastName:  rest.join(" ") || "",
+          lastName: rest.join(" ") || "",
         },
       })
     }
 
     await tx.invitation.update({
       where: { id: invitation.id },
-      data:  { status: "ACCEPTED" },
+      data: { status: "ACCEPTED" },
     })
   })
 

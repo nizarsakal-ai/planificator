@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { assertCronBearerAuth } from "@/lib/cron/assert-cron-bearer-auth"
 
 // Protégé par le secret Vercel Cron (Authorization: Bearer <CRON_SECRET>)
 // Déclenché automatiquement via vercel.json — ne jamais exposer publiquement
 
 export async function GET(req: Request) {
-  // Vérification du secret Vercel Cron
-  const auth = req.headers.get("authorization")
-  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const unauthorized = assertCronBearerAuth(req)
+  if (unauthorized) return unauthorized
 
   const now   = new Date()
   const today = new Date(now)

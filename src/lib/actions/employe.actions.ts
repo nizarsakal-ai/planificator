@@ -8,6 +8,7 @@ import { auth } from "@/auth"
 import { createEmployeSchema, updateEmployeSchema } from "@/lib/validations/employe"
 import { sendWelcomeEmail } from "@/lib/email"
 import crypto from "crypto"
+import { deleteEmployeImpl } from "@/lib/actions/employe-delete.core"
 
 // ─── Utilitaire : récupère la session et vérifie le rôle ────────────────────
 
@@ -253,27 +254,17 @@ export async function toggleEmployeActive(employeeId: string, active: boolean) {
 }
 
 export async function deleteEmploye(employeeId: string) {
-  try {
-    await requireAdmin()
-
-    const employee = await prisma.employee.findUnique({
-      where: { id: employeeId },
-      select: { userId: true },
-    })
-
-    if (!employee) return { error: "Employé introuvable" }
-
-    await prisma.employeeAssignment.deleteMany({ where: { employeeId } })
-    await prisma.employee.delete({ where: { id: employeeId } })
-
-    if (employee.userId) {
-      try { await prisma.user.delete({ where: { id: employee.userId } }) } catch(_e) {}
-    }
-
-    revalidatePath("/employes")
-    return { success: true }
-  } catch (error) {
-    console.error("deleteEmploye error:", error)
-    return { error: "Erreur lors de la suppression" }
-  }
+  return deleteEmployeImpl(employeeId, {
+    requireSession: requireAdmin,
+    findEmployee: (where) =>
+      prisma.employee.findFirst({
+        where,
+        select: { id: true, userId: true },
+      }),
+    deleteAssignments: (id) =>
+      prisma.employeeAssignment.deleteMany({ where: { employeeId: id } }),
+    deleteEmployee: (id) => prisma.employee.delete({ where: { id } }),
+    deleteUser: (id) => prisma.user.delete({ where: { id } }),
+    revalidate: () => revalidatePath("/employes"),
+  })
 }

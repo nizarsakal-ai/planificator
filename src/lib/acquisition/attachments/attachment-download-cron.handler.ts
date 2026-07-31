@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { assertCronBearerAuth } from "@/lib/cron/assert-cron-bearer-auth"
 import { acquisitionAttachmentRepository } from "@/lib/acquisition/attachments/acquisition-attachment.repository"
 import { getAttachmentDownloadCronConfig } from "@/lib/acquisition/attachments/attachment-download-cron-feature-flag"
 import { downloadAcquisitionAttachment } from "@/lib/acquisition/attachments/attachment-download.service"
@@ -22,10 +23,8 @@ export async function handleAcquisitionAttachmentDownloadCron(
   req: Request,
   deps: AttachmentDownloadCronRouteDeps = {}
 ): Promise<Response> {
-  const auth = req.headers.get("authorization")
-  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const unauthorized = assertCronBearerAuth(req)
+  if (unauthorized) return unauthorized
 
   const result = await (deps.runOrchestrator ?? defaultRunOrchestrator)()
   return NextResponse.json(result)

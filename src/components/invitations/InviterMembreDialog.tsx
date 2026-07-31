@@ -18,7 +18,12 @@ const schema = z.object({
 })
 type FormData = z.infer<typeof schema>
 
-export function InviterMembreDialog() {
+type Props = {
+  /** Si false (TEAM_LEADER), l’option ADMIN est masquée — le serveur reste la source de vérité. */
+  canInviteAdmin?: boolean
+}
+
+export function InviterMembreDialog({ canInviteAdmin = true }: Props) {
   const [open, setOpen]             = useState(false)
   const [invitationUrl, setInvitationUrl] = useState<string | null>(null)
 
@@ -88,7 +93,7 @@ export function InviterMembreDialog() {
               <select {...register("role")} className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm">
                 <option value="EMPLOYEE">Employé</option>
                 <option value="TEAM_LEADER">Chef d&apos;équipe</option>
-                <option value="ADMIN">Administrateur</option>
+                {canInviteAdmin && <option value="ADMIN">Administrateur</option>}
               </select>
             </div>
 

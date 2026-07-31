@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { encrypt } from "@/lib/encryption"
-import { createHmac } from "crypto"
+import {
+  resolveGmailOAuthHmacSecret,
+  verifyGmailOAuthSignature,
+} from "@/lib/auth/gmail-oauth-state"
 
 const APP_URL = process.env.NEXTAUTH_URL ?? "http://localhost:3000"
 
@@ -18,14 +21,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${APP_URL}/parametres?gmail=error&reason=missing_params`)
   }
 
+  const hmacSecret = resolveGmailOAuthHmacSecret()
+  if (!hmacSecret) {
+    return NextResponse.redirect(`${APP_URL}/parametres?gmail=error&reason=invalid_state`)
+  }
+
   // Vérifier la signature du state
   let companyId: string, userId: string
   try {
     const decoded = JSON.parse(Buffer.from(state, "base64url").toString("utf8"))
-    const expectedSig = createHmac("sha256", process.env.CRON_SECRET ?? "fallback")
-      .update(decoded.payload)
-      .digest("hex")
-    if (expectedSig !== decoded.sig) throw new Error("Invalid signature")
+    if (
+      typeof decoded.payload !== "string" ||
+      typeof decoded.sig !== "string" ||
+      !verifyGmailOAuthSignature(decoded.payload, decoded.sig, hmacSecret)
+    ) {
+      throw new Error("Invalid signature")
+    }
     const parsed = JSON.parse(decoded.payload)
     companyId = parsed.companyId
     userId    = parsed.userId
