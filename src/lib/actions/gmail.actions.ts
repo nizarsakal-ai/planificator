@@ -4,19 +4,12 @@ import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
 import { sendLogementCreatedEmail } from "@/lib/email"
-import { resolveConfirmAddress } from "@/lib/booking/booking-pending-merge"
-import { isCalendarRangeValid } from "@/lib/booking/booking-date-only"
 import {
   updatePendingAccommodationImpl,
   type UpdatePendingAccommodationPatch,
 } from "@/lib/actions/gmail-pending-update.core"
-import {
-  ACCOMMODATION_GMAIL_SOURCE_UNIQUE_HINTS,
-  isAnyPrismaUniqueViolation,
-  isPrismaUniqueViolation,
-  resolveConfirmAfterGmailSourceConflict,
-  runConfirmCreateTransaction,
-} from "@/lib/booking/booking-confirm-idempotency"
+import { confirmPendingAccommodationImpl } from "@/lib/actions/gmail-pending-confirm.core"
+import { dismissPendingAccommodationImpl } from "@/lib/actions/gmail-pending-dismiss.core"
 
 export type { UpdatePendingAccommodationPatch }
 
@@ -78,150 +71,23 @@ export async function confirmPendingAccommodation(
   teamId: string,
   overrideAddress?: string
 ) {
-  const user = await requireBookingValidationAdmin()
-  const companyId = user.companyId!
-
-  const pending = await prisma.pendingAccommodation.findFirst({
-    where: { id, companyId },
-  })
-  if (!pending) return { error: "Réservation introuvable." }
-  if (pending.status === "DISMISSED") {
-    return { error: "Réservation déjà ignorée — confirmation impossible." }
-  }
-  if (pending.status === "CONFIRMED") {
-    return { success: true, idempotent: true }
-  }
-  if (pending.status !== "PENDING") {
-    return { error: "Réservation introuvable." }
-  }
-
-  if (!pending.startDate || !pending.endDate) return { error: "Dates manquantes dans l'email." }
-  if (!isCalendarRangeValid(pending.startDate, pending.endDate)) {
-    return { error: "La date de départ doit être après la date d'arrivée" }
-  }
-  const finalAddress = resolveConfirmAddress(pending.address, overrideAddress)
-  if (!finalAddress) return { error: "Veuillez saisir l'adresse du logement." }
-
-  const team = await prisma.team.findFirst({
-    where: { id: teamId, companyId, active: true },
-    include: {
-      leader: { select: { userId: true } },
-      members: {
-        where: { leftAt: null },
-        include: {
-          employee: {
-            select: {
-              userId: true,
-              firstName: true,
-              lastName: true,
-              user: { select: { email: true } },
-            },
-          },
-        },
-      },
-    },
-  })
-  if (!team) return { error: "Équipe introuvable." }
-
-  const fmtDate = (d: Date) =>
-    new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long", year: "numeric" }).format(d)
-  const startLabel = fmtDate(pending.startDate)
-  const endLabel = fmtDate(pending.endDate)
-
-  const userIds = [
-    team.leader.userId,
-    ...team.members.map((m) => m.employee.userId),
-  ].filter(Boolean) as string[]
-
-  const notesValue = [pending.propertyName, pending.notes].filter(Boolean).join(" — ") || null
-
-  const createInput = {
-    companyId,
-    userId: user.id,
-    pendingId: id,
-    gmailMessageId: pending.gmailMessageId,
+  return confirmPendingAccommodationImpl(
+    id,
     teamId,
-    finalAddress,
-    city: pending.city ?? null,
-    zipCode: pending.zipCode ?? null,
-    doorCode: pending.doorCode ?? null,
-    contactName: pending.contactName ?? null,
-    contactPhone: pending.contactPhone ?? null,
-    notes: notesValue,
-    startDate: pending.startDate,
-    endDate: pending.endDate,
-    notifyUserIds: userIds,
-    teamName: team.name,
-    startLabel,
-    endLabel,
-  }
-
-  let createdNew = true
-  try {
-    await runConfirmCreateTransaction(prisma, createInput)
-  } catch (error) {
-    if (isPrismaUniqueViolation(error, ACCOMMODATION_GMAIL_SOURCE_UNIQUE_HINTS)) {
-      const resolved = await resolveConfirmAfterGmailSourceConflict(prisma, {
-        companyId,
-        userId: user.id,
-        pendingId: id,
-        gmailMessageId: pending.gmailMessageId,
-      })
-      if ("error" in resolved) return resolved
-      createdNew = false
-      revalidatePath("/logements")
-      revalidatePath("/planning/moi")
-      return resolved
-    }
-    if (isAnyPrismaUniqueViolation(error)) {
-      throw error
-    }
-    return { error: "Impossible de confirmer la réservation. Réessayez." }
-  }
-
-  if (createdNew) {
-    const company = await prisma.company.findUnique({
-      where: { id: companyId },
-      select: { name: true },
-    })
-    for (const membre of team.members) {
-      const email = membre.employee.user?.email
-      if (!email) continue
-      sendLogementCreatedEmail({
-        to: email,
-        recipientName: `${membre.employee.firstName} ${membre.employee.lastName}`,
-        teamName: team.name,
-        address: `${finalAddress}${pending.city ? `, ${pending.city}` : ""}`,
-        startLabel,
-        endLabel,
-        doorCode: pending.doorCode ?? undefined,
-        contactPhone: pending.contactPhone ?? undefined,
-        companyName: company?.name ?? "",
-      }).catch(() => {})
-    }
-  }
-
-  revalidatePath("/logements")
-  revalidatePath("/planning/moi")
-  return { success: true, idempotent: false }
+    {
+      auth,
+      db: prisma as never,
+      revalidatePath,
+      sendLogementCreatedEmail,
+    },
+    overrideAddress
+  )
 }
 
 export async function dismissPendingAccommodation(id: string) {
-  const user = await requireBookingValidationAdmin()
-  const pending = await prisma.pendingAccommodation.findFirst({
-    where: { id, companyId: user.companyId! },
+  return dismissPendingAccommodationImpl(id, {
+    auth,
+    db: prisma as never,
+    revalidatePath,
   })
-  if (!pending) return { error: "Réservation introuvable." }
-  if (pending.status !== "PENDING") {
-    return { error: "Réservation déjà traitée." }
-  }
-  const updated = await prisma.pendingAccommodation.updateMany({
-    where: { id, companyId: user.companyId!, status: "PENDING" },
-    data: { status: "DISMISSED" },
-  })
-  if (updated.count === 0) {
-    return { error: "Réservation déjà traitée." }
-  }
-  revalidatePath("/logements")
-  return { success: true }
 }

@@ -541,13 +541,13 @@ describe("M3-R2 — P2002 hors TX + résolution idempotente", () => {
       "P2002 ne doit pas être absorbé dans runConfirmCreateTransaction"
     )
 
-    const actionSrc = readFileSync(
-      join(process.cwd(), "src/lib/actions/gmail.actions.ts"),
+    const coreSrc = readFileSync(
+      join(process.cwd(), "src/lib/actions/gmail-pending-confirm.core.ts"),
       "utf8"
     )
-    const confirmFn = actionSrc.slice(
-      actionSrc.indexOf("export async function confirmPendingAccommodation"),
-      actionSrc.indexOf("export async function dismissPendingAccommodation")
+    const confirmFn = coreSrc.slice(
+      coreSrc.indexOf("export async function confirmPendingAccommodationImpl"),
+      coreSrc.length
     )
     // Catch P2002 après await runConfirmCreateTransaction — pas dans un try interne au callback tx
     assert.ok(confirmFn.includes("runConfirmCreateTransaction"))
@@ -555,6 +555,12 @@ describe("M3-R2 — P2002 hors TX + résolution idempotente", () => {
     const createCallIdx = confirmFn.indexOf("await runConfirmCreateTransaction")
     const catchIdx = confirmFn.indexOf("isPrismaUniqueViolation", createCallIdx)
     assert.ok(catchIdx > createCallIdx, "catch P2002 doit être après l’appel TX create")
+
+    const façade = readFileSync(
+      join(process.cwd(), "src/lib/actions/gmail.actions.ts"),
+      "utf8"
+    )
+    assert.ok(façade.includes("confirmPendingAccommodationImpl"))
   })
 
   it("reconnaît gmailSourceMessageId ; refuse autre contrainte / meta absente", () => {

@@ -196,7 +196,7 @@ export function PendingBookingsDialog({
   function handleDismiss(id: string) {
     startTransition(async () => {
       const res = await dismissPendingAccommodation(id)
-      if (res.error) {
+      if ("error" in res) {
         toast.error(res.error)
         return
       }
