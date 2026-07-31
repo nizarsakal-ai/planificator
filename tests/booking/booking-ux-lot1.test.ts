@@ -295,22 +295,27 @@ describe("LOT 1 — garde-fous source", () => {
     assert.ok(src.includes("requireBookingValidationAdmin"))
     assert.ok(src.includes("export async function updatePendingAccommodation"))
     assert.ok(src.includes("updatePendingAccommodationImpl"))
-    assert.match(
-      src,
-      /export async function confirmPendingAccommodation[\s\S]*?requireBookingValidationAdmin/
-    )
-    assert.match(
-      src,
-      /export async function dismissPendingAccommodation[\s\S]*?requireBookingValidationAdmin/
-    )
+    assert.ok(src.includes("confirmPendingAccommodationImpl"))
+    assert.ok(src.includes("dismissPendingAccommodationImpl"))
     assert.match(
       src,
       /export async function getPendingAccommodations[\s\S]*?requireBookingValidationAdmin/
     )
     assert.ok(src.includes('["ADMIN", "SUPER_ADMIN"]'))
-    assert.ok(src.includes("active: true"))
     assert.ok(core.includes(".strict()"))
     assert.ok(core.includes("export async function updatePendingAccommodationImpl"))
+
+    const confirmCore = readFileSync(
+      join(ROOT, "src/lib/actions/gmail-pending-confirm.core.ts"),
+      "utf8"
+    )
+    const dismissCore = readFileSync(
+      join(ROOT, "src/lib/actions/gmail-pending-dismiss.core.ts"),
+      "utf8"
+    )
+    assert.ok(confirmCore.includes('["ADMIN", "SUPER_ADMIN"]'))
+    assert.ok(dismissCore.includes('["ADMIN", "SUPER_ADMIN"]'))
+    assert.ok(confirmCore.includes("active: true"))
   })
 
   it("UI : pas de Traiter avec l'IA ; router.refresh présent", () => {
