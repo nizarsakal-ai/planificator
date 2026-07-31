@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { assertCronBearerAuth } from "@/lib/cron/assert-cron-bearer-auth"
 
 export async function POST(req: Request) {
-  const authHeader = req.headers.get("authorization")
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const unauthorized = assertCronBearerAuth(req)
+  if (unauthorized) return unauthorized
 
   const today = new Date()
   today.setHours(0, 0, 0, 0)

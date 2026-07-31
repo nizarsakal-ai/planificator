@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { assertCronBearerAuth } from "@/lib/cron/assert-cron-bearer-auth"
 import { syncAcquisitionMailForCompany } from "@/lib/acquisition/connector/acquisition-gmail-sync.service"
 import {
   runAcquisitionGmailSyncDriver,
@@ -30,10 +31,8 @@ export async function handleAcquisitionGmailSyncCron(
   req: Request,
   deps: AcquisitionGmailSyncRouteDeps = {}
 ): Promise<Response> {
-  const auth = req.headers.get("authorization")
-  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const unauthorized = assertCronBearerAuth(req)
+  if (unauthorized) return unauthorized
 
   const result = await (deps.runDriver ?? defaultRunDriver)()
   return NextResponse.json(result)

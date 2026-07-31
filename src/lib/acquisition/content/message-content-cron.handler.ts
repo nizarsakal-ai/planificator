@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { assertCronBearerAuth } from "@/lib/cron/assert-cron-bearer-auth"
 import { getContentCronConfig } from "@/lib/acquisition/content/content-cron-feature-flag"
 import { runAcquisitionContentCronOrchestratorDefault } from "@/lib/acquisition/content/message-content-cron.orchestrator"
 import type { ContentCronRunResult } from "@/lib/acquisition/content/message-content-cron.orchestrator.types"
@@ -17,10 +18,8 @@ export async function handleAcquisitionContentFetchCron(
   req: Request,
   deps: ContentCronRouteDeps = {}
 ): Promise<Response> {
-  const auth = req.headers.get("authorization")
-  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const unauthorized = assertCronBearerAuth(req)
+  if (unauthorized) return unauthorized
 
   const result = await (deps.runOrchestrator ?? defaultRunOrchestrator)()
   return NextResponse.json(result)

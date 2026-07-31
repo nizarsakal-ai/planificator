@@ -43,7 +43,9 @@ export default async function EmployesPage() {
         </div>
         <div className="flex items-center gap-2">
           <ResendAccessButton />
-          <InviterMembreDialog />
+          <InviterMembreDialog
+            canInviteAdmin={["ADMIN", "SUPER_ADMIN"].includes(session.user.role)}
+          />
           <NouvelEmployeDialog />
         </div>
       </div>

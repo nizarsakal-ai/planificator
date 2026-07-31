@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { createHmac } from "crypto"
+import {
+  resolveGmailOAuthHmacSecret,
+  signGmailOAuthPayload,
+} from "@/lib/auth/gmail-oauth-state"
 
 // Initie le flux OAuth Google Gmail
 // GET /api/auth/gmail → redirige vers Google
@@ -10,6 +13,11 @@ export async function GET() {
   if (!session?.user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 })
   if (!["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) {
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 })
+  }
+
+  const hmacSecret = resolveGmailOAuthHmacSecret()
+  if (!hmacSecret) {
+    return NextResponse.json({ error: "OAuth non configuré" }, { status: 500 })
   }
 
   const clientId    = process.env.GOOGLE_CLIENT_ID
@@ -24,9 +32,7 @@ export async function GET() {
     userId:    session.user.id,
     nonce:     Date.now(),
   })
-  const sig = createHmac("sha256", process.env.CRON_SECRET ?? "fallback")
-    .update(payload)
-    .digest("hex")
+  const sig = signGmailOAuthPayload(payload, hmacSecret)
   const state = Buffer.from(JSON.stringify({ payload, sig })).toString("base64url")
 
   const params = new URLSearchParams({
