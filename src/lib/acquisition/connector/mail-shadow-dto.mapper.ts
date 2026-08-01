@@ -6,6 +6,7 @@
 import type { CanonicalMailMessage } from "@/lib/acquisition/connector/connector.types"
 import type { MailShadowInputDtoInput } from "@/lib/integration/connectors/mail-bridge/mail-shadow-input.dto"
 import { MESSAGE_CONTENT_CAPABILITIES } from "@/lib/integration/types/message-content-capability"
+import { normalizeSubject } from "@/lib/integration/normalizers/message/normalize-subject"
 
 export type MailShadowDtoMapperContext = {
   companyId: string
@@ -41,6 +42,10 @@ export function mapCanonicalMailToShadowDto(
     ? senderEmail.split("@")[1]?.toLowerCase()
     : undefined
 
+  // LOT-2A — subject optionnel déjà présent dans le poll (aucun second fetch).
+  // Invariant : normalizeSubject obligatoire (borne 512 Unicode-safe).
+  const subject = normalizeSubject(message.subject)
+
   const dto: MailShadowInputDtoInput = {
     companyId: ctx.companyId,
     connectionId: ctx.connectionId,
@@ -64,8 +69,7 @@ export function mapCanonicalMailToShadowDto(
             },
           }
         : {}),
-      // subject volontairement omis du DTO message pour limiter PII en shadow V1
-      // (peut être ajouté plus tard si contrat / redaction le permettent explicitement)
+      ...(subject ? { subject } : {}),
     },
   }
 

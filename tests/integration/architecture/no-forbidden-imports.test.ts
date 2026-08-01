@@ -1,10 +1,11 @@
 /**
- * LOT-1A / LOT-1B1 / LOT-1B2 / LOT-1C — architecture : imports interdits + frontières.
+ * LOT-1A / LOT-1B1 / LOT-1B2 / LOT-1C / LOT-2A — architecture : imports interdits + frontières.
  *
  * Zones :
- * - types / contracts / registry / flags / observability / normalizers : abstraites
+ * - types / contracts / registry / flags / observability / normalizers / rules : abstraites
+ * - sources (LOT-2A) : persistence OK ; Prisma direct interdit ; pas Acquisition/Booking
  * - persistence : Prisma + contracts/types/registry OK ;
- *   connectors / normalizers / observability / ops interdits
+ *   connectors / normalizers / observability / ops / sources / rules interdits
  * - connectors / ops (LOT-1C) : Prisma + persistence OK ; Acquisition/Booking interdits
  */
 import { describe, it } from "node:test"
@@ -51,6 +52,9 @@ export type IntegrationLayer =
   | "flags"
   | "observability"
   | "ops"
+  | "sources"
+  | "rules"
+  | "util"
   | "other"
 
 export function stripComments(source: string): string {
@@ -97,6 +101,9 @@ export function layerOf(filePath: string): IntegrationLayer {
   if (rel.startsWith("flags/")) return "flags"
   if (rel.startsWith("observability/")) return "observability"
   if (rel.startsWith("ops/")) return "ops"
+  if (rel.startsWith("sources/")) return "sources"
+  if (rel.startsWith("rules/")) return "rules"
+  if (rel.startsWith("util/")) return "util"
   return "other"
 }
 
@@ -133,12 +140,14 @@ export function isConnectorsOrNormalizersTarget(
   )
 }
 
-/** Couches runtime LOT-1C interdites depuis persistence (SPEC §19.2). */
+/** Couches runtime / domain interdites depuis persistence. */
 const PERSISTENCE_FORBIDDEN_LAYER_PREFIXES = [
   "connectors",
   "normalizers",
   "observability",
   "ops",
+  "sources",
+  "rules",
 ] as const
 
 /**
@@ -235,7 +244,7 @@ export function violationForImport(
   const toPersistence = isPersistenceTarget(fromFile, spec)
 
   // persistence : Prisma + contracts/types/registry OK ;
-  // connectors / normalizers / observability / ops interdits (SPEC §19.2).
+  // connectors / normalizers / observability / ops / sources / rules interdits.
   if (layer === "persistence") {
     if (isPersistenceForbiddenRuntimeTarget(fromFile, spec)) {
       return `couche runtime interdite depuis persistence: ${spec}`
@@ -248,7 +257,16 @@ export function violationForImport(
     return null
   }
 
-  if (layer === "normalizers") {
+  // LOT-2A sources : persistence OK ; Prisma direct interdit.
+  if (layer === "sources") {
+    if (prisma) return `Prisma interdit depuis sources (passer par persistence): ${spec}`
+    if (isConnectorsOrNormalizersTarget(fromFile, spec)) {
+      return `connectors/normalizers interdits depuis sources: ${spec}`
+    }
+    return null
+  }
+
+  if (layer === "normalizers" || layer === "rules" || layer === "util") {
     if (prisma) return `Prisma interdit hors runtime: ${spec}`
     if (toPersistence) {
       return `persistence interdit hors runtime: ${spec}`
@@ -295,7 +313,7 @@ function scanLayerViolations(
   return violations
 }
 
-describe("Integration architecture — frontières LOT-1A / LOT-1B / LOT-1C", () => {
+describe("Integration architecture — frontières LOT-1A / LOT-1B / LOT-1C / LOT-2A", () => {
   const files = collectTsFiles(ROOT)
   const abstractLayers = new Set<IntegrationLayer>([
     "types",
@@ -304,12 +322,16 @@ describe("Integration architecture — frontières LOT-1A / LOT-1B / LOT-1C", ()
     "flags",
     "observability",
     "normalizers",
+    "rules",
+    "util",
   ])
   const abstractFiles = files.filter((f) => abstractLayers.has(layerOf(f)))
   const persistenceFiles = files.filter((f) => layerOf(f) === "persistence")
   const connectorFiles = files.filter((f) => layerOf(f) === "connectors")
+  const sourceFiles = files.filter((f) => layerOf(f) === "sources")
+  const ruleFiles = files.filter((f) => layerOf(f) === "rules")
 
-  it("scanne le périmètre integration (LOT-1A + 1B + 1C)", () => {
+  it("scanne le périmètre integration (LOT-1A + 1B + 1C + 2A)", () => {
     assert.ok(files.length >= 24)
     for (const file of files) {
       assert.ok(file.startsWith(ROOT))
@@ -322,9 +344,11 @@ describe("Integration architecture — frontières LOT-1A / LOT-1B / LOT-1C", ()
       connectorFiles.length >= 1,
       "connectors mail-bridge LOT-1C attendus"
     )
+    assert.ok(sourceFiles.length >= 1, "sources LOT-2A attendus")
+    assert.ok(ruleFiles.length >= 1, "rules LOT-2A attendus")
   })
 
-  it("n’autorise Prisma / persistence que dans couches runtime (persistence|connectors|ops)", () => {
+  it("n’autorise Prisma / persistence que dans couches runtime (persistence|connectors|ops|sources)", () => {
     const violations = scanLayerViolations(files)
     assert.deepEqual(violations, [])
   })
@@ -417,7 +441,7 @@ describe("Integration architecture — frontières LOT-1A / LOT-1B / LOT-1C", ()
     )
   })
 
-  it("persistence → contracts|types|registry autorisé ; connectors|normalizers|observability|ops interdit", () => {
+  it("persistence → contracts|types|registry autorisé ; connectors|normalizers|observability|ops|sources|rules interdit", () => {
     const fake = path.join(ROOT, "persistence", "fixture.ts")
     assert.equal(
       violationForImport(
@@ -449,6 +473,8 @@ describe("Integration architecture — frontières LOT-1A / LOT-1B / LOT-1C", ()
       "@/lib/integration/normalizers/message/message-family-normalizer",
       "@/lib/integration/observability/redaction/redact",
       "@/lib/integration/ops/bootstrap-legacy-mail-connection",
+      "@/lib/integration/sources/inbound-source-write.service",
+      "@/lib/integration/rules/normalize-rule-value",
     ]
     for (const spec of forbiddenSpecs) {
       const v = violationForImport("persistence", fake, spec)
@@ -457,6 +483,21 @@ describe("Integration architecture — frontières LOT-1A / LOT-1B / LOT-1C", ()
         `attendu refus persistence → ${spec}, obtenu: ${v}`
       )
     }
+    // F5 — assertions explicites persistence ↛ sources/** et rules/**
+    assert.ok(
+      violationForImport(
+        "persistence",
+        fake,
+        "@/lib/integration/sources/inbound-source.validation"
+      )?.includes("interdite depuis persistence")
+    )
+    assert.ok(
+      violationForImport(
+        "persistence",
+        fake,
+        "@/lib/integration/rules/normalize-rule-value"
+      )?.includes("interdite depuis persistence")
+    )
 
     assert.ok(
       violationForImport(

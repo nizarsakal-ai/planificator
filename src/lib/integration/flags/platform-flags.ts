@@ -87,3 +87,45 @@ export function getMailShadowRunBudgetMs(env: PlatformFlagEnv = process.env): nu
     readRaw(env, PLATFORM_FLAG_NAMES.MAIL_SHADOW_RUN_BUDGET_MS)
   )
 }
+
+/** LOT-2A — lecteurs fail-closed ; aucun Router appelé ici. */
+export function isMatchingEnabled(env: PlatformFlagEnv = process.env): boolean {
+  return isExactTrue(readRaw(env, PLATFORM_FLAG_NAMES.MATCHING_ENABLED))
+}
+
+export function isCompanyAllowedForMatching(
+  companyId: string,
+  env: PlatformFlagEnv = process.env
+): boolean {
+  if (!companyId) return false
+  const allow = parseCompanyAllowlist(
+    readRaw(env, PLATFORM_FLAG_NAMES.MATCHING_COMPANY_ALLOWLIST)
+  )
+  return allow.has(companyId)
+}
+
+export function isMatchingShadowEnabled(
+  env: PlatformFlagEnv = process.env
+): boolean {
+  return isExactTrue(readRaw(env, PLATFORM_FLAG_NAMES.MATCHING_SHADOW_ENABLED))
+}
+
+/**
+ * Fail-closed : foundation ∧ matching enabled ∧ allowlist.
+ *
+ * `INTEGRATION_MATCHING_SHADOW_ENABLED` est **orthogonal** : il sera consommé
+ * en LOT-2C (parity L1). Il n’entre PAS dans ce prédicat.
+ *
+ * LOT-2A : aucun Router ni shadow parity n’est appelé, même si tous les flags
+ * matching / shadow sont ON.
+ */
+export function isMatchingActiveForCompany(
+  companyId: string,
+  env: PlatformFlagEnv = process.env
+): boolean {
+  return (
+    isPlatformFoundationEnabled(env) &&
+    isMatchingEnabled(env) &&
+    isCompanyAllowedForMatching(companyId, env)
+  )
+}

@@ -10,9 +10,13 @@ import {
 import {
   getMailShadowRunBudgetMs,
   isCompanyAllowedForMailShadow,
+  isCompanyAllowedForMatching,
   isExactTrue,
   isMailShadowActiveForCompany,
   isMailShadowEnabled,
+  isMatchingActiveForCompany,
+  isMatchingEnabled,
+  isMatchingShadowEnabled,
   isPlatformFoundationEnabled,
   parseCompanyAllowlist,
   parseMailShadowRunBudgetMs,
@@ -69,6 +73,49 @@ describe("platform flags", () => {
     )
     assert.equal(isPlatformFoundationEnabled({}), false)
     assert.equal(isMailShadowEnabled({}), false)
+  })
+
+  it("LOT-2A matching flags fail-closed ; SHADOW orthogonal (aucun Router)", () => {
+    assert.equal(isMatchingEnabled({}), false)
+    assert.equal(isMatchingShadowEnabled({}), false)
+    assert.equal(
+      isMatchingEnabled({
+        [PLATFORM_FLAG_NAMES.MATCHING_ENABLED]: "TRUE",
+      }),
+      false
+    )
+    assert.equal(
+      isCompanyAllowedForMatching("co1", {
+        [PLATFORM_FLAG_NAMES.MATCHING_COMPANY_ALLOWLIST]: "",
+      }),
+      false
+    )
+    const env = {
+      [PLATFORM_FLAG_NAMES.FOUNDATION_ENABLED]: "true",
+      [PLATFORM_FLAG_NAMES.MATCHING_ENABLED]: "true",
+      [PLATFORM_FLAG_NAMES.MATCHING_COMPANY_ALLOWLIST]: "co1",
+      [PLATFORM_FLAG_NAMES.MATCHING_SHADOW_ENABLED]: "true",
+    }
+    assert.equal(isMatchingActiveForCompany("co1", env), true)
+    assert.equal(isMatchingActiveForCompany("co2", env), false)
+    assert.equal(isMatchingShadowEnabled(env), true)
+    // SHADOW ON n’entre pas dans isMatchingActiveForCompany
+    assert.equal(
+      isMatchingActiveForCompany("co1", {
+        ...env,
+        [PLATFORM_FLAG_NAMES.MATCHING_SHADOW_ENABLED]: "false",
+      }),
+      true
+    )
+    assert.equal(
+      isMatchingActiveForCompany("co1", {
+        [PLATFORM_FLAG_NAMES.FOUNDATION_ENABLED]: "true",
+        [PLATFORM_FLAG_NAMES.MATCHING_ENABLED]: "false",
+        [PLATFORM_FLAG_NAMES.MATCHING_COMPANY_ALLOWLIST]: "co1",
+        [PLATFORM_FLAG_NAMES.MATCHING_SHADOW_ENABLED]: "true",
+      }),
+      false
+    )
   })
 
   it("budget : défaut et fallback sûr si invalide", () => {
