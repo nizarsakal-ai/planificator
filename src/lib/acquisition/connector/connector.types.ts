@@ -73,6 +73,8 @@ export interface MailSyncResult {
   stats: MailSyncStats
   error?: MailSyncError
   nextHistoryId: string | null
+  /** LOT-1C — compteurs agrégés shadow du run (hors stats métier). */
+  shadowStats?: import("@/lib/integration/connectors/mail-bridge/mail-shadow-run-stats").MailShadowRunStats
 }
 
 export type { RegisterIncomingMessageInput }

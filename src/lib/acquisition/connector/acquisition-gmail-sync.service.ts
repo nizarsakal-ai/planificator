@@ -7,6 +7,20 @@ import type {
   MailSyncResult,
   MailSyncStats,
 } from "@/lib/acquisition/connector/connector.types"
+import {
+  prepareMailShadowRun,
+  projectMailShadowAfterLegacy,
+  type MailShadowRunContext,
+} from "@/lib/acquisition/connector/mail-shadow-hook"
+import type { MailShadowRunStats } from "@/lib/integration/connectors/mail-bridge/mail-shadow-run-stats"
+
+function withShadow<T extends object>(
+  result: T,
+  mailShadowCtx: MailShadowRunContext | null
+): T & { shadowStats?: MailShadowRunStats } {
+  if (!mailShadowCtx) return result
+  return { ...result, shadowStats: mailShadowCtx.stats }
+}
 
 /** Taille de page Gmail par appel list/history (max API messages.list : 500). */
 export const DEFAULT_GMAIL_PAGE_SIZE = 50
@@ -41,6 +55,11 @@ export interface SyncAcquisitionMailForCompanyInput {
   deadlineAtMs?: number
   /** Fence : false → stop immédiat (lease perdu). */
   shouldContinue?: () => boolean | Promise<boolean>
+  /**
+   * LOT-1C — injecter un contexte shadow (tests) ; sinon préparé si flags ON.
+   * `false` désactive explicitement le shadow pour ce run.
+   */
+  mailShadow?: MailShadowRunContext | false
 }
 
 /**
@@ -94,11 +113,24 @@ export async function syncAcquisitionMailForCompany(
   const deadlineAtMs = input.deadlineAtMs
   const shouldContinue = input.shouldContinue
 
+  let mailShadowCtx: MailShadowRunContext | null = null
+  if (input.mailShadow === false) {
+    mailShadowCtx = null
+  } else if (input.mailShadow) {
+    mailShadowCtx = input.mailShadow
+  } else {
+    try {
+      mailShadowCtx = await prepareMailShadowRun(companyId)
+    } catch {
+      mailShadowCtx = null
+    }
+  }
+
   // Pagination complète : parcourir toutes les pages jusqu'à absence de nextPageToken.
   // pageSize borne uniquement chaque appel Gmail — jamais de limite globale de messages.
   while (true) {
     if (deadlineAtMs != null && Date.now() >= deadlineAtMs) {
-      return {
+      return withShadow({
         ...base,
         status: pagesProcessed > 0 ? "PARTIAL" : "SKIPPED",
         ...(pagesProcessed > 0
@@ -110,12 +142,12 @@ export async function syncAcquisitionMailForCompany(
           message: "Budget orchestrateur épuisé pendant sync Gmail",
           retryable: true,
         },
-      }
+      }, mailShadowCtx)
     }
     if (shouldContinue) {
       const ok = await shouldContinue()
       if (!ok) {
-        return {
+        return withShadow({
           ...base,
           status: "PARTIAL",
           partialReason: "BUDGET_EXHAUSTED",
@@ -125,7 +157,7 @@ export async function syncAcquisitionMailForCompany(
             message: "Lease orchestrateur perdu pendant sync Gmail",
             retryable: true,
           },
-        }
+        }, mailShadowCtx)
       }
     }
 
@@ -157,13 +189,13 @@ export async function syncAcquisitionMailForCompany(
       }
       const message = e instanceof Error ? e.message : "PROVIDER_LIST_FAILED"
       await cursorRepository.recordFailure(companyId, provider.source, "PROVIDER_LIST_FAILED", now())
-      return {
+      return withShadow({
         ...base,
         status: "FAILED",
         stats: { ...base.stats },
         nextHistoryId: finalHistoryId,
         error: { code: "PROVIDER_LIST_FAILED", message, retryable: true },
-      }
+      }, mailShadowCtx)
     }
 
     pagesProcessed++
@@ -187,9 +219,14 @@ export async function syncAcquisitionMailForCompany(
         } else {
           base.stats.skippedDuplicate++
         }
+
+        // LOT-1C — shadow après legacy ; best-effort ; n’altère pas stats métier
+        if (mailShadowCtx) {
+          await projectMailShadowAfterLegacy(message, companyId, mailShadowCtx)
+        }
       } catch {
         base.stats.failed++
-        return {
+        return withShadow({
           ...base,
           status: "PARTIAL",
           partialReason: "MESSAGE_INGESTION_FAILED",
@@ -198,7 +235,7 @@ export async function syncAcquisitionMailForCompany(
             message: "Au moins un message n'a pas pu être persisté",
             retryable: true,
           },
-        }
+        }, mailShadowCtx)
       }
     }
 
@@ -212,11 +249,11 @@ export async function syncAcquisitionMailForCompany(
           now()
         )
       }
-      return { ...base, status: "SUCCESS" }
+      return withShadow({ ...base, status: "SUCCESS" }, mailShadowCtx)
     }
 
     if (pagesProcessed >= maxPagesPerRun) {
-      return {
+      return withShadow({
         ...base,
         status: "PARTIAL",
         partialReason: "PAGE_LIMIT_REACHED",
@@ -226,7 +263,7 @@ export async function syncAcquisitionMailForCompany(
           message: `Limite défensive maxPagesPerRun (${maxPagesPerRun}) atteinte avec des pages restantes`,
           retryable: true,
         },
-      }
+      }, mailShadowCtx)
     }
 
     pageToken = page.nextPageToken
