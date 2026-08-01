@@ -275,6 +275,15 @@ enum InboundFamily {
   MESSAGE
 }
 
+/// PLAN-INTEGRATION-PLATFORM-001 — LOT-2A — Types de rules InboundSource.
+enum InboundSourceRuleType {
+  SENDER_EMAIL
+  SENDER_DOMAIN
+  SUBJECT_KEYWORD
+  BODY_KEYWORD
+  RECIPIENT_EMAIL
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // COMPANY — Tenant racine
 // Toutes les données métier sont isolées par companyId
@@ -328,6 +337,8 @@ model Company {
   integrationConnections      IntegrationConnection[]
   inboundEnvelopes            InboundEnvelope[]
   normalizedInbounds          NormalizedInbound[]
+  inboundSources              InboundSource[]
+  inboundSourceRules          InboundSourceRule[]
 
   @@map("companies")
 }
@@ -1696,4 +1707,48 @@ model NormalizedInbound {
   @@index([companyId, connectionId, receivedAt], map: "integration_normalized_inbounds_co_conn_receivedAt_idx")
   @@index([companyId, envelopeId], map: "integration_normalized_inbounds_companyId_envelopeId_idx")
   @@map("integration_normalized_inbounds")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INTEGRATION PLATFORM — LOT-2A — InboundSource + InboundSourceRule
+// Additive. Convention colonnes camelCase (alignée LOT-1B1/1B2).
+// ═══════════════════════════════════════════════════════════════════════════
+
+model InboundSource {
+  id            String   @id @default(cuid())
+  companyId     String
+  displayName   String
+  enabled       Boolean  @default(false)
+  schemaVersion String   @default("1.0.0")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  company Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  rules   InboundSourceRule[]
+
+  @@unique([id, companyId], map: "integration_inbound_sources_id_companyId_key")
+  @@index([companyId, enabled], map: "integration_inbound_sources_companyId_enabled_idx")
+  @@map("integration_inbound_sources")
+}
+
+model InboundSourceRule {
+  id               String                @id @default(cuid())
+  companyId        String
+  sourceId         String
+  type             InboundSourceRuleType
+  value            String
+  normalizedValue  String
+  enabled          Boolean               @default(true)
+  schemaVersion    String                @default("1.0.0")
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  company Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  source  InboundSource @relation(fields: [sourceId, companyId], references: [id, companyId], onDelete: Cascade, map: "integration_inbound_source_rules_source_fkey")
+
+  @@unique([id, companyId], map: "integration_inbound_source_rules_id_companyId_key")
+  @@unique([companyId, sourceId, type, normalizedValue], map: "integration_inbound_source_rules_match_key")
+  @@index([companyId, type, normalizedValue], map: "integration_inbound_source_rules_co_type_norm_idx")
+  @@index([companyId, sourceId, enabled], map: "integration_inbound_source_rules_co_src_en_idx")
+  @@map("integration_inbound_source_rules")
 }
