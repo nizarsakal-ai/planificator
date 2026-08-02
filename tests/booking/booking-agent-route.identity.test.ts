@@ -5,11 +5,11 @@ process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 
 import { describe, it, beforeEach, afterEach } from "node:test"
 import assert from "node:assert/strict"
+import { POST } from "@/app/api/booking/agent/route"
 import {
   handleBookingAgentPost,
-  POST,
   type BookingAgentDb,
-} from "@/app/api/booking/agent/route"
+} from "@/lib/booking/booking-agent.handler"
 
 const SECRET = "booking-agent-identity-secret"
 

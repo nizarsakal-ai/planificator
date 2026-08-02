@@ -12,7 +12,3 @@ export async function POST(req: Request) {
     db: prisma as unknown as BookingAgentDb,
   })
 }
-
-/** Réexport pour tests qui invoquent le handler réel. */
-export { handleBookingAgentPost }
-export type { BookingAgentDb }
