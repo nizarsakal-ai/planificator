@@ -13,6 +13,8 @@ import {
 import { createOrGetBookingScanResult } from "@/lib/booking/booking-scan-result"
 import { extractBookingFields } from "@/lib/booking/extract-booking-fields"
 import { extractNormalizedGmailBody } from "@/lib/booking/booking-gmail-body.service"
+import { extractGmailSubject } from "@/lib/booking/booking-email-intent"
+import { applyBookingEmailIntentGate } from "@/lib/booking/booking-email-intent-gate"
 import {
   truncateBookingEmailForExtract,
   truncateBookingEmailForPersist,
@@ -30,8 +32,11 @@ import {
 
 /**
  * Critères avant Pending / Acc (PLAN-BOOKING-FILTER-001) :
+ * - PARSER-003 : intent CONFIRMATION uniquement avant extract/Anthropic
+ * - confirmationCount = emails classifiés CONFIRMATION (pas pendings créés)
  * - ACCEPT : dates calendaires valides, adresse, plage, start >= cutoff
- * - PERMANENT_IGNORE : uniquement BEFORE_CUTOFF
+ * - PERMANENT_IGNORE : BEFORE_CUTOFF ou intent hors confirmation prouvé
+ * - AMBIGU : retry borné (BOOKING_EMAIL_INTENT_AMBIGUOUS) puis permanent
  * - RETRYABLE_REJECT : champs manquants/invalides → markFailure, pas de Pending/Acc
  * - l’équipe n’est pas un critère (choix manuel à la confirmation)
  */
@@ -54,6 +59,12 @@ export async function GET(req: Request) {
     pagesFetched: 0,
     idsExamined: 0,
     fullFetches: 0,
+    confirmationCount: 0,
+    hostMessageIgnoredCount: 0,
+    receiptIgnoredCount: 0,
+    cancellationIgnoredCount: 0,
+    otherIgnoredCount: 0,
+    ambiguousCount: 0,
   }
   const anthropic = process.env.ANTHROPIC_API_KEY
     ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -135,6 +146,7 @@ export async function GET(req: Request) {
           }
           const msgData = await msgRes.json()
           const bodyText = extractNormalizedGmailBody(msgData.payload)
+          const subject = extractGmailSubject(msgData.payload)
           const snippet = (msgData.snippet ?? "") as string
 
           if (!bodyText && !snippet) {
@@ -149,6 +161,43 @@ export async function GET(req: Request) {
           }
 
           const fullText = bodyText || snippet
+          const intentGate = await applyBookingEmailIntentGate({
+            companyId: conn.companyId,
+            messageId,
+            subject,
+            bodyText: fullText,
+            stats,
+            markPermanentIgnored: (companyId, msgId, error) =>
+              lifecycle.markPermanentIgnored(companyId, msgId, error),
+            markFailure: (args) => lifecycle.markFailure(args),
+          })
+
+          if (intentGate.action === "STOP") {
+            if (intentGate.telemetryKind === "retryable_failure") {
+              stats.retryable++
+              console.warn(
+                `[gmail-scan] RETRYABLE_FAILURE intent=${intentGate.classification.intent} confidence=${intentGate.classification.confidence} code=${intentGate.code} messageId=${messageId} company=${conn.companyId} evidence=${intentGate.classification.evidence.join(",")} nextRetryAt=${intentGate.lifecycle.nextRetryAt?.toISOString() ?? "n/a"}`
+              )
+            } else if (intentGate.telemetryKind === "permanent_ignored") {
+              stats.permanent++
+              console.log(
+                `[gmail-scan] PERMANENTLY_IGNORED intent=${intentGate.classification.intent} confidence=${intentGate.classification.confidence} code=${intentGate.lifecycle.errorCode ?? intentGate.code} messageId=${messageId} company=${conn.companyId} evidence=${intentGate.classification.evidence.join(",")}`
+              )
+            } else if (intentGate.telemetryKind === "lifecycle_race_succeeded") {
+              // Course : markFailure/markPermanentIgnored n’a pas écrasé SUCCEEDED
+              stats.detected++
+              console.warn(
+                `[gmail-scan] LIFECYCLE_RACE_SUCCEEDED intent=${intentGate.classification.intent} code=${intentGate.code} messageId=${messageId} company=${conn.companyId} — aucun compteur permanent`
+              )
+            } else {
+              stats.errors++
+              console.warn(
+                `[gmail-scan] LIFECYCLE_UNEXPECTED status=${intentGate.lifecycleStatus} intent=${intentGate.classification.intent} code=${intentGate.code} messageId=${messageId} company=${conn.companyId}`
+              )
+            }
+            return
+          }
+
           const emailTextForExtract = truncateBookingEmailForExtract(fullText)
           const emailTextForPersist = truncateBookingEmailForPersist(fullText)
           const parsed = await extractBookingFields(
@@ -315,7 +364,7 @@ export async function GET(req: Request) {
   }
 
   console.log(
-    `[CRON gmail-scan] scanned=${stats.scanned} detected=${stats.detected} skipped=${stats.skipped} retryable=${stats.retryable} permanent=${stats.permanent} missingAddress=${stats.missingAddress} errors=${stats.errors} pagesFetched=${stats.pagesFetched} idsExamined=${stats.idsExamined} fullFetches=${stats.fullFetches}`
+    `[CRON gmail-scan] scanned=${stats.scanned} detected=${stats.detected} skipped=${stats.skipped} retryable=${stats.retryable} permanent=${stats.permanent} missingAddress=${stats.missingAddress} errors=${stats.errors} pagesFetched=${stats.pagesFetched} idsExamined=${stats.idsExamined} fullFetches=${stats.fullFetches} confirmation=${stats.confirmationCount} hostMsg=${stats.hostMessageIgnoredCount} receipt=${stats.receiptIgnoredCount} cancel=${stats.cancellationIgnoredCount} other=${stats.otherIgnoredCount} ambiguous=${stats.ambiguousCount}`
   )
   return NextResponse.json({ ok: true, ...stats })
 }

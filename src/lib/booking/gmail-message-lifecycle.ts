@@ -320,6 +320,16 @@ export class BookingGmailMessageLifecycle {
         status = "RETRYABLE_FAILURE"
         nextRetryAt = computeNextRetryAt(attempts, now)
       }
+    } else if (classified.code === "BOOKING_EMAIL_INTENT_AMBIGUOUS") {
+      // PARSER-003 : retry borné, code diagnostique conservé au plafond.
+      if (attempts >= maxAttempts) {
+        status = "PERMANENTLY_IGNORED"
+        errorCode = "BOOKING_EMAIL_INTENT_AMBIGUOUS"
+        errorMessage = classified.message
+      } else {
+        status = "RETRYABLE_FAILURE"
+        nextRetryAt = computeNextRetryAt(attempts, now)
+      }
     } else if (classified.kind === "PERMANENT") {
       status = "PERMANENTLY_IGNORED"
     } else if (attempts >= maxAttempts) {

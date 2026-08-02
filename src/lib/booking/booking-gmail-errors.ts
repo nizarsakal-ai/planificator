@@ -55,6 +55,53 @@ export function classifyBookingError(error: unknown): ClassifiedBookingError {
       message: "Date d'arrivée antérieure à la coupure de scan",
     }
   }
+  if (
+    msg === "IGNORED_BOOKING_HOST_MESSAGE" ||
+    name === "IGNORED_BOOKING_HOST_MESSAGE"
+  ) {
+    return {
+      kind: "PERMANENT",
+      code: "IGNORED_BOOKING_HOST_MESSAGE",
+      message: "Message établissement Booking ignoré",
+    }
+  }
+  if (msg === "IGNORED_BOOKING_RECEIPT" || name === "IGNORED_BOOKING_RECEIPT") {
+    return {
+      kind: "PERMANENT",
+      code: "IGNORED_BOOKING_RECEIPT",
+      message: "Reçu / facture Booking ignoré",
+    }
+  }
+  if (
+    msg === "IGNORED_BOOKING_CANCELLATION" ||
+    name === "IGNORED_BOOKING_CANCELLATION"
+  ) {
+    return {
+      kind: "PERMANENT",
+      code: "IGNORED_BOOKING_CANCELLATION",
+      message: "Annulation Booking ignorée par le scan Gmail",
+    }
+  }
+  if (
+    msg === "IGNORED_BOOKING_NON_CONFIRMATION" ||
+    name === "IGNORED_BOOKING_NON_CONFIRMATION"
+  ) {
+    return {
+      kind: "PERMANENT",
+      code: "IGNORED_BOOKING_NON_CONFIRMATION",
+      message: "Email Booking hors confirmation initiale",
+    }
+  }
+  if (
+    msg === "BOOKING_EMAIL_INTENT_AMBIGUOUS" ||
+    name === "BOOKING_EMAIL_INTENT_AMBIGUOUS"
+  ) {
+    return {
+      kind: "RETRYABLE",
+      code: "BOOKING_EMAIL_INTENT_AMBIGUOUS",
+      message: "Intent Booking ambigu — aucun pending (retry borné)",
+    }
+  }
   if (msg === "MISSING_START_DATE" || name === "MISSING_START_DATE") {
     return {
       kind: "RETRYABLE",
