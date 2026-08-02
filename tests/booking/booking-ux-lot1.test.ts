@@ -43,8 +43,8 @@ describe("isBookingScanPendingOnly", () => {
   })
 })
 
-describe("isPendingReady (UI dérivé)", () => {
-  it("Prêt uniquement avec adresse + dates", () => {
+describe("isPendingReady (UI dérivé UX-002 R1)", () => {
+  it("Prêt uniquement avec adresse + dates (nom seul insuffisant)", () => {
     assert.equal(
       isPendingReady({
         address: "12 rue X",
@@ -52,6 +52,15 @@ describe("isPendingReady (UI dérivé)", () => {
         endDate: new Date("2026-08-05"),
       }),
       true
+    )
+    assert.equal(
+      isPendingReady({
+        propertyName: "Hotel Alone",
+        address: null,
+        startDate: new Date("2026-08-01"),
+        endDate: new Date("2026-08-05"),
+      }),
+      false
     )
     assert.equal(
       isPendingReady({
@@ -335,7 +344,9 @@ describe("LOT 1 — garde-fous source", () => {
     assert.equal(banner.includes("autoProcessPendingAccommodations"), false)
     assert.ok(banner.includes("Logements Booking à valider"))
     assert.ok(banner.includes("Prêts"))
-    assert.ok(banner.includes("Incomplets"))
+    assert.ok(banner.includes("À vérifier"))
+    assert.ok(banner.includes("Action requise"))
+    assert.equal(banner.includes("Incomplets"), false)
     assert.ok(dialog.includes("router.refresh()"))
     assert.ok(dialog.includes("updatePendingAccommodation"))
     assert.ok(dialog.includes("Valider et créer"))

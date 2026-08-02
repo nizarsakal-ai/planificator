@@ -28,7 +28,7 @@ import {
 } from "@/lib/actions/gmail.actions"
 import { toast } from "sonner"
 import {
-  isPendingReady,
+  evaluatePendingCompleteness,
 } from "@/lib/booking/booking-pending-ready"
 import { formatDateOnlyForInput } from "@/lib/booking/booking-date-only"
 import type { PendingAccommodationListItem } from "./pending-accommodation-list.types"
@@ -227,12 +227,26 @@ export function PendingBookingsDialog({
           <div className="space-y-5">
             {visible.map((p) => {
               const d = drafts[p.id] ?? draftFromPending(p)
-              const ready = isPendingReady({
+              const completeness = evaluatePendingCompleteness({
+                propertyName: d.propertyName,
                 address: d.address,
+                city: d.city,
+                zipCode: d.zipCode,
                 startDate: d.startDate || null,
                 endDate: d.endDate || null,
+                doorCode: d.doorCode,
+                contactName: d.contactName,
+                contactPhone: d.contactPhone,
+                notes: d.notes,
+                teamId: d.teamId,
               })
-              const canValidate = Boolean(d.teamId && ready)
+              const canValidate = completeness.canValidate
+              const badgeClass =
+                completeness.status === "READY"
+                  ? "border-green-200 bg-green-50 text-green-700"
+                  : completeness.status === "NEEDS_REVIEW"
+                    ? "border-amber-200 bg-amber-50 text-amber-700"
+                    : "border-red-200 bg-red-50 text-red-700"
 
               return (
                 <div
@@ -242,7 +256,9 @@ export function PendingBookingsDialog({
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <p className="text-sm font-medium text-slate-800">
-                        {d.propertyName.trim() || "Logement Booking.com"}
+                        {d.propertyName.trim() ||
+                          d.address.trim() ||
+                          "Logement Booking.com"}
                       </p>
                       <p className="mt-0.5 text-[11px] text-slate-400">
                         Reçu le {fmtCreated(p.createdAt)}
@@ -251,20 +267,32 @@ export function PendingBookingsDialog({
                     </div>
                     <Badge
                       variant="secondary"
-                      className={`shrink-0 text-xs ${
-                        ready
-                          ? "border-green-200 bg-green-50 text-green-700"
-                          : "border-amber-200 bg-amber-50 text-amber-700"
-                      }`}
+                      className={`shrink-0 text-xs ${badgeClass}`}
                     >
-                      {ready ? "Prêt" : "Incomplet"}
+                      {completeness.label}
                     </Badge>
                   </div>
 
-                  {!ready && (
+                  {completeness.status === "ACTION_REQUIRED" && completeness.hint && (
+                    <div className="flex items-start gap-1.5 rounded-md border border-red-100 bg-red-50 px-2 py-1.5 text-xs text-red-700">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      {completeness.hint}
+                    </div>
+                  )}
+
+                  {completeness.status === "NEEDS_REVIEW" && completeness.hint && (
                     <div className="flex items-start gap-1.5 rounded-md border border-amber-100 bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
                       <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      Adresse et dates obligatoires avant validation.
+                      {completeness.hint}
+                    </div>
+                  )}
+
+                  {completeness.status === "READY" &&
+                    !completeness.canValidate &&
+                    completeness.hint && (
+                    <div className="flex items-start gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-600">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      {completeness.hint}
                     </div>
                   )}
 
