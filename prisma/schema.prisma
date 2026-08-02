@@ -71,6 +71,14 @@ enum PendingAccommodationStatus {
   DISMISSED  // Admin a ignoré
 }
 
+/// Canal d'origine d'un PendingAccommodation (PLAN-BOOKING-FINAL-2).
+enum PendingAccommodationSourceKind {
+  GMAIL
+  N8N
+  AGENT
+  MANUAL
+}
+
 /// Cycle de vie d'un message Gmail Booking (table processed_gmail_messages).
 /// Les lignes historiques sans statut explicite sont migrées en SUCCEEDED.
 enum BookingGmailMessageStatus {
@@ -1087,10 +1095,11 @@ model Accommodation {
 
   // Source & référence externe
   /// Numéro de réservation Booking.com (métier). Ne jamais y stocker un id Gmail technique.
-  bookingReference     String? @unique
+  /// Unicité tenant-safe : @@unique([companyId, bookingReference]).
+  bookingReference     String?
   /// Identité technique du message Gmail source (tenant-safe). Null si création manuelle / hors Gmail.
   gmailSourceMessageId String?
-  source               String? @default("manual") // "manual" | "gmail-scan" | "n8n"
+  source               String? @default("manual") // "manual" | "gmail-scan" | "n8n" | "agent"
 
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
@@ -1099,6 +1108,7 @@ model Accommodation {
   company  Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   team     Team    @relation(fields: [teamId], references: [id])
 
+  @@unique([companyId, bookingReference])
   @@unique([companyId, gmailSourceMessageId])
   @@index([companyId])
   @@index([teamId])
@@ -1172,7 +1182,14 @@ model ProcessedGmailMessage {
 model PendingAccommodation {
   id              String                     @id @default(cuid())
   companyId       String
-  gmailMessageId  String
+  /// Id Gmail technique UNIQUEMENT. Null pour N8N / agent (jamais bookingReference).
+  gmailMessageId  String?
+  /// Clé d'idempotence pending : gmail:{id} | n8n:{ref} | agent:{eventId|ref}
+  /// Borne applicative : IDEMPOTENCY_KEY_MAX_BYTES (512 octets UTF-8).
+  idempotencyKey  String
+  sourceKind      PendingAccommodationSourceKind
+  /// Id externe non-Gmail. N8N = bookingReference. Agent = bookingReference si fournie (jamais un event id générique).
+  externalSourceId String?
 
   propertyName    String?
   address         String?
@@ -1196,9 +1213,11 @@ model PendingAccommodation {
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
+  @@unique([companyId, idempotencyKey])
   @@unique([companyId, gmailMessageId])
   @@index([companyId])
   @@index([status])
+  @@index([companyId, sourceKind, externalSourceId])
   @@map("pending_accommodations")
 }
 

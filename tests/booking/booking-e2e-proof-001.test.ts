@@ -54,6 +54,7 @@ type AccRow = {
   startDate: Date
   endDate: Date
   gmailSourceMessageId: string | null
+  bookingReference: string | null
   source: string | null
 }
 
@@ -82,10 +83,13 @@ function session(
 }
 
 function basePending(over: Partial<PendingRow> = {}): PendingRow {
-  return {
+  const merged: PendingRow = {
     id: "pend1",
     companyId: "co1",
     gmailMessageId: "gmail-msg-e2e-proof-001",
+    idempotencyKey: "gmail:gmail-msg-e2e-proof-001",
+    sourceKind: "GMAIL",
+    externalSourceId: null,
     propertyName: "Résidence Fictive",
     address: "42 rue des Lilas Inventés",
     city: "Ville-Fictive-sur-Loire",
@@ -105,6 +109,12 @@ function basePending(over: Partial<PendingRow> = {}): PendingRow {
     updatedAt: new Date("2026-07-01T10:00:00Z"),
     ...over,
   }
+  if (over.idempotencyKey === undefined) {
+    merged.idempotencyKey = merged.gmailMessageId
+      ? `gmail:${merged.gmailMessageId}`
+      : `n8n:${merged.externalSourceId ?? merged.id}`
+  }
+  return merged
 }
 
 function teamCo1(): ConfirmPendingTeam {
@@ -139,16 +149,28 @@ function makeConfirmWorld(opts: {
     return {
       accommodation: {
         async create({ data }: { data: Omit<AccRow, "id"> & { id?: string } }) {
-          const dup = state.accommodations.find(
+          const dupGmail = state.accommodations.find(
             (a) =>
               a.companyId === data.companyId &&
               a.gmailSourceMessageId != null &&
               a.gmailSourceMessageId === data.gmailSourceMessageId
           )
-          if (dup) {
+          if (dupGmail) {
             throw Object.assign(new Error("Unique"), {
               code: "P2002",
               meta: { target: ["companyId", "gmailSourceMessageId"] },
+            })
+          }
+          const dupRef = state.accommodations.find(
+            (a) =>
+              a.companyId === data.companyId &&
+              a.bookingReference != null &&
+              a.bookingReference === data.bookingReference
+          )
+          if (dupRef) {
+            throw Object.assign(new Error("Unique"), {
+              code: "P2002",
+              meta: { target: ["companyId", "bookingReference"] },
             })
           }
           const row: AccRow = {
@@ -166,6 +188,7 @@ function makeConfirmWorld(opts: {
             startDate: data.startDate,
             endDate: data.endDate,
             gmailSourceMessageId: data.gmailSourceMessageId ?? null,
+            bookingReference: data.bookingReference ?? null,
             source: data.source ?? null,
           }
           state.accommodations.push(row)
@@ -174,13 +197,41 @@ function makeConfirmWorld(opts: {
         async findFirst({
           where,
         }: {
-          where: { companyId: string; gmailSourceMessageId: string }
+          where: {
+            companyId: string
+            gmailSourceMessageId?: string
+            bookingReference?: string
+          }
         }) {
+          return (
+            state.accommodations.find((a) => {
+              if (a.companyId !== where.companyId) return false
+              if (where.gmailSourceMessageId !== undefined) {
+                return a.gmailSourceMessageId === where.gmailSourceMessageId
+              }
+              if (where.bookingReference !== undefined) {
+                return a.bookingReference === where.bookingReference
+              }
+              return false
+            }) ?? null
+          )
+        },
+        async findUnique({
+          where,
+        }: {
+          where: {
+            companyId_bookingReference: {
+              companyId: string
+              bookingReference: string
+            }
+          }
+        }) {
+          const key = where.companyId_bookingReference
           return (
             state.accommodations.find(
               (a) =>
-                a.companyId === where.companyId &&
-                a.gmailSourceMessageId === where.gmailSourceMessageId
+                a.companyId === key.companyId &&
+                a.bookingReference === key.bookingReference
             ) ?? null
           )
         },

@@ -111,6 +111,10 @@ function makeFakeScanTx() {
           id: `pend_${++pendingSeq}`,
           companyId: data.companyId,
           gmailMessageId: data.gmailMessageId,
+          idempotencyKey:
+            data.idempotencyKey ?? `gmail:${data.gmailMessageId}`,
+          sourceKind: data.sourceKind ?? "GMAIL",
+          externalSourceId: data.externalSourceId ?? null,
           propertyName: data.propertyName ?? null,
           address: data.address ?? null,
           city: data.city ?? null,

@@ -12,5 +12,5 @@ export interface PendingAccommodationListItem {
   notes: string | null
   createdAt: Date
   emailPreview: string | null
-  gmailMessageId: string
+  gmailMessageId: string | null
 }

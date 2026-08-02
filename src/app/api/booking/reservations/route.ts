@@ -2,12 +2,29 @@ import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { z } from "zod"
 import { assertCronBearerAuth } from "@/lib/cron/assert-cron-bearer-auth"
+import {
+  BOOKING_REFERENCE_MAX_BYTES,
+  n8nPendingIdempotencyKey,
+  PENDING_SOURCE_KIND,
+  utf8ByteLength,
+} from "@/lib/booking/booking-pending-identity"
 
 // ── Schéma de validation du payload N8N ──────────────────────────────────────
 const ReservationSchema = z.object({
   // Identification
   companyId:        z.string().min(1),
-  bookingReference: z.string().min(1),
+  bookingReference: z
+    .string()
+    .min(1)
+    .max(BOOKING_REFERENCE_MAX_BYTES)
+    .superRefine((val, ctx) => {
+      if (utf8ByteLength(val) > BOOKING_REFERENCE_MAX_BYTES) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `bookingReference dépasse ${BOOKING_REFERENCE_MAX_BYTES} octets UTF-8`,
+        })
+      }
+    }),
 
   // Statut de la réservation Booking.com
   // confirmed → créer/mettre à jour
@@ -69,10 +86,15 @@ export async function POST(req: Request) {
     select: { id: true },
   })
 
-  // ── Cas CANCELLED : on annule l'accommodation existante ───────────────────
+  // ── Cas CANCELLED : isolation tenant via unique composite ─────────────────
   if (data.status === "cancelled") {
     const existing = await prisma.accommodation.findUnique({
-      where: { bookingReference: data.bookingReference },
+      where: {
+        companyId_bookingReference: {
+          companyId: data.companyId,
+          bookingReference: data.bookingReference,
+        },
+      },
       select: { id: true, companyId: true },
     })
     if (!existing || existing.companyId !== data.companyId) {
@@ -84,7 +106,6 @@ export async function POST(req: Request) {
       data:  { status: "CANCELLED" },
     })
 
-    // Notification admins
     await _notifyAdmins(data.companyId, "Réservation annulée", `Booking #${data.bookingReference} annulée.`, "/logements")
 
     return NextResponse.json({ ok: true, action: "cancelled", id: existing.id })
@@ -92,7 +113,6 @@ export async function POST(req: Request) {
 
   // ── Cas CONFIRMED ou MODIFIED : upsert ───────────────────────────────────
 
-  // Chercher l'équipe par nom si fourni — exact d'abord, puis partiel
   let matchedTeamId: string | null = null
   if (data.teamName) {
     const exactTeam = await prisma.team.findFirst({
@@ -126,7 +146,6 @@ export async function POST(req: Request) {
     data.endDate
 
   if (hasRequiredData) {
-    // ── Upsert Accommodation ─────────────────────────────────────────────
     const accData = {
       companyId:        data.companyId,
       teamId:           matchedTeamId!,
@@ -146,20 +165,24 @@ export async function POST(req: Request) {
     }
 
     const result = await prisma.accommodation.upsert({
-      where:  { bookingReference: data.bookingReference },
+      where: {
+        companyId_bookingReference: {
+          companyId: data.companyId,
+          bookingReference: data.bookingReference,
+        },
+      },
       create: accData,
       update: {
-        // Ne pas écraser le statut CANCELLED
-        teamId:      accData.teamId,
-        address:     accData.address,
-        city:        accData.city,
-        zipCode:     accData.zipCode,
-        startDate:   accData.startDate,
-        endDate:     accData.endDate,
-        doorCode:    accData.doorCode,
-        contactName: accData.contactName,
-        contactPhone:accData.contactPhone,
-        notes:       accData.notes,
+        teamId:       accData.teamId,
+        address:      accData.address,
+        city:         accData.city,
+        zipCode:      accData.zipCode,
+        startDate:    accData.startDate,
+        endDate:      accData.endDate,
+        doorCode:     accData.doorCode,
+        contactName:  accData.contactName,
+        contactPhone: accData.contactPhone,
+        notes:        accData.notes,
       },
     })
 
@@ -171,7 +194,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, action, id: result.id })
   }
 
-  // ── Fallback : PendingAccommodation si équipe non trouvée ─────────────────
+  // ── Fallback Pending : jamais gmailMessageId = bookingReference ───────────
   const pendingData = {
     propertyName:    data.propertyName  ?? null,
     address:         data.address       ?? null,
@@ -185,9 +208,14 @@ export async function POST(req: Request) {
     notes:           data.notes         ?? null,
   }
 
-  // Chercher si une PendingAccommodation existe déjà pour cette référence
-  const existingPending = await prisma.pendingAccommodation.findFirst({
-    where:  { gmailMessageId: data.bookingReference, companyId: data.companyId },
+  const idempotencyKey = n8nPendingIdempotencyKey(data.bookingReference)
+  const existingPending = await prisma.pendingAccommodation.findUnique({
+    where: {
+      companyId_idempotencyKey: {
+        companyId: data.companyId,
+        idempotencyKey,
+      },
+    },
     select: { id: true },
   })
 
@@ -199,7 +227,10 @@ export async function POST(req: Request) {
     : await prisma.pendingAccommodation.create({
         data: {
           companyId:       data.companyId,
-          gmailMessageId:  data.bookingReference,
+          gmailMessageId:  null,
+          idempotencyKey,
+          sourceKind:      PENDING_SOURCE_KIND.N8N,
+          externalSourceId: data.bookingReference,
           rawEmailSnippet: `[n8n] ${data.propertyName ?? ""} — ref: ${data.bookingReference}`.substring(0, 500),
           ...pendingData,
         },
@@ -215,8 +246,6 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ ok: true, action: "pending", id: pending.id })
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function _notifyAdmins(companyId: string, title: string, message: string, link: string) {
   const admins = await prisma.user.findMany({
@@ -235,4 +264,3 @@ async function _notifyAdmins(companyId: string, title: string, message: string, 
     })),
   })
 }
-

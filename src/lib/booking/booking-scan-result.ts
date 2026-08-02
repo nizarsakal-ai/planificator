@@ -3,7 +3,7 @@
  *
  * - bookingReference : uniquement la vraie référence Booking.com (si connue).
  * - Accommodation.gmailSourceMessageId : clé technique tenant-safe (companyId + messageId).
- * - PendingAccommodation : unique (companyId, gmailMessageId).
+ * - PendingAccommodation : unique (companyId, gmailMessageId) + (companyId, idempotencyKey).
  * - Rejeu : enrichit un pending PENDING sans doublon ni écrasement d’adresse.
  */
 
@@ -13,6 +13,10 @@ import {
   buildPendingEnrichmentUpdate,
 } from "@/lib/booking/booking-pending-merge"
 import { isBookingScanPendingOnly } from "@/lib/booking/booking-scan-pending-only-flag"
+import {
+  gmailPendingIdempotencyKey,
+  PENDING_SOURCE_KIND,
+} from "@/lib/booking/booking-pending-identity"
 
 export type ParsedBookingFields = Record<string, string | null>
 
@@ -186,6 +190,9 @@ export async function createOrGetBookingScanResult(
       data: {
         companyId,
         gmailMessageId: messageId,
+        idempotencyKey: gmailPendingIdempotencyKey(messageId),
+        sourceKind: PENDING_SOURCE_KIND.GMAIL,
+        externalSourceId: null,
         propertyName: parsed.propertyName ?? null,
         address: parsed.address ?? null,
         city: parsed.city ?? null,

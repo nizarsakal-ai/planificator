@@ -143,6 +143,8 @@ describe("booking gmail lifecycle — intégration PG", RUN, () => {
       data: {
         companyId,
         gmailMessageId: msg,
+        idempotencyKey: `gmail:${msg}`,
+        sourceKind: "GMAIL",
         propertyName: "Ancien",
         address: "1 rue A",
         status: "PENDING",
@@ -150,11 +152,15 @@ describe("booking gmail lifecycle — intégration PG", RUN, () => {
     })
     // Insert second row with raw SQL (unique dropped)
     const newerId = `manual_${Date.now()}`
+    const newerKey = `gmail:${msg}:dup`
     await db.$executeRaw`
       INSERT INTO "pending_accommodations"
-        (id, "companyId", "gmailMessageId", "propertyName", address, status, "createdAt", "updatedAt")
+        (id, "companyId", "gmailMessageId", "idempotencyKey", "sourceKind",
+         "propertyName", address, status, "createdAt", "updatedAt")
       VALUES
-        (${newerId}, ${companyId}, ${msg}, ${"Récent corrigé"}, ${"2 rue B"},
+        (${newerId}, ${companyId}, ${msg}, ${newerKey},
+         'GMAIL'::"PendingAccommodationSourceKind",
+         ${"Récent corrigé"}, ${"2 rue B"},
          'CONFIRMED'::"PendingAccommodationStatus", NOW(), NOW())
     `
     await db.$executeRaw`

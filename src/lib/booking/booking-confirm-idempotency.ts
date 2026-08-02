@@ -7,6 +7,10 @@
  */
 
 import type { Prisma, PrismaClient } from "@prisma/client"
+import {
+  accommodationFieldsFromPendingIdentity,
+  type PendingSourceKind,
+} from "@/lib/booking/booking-pending-identity"
 
 export function isPrismaUniqueViolation(
   error: unknown,
@@ -45,11 +49,21 @@ export const ACCOMMODATION_GMAIL_SOURCE_UNIQUE_HINTS = [
   "companyId_gmailSourceMessageId",
 ] as const
 
+/** Contrainte Accommodation @@unique([companyId, bookingReference]). */
+export const ACCOMMODATION_BOOKING_REF_UNIQUE_HINTS = [
+  "bookingReference",
+  "companyId_bookingReference",
+] as const
+
 export type ConfirmCreateInput = {
   companyId: string
   userId: string
   pendingId: string
-  gmailMessageId: string
+  /** Null si pending N8N/agent (pas d'id Gmail). */
+  gmailMessageId: string | null
+  sourceKind: PendingSourceKind | string
+  externalSourceId: string | null
+  idempotencyKey: string
   teamId: string
   finalAddress: string
   city: string | null
@@ -80,6 +94,13 @@ export async function runConfirmCreateTransaction(
   db: PrismaClient,
   input: ConfirmCreateInput
 ): Promise<void> {
+  const identity = accommodationFieldsFromPendingIdentity({
+    sourceKind: input.sourceKind,
+    gmailMessageId: input.gmailMessageId,
+    externalSourceId: input.externalSourceId,
+    idempotencyKey: input.idempotencyKey,
+  })
+
   await db.$transaction(async (tx) => {
     const created = await tx.accommodation.create({
       data: {
@@ -95,8 +116,9 @@ export async function runConfirmCreateTransaction(
         contactName: input.contactName,
         contactPhone: input.contactPhone,
         notes: input.notes,
-        gmailSourceMessageId: input.gmailMessageId,
-        source: "gmail-scan",
+        gmailSourceMessageId: identity.gmailSourceMessageId,
+        bookingReference: identity.bookingReference,
+        source: identity.source,
       },
     })
 
@@ -142,16 +164,81 @@ export async function resolveConfirmAfterGmailSourceConflict(
     companyId: string
     userId: string
     pendingId: string
-    gmailMessageId: string
+    gmailMessageId: string | null
   }
 ): Promise<ConfirmResult> {
   return db.$transaction(async (tx) => {
+    if (!input.gmailMessageId) {
+      return { error: "Conflit d'unicité Gmail sans gmailMessageId." }
+    }
     const accommodation = await tx.accommodation.findFirst({
       where: {
         companyId: input.companyId,
         gmailSourceMessageId: input.gmailMessageId,
       },
       orderBy: { createdAt: "asc" },
+    })
+    if (!accommodation) {
+      return { error: "Logement introuvable après conflit d'unicité." }
+    }
+    if (accommodation.companyId !== input.companyId) {
+      return { error: "Conflit d'isolation locataire." }
+    }
+
+    const pending = await tx.pendingAccommodation.findFirst({
+      where: { id: input.pendingId, companyId: input.companyId },
+    })
+    if (!pending) {
+      return { error: "Réservation introuvable." }
+    }
+    if (pending.status === "DISMISSED") {
+      return { error: "Réservation déjà ignorée — confirmation impossible." }
+    }
+    if (pending.status === "CONFIRMED") {
+      return { success: true, idempotent: true }
+    }
+
+    await tx.pendingAccommodation.updateMany({
+      where: {
+        id: input.pendingId,
+        companyId: input.companyId,
+        status: "PENDING",
+      },
+      data: {
+        status: "CONFIRMED",
+        accommodationId: accommodation.id,
+        confirmedById: input.userId,
+        confirmedAt: new Date(),
+      },
+    })
+
+    return { success: true, idempotent: true }
+  })
+}
+
+/**
+ * Résolution après P2002 sur (companyId, bookingReference) — N8N / Agent avec ref.
+ */
+export async function resolveConfirmAfterBookingRefConflict(
+  db: PrismaClient,
+  input: {
+    companyId: string
+    userId: string
+    pendingId: string
+    bookingReference: string | null
+  }
+): Promise<ConfirmResult> {
+  return db.$transaction(async (tx) => {
+    if (!input.bookingReference) {
+      return { error: "Conflit d'unicité bookingReference sans référence." }
+    }
+    const accommodation = await tx.accommodation.findUnique({
+      where: {
+        companyId_bookingReference: {
+          companyId: input.companyId,
+          bookingReference: input.bookingReference,
+        },
+      },
     })
     if (!accommodation) {
       return { error: "Logement introuvable après conflit d'unicité." }

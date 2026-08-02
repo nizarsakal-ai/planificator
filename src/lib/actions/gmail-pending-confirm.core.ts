@@ -7,12 +7,15 @@ import type { PendingAccommodation, PrismaClient, Role } from "@prisma/client"
 import { resolveConfirmAddress } from "@/lib/booking/booking-pending-merge"
 import { isCalendarRangeValid } from "@/lib/booking/booking-date-only"
 import {
+  ACCOMMODATION_BOOKING_REF_UNIQUE_HINTS,
   ACCOMMODATION_GMAIL_SOURCE_UNIQUE_HINTS,
   isAnyPrismaUniqueViolation,
   isPrismaUniqueViolation,
+  resolveConfirmAfterBookingRefConflict,
   resolveConfirmAfterGmailSourceConflict,
   runConfirmCreateTransaction,
 } from "@/lib/booking/booking-confirm-idempotency"
+import { accommodationFieldsFromPendingIdentity } from "@/lib/booking/booking-pending-identity"
 
 export type BookingValidationSessionUser = {
   id: string
@@ -168,6 +171,9 @@ export async function confirmPendingAccommodationImpl(
     userId: user.id,
     pendingId: id,
     gmailMessageId: pending.gmailMessageId,
+    sourceKind: pending.sourceKind,
+    externalSourceId: pending.externalSourceId,
+    idempotencyKey: pending.idempotencyKey,
     teamId,
     finalAddress,
     city: pending.city ?? null,
@@ -184,6 +190,13 @@ export async function confirmPendingAccommodationImpl(
     endLabel,
   }
 
+  const identity = accommodationFieldsFromPendingIdentity({
+    sourceKind: pending.sourceKind,
+    gmailMessageId: pending.gmailMessageId,
+    externalSourceId: pending.externalSourceId,
+    idempotencyKey: pending.idempotencyKey,
+  })
+
   let createdNew = true
   try {
     await runConfirmCreateTransaction(deps.db as unknown as PrismaClient, createInput)
@@ -196,6 +209,22 @@ export async function confirmPendingAccommodationImpl(
           userId: user.id,
           pendingId: id,
           gmailMessageId: pending.gmailMessageId,
+        }
+      )
+      if ("error" in resolved) return resolved
+      createdNew = false
+      deps.revalidatePath("/logements")
+      deps.revalidatePath("/planning/moi")
+      return resolved
+    }
+    if (isPrismaUniqueViolation(error, ACCOMMODATION_BOOKING_REF_UNIQUE_HINTS)) {
+      const resolved = await resolveConfirmAfterBookingRefConflict(
+        deps.db as unknown as PrismaClient,
+        {
+          companyId,
+          userId: user.id,
+          pendingId: id,
+          bookingReference: identity.bookingReference,
         }
       )
       if ("error" in resolved) return resolved
