@@ -196,83 +196,28 @@ export async function createLogement(formData: FormData) {
 export async function autoProcessPendingAccommodations() {
   const user = await requireAdmin()
 
-  if (!process.env.ANTHROPIC_API_KEY) return { error: "Clé API Anthropic non configurée." }
-
-  const [pendings, teams, admin] = await Promise.all([
-    prisma.pendingAccommodation.findMany({
-      where:   { companyId: user.companyId!, status: "PENDING" },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.team.findMany({
-      where:  { companyId: user.companyId!, active: true },
-      select: { id: true, name: true },
-    }),
-    prisma.user.findFirst({
-      where:  { companyId: user.companyId!, role: { in: ["SUPER_ADMIN", "ADMIN"] } },
-      select: { id: true },
-    }),
-  ])
-
-  if (pendings.length === 0) return { success: true, processed: 0, failed: 0 }
-
+  const { autoProcessPendingAccommodationsCore } = await import(
+    "@/lib/booking/booking-autoprocess.core"
+  )
   const { fetchBookingGmailMessageBody } = await import(
     "@/lib/booking/booking-gmail-body.service"
   )
-  const {
-    pickEmailTextForReprocess,
-    BOOKING_EMAIL_BODY_PERSIST_MAX,
-    BOOKING_SNIPPET_RICH_MIN,
-  } = await import("@/lib/booking/booking-pending-merge")
-  const { mergeAiWithRegexFallback, tryParseAiBookingContent } = await import(
-    "@/lib/booking/extract-booking-fields"
-  )
 
   const Anthropic = (await import("@anthropic-ai/sdk")).default
-  const client    = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-  const teamNames = teams.map((t) => t.name).join(", ")
-  const today     = new Date().toISOString().split("T")[0]
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  const client = apiKey ? new Anthropic({ apiKey }) : null
 
-  let processed = 0
-  let failed    = 0
-
-  for (const pending of pendings) {
-    let gmailBody: string | null = null
-    const persisted = pending.rawEmailSnippet
-    const needsGmail =
-      !persisted || persisted.trim().length < BOOKING_SNIPPET_RICH_MIN
-
-    if (needsGmail && pending.gmailMessageId) {
-      const fetched = await fetchBookingGmailMessageBody(
-        user.companyId!,
-        pending.gmailMessageId
-      )
-      if (fetched.ok) {
-        gmailBody = fetched.text
-        // Persister le corps riche pour éviter les re-fetch inutiles (même tenant).
-        if (fetched.text.length > (persisted?.length ?? 0)) {
-          await prisma.pendingAccommodation.updateMany({
-            where: { id: pending.id, companyId: user.companyId! },
-            data: {
-              rawEmailSnippet: fetched.text.substring(0, BOOKING_EMAIL_BODY_PERSIST_MAX),
-            },
-          })
-        }
-      }
-    }
-
-    const chosen = pickEmailTextForReprocess({
-      propertyName: pending.propertyName,
-      persistedText: pending.rawEmailSnippet,
-      gmailBody,
-      snippetFallback: pending.rawEmailSnippet,
-    })
-    const emailText = chosen.text
-
-    if (!emailText.trim()) { failed++; continue }
-
-    try {
+  return autoProcessPendingAccommodationsCore({
+    companyId: user.companyId!,
+    userId: user.id,
+    db: prisma as unknown as import("@/lib/booking/booking-autoprocess.core").AutoProcessDb,
+    anthropicApiKey: apiKey,
+    fetchGmailBody: (companyId, messageId) =>
+      fetchBookingGmailMessageBody(companyId, messageId),
+    createAiMessage: async ({ emailText, teamNames, today }) => {
+      if (!client) return { type: "other" as const }
       const msg = await client.messages.create({
-        model:      "claude-haiku-4-5-20251001",
+        model: "claude-haiku-4-5-20251001",
         max_tokens: 512,
         system: `Extrais les informations d'une réservation Booking.com.
 Équipes disponibles: ${teamNames}
@@ -290,123 +235,12 @@ Réponds UNIQUEMENT en JSON valide sans markdown:
 Pour teamName: cherche un prénom/nom qui correspond à une équipe disponible.`,
         messages: [{ role: "user", content: emailText }],
       })
-
       const content = msg.content[0]
-      if (content.type !== "text") { failed++; continue }
-
-      const aiParsed = tryParseAiBookingContent(content)
-      const extracted = aiParsed
-        ? mergeAiWithRegexFallback(aiParsed, emailText)
-        : mergeAiWithRegexFallback(
-            {
-              propertyName: null,
-              address: null,
-              city: null,
-              zipCode: null,
-              startDate: null,
-              endDate: null,
-              doorCode: null,
-              contactName: null,
-              contactPhone: null,
-              notes: null,
-              teamName: null,
-            },
-            emailText
-          )
-
-      const finalAddress =
-        pending.address?.trim() || extracted.address?.trim() || null
-
-      // Enrichir le pending avec les données extraites (ne pas écraser une adresse existante)
-      await prisma.pendingAccommodation.updateMany({
-        where: { id: pending.id, companyId: user.companyId! },
-        data: {
-          address:      finalAddress,
-          city:         extracted.city?.trim() || pending.city || null,
-          zipCode:      extracted.zipCode?.trim() || pending.zipCode || null,
-          doorCode:     extracted.doorCode?.trim() || pending.doorCode || null,
-          contactPhone: extracted.contactPhone?.trim() || pending.contactPhone || null,
-          contactName:  extracted.contactName?.trim() || pending.contactName || null,
-        },
-      })
-
-      // Matcher l'équipe — 1) par adresse déjà connue, 2) par nom extrait
-      let teamId: string | null = null
-
-      if (finalAddress) {
-        const normalizeAddr = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "")
-        const allAcc = await prisma.accommodation.findMany({
-          where: { companyId: user.companyId! },
-          select: { teamId: true, address: true },
-        })
-        const addrPrefix = normalizeAddr(finalAddress).substring(0, 10)
-        const match = allAcc.find(
-          (a) => a.address && normalizeAddr(a.address).includes(addrPrefix)
-        )
-        if (match) teamId = match.teamId
-      }
-
-      // Fallback : nom d'équipe extrait par l'IA
-      if (!teamId) {
-        const teamName = extracted.teamName
-        if (teamName) {
-          const match = teams.find((t) =>
-            t.name.toLowerCase() === teamName.toLowerCase() ||
-            t.name.toLowerCase().includes(teamName.toLowerCase()) ||
-            teamName.toLowerCase().includes(t.name.toLowerCase())
-          )
-          teamId = match?.id ?? null
-        }
-      }
-
-      if (!teamId || !finalAddress || !pending.startDate || !pending.endDate || !admin) {
-        failed++
-        continue
-      }
-
-      // Confirmation automatique
-      const notesValue = [pending.propertyName, pending.notes].filter(Boolean).join(" — ") || null
-
-      await prisma.$transaction(async (tx) => {
-        const created = await tx.accommodation.create({
-          data: {
-            companyId:    user.companyId!,
-            teamId:       teamId!,
-            createdById:  admin.id,
-            startDate:    pending.startDate!,
-            endDate:      pending.endDate!,
-            address:      finalAddress!,
-            city:         extracted.city?.trim() || pending.city || null,
-            zipCode:      extracted.zipCode?.trim() || pending.zipCode || null,
-            doorCode:     extracted.doorCode?.trim() || pending.doorCode || null,
-            contactName:  extracted.contactName?.trim() || pending.contactName || null,
-            contactPhone: extracted.contactPhone?.trim() || pending.contactPhone || null,
-            notes:        notesValue,
-            gmailSourceMessageId: pending.gmailMessageId,
-            source: "gmail-scan",
-          },
-        })
-
-        await tx.pendingAccommodation.updateMany({
-          where: { id: pending.id, companyId: user.companyId! },
-          data: {
-            status:          "CONFIRMED",
-            accommodationId: created.id,
-            confirmedById:   user.id,
-            confirmedAt:     new Date(),
-          },
-        })
-      })
-
-      processed++
-    } catch {
-      failed++
-    }
-  }
-
-  revalidatePath("/logements")
-  revalidatePath("/planning/moi")
-  return { success: true, processed, failed }
+      if (content.type !== "text") return { type: "other" as const }
+      return { type: "text" as const, text: content.text }
+    },
+    revalidatePath,
+  })
 }
 
 // ─── Supprimer un logement ────────────────────────────────────────────────────
