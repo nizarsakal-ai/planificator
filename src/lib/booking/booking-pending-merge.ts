@@ -182,6 +182,7 @@ export function hasBookingAddress(parsed: BookingFieldPatch): boolean {
 
 /**
  * Résolution d’adresse pour confirmPendingAccommodation (extrait / override).
+ * Jamais propertyName — Accommodation.address doit rester une vraie adresse.
  */
 export function resolveConfirmAddress(
   pendingAddress: string | null | undefined,

@@ -4,7 +4,9 @@ import { useMemo, useState } from "react"
 import { Bell, ChevronRight } from "lucide-react"
 import { PendingBookingsDialog } from "./PendingBookingsDialog"
 import { Badge } from "@/components/ui/badge"
-import { isPendingReady } from "@/lib/booking/booking-pending-ready"
+import {
+  evaluatePendingCompleteness,
+} from "@/lib/booking/booking-pending-ready"
 import type { PendingAccommodationListItem } from "./pending-accommodation-list.types"
 
 export type { PendingAccommodationListItem } from "./pending-accommodation-list.types"
@@ -20,22 +22,42 @@ interface Props {
   teams: Team[]
 }
 
-export type PendingReadyFilter = "all" | "ready" | "incomplete"
+export type PendingReadyFilter =
+  | "all"
+  | "ready"
+  | "needs_review"
+  | "action_required"
+
+function statusOf(p: PendingAccommodationListItem) {
+  return evaluatePendingCompleteness(p).status
+}
 
 export function PendingBookingsBanner({ pendings, teams }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [filter, setFilter] = useState<PendingReadyFilter>("all")
 
   const filtered = useMemo(() => {
-    if (filter === "ready") return pendings.filter(isPendingReady)
-    if (filter === "incomplete") return pendings.filter((p) => !isPendingReady(p))
+    if (filter === "ready") {
+      return pendings.filter((p) => statusOf(p) === "READY")
+    }
+    if (filter === "needs_review") {
+      return pendings.filter((p) => statusOf(p) === "NEEDS_REVIEW")
+    }
+    if (filter === "action_required") {
+      return pendings.filter((p) => statusOf(p) === "ACTION_REQUIRED")
+    }
     return pendings
   }, [pendings, filter])
 
   if (pendings.length === 0) return null
 
-  const readyCount = pendings.filter(isPendingReady).length
-  const incompleteCount = pendings.length - readyCount
+  const readyCount = pendings.filter((p) => statusOf(p) === "READY").length
+  const needsReviewCount = pendings.filter(
+    (p) => statusOf(p) === "NEEDS_REVIEW"
+  ).length
+  const actionRequiredCount = pendings.filter(
+    (p) => statusOf(p) === "ACTION_REQUIRED"
+  ).length
 
   return (
     <>
@@ -54,8 +76,10 @@ export function PendingBookingsBanner({ pendings, teams }: Props) {
               Logements Booking à valider ({pendings.length})
             </p>
             <p className="mt-0.5 text-xs text-amber-600">
-              {readyCount} prêt{readyCount > 1 ? "s" : ""} · {incompleteCount} incomplet
-              {incompleteCount > 1 ? "s" : ""} — revue humaine requise
+              {readyCount} prêt{readyCount > 1 ? "s" : ""} · {needsReviewCount} à
+              vérifier · {actionRequiredCount} action
+              {actionRequiredCount > 1 ? "s" : ""} requise
+              {actionRequiredCount > 1 ? "s" : ""} — revue humaine requise
             </p>
           </button>
 
@@ -70,7 +94,16 @@ export function PendingBookingsBanner({ pendings, teams }: Props) {
             [
               { id: "all" as const, label: "Tous", count: pendings.length },
               { id: "ready" as const, label: "Prêts", count: readyCount },
-              { id: "incomplete" as const, label: "Incomplets", count: incompleteCount },
+              {
+                id: "needs_review" as const,
+                label: "À vérifier",
+                count: needsReviewCount,
+              },
+              {
+                id: "action_required" as const,
+                label: "Action requise",
+                count: actionRequiredCount,
+              },
             ] as const
           ).map((f) => (
             <button
@@ -110,7 +143,13 @@ export function PendingBookingsBanner({ pendings, teams }: Props) {
         pendings={filtered}
         teams={teams}
         filterLabel={
-          filter === "ready" ? "Prêts" : filter === "incomplete" ? "Incomplets" : "Tous"
+          filter === "ready"
+            ? "Prêts"
+            : filter === "needs_review"
+              ? "À vérifier"
+              : filter === "action_required"
+                ? "Action requise"
+                : "Tous"
         }
       />
     </>

@@ -126,7 +126,9 @@ export async function confirmPendingAccommodationImpl(
     return { error: "La date de départ doit être après la date d'arrivée" }
   }
   const finalAddress = resolveConfirmAddress(pending.address, overrideAddress)
-  if (!finalAddress) return { error: "Veuillez saisir l'adresse du logement." }
+  if (!finalAddress) {
+    return { error: "Veuillez saisir l'adresse du logement." }
+  }
 
   const team = await deps.db.team.findFirst({
     where: { id: teamId, companyId, active: true },
