@@ -17,37 +17,86 @@ type GmailPayloadPart = {
   parts?: GmailPayloadPart[]
 }
 
+export type BookingGmailBodySourceMime =
+  | "text/plain"
+  | "text/html"
+  | "multipart"
+  | "none"
+
+export type NormalizedBookingGmailBody = {
+  text: string
+  sourceMime: BookingGmailBodySourceMime
+}
+
 export type BookingGmailBodyResult =
   | { ok: true; text: string }
   | { ok: false; code: string; retryable: boolean; message: string }
 
-function extractTextFromParts(parts: GmailPayloadPart[] | undefined): string {
+function extractTextFromParts(
+  parts: GmailPayloadPart[] | undefined
+): { text: string; sources: Set<"text/plain" | "text/html">; chunks: number } {
   let text = ""
+  const sources = new Set<"text/plain" | "text/html">()
+  let chunks = 0
   for (const part of parts ?? []) {
     if (part.mimeType === "text/plain" && part.body?.data) {
-      text += decodeHtmlEntities(
+      const chunk = decodeHtmlEntities(
         Buffer.from(part.body.data, "base64url").toString("utf8")
       )
+      text += chunk
+      // Plain vide / blanc : n’est pas un contributeur MIME (html peut prendre le relais).
+      if (chunk.trim()) {
+        sources.add("text/plain")
+        chunks++
+      }
     } else if (part.mimeType === "text/html" && part.body?.data && !text) {
       const html = Buffer.from(part.body.data, "base64url").toString("utf8")
-      text += htmlToPlainText(html)
+      const chunk = htmlToPlainText(html)
+      text += chunk
+      if (chunk.trim()) {
+        sources.add("text/html")
+        chunks++
+      }
     } else if (part.parts) {
-      text += extractTextFromParts(part.parts)
+      const nested = extractTextFromParts(part.parts)
+      text += nested.text
+      nested.sources.forEach((source) => sources.add(source))
+      chunks += nested.chunks
     }
   }
-  return text
+  return { text, sources, chunks }
 }
 
-export function extractNormalizedGmailBody(payload: GmailPayloadPart | undefined): string {
-  if (!payload) return ""
-  if (payload.parts) return extractTextFromParts(payload.parts).trim()
+export function extractNormalizedGmailBodyWithMetadata(
+  payload: GmailPayloadPart | undefined
+): NormalizedBookingGmailBody {
+  if (!payload) return { text: "", sourceMime: "none" }
+  if (payload.parts) {
+    const extracted = extractTextFromParts(payload.parts)
+    const sourceMime: BookingGmailBodySourceMime =
+      extracted.chunks > 1 || extracted.sources.size > 1
+        ? "multipart"
+        : (extracted.sources.values().next().value ?? "none")
+    return { text: extracted.text.trim(), sourceMime }
+  }
   if (payload.body?.data) {
     const raw = Buffer.from(payload.body.data, "base64url").toString("utf8")
-    if (payload.mimeType === "text/html") return htmlToPlainText(raw)
+    if (payload.mimeType === "text/html") {
+      return { text: htmlToPlainText(raw), sourceMime: "text/html" }
+    }
     // text/plain : décoder les entités résiduelles (&nbsp; littéral) sans strip HTML.
-    return decodeHtmlEntities(raw).trim()
+    return {
+      text: decodeHtmlEntities(raw).trim(),
+      sourceMime: "text/plain",
+    }
   }
-  return ""
+  return { text: "", sourceMime: "none" }
+}
+
+export function extractNormalizedGmailBody(
+  payload: GmailPayloadPart | undefined
+): string {
+  return extractNormalizedGmailBodyWithMetadata(payload).text
 }
 
 async function getCompanyAccessToken(companyId: string): Promise<string> {

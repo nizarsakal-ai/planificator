@@ -11,8 +11,11 @@ import {
   retryableBookingError,
 } from "@/lib/booking/booking-gmail-errors"
 import { createOrGetBookingScanResult } from "@/lib/booking/booking-scan-result"
-import { extractBookingFields } from "@/lib/booking/extract-booking-fields"
-import { extractNormalizedGmailBody } from "@/lib/booking/booking-gmail-body.service"
+import {
+  extractBookingFields,
+  regexFallbackParser,
+} from "@/lib/booking/extract-booking-fields"
+import { extractNormalizedGmailBodyWithMetadata } from "@/lib/booking/booking-gmail-body.service"
 import { extractGmailSubject } from "@/lib/booking/booking-email-intent"
 import { applyBookingEmailIntentGate } from "@/lib/booking/booking-email-intent-gate"
 import {
@@ -145,7 +148,8 @@ export async function GET(req: Request) {
             throw retryableBookingError("GMAIL_TEMPORARY", `Gmail get HTTP ${msgRes.status}`)
           }
           const msgData = await msgRes.json()
-          const bodyText = extractNormalizedGmailBody(msgData.payload)
+          const normalizedBody = extractNormalizedGmailBodyWithMetadata(msgData.payload)
+          const bodyText = normalizedBody.text
           const subject = extractGmailSubject(msgData.payload)
           const snippet = (msgData.snippet ?? "") as string
 
@@ -200,13 +204,86 @@ export async function GET(req: Request) {
 
           const emailTextForExtract = truncateBookingEmailForExtract(fullText)
           const emailTextForPersist = truncateBookingEmailForPersist(fullText)
+          const markerOffsets = (text: string) => {
+            const offset = (pattern: RegExp) => pattern.exec(text)?.index ?? -1
+            return {
+              Arrivee: offset(/\bArriv[ée]e\b/i),
+              Depart: offset(/\bD[ée]part\b/i),
+              "Check-in": offset(/\bCheck[\s-]?in\b/i),
+              "Check-out": offset(/\bCheck[\s-]?out\b/i),
+            }
+          }
+          const extractDiagnosticContext: import("@/lib/booking/extract-booking-fields").BookingExtractDiagnosticContext =
+            {
+              companyId: conn.companyId,
+              normalizedTextLength: fullText.length,
+              sourceMime: bodyText
+                ? normalizedBody.sourceMime
+                : ("snippet" as const),
+              normalizedMarkerOffsets: markerOffsets(fullText),
+              analyzedMarkerOffsets: markerOffsets(emailTextForExtract),
+              truncatedTextLength: emailTextForExtract.length,
+              wasTruncated: emailTextForExtract.length < fullText.length,
+            }
           const parsed = await extractBookingFields(
             emailTextForExtract,
             messageId,
-            anthropic as import("@/lib/booking/extract-booking-fields").BookingAiClient | null
+            anthropic as import("@/lib/booking/extract-booking-fields").BookingAiClient | null,
+            extractDiagnosticContext
           )
 
           const gate = evaluatePendingCreationGate(parsed, scanCutoff)
+          if (gate.decision === "RETRYABLE_REJECT" && gate.code === "MISSING_START_DATE") {
+            // Regex diag seulement ici si non déjà remplie par un rejet IA.
+            if (
+              extractDiagnosticContext.lastFallbackStartDatePresent ===
+                undefined ||
+              extractDiagnosticContext.lastFallbackEndDatePresent === undefined
+            ) {
+              const regexDiag = regexFallbackParser(emailTextForExtract)
+              extractDiagnosticContext.lastFallbackStartDatePresent = Boolean(
+                regexDiag.startDate
+              )
+              extractDiagnosticContext.lastFallbackEndDatePresent = Boolean(
+                regexDiag.endDate
+              )
+            }
+            console.warn("[booking-extract-diagnostic]", {
+              event: "missing_start_date",
+              messageId,
+              companyId: extractDiagnosticContext.companyId,
+              normalizedTextLength: extractDiagnosticContext.normalizedTextLength,
+              sourceMime: extractDiagnosticContext.sourceMime,
+              normalizedMarkerPresent: Object.fromEntries(
+                Object.entries(
+                  extractDiagnosticContext.normalizedMarkerOffsets
+                ).map(([key, offset]) => [key, offset >= 0])
+              ),
+              normalizedMarkerOffsets:
+                extractDiagnosticContext.normalizedMarkerOffsets,
+              analyzedMarkerPresent: Object.fromEntries(
+                Object.entries(
+                  extractDiagnosticContext.analyzedMarkerOffsets
+                ).map(([key, offset]) => [key, offset >= 0])
+              ),
+              analyzedMarkerOffsets:
+                extractDiagnosticContext.analyzedMarkerOffsets,
+              truncatedTextLength: extractDiagnosticContext.truncatedTextLength,
+              wasTruncated: extractDiagnosticContext.wasTruncated,
+              parserStartDatePresent: Boolean(parsed.startDate),
+              parserEndDatePresent: Boolean(parsed.endDate),
+              aiRejectionReason:
+                extractDiagnosticContext.lastAiRejectionReason ?? null,
+              validationField:
+                extractDiagnosticContext.lastAiValidationField ?? null,
+              aiStartDatePresent:
+                extractDiagnosticContext.lastAiStartDatePresent ?? null,
+              fallbackStartDatePresent:
+                extractDiagnosticContext.lastFallbackStartDatePresent ?? false,
+              fallbackEndDatePresent:
+                extractDiagnosticContext.lastFallbackEndDatePresent ?? false,
+            })
+          }
           if (gate.decision === "PERMANENT_IGNORE") {
             await lifecycle.markPermanentIgnored(
               conn.companyId,
