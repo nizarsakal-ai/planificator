@@ -26,6 +26,54 @@ export const BOOKING_FIELD_KEYS = [
 
 export type BookingFieldKey = (typeof BOOKING_FIELD_KEYS)[number]
 
+/** Contexte EXTRACT-005 — longueurs/offsets/booléens uniquement (pas de PII). */
+export type BookingExtractDiagnosticContext = {
+  companyId: string
+  normalizedTextLength: number
+  sourceMime: "text/plain" | "text/html" | "multipart" | "none" | "snippet"
+  truncatedTextLength: number
+  wasTruncated: boolean
+  normalizedMarkerOffsets: Record<
+    "Arrivee" | "Depart" | "Check-in" | "Check-out",
+    number
+  >
+  analyzedMarkerOffsets: Record<
+    "Arrivee" | "Depart" | "Check-in" | "Check-out",
+    number
+  >
+  /** Rempli par extractBookingFields pour le log gate (MISSING_START_DATE). */
+  lastAiRejectionReason?: BookingAiRejectionReason | null
+  lastAiValidationField?: BookingFieldKey | null
+  lastAiStartDatePresent?: boolean
+  lastFallbackStartDatePresent?: boolean
+  lastFallbackEndDatePresent?: boolean
+}
+
+export const BOOKING_AI_REJECTION_REASONS = [
+  "json_invalid",
+  "parse_error",
+  "schema_validation",
+  "type_mismatch",
+  "other",
+] as const
+
+export type BookingAiRejectionReason =
+  (typeof BOOKING_AI_REJECTION_REASONS)[number]
+
+type AiRejectionReasonInternal =
+  | BookingAiRejectionReason
+  | "non_text_content"
+  | "empty_content"
+
+type AiContentAnalysis =
+  | { ok: true; parsed: BookingParsedFields }
+  | {
+      ok: false
+      reason: AiRejectionReasonInternal
+      fieldName: BookingFieldKey | null
+      aiStartDatePresent: boolean
+    }
+
 /** Client IA minimal (injectable pour tests). */
 export type BookingAiClient = {
   messages: {
@@ -190,6 +238,91 @@ export function normalizeAiBookingJson(raw: unknown): BookingParsedFields | null
   return out
 }
 
+function toPublicAiRejectionReason(
+  reason: AiRejectionReasonInternal
+): BookingAiRejectionReason {
+  switch (reason) {
+    case "json_invalid":
+    case "parse_error":
+    case "schema_validation":
+    case "type_mismatch":
+    case "other":
+      return reason
+    case "non_text_content":
+    case "empty_content":
+      return "other"
+    default:
+      return "other"
+  }
+}
+
+function analyzeAiBookingContent(content: {
+  type: string
+  text?: string
+}): AiContentAnalysis {
+  if (content.type !== "text") {
+    return {
+      ok: false,
+      reason: "non_text_content",
+      fieldName: null,
+      aiStartDatePresent: false,
+    }
+  }
+  const text = content.text?.trim() ?? ""
+  if (!text) {
+    return {
+      ok: false,
+      reason: "empty_content",
+      fieldName: null,
+      aiStartDatePresent: false,
+    }
+  }
+  let raw: unknown
+  try {
+    raw = JSON.parse(text)
+  } catch {
+    // Texte non-JSON (markdown, etc.) → parse_error ; JSON cassé → json_invalid
+    const looksLikeJson = text.startsWith("{") || text.startsWith("[")
+    return {
+      ok: false,
+      reason: looksLikeJson ? "json_invalid" : "parse_error",
+      fieldName: null,
+      aiStartDatePresent: false,
+    }
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return {
+      ok: false,
+      reason: "schema_validation",
+      fieldName: null,
+      aiStartDatePresent: false,
+    }
+  }
+  const object = raw as Record<string, unknown>
+  const aiStartDatePresent =
+    typeof object.startDate === "string" && object.startDate.trim().length > 0
+  for (const key of BOOKING_FIELD_KEYS) {
+    const value = object[key]
+    if (value !== undefined && value !== null && typeof value !== "string") {
+      return {
+        ok: false,
+        reason: "type_mismatch",
+        fieldName: key,
+        aiStartDatePresent,
+      }
+    }
+  }
+  const parsed = normalizeAiBookingJson(raw)
+  return parsed
+    ? { ok: true, parsed }
+    : {
+        ok: false,
+        reason: "other",
+        fieldName: null,
+        aiStartDatePresent,
+      }
+}
+
 /**
  * Interprète un bloc de contenu IA. Retourne les champs ou null si inexploitable.
  */
@@ -197,16 +330,59 @@ export function tryParseAiBookingContent(content: {
   type: string
   text?: string
 }): BookingParsedFields | null {
-  if (content.type !== "text") return null
-  const text = content.text?.trim() ?? ""
-  if (!text) return null
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    return null
-  }
-  return normalizeAiBookingJson(parsed)
+  const analysis = analyzeAiBookingContent(content)
+  return analysis.ok ? analysis.parsed : null
+}
+
+function attachAiRejectionToContext(
+  context: BookingExtractDiagnosticContext | undefined,
+  analysis: Extract<AiContentAnalysis, { ok: false }>,
+  fallback: BookingParsedFields
+): void {
+  if (!context) return
+  context.lastAiRejectionReason = toPublicAiRejectionReason(analysis.reason)
+  context.lastAiValidationField = analysis.fieldName
+  context.lastAiStartDatePresent = analysis.aiStartDatePresent
+  context.lastFallbackStartDatePresent = Boolean(fallback.startDate)
+  context.lastFallbackEndDatePresent = Boolean(fallback.endDate)
+}
+
+function logAiRejectionDiagnostic(
+  messageId: string,
+  context: BookingExtractDiagnosticContext | undefined,
+  analysis: Extract<AiContentAnalysis, { ok: false }>,
+  fallback: BookingParsedFields
+): void {
+  if (!context) return
+  attachAiRejectionToContext(context, analysis, fallback)
+  console.warn("[booking-extract-diagnostic]", {
+    event: "ai_rejected_fallback_evaluated",
+    messageId,
+    companyId: context.companyId,
+    normalizedTextLength: context.normalizedTextLength,
+    sourceMime: context.sourceMime,
+    normalizedMarkerPresent: Object.fromEntries(
+      Object.entries(context.normalizedMarkerOffsets).map(([key, offset]) => [
+        key,
+        offset >= 0,
+      ])
+    ),
+    normalizedMarkerOffsets: context.normalizedMarkerOffsets,
+    analyzedMarkerPresent: Object.fromEntries(
+      Object.entries(context.analyzedMarkerOffsets).map(([key, offset]) => [
+        key,
+        offset >= 0,
+      ])
+    ),
+    analyzedMarkerOffsets: context.analyzedMarkerOffsets,
+    truncatedTextLength: context.truncatedTextLength,
+    wasTruncated: context.wasTruncated,
+    aiRejectionReason: toPublicAiRejectionReason(analysis.reason),
+    validationField: analysis.fieldName,
+    aiStartDatePresent: analysis.aiStartDatePresent,
+    fallbackStartDatePresent: Boolean(fallback.startDate),
+    fallbackEndDatePresent: Boolean(fallback.endDate),
+  })
 }
 
 function throwProviderInvalidOrContinueWithRegex(
@@ -269,7 +445,8 @@ export function mergeAiWithRegexFallback(
 export async function extractBookingFields(
   emailText: string,
   messageId: string,
-  anthropic: BookingAiClient | null
+  anthropic: BookingAiClient | null,
+  diagnosticContext?: BookingExtractDiagnosticContext
 ): Promise<BookingParsedFields> {
   if (!anthropic) {
     console.warn(
@@ -305,18 +482,41 @@ Format (toutes les valeurs peuvent être null si non trouvées) :
 
     const aiContent = aiRes.content[0]
     if (!aiContent) {
+      const fallback = regexFallbackParser(emailText)
+      logAiRejectionDiagnostic(
+        messageId,
+        diagnosticContext,
+        {
+          ok: false,
+          reason: "other",
+          fieldName: null,
+          aiStartDatePresent: false,
+        },
+        fallback
+      )
       console.warn(
         `[gmail-scan] Empty AI content for message ${messageId}, switching to regex fallback`
       )
-      return throwProviderInvalidOrContinueWithRegex(
-        emailText,
-        "Réponse IA vide (aucun bloc de contenu)"
-      )
+      return hasUsefulBookingData(fallback)
+        ? fallback
+        : throwProviderInvalidOrContinueWithRegex(
+            emailText,
+            "Réponse IA vide (aucun bloc de contenu)"
+          )
     }
 
-    const normalized = tryParseAiBookingContent(aiContent)
-    if (normalized) {
-      return mergeAiWithRegexFallback(normalized, emailText)
+    const analysis = analyzeAiBookingContent(aiContent)
+    if (analysis.ok) {
+      const merged = mergeAiWithRegexFallback(analysis.parsed, emailText)
+      // Pas de regex diag ici : calculé seulement sur rejet IA ou gate MISSING_START_DATE.
+      if (diagnosticContext) {
+        diagnosticContext.lastAiRejectionReason = null
+        diagnosticContext.lastAiValidationField = null
+        diagnosticContext.lastAiStartDatePresent = Boolean(
+          analysis.parsed.startDate
+        )
+      }
+      return merged
     }
 
     const reason =
@@ -329,7 +529,11 @@ Format (toutes les valeurs peuvent être null si non trouvées) :
     console.warn(
       `[gmail-scan] ${reason} for message ${messageId}, switching to regex fallback`
     )
-    const fallback = throwProviderInvalidOrContinueWithRegex(emailText, reason)
+    const rawFallback = regexFallbackParser(emailText)
+    logAiRejectionDiagnostic(messageId, diagnosticContext, analysis, rawFallback)
+    const fallback = hasUsefulBookingData(rawFallback)
+      ? rawFallback
+      : throwProviderInvalidOrContinueWithRegex(emailText, reason)
     console.log(`[gmail-scan] Regex fallback used for ${messageId}`)
     return fallback
   } catch (claudeErr) {
@@ -344,7 +548,21 @@ Format (toutes les valeurs peuvent être null si non trouvées) :
     console.warn(
       `[gmail-scan] Claude API error for message ${messageId}, switching to regex fallback`
     )
-    const fallback = throwProviderTemporaryOrContinueWithRegex(emailText, claudeErr)
+    const rawFallback = regexFallbackParser(emailText)
+    logAiRejectionDiagnostic(
+      messageId,
+      diagnosticContext,
+      {
+        ok: false,
+        reason: "other",
+        fieldName: null,
+        aiStartDatePresent: false,
+      },
+      rawFallback
+    )
+    const fallback = hasUsefulBookingData(rawFallback)
+      ? rawFallback
+      : throwProviderTemporaryOrContinueWithRegex(emailText, claudeErr)
     console.log(`[gmail-scan] Regex fallback used for ${messageId}`)
     return fallback
   }
