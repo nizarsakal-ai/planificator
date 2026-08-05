@@ -3,7 +3,7 @@ import Credentials from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { z } from "zod"
 import { prisma } from "@/lib/prisma"
-import { authConfig } from "@/auth.config"
+import { authConfig, edgeSessionCallback } from "@/auth.config"
 
 // Schéma de validation des credentials
 const credentialsSchema = z.object({
@@ -68,36 +68,29 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
     }),
   ],
+  // Merger avec authConfig : ne pas remplacer tout l'objet callbacks
+  // (sinon `authorized` / jwt Edge seraient perdus côté config partagée).
   callbacks: {
-    // Inclure role et companyId dans le JWT — relit la DB à chaque login
+    ...authConfig.callbacks,
+    // Node uniquement : relit Prisma pour garder role/companyId à jour.
+    // Le middleware Edge continue d'utiliser edgeJwtCallback (sans Prisma).
     async jwt({ token, user }) {
       if (user) {
-        // Connexion fraîche : on stocke l'id, role et companyId
-        token.id        = user.id as string
-        token.role      = (user as any).role
-        token.companyId = (user as any).companyId ?? null
+        token.id = user.id as string
+        token.role = (user as { role: typeof token.role }).role
+        token.companyId =
+          (user as { companyId?: string | null }).companyId ?? null
       } else if (token.id) {
-        // Session existante : on relit le rôle depuis la DB pour le garder à jour
         const dbUser = await prisma.user.findUnique({
-          where:  { id: token.id as string },
+          where: { id: token.id as string },
           select: { role: true, companyId: true, active: true },
         })
         if (!dbUser || !dbUser.active) return null
-        token.role      = dbUser.role
+        token.role = dbUser.role
         token.companyId = dbUser.companyId
       }
       return token
     },
-    // Exposer role et companyId dans la session côté client
-    async session({ session, token }) {
-      if (token) {
-        session.user.id        = token.id as string
-        session.user.role      = token.role as import("@prisma/client").Role
-        session.user.companyId = token.companyId as string | null
-      }
-      return session
-    },
-    // Réutiliser la logique authorized de authConfig
-    authorized: authConfig.callbacks!.authorized,
+    session: edgeSessionCallback,
   },
 })
