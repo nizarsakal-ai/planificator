@@ -17,6 +17,10 @@ import {
 } from "@/lib/booking/extract-booking-fields"
 import { extractNormalizedGmailBodyWithMetadata } from "@/lib/booking/booking-gmail-body.service"
 import { extractGmailSubject } from "@/lib/booking/booking-email-intent"
+import {
+  extractGmailFromHeader,
+  maybeLogAmbiguousIntentDiagnostic,
+} from "@/lib/booking/booking-email-intent-diagnostics"
 import { applyBookingEmailIntentGate } from "@/lib/booking/booking-email-intent-gate"
 import {
   truncateBookingEmailForExtract,
@@ -175,6 +179,15 @@ export async function GET(req: Request) {
             markPermanentIgnored: (companyId, msgId, error) =>
               lifecycle.markPermanentIgnored(companyId, msgId, error),
             markFailure: (args) => lifecycle.markFailure(args),
+          })
+
+          // PLAN-BOOKING-INTENT-DIAG-001 — logs AMBIGU uniquement si flag ON
+          // From extrait seulement derrière la garde (flag + AMBIGU)
+          maybeLogAmbiguousIntentDiagnostic({
+            messageId,
+            companyId: conn.companyId,
+            classification: intentGate.classification,
+            getFromHeaderValue: () => extractGmailFromHeader(msgData.payload),
           })
 
           if (intentGate.action === "STOP") {
