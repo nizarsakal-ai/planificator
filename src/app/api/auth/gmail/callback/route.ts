@@ -5,6 +5,10 @@ import {
   resolveGmailOAuthHmacSecret,
   verifyGmailOAuthSignature,
 } from "@/lib/auth/gmail-oauth-state"
+import {
+  diagnoseGmailOAuthTokenScopes,
+  formatGmailOAuthScopeDiagnosticLog,
+} from "@/lib/auth/gmail-oauth-scope-diagnostic"
 
 const APP_URL = process.env.NEXTAUTH_URL ?? "http://localhost:3000"
 
@@ -65,6 +69,11 @@ export async function GET(req: NextRequest) {
   if (!tokenData.access_token || !tokenData.refresh_token) {
     return NextResponse.redirect(`${APP_URL}/parametres?gmail=error&reason=no_tokens`)
   }
+
+  // TEMPORARY PLAN-BOOKING-DIAG-GMAIL-SCOPES-007 — scopes accordés (pas de secrets).
+  console.info(
+    formatGmailOAuthScopeDiagnosticLog(diagnoseGmailOAuthTokenScopes(tokenData))
+  )
 
   // Récupérer l'adresse Gmail
   const profileRes = await fetch("https://www.googleapis.com/oauth2/v1/userinfo", {
