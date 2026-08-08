@@ -18,6 +18,8 @@ import {
   buildBookingGmailListUrl,
   canAdmitFullFetch,
   consumeFullFetchAdmission,
+  formatBookingGmailListErrorLog,
+  BOOKING_GMAIL_GOOGLE_ERROR_MESSAGE_MAX,
   getBookingGmailListPageSize,
   getBookingGmailMaxFullFetchesPerConnection,
   getBookingGmailMaxFullFetchesPerRun,
@@ -305,6 +307,232 @@ describe("iterateBookingGmailMessagePages", () => {
       (err: unknown) =>
         err instanceof BookingGmailListError && err.kind === "http" && err.httpStatus === 500
     )
+  })
+
+  it("PLAN-BOOKING-DIAG-HTTP403-001 cas1: 403 JSON Google → extraction code/status/message", async () => {
+    const fetchImpl = mockFetchSequence([
+      () =>
+        jsonResponse(
+          {
+            error: {
+              code: 403,
+              message: "Request had insufficient authentication scopes.",
+              status: "PERMISSION_DENIED",
+            },
+          },
+          403
+        ),
+    ])
+    await assert.rejects(
+      () =>
+        collectPages(
+          iterateBookingGmailMessagePages({
+            accessToken: "t",
+            fetchImpl,
+            maxPages: 5,
+          })
+        ),
+      (err: unknown) =>
+        err instanceof BookingGmailListError &&
+        err.kind === "http" &&
+        err.httpStatus === 403 &&
+        err.googleErrorCode === 403 &&
+        err.googleErrorStatus === "PERMISSION_DENIED" &&
+        err.googleErrorMessage ===
+          "Request had insufficient authentication scopes."
+    )
+  })
+
+  it("PLAN-BOOKING-DIAG-HTTP403-001 cas2: 403 body non JSON → fallback sans crash", async () => {
+    const fetchImpl = mockFetchSequence([
+      () => new Response("forbidden plain text", { status: 403 }),
+    ])
+    await assert.rejects(
+      () =>
+        collectPages(
+          iterateBookingGmailMessagePages({
+            accessToken: "t",
+            fetchImpl,
+            maxPages: 5,
+          })
+        ),
+      (err: unknown) =>
+        err instanceof BookingGmailListError &&
+        err.kind === "http" &&
+        err.httpStatus === 403 &&
+        err.googleErrorCode === undefined &&
+        err.googleErrorStatus === undefined &&
+        err.googleErrorMessage === undefined
+    )
+  })
+
+  it("PLAN-BOOKING-DIAG-HTTP403-001 cas3: 500 JSON incomplet → httpStatus seul", async () => {
+    const fetchImpl = mockFetchSequence([
+      () => jsonResponse({ error: { details: [{ reason: "backendError" }] } }, 500),
+    ])
+    await assert.rejects(
+      () =>
+        collectPages(
+          iterateBookingGmailMessagePages({
+            accessToken: "t",
+            fetchImpl,
+            maxPages: 5,
+          })
+        ),
+      (err: unknown) =>
+        err instanceof BookingGmailListError &&
+        err.kind === "http" &&
+        err.httpStatus === 500 &&
+        err.googleErrorCode === undefined &&
+        err.googleErrorStatus === undefined &&
+        err.googleErrorMessage === undefined
+    )
+  })
+
+  it("PLAN-BOOKING-DIAG-HTTP403-001 cas4: log sans tokens / Authorization / body brut", async () => {
+    const secretAccess = "ya29.a0AfH6SMC_ACCESS_TOKEN_SECRET"
+    const secretRefresh = "1//0gREFRESH_TOKEN_SECRET"
+    const rawBodySnippet = '"access_token":"leak-me-please"'
+    const fetchImpl = mockFetchSequence([
+      () =>
+        jsonResponse(
+          {
+            error: {
+              code: 403,
+              message: "Insufficient Permission",
+              status: "PERMISSION_DENIED",
+              details: [
+                {
+                  access_token: secretAccess,
+                  refresh_token: secretRefresh,
+                  Authorization: `Bearer ${secretAccess}`,
+                },
+              ],
+            },
+            access_token: secretAccess,
+            refresh_token: secretRefresh,
+          },
+          403
+        ),
+    ])
+
+    let caught: BookingGmailListError | undefined
+    try {
+      await collectPages(
+        iterateBookingGmailMessagePages({
+          accessToken: secretAccess,
+          fetchImpl,
+          maxPages: 5,
+        })
+      )
+    } catch (err) {
+      assert.ok(err instanceof BookingGmailListError)
+      caught = err
+    }
+    assert.ok(caught)
+
+    const logLine = formatBookingGmailListErrorLog(caught, "company-diag-001")
+    assert.match(logLine, /httpStatus=403/)
+    assert.match(logLine, /googleErrorCode=403/)
+    assert.match(logLine, /googleErrorStatus=PERMISSION_DENIED/)
+    assert.match(logLine, /googleErrorMessage=Insufficient Permission/)
+    assert.equal(logLine.includes(secretAccess), false)
+    assert.equal(logLine.includes(secretRefresh), false)
+    assert.equal(logLine.includes("Authorization"), false)
+    assert.equal(logLine.includes("Bearer "), false)
+    assert.equal(logLine.includes(rawBodySnippet), false)
+    assert.equal(logLine.includes("leak-me-please"), false)
+    assert.equal(JSON.stringify(caught).includes(secretAccess), false)
+    assert.equal(JSON.stringify(caught).includes(secretRefresh), false)
+
+    const routeSrc = readFileSync(
+      join(ROOT, "src/app/api/cron/gmail-scan/route.ts"),
+      "utf8"
+    )
+    assert.ok(routeSrc.includes("formatBookingGmailListErrorLog"))
+    const listErrBlock = routeSrc.match(
+      /catch \(listErr\) \{[\s\S]*?throw listErr[\s\S]*?\}/
+    )?.[0]
+    assert.ok(listErrBlock)
+    assert.ok(listErrBlock.includes("formatBookingGmailListErrorLog"))
+    assert.equal(listErrBlock.includes("access_token"), false)
+    assert.equal(listErrBlock.includes("refresh_token"), false)
+    assert.equal(listErrBlock.includes("Authorization"), false)
+    assert.equal(listErrBlock.includes(".json()"), false)
+    assert.equal(listErrBlock.includes(".text()"), false)
+  })
+
+  it("PLAN-BOOKING-DIAG-HTTP403-001 R1: email dans message → [REDACTED_EMAIL], absent du log", async () => {
+    const fetchImpl = mockFetchSequence([
+      () =>
+        jsonResponse(
+          {
+            error: {
+              code: 403,
+              message: "Denied for user@example.com — insufficient scopes",
+              status: "PERMISSION_DENIED",
+            },
+          },
+          403
+        ),
+    ])
+    let caught: BookingGmailListError | undefined
+    try {
+      await collectPages(
+        iterateBookingGmailMessagePages({
+          accessToken: "t",
+          fetchImpl,
+          maxPages: 5,
+        })
+      )
+    } catch (err) {
+      assert.ok(err instanceof BookingGmailListError)
+      caught = err
+    }
+    assert.ok(caught)
+    assert.equal(caught.googleErrorMessage?.includes("user@example.com"), false)
+    assert.ok(caught.googleErrorMessage?.includes("[REDACTED_EMAIL]"))
+    const logLine = formatBookingGmailListErrorLog(caught, "company-r1")
+    assert.equal(logLine.includes("user@example.com"), false)
+    assert.ok(logLine.includes("[REDACTED_EMAIL]"))
+  })
+
+  it("PLAN-BOOKING-DIAG-HTTP403-001 R1: message > 500 → valeur bornée", async () => {
+    const longMsg = `PREFIX-${"x".repeat(600)}-SUFFIX`
+    assert.ok(longMsg.length > BOOKING_GMAIL_GOOGLE_ERROR_MESSAGE_MAX)
+    const fetchImpl = mockFetchSequence([
+      () =>
+        jsonResponse(
+          {
+            error: {
+              code: 403,
+              message: longMsg,
+              status: "PERMISSION_DENIED",
+            },
+          },
+          403
+        ),
+    ])
+    let caught: BookingGmailListError | undefined
+    try {
+      await collectPages(
+        iterateBookingGmailMessagePages({
+          accessToken: "t",
+          fetchImpl,
+          maxPages: 5,
+        })
+      )
+    } catch (err) {
+      assert.ok(err instanceof BookingGmailListError)
+      caught = err
+    }
+    assert.ok(caught)
+    assert.equal(caught.googleErrorMessage?.length, BOOKING_GMAIL_GOOGLE_ERROR_MESSAGE_MAX)
+    assert.ok(caught.googleErrorMessage?.startsWith("PREFIX-"))
+    assert.equal(caught.googleErrorMessage?.includes("SUFFIX"), false)
+    const logLine = formatBookingGmailListErrorLog(caught, "company-r1")
+    assert.ok(logLine.includes(`googleErrorMessage=${caught.googleErrorMessage}`))
+    assert.equal(logLine.includes("SUFFIX"), false)
   })
 
   it("12. JSON invalide", async () => {
