@@ -182,12 +182,12 @@ export async function GET(req: Request) {
           })
 
           // PLAN-BOOKING-INTENT-DIAG-001 — logs AMBIGU uniquement si flag ON
+          // From extrait seulement derrière la garde (flag + AMBIGU)
           maybeLogAmbiguousIntentDiagnostic({
             messageId,
             companyId: conn.companyId,
-            fromHeaderValue: extractGmailFromHeader(msgData.payload),
-            subject,
             classification: intentGate.classification,
+            getFromHeaderValue: () => extractGmailFromHeader(msgData.payload),
           })
 
           if (intentGate.action === "STOP") {

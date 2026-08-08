@@ -1,8 +1,9 @@
 /**
- * PLAN-BOOKING-INTENT-DIAG-001 — Instrumentation temporaire (AMBIGU).
+ * PLAN-BOOKING-INTENT-DIAG-001 / R1 — Instrumentation temporaire (AMBIGU).
  * Activée uniquement si BOOKING_INTENT_DIAGNOSTICS=true.
  * Aucun impact sur le classifieur ni sur les décisions métier.
- * Ne log jamais : corps, email complet, téléphone, adresse postale, nom voyageur.
+ * Observe evidence[] uniquement — ne recalcule aucun seuil CONFIRMATION.
+ * Ne log jamais : sujet, corps, email complet, téléphone, adresse, nom voyageur.
  */
 
 import type {
@@ -11,15 +12,16 @@ import type {
 } from "@/lib/booking/booking-email-intent"
 
 const DIAG_LOG_PREFIX = "[booking-intent-diag]"
-const SUBJECT_LOG_MAX_LEN = 300
 
-/** Codes structurels émis par le classifieur (evidence). */
+/** Codes structurels connus émis par le classifieur (observation seule). */
 const STRUCT_EVIDENCE_CODES = [
   "struct:dates",
   "struct:booking_ref",
   "struct:property",
   "struct:address",
 ] as const
+
+type StructuralEvidenceCode = (typeof STRUCT_EVIDENCE_CODES)[number]
 
 type GmailHeader = { name?: string | null; value?: string | null }
 
@@ -29,19 +31,24 @@ export type BookingAmbiguousDecisionPath =
   | "no_decisive_signal"
   | "unknown_ambiguous"
 
+/**
+ * Payload diagnostic — aucun sujet, aucun body, aucune PII de contenu.
+ * structuralScore = nombre de codes struct:* présents dans evidence (observation).
+ */
 export type BookingAmbiguousIntentDiagnostic = {
   messageId: string
   companyId: string
   /** Domaine expéditeur uniquement — jamais l'adresse complète. */
   senderDomain: string | null
-  subject: string
   evidence: string[]
   structuralScore: number
   confidence: BookingEmailConfidence
   finalDecision: "AMBIGU"
-  structuralSignalsPresent: string[]
-  missingSignalsPreventingConfirmation: string[]
   decisionPath: BookingAmbiguousDecisionPath
+  /** Codes struct:* présents dans evidence (descriptif). */
+  observedStructuralSignals: StructuralEvidenceCode[]
+  /** Codes struct:* absents de evidence (descriptif, sans seuil métier). */
+  missingObservedStructuralSignals: StructuralEvidenceCode[]
 }
 
 export function isBookingIntentDiagnosticsEnabled(
@@ -53,6 +60,7 @@ export function isBookingIntentDiagnosticsEnabled(
 /**
  * Header From brut (pour extraction domaine uniquement).
  * Ne jamais logger la valeur retournée telle quelle.
+ * À n'appeler que derrière la garde BOOKING_INTENT_DIAGNOSTICS=true.
  */
 export function extractGmailFromHeader(
   payload: { headers?: GmailHeader[] | null } | null | undefined
@@ -76,13 +84,11 @@ export function extractSenderDomainOnly(fromHeaderValue: string): string | null 
   if (typeof fromHeaderValue !== "string" || fromHeaderValue.length === 0) {
     return null
   }
-  // Angle brackets first (RFC-style)
   const angle = fromHeaderValue.match(/<([^<>@\s]+@([^<>@\s]+))>/)
   if (angle?.[2]) {
     const domain = angle[2].trim().toLowerCase()
     return isPlausibleDomain(domain) ? domain : null
   }
-  // Bare address (no spaces preferred)
   const bare = fromHeaderValue.match(
     /(?:^|[\s,;:])([A-Z0-9._%+-]+@([A-Z0-9.-]+\.[A-Z]{2,}))(?:$|[\s,;>])/i
   )
@@ -99,12 +105,7 @@ function isPlausibleDomain(domain: string): boolean {
   return /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/i.test(domain) && domain.includes(".")
 }
 
-export function truncateSubjectForDiagnosticLog(subject: string): string {
-  const s = typeof subject === "string" ? subject : ""
-  if (s.length <= SUBJECT_LOG_MAX_LEN) return s
-  return `${s.slice(0, SUBJECT_LOG_MAX_LEN)}…`
-}
-
+/** Mappe un code ambig:* déjà émis par le classifieur — pas de reclassification. */
 export function resolveAmbiguousDecisionPath(
   evidence: string[]
 ): BookingAmbiguousDecisionPath {
@@ -121,56 +122,25 @@ export function resolveAmbiguousDecisionPath(
 }
 
 /**
- * Dérive score / signaux / manques depuis evidence[] uniquement
- * (miroir des règles CONFIRMATION du classifieur, sans reclasser).
- *
- * CONFIRMATION si :
- * - (lexique + structuralScore ≥ 2) OU
- * - (!lexique + ref + dates + score ≥ 3)
+ * Observation pure des codes struct:* dans evidence[].
+ * Aucun seuil CONFIRMATION, aucune règle métier recalculée.
  */
-export function deriveAmbiguousGapFromEvidence(evidence: string[]): {
+export function observeStructuralSignalsFromEvidence(evidence: string[]): {
   structuralScore: number
-  structuralSignalsPresent: string[]
-  missingSignalsPreventingConfirmation: string[]
+  observedStructuralSignals: StructuralEvidenceCode[]
+  missingObservedStructuralSignals: StructuralEvidenceCode[]
   decisionPath: BookingAmbiguousDecisionPath
 } {
-  const structuralSignalsPresent = STRUCT_EVIDENCE_CODES.filter((code) =>
+  const observedStructuralSignals = STRUCT_EVIDENCE_CODES.filter((code) =>
     evidence.includes(code)
   )
-  const structuralScore = structuralSignalsPresent.length
-  const hasLexicon = evidence.includes("pos:confirmation_lexicon")
-  const hasDates = evidence.includes("struct:dates")
-  const hasRef = evidence.includes("struct:booking_ref")
-
-  const missing: string[] = []
-
-  if (hasLexicon) {
-    // Chemin lexique : besoin score ≥ 2
-    if (structuralScore < 2) {
-      missing.push("need_structural_score_gte_2")
-      for (const code of STRUCT_EVIDENCE_CODES) {
-        if (!evidence.includes(code)) missing.push(code)
-      }
-    }
-  } else {
-    // Chemin structure seule : lexique absent + ref + dates + score ≥ 3
-    missing.push("pos:confirmation_lexicon")
-    if (!hasRef) missing.push("struct:booking_ref")
-    if (!hasDates) missing.push("struct:dates")
-    if (structuralScore < 3) {
-      missing.push("need_structural_score_gte_3")
-      for (const code of STRUCT_EVIDENCE_CODES) {
-        if (!evidence.includes(code) && !missing.includes(code)) {
-          missing.push(code)
-        }
-      }
-    }
-  }
-
+  const missingObservedStructuralSignals = STRUCT_EVIDENCE_CODES.filter(
+    (code) => !evidence.includes(code)
+  )
   return {
-    structuralScore,
-    structuralSignalsPresent: [...structuralSignalsPresent],
-    missingSignalsPreventingConfirmation: missing,
+    structuralScore: observedStructuralSignals.length,
+    observedStructuralSignals: [...observedStructuralSignals],
+    missingObservedStructuralSignals: [...missingObservedStructuralSignals],
     decisionPath: resolveAmbiguousDecisionPath(evidence),
   }
 }
@@ -179,29 +149,29 @@ export function buildAmbiguousIntentDiagnostic(input: {
   messageId: string
   companyId: string
   senderDomain: string | null
-  subject: string
   classification: BookingEmailClassification
 }): BookingAmbiguousIntentDiagnostic | null {
   if (input.classification.intent !== "AMBIGU") return null
 
-  const gap = deriveAmbiguousGapFromEvidence(input.classification.evidence)
+  const observed = observeStructuralSignalsFromEvidence(
+    input.classification.evidence
+  )
 
   return {
     messageId: input.messageId,
     companyId: input.companyId,
     senderDomain: input.senderDomain,
-    subject: truncateSubjectForDiagnosticLog(input.subject),
     evidence: [...input.classification.evidence],
-    structuralScore: gap.structuralScore,
+    structuralScore: observed.structuralScore,
     confidence: input.classification.confidence,
     finalDecision: "AMBIGU",
-    structuralSignalsPresent: gap.structuralSignalsPresent,
-    missingSignalsPreventingConfirmation: gap.missingSignalsPreventingConfirmation,
-    decisionPath: gap.decisionPath,
+    decisionPath: observed.decisionPath,
+    observedStructuralSignals: observed.observedStructuralSignals,
+    missingObservedStructuralSignals: observed.missingObservedStructuralSignals,
   }
 }
 
-/** Payload JSON sûr — champs contrôlés uniquement. */
+/** Payload JSON sûr — champs contrôlés uniquement (pas de subject). */
 export function formatAmbiguousIntentDiagnosticLog(
   diagnostic: BookingAmbiguousIntentDiagnostic
 ): string {
@@ -211,31 +181,35 @@ export function formatAmbiguousIntentDiagnosticLog(
       messageId: diagnostic.messageId,
       companyId: diagnostic.companyId,
       senderDomain: diagnostic.senderDomain,
-      subject: diagnostic.subject,
       evidence: diagnostic.evidence,
       structuralScore: diagnostic.structuralScore,
       confidence: diagnostic.confidence,
       finalDecision: diagnostic.finalDecision,
-      structuralSignalsPresent: diagnostic.structuralSignalsPresent,
-      missingSignalsPreventingConfirmation:
-        diagnostic.missingSignalsPreventingConfirmation,
       decisionPath: diagnostic.decisionPath,
+      observedStructuralSignals: diagnostic.observedStructuralSignals,
+      missingObservedStructuralSignals:
+        diagnostic.missingObservedStructuralSignals,
     })
   )
 }
 
+export type MaybeLogAmbiguousIntentDiagnosticInput = {
+  messageId: string
+  companyId: string
+  classification: BookingEmailClassification
+  /**
+   * Fournit le header From uniquement si le diagnostic est réellement actif.
+   * Ne doit pas être évalué lorsque le flag est OFF (coût minimal).
+   */
+  getFromHeaderValue: () => string
+}
+
 /**
  * Log conditionnel. Retourne true si un log a été émis.
- * `logFn` injectable pour tests.
+ * Flag OFF → return immédiat, aucune extraction From / build / derive.
  */
 export function maybeLogAmbiguousIntentDiagnostic(
-  input: {
-    messageId: string
-    companyId: string
-    fromHeaderValue: string
-    subject: string
-    classification: BookingEmailClassification
-  },
+  input: MaybeLogAmbiguousIntentDiagnosticInput,
   options?: {
     env?: NodeJS.ProcessEnv
     logFn?: (line: string) => void
@@ -248,8 +222,7 @@ export function maybeLogAmbiguousIntentDiagnostic(
   const diagnostic = buildAmbiguousIntentDiagnostic({
     messageId: input.messageId,
     companyId: input.companyId,
-    senderDomain: extractSenderDomainOnly(input.fromHeaderValue),
-    subject: input.subject,
+    senderDomain: extractSenderDomainOnly(input.getFromHeaderValue()),
     classification: input.classification,
   })
   if (!diagnostic) return false
