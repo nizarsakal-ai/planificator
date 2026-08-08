@@ -119,11 +119,25 @@ export type BookingGmailMessagePage = {
 
 export type BookingGmailListErrorKind = "http" | "invalid_json"
 
+/** Champs Google error extraits de manière sûre (jamais le body complet). */
+export type BookingGmailListGoogleErrorDetails = {
+  googleErrorCode?: number
+  googleErrorStatus?: string
+  googleErrorMessage?: string
+}
+
 export class BookingGmailListError extends Error {
   readonly kind: BookingGmailListErrorKind
   readonly httpStatus: number | undefined
+  readonly googleErrorCode: number | undefined
+  readonly googleErrorStatus: string | undefined
+  readonly googleErrorMessage: string | undefined
 
-  constructor(kind: BookingGmailListErrorKind, httpStatus?: number) {
+  constructor(
+    kind: BookingGmailListErrorKind,
+    httpStatus?: number,
+    details?: BookingGmailListGoogleErrorDetails
+  ) {
     super(
       kind === "http"
         ? `Gmail list HTTP ${httpStatus ?? "?"}`
@@ -132,7 +146,80 @@ export class BookingGmailListError extends Error {
     this.name = "BookingGmailListError"
     this.kind = kind
     this.httpStatus = httpStatus
+    this.googleErrorCode = details?.googleErrorCode
+    this.googleErrorStatus = details?.googleErrorStatus
+    this.googleErrorMessage = details?.googleErrorMessage
   }
+}
+
+/** Borne max pour googleErrorMessage (évite logs anormalement longs). */
+export const BOOKING_GMAIL_GOOGLE_ERROR_MESSAGE_MAX = 500
+
+const GOOGLE_ERROR_EMAIL_RE =
+  /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
+
+/**
+ * Durcit error.message avant conservation / log :
+ * - masque les emails → [REDACTED_EMAIL]
+ * - tronque à BOOKING_GMAIL_GOOGLE_ERROR_MESSAGE_MAX
+ */
+export function sanitizeGoogleListErrorMessage(raw: string): string {
+  const redacted = raw.replace(GOOGLE_ERROR_EMAIL_RE, "[REDACTED_EMAIL]")
+  if (redacted.length <= BOOKING_GMAIL_GOOGLE_ERROR_MESSAGE_MAX) return redacted
+  return redacted.slice(0, BOOKING_GMAIL_GOOGLE_ERROR_MESSAGE_MAX)
+}
+
+/**
+ * Extrait uniquement error.code / error.status / error.message si présents et typés.
+ * Body non-JSON, JSON invalide ou format inattendu → objet vide (fallback httpStatus seul).
+ * googleErrorMessage est toujours sanitisé (email + borne 500).
+ */
+export async function readSafeGoogleListErrorDetails(
+  res: Response
+): Promise<BookingGmailListGoogleErrorDetails> {
+  let raw: unknown
+  try {
+    raw = await res.json()
+  } catch {
+    return {}
+  }
+  if (typeof raw !== "object" || raw === null) return {}
+  const error = (raw as { error?: unknown }).error
+  if (typeof error !== "object" || error === null) return {}
+  const record = error as {
+    code?: unknown
+    status?: unknown
+    message?: unknown
+  }
+  const details: BookingGmailListGoogleErrorDetails = {}
+  if (typeof record.code === "number" && Number.isFinite(record.code)) {
+    details.googleErrorCode = record.code
+  }
+  if (typeof record.status === "string" && record.status.length > 0) {
+    details.googleErrorStatus = record.status
+  }
+  if (typeof record.message === "string" && record.message.length > 0) {
+    details.googleErrorMessage = sanitizeGoogleListErrorMessage(record.message)
+  }
+  return details
+}
+
+/** Ligne de log diagnostique — champs sûrs uniquement (pas de body / tokens). */
+export function formatBookingGmailListErrorLog(
+  err: BookingGmailListError,
+  companyId: string
+): string {
+  const parts = [`[gmail-scan] Gmail list ${err.kind}`]
+  if (err.httpStatus != null) parts.push(`httpStatus=${err.httpStatus}`)
+  if (err.googleErrorCode != null) parts.push(`googleErrorCode=${err.googleErrorCode}`)
+  if (err.googleErrorStatus != null) {
+    parts.push(`googleErrorStatus=${err.googleErrorStatus}`)
+  }
+  if (err.googleErrorMessage != null) {
+    parts.push(`googleErrorMessage=${err.googleErrorMessage}`)
+  }
+  parts.push(`for company ${companyId}`)
+  return parts.join(" ")
 }
 
 export function buildBookingGmailListUrl(input: {
@@ -218,7 +305,8 @@ export async function* iterateBookingGmailMessagePages(input: {
       headers: { Authorization: `Bearer ${input.accessToken}` },
     })
     if (!res.ok) {
-      throw new BookingGmailListError("http", res.status)
+      const googleDetails = await readSafeGoogleListErrorDetails(res)
+      throw new BookingGmailListError("http", res.status, googleDetails)
     }
 
     let data: unknown

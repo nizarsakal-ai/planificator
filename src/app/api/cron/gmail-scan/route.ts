@@ -27,6 +27,7 @@ import { getBookingScanCutoffDate } from "@/lib/booking/booking-scan-cutoff"
 import { evaluatePendingCreationGate } from "@/lib/booking/booking-scan-pending-gate"
 import {
   BookingGmailListError,
+  formatBookingGmailListErrorLog,
   getBookingGmailMaxFullFetchesPerConnection,
   getBookingGmailMaxFullFetchesPerRun,
   iterateBookingGmailMessagePages,
@@ -425,11 +426,8 @@ export async function GET(req: Request) {
       } catch (listErr) {
         if (listErr instanceof BookingGmailListError) {
           stats.errors++
-          console.error(
-            `[gmail-scan] Gmail list ${listErr.kind}` +
-              (listErr.httpStatus != null ? ` HTTP ${listErr.httpStatus}` : "") +
-              ` for company ${conn.companyId}`
-          )
+          // Observabilité Gmail list : champs Google sûrs uniquement (pas de secrets).
+          console.error(formatBookingGmailListErrorLog(listErr, conn.companyId))
           continue
         }
         throw listErr
