@@ -1,6 +1,6 @@
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 
-import { describe, it, beforeEach, mock } from "node:test"
+import { describe, it, beforeEach, afterEach, mock } from "node:test"
 import assert from "node:assert/strict"
 import {
   GmailMailProviderAdapter,
@@ -411,6 +411,10 @@ describe("GmailMailProviderAdapter", () => {
 
 describe("PrismaGmailConnectionClient (refresh token)", () => {
   it("refresh échoué → GMAIL_TOKEN_REFRESH_FAILED", async () => {
+    const previousGoogleClientId = process.env.GOOGLE_CLIENT_ID
+    const previousGoogleClientSecret = process.env.GOOGLE_CLIENT_SECRET
+    const previousGmailTokenEncryptionKey = process.env.GMAIL_TOKEN_ENCRYPTION_KEY
+
     process.env.GOOGLE_CLIENT_ID = "client-id"
     process.env.GOOGLE_CLIENT_SECRET = "client-secret"
     process.env.GMAIL_TOKEN_ENCRYPTION_KEY = "test-encryption-key-32chars-min!!"
@@ -450,6 +454,313 @@ describe("PrismaGmailConnectionClient (refresh token)", () => {
       )
     } finally {
       globalThis.fetch = originalFetch
+      if (previousGoogleClientId === undefined) delete process.env.GOOGLE_CLIENT_ID
+      else process.env.GOOGLE_CLIENT_ID = previousGoogleClientId
+      if (previousGoogleClientSecret === undefined) delete process.env.GOOGLE_CLIENT_SECRET
+      else process.env.GOOGLE_CLIENT_SECRET = previousGoogleClientSecret
+      if (previousGmailTokenEncryptionKey === undefined) delete process.env.GMAIL_TOKEN_ENCRYPTION_KEY
+      else process.env.GMAIL_TOKEN_ENCRYPTION_KEY = previousGmailTokenEncryptionKey
     }
+  })
+})
+
+describe("PrismaGmailConnectionClient — connection diag (flag)", () => {
+  const ENV_KEY = "ACQUISITION_GMAIL_DIAGNOSTIC"
+  const PREFIX = "[acquisition-gmail-connection-diag]"
+  let previousEnv: string | undefined
+  let previousGoogleClientId: string | undefined
+  let previousGoogleClientSecret: string | undefined
+  let previousGmailTokenEncryptionKey: string | undefined
+  let infoCalls: unknown[][]
+  let originalInfo: typeof console.info
+  let originalFetch: typeof globalThis.fetch
+
+  function restoreEnvVar(key: string, previous: string | undefined): void {
+    if (previous === undefined) delete process.env[key]
+    else process.env[key] = previous
+  }
+
+  beforeEach(() => {
+    previousEnv = process.env[ENV_KEY]
+    previousGoogleClientId = process.env.GOOGLE_CLIENT_ID
+    previousGoogleClientSecret = process.env.GOOGLE_CLIENT_SECRET
+    previousGmailTokenEncryptionKey = process.env.GMAIL_TOKEN_ENCRYPTION_KEY
+    delete process.env[ENV_KEY]
+    process.env.GOOGLE_CLIENT_ID = "client-id"
+    process.env.GOOGLE_CLIENT_SECRET = "client-secret"
+    process.env.GMAIL_TOKEN_ENCRYPTION_KEY = "test-encryption-key-32chars-min!!"
+    infoCalls = []
+    originalInfo = console.info
+    console.info = (...args: unknown[]) => {
+      infoCalls.push(args)
+    }
+    originalFetch = globalThis.fetch
+  })
+
+  afterEach(() => {
+    console.info = originalInfo
+    globalThis.fetch = originalFetch
+    restoreEnvVar(ENV_KEY, previousEnv)
+    restoreEnvVar("GOOGLE_CLIENT_ID", previousGoogleClientId)
+    restoreEnvVar("GOOGLE_CLIENT_SECRET", previousGoogleClientSecret)
+    restoreEnvVar("GMAIL_TOKEN_ENCRYPTION_KEY", previousGmailTokenEncryptionKey)
+  })
+
+  function diagLogs(): string[] {
+    return infoCalls
+      .filter((args) => typeof args[0] === "string" && (args[0] as string).startsWith(PREFIX))
+      .map((args) => String(args[0]))
+  }
+
+  function assertSafeDiagPayload(raw: string): { stage: string } {
+    assert.ok(raw.startsWith(`${PREFIX} `))
+    const payload = JSON.parse(raw.slice(PREFIX.length + 1)) as Record<string, unknown>
+    assert.deepEqual(Object.keys(payload).sort(), ["stage"])
+    assert.equal(typeof payload.stage, "string")
+    assert.ok(!("message" in payload))
+    assert.ok(!("stack" in payload))
+    assert.ok(!("errorName" in payload))
+    assert.ok(!raw.includes("old-access"))
+    assert.ok(!raw.includes("old-refresh"))
+    assert.ok(!raw.includes("client-secret"))
+    assert.ok(!raw.includes("secret-token"))
+    assert.ok(!raw.includes("secret-xyz"))
+    assert.ok(!raw.includes("new-access-token-value"))
+    assert.ok(!raw.includes("https://"))
+    assert.ok(!raw.includes("Bearer"))
+    return payload as { stage: string }
+  }
+
+  async function loadClient() {
+    const { encrypt } = await import("@/lib/encryption")
+    const { PrismaGmailConnectionClient } = await import(
+      "@/lib/acquisition/connector/gmail-connection.client"
+    )
+    return { encrypt, PrismaGmailConnectionClient }
+  }
+
+  function expiredConn(encrypt: (s: string) => string, overrides: Record<string, unknown> = {}) {
+    return {
+      companyId: COMPANY,
+      accessToken: encrypt("old-access"),
+      refreshToken: encrypt("old-refresh"),
+      tokenExpiry: new Date(Date.now() - 1000),
+      ...overrides,
+    }
+  }
+
+  it("flag OFF => aucun log même si findUnique throw", async () => {
+    delete process.env[ENV_KEY]
+    const { PrismaGmailConnectionClient } = await loadClient()
+    const mockDb = {
+      gmailConnection: {
+        findUnique: async () => {
+          throw new Error("db-down secret-token-xyz")
+        },
+      },
+    }
+    const client = new PrismaGmailConnectionClient(mockDb as never)
+    await assert.rejects(() => client.getValidAccessToken(COMPANY), /db-down/)
+    assert.equal(diagLogs().length, 0)
+  })
+
+  it("flag non-true (1) => aucun log", async () => {
+    process.env[ENV_KEY] = "1"
+    const { PrismaGmailConnectionClient } = await loadClient()
+    const mockDb = {
+      gmailConnection: {
+        findUnique: async () => {
+          throw new Error("db-down")
+        },
+      },
+    }
+    const client = new PrismaGmailConnectionClient(mockDb as never)
+    await assert.rejects(() => client.getValidAccessToken(COMPANY))
+    assert.equal(diagLogs().length, 0)
+  })
+
+  it("findUnique throw => CONNECTION_LOOKUP", async () => {
+    process.env[ENV_KEY] = "true"
+    const { PrismaGmailConnectionClient } = await loadClient()
+    const mockDb = {
+      gmailConnection: {
+        findUnique: async () => {
+          throw new Error("lookup failed with secret-xyz")
+        },
+      },
+    }
+    const client = new PrismaGmailConnectionClient(mockDb as never)
+    await assert.rejects(() => client.getValidAccessToken(COMPANY), /lookup failed/)
+    const logs = diagLogs()
+    assert.equal(logs.length, 1)
+    assert.equal(assertSafeDiagPayload(logs[0]!).stage, "CONNECTION_LOOKUP")
+  })
+
+  it("decrypt accessToken throw => ACCESS_TOKEN_DECRYPT", async () => {
+    process.env[ENV_KEY] = "true"
+    const { PrismaGmailConnectionClient, encrypt } = await loadClient()
+    const mockDb = {
+      gmailConnection: {
+        findUnique: async () => ({
+          companyId: COMPANY,
+          accessToken: "not-valid-ciphertext",
+          refreshToken: encrypt("old-refresh"),
+          tokenExpiry: new Date(Date.now() + 60_000_000),
+        }),
+      },
+    }
+    const client = new PrismaGmailConnectionClient(mockDb as never)
+    await assert.rejects(() => client.getValidAccessToken(COMPANY))
+    const logs = diagLogs()
+    assert.equal(logs.length, 1)
+    assert.equal(assertSafeDiagPayload(logs[0]!).stage, "ACCESS_TOKEN_DECRYPT")
+  })
+
+  it("decrypt refreshToken throw => REFRESH_TOKEN_DECRYPT + GmailProviderError métier inchangé", async () => {
+    process.env[ENV_KEY] = "true"
+    const { PrismaGmailConnectionClient, encrypt } = await loadClient()
+    const mockDb = {
+      gmailConnection: {
+        findUnique: async () =>
+          expiredConn(encrypt, { refreshToken: "not-valid-ciphertext" }),
+      },
+    }
+    const client = new PrismaGmailConnectionClient(mockDb as never)
+    await assert.rejects(
+      () => client.getValidAccessToken(COMPANY),
+      (err: unknown) => {
+        assert.ok(err instanceof GmailProviderError)
+        assert.equal(err.code, "GMAIL_TOKEN_REFRESH_FAILED")
+        return true
+      }
+    )
+    const logs = diagLogs()
+    assert.equal(logs.length, 1)
+    assert.equal(assertSafeDiagPayload(logs[0]!).stage, "REFRESH_TOKEN_DECRYPT")
+  })
+
+  it("fetch network throw => TOKEN_REFRESH_REQUEST", async () => {
+    process.env[ENV_KEY] = "true"
+    const { PrismaGmailConnectionClient, encrypt } = await loadClient()
+    const mockDb = {
+      gmailConnection: {
+        findUnique: async () => expiredConn(encrypt),
+      },
+    }
+    globalThis.fetch = mock.fn(async () => {
+      throw new Error("network down secret-token")
+    }) as typeof fetch
+    const client = new PrismaGmailConnectionClient(mockDb as never)
+    await assert.rejects(() => client.getValidAccessToken(COMPANY), /network down/)
+    const logs = diagLogs()
+    assert.equal(logs.length, 1)
+    assert.equal(assertSafeDiagPayload(logs[0]!).stage, "TOKEN_REFRESH_REQUEST")
+  })
+
+  it("refreshRes.json throw => TOKEN_REFRESH_PARSE", async () => {
+    process.env[ENV_KEY] = "true"
+    const { PrismaGmailConnectionClient, encrypt } = await loadClient()
+    const mockDb = {
+      gmailConnection: {
+        findUnique: async () => expiredConn(encrypt),
+      },
+    }
+    globalThis.fetch = mock.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new Error("invalid json body")
+      },
+    })) as typeof fetch
+    const client = new PrismaGmailConnectionClient(mockDb as never)
+    await assert.rejects(() => client.getValidAccessToken(COMPANY), /invalid json/)
+    const logs = diagLogs()
+    assert.equal(logs.length, 1)
+    assert.equal(assertSafeDiagPayload(logs[0]!).stage, "TOKEN_REFRESH_PARSE")
+  })
+
+  it("db update throw => TOKEN_PERSIST", async () => {
+    process.env[ENV_KEY] = "true"
+    const { PrismaGmailConnectionClient, encrypt } = await loadClient()
+    const mockDb = {
+      gmailConnection: {
+        findUnique: async () => expiredConn(encrypt),
+        update: async () => {
+          throw new Error("persist failed secret-xyz")
+        },
+      },
+    }
+    globalThis.fetch = mock.fn(async () =>
+      Response.json({ access_token: "new-access-token-value", expires_in: 3600 }, { status: 200 })
+    ) as typeof fetch
+    const client = new PrismaGmailConnectionClient(mockDb as never)
+    await assert.rejects(() => client.getValidAccessToken(COMPANY), /persist failed/)
+    const logs = diagLogs()
+    assert.equal(logs.length, 1)
+    assert.equal(assertSafeDiagPayload(logs[0]!).stage, "TOKEN_PERSIST")
+    assert.ok(!logs[0]!.includes("new-access-token-value"))
+  })
+
+  it("GmailProviderError métier (refresh HTTP 400) => aucun log connection-diag", async () => {
+    process.env[ENV_KEY] = "true"
+    const { PrismaGmailConnectionClient, encrypt } = await loadClient()
+    const mockDb = {
+      gmailConnection: {
+        findUnique: async () => expiredConn(encrypt),
+        update: async () => ({}),
+      },
+    }
+    globalThis.fetch = mock.fn(async () =>
+      Response.json({ error: "invalid_grant", error_description: "Token revoked" }, { status: 400 })
+    ) as typeof fetch
+    const client = new PrismaGmailConnectionClient(mockDb as never)
+    await assert.rejects(
+      () => client.getValidAccessToken(COMPANY),
+      (err: unknown) => {
+        assert.ok(err instanceof GmailProviderError)
+        assert.equal(err.code, "GMAIL_TOKEN_REFRESH_FAILED")
+        return true
+      }
+    )
+    assert.equal(diagLogs().length, 0)
+  })
+
+  it("GMAIL_NOT_CONNECTED => aucun log connection-diag", async () => {
+    process.env[ENV_KEY] = "true"
+    const { PrismaGmailConnectionClient } = await loadClient()
+    const mockDb = {
+      gmailConnection: {
+        findUnique: async () => null,
+      },
+    }
+    const client = new PrismaGmailConnectionClient(mockDb as never)
+    await assert.rejects(
+      () => client.getValidAccessToken(COMPANY),
+      (err: unknown) => {
+        assert.ok(err instanceof GmailProviderError)
+        assert.equal(err.code, "GMAIL_NOT_CONNECTED")
+        return true
+      }
+    )
+    assert.equal(diagLogs().length, 0)
+  })
+
+  it("succès token valide (non expiré) => aucun log + token métier inchangé", async () => {
+    process.env[ENV_KEY] = "true"
+    const { PrismaGmailConnectionClient, encrypt } = await loadClient()
+    const mockDb = {
+      gmailConnection: {
+        findUnique: async () => ({
+          companyId: COMPANY,
+          accessToken: encrypt("valid-access-token"),
+          refreshToken: encrypt("old-refresh"),
+          tokenExpiry: new Date(Date.now() + 60_000_000),
+        }),
+      },
+    }
+    const client = new PrismaGmailConnectionClient(mockDb as never)
+    const token = await client.getValidAccessToken(COMPANY)
+    assert.equal(token, "valid-access-token")
+    assert.equal(diagLogs().length, 0)
   })
 })
