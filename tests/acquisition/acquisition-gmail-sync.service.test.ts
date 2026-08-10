@@ -1,11 +1,12 @@
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 
-import { describe, it, beforeEach } from "node:test"
+import { describe, it, beforeEach, afterEach } from "node:test"
 import assert from "node:assert/strict"
 import {
   syncAcquisitionMailForCompany,
   DEFAULT_GMAIL_PAGE_SIZE,
 } from "@/lib/acquisition/connector/acquisition-gmail-sync.service"
+import { GmailProviderError } from "@/lib/acquisition/connector/gmail.errors"
 import type { MailProviderPort } from "@/lib/acquisition/ports/mail-provider.port"
 import type { AcquisitionIngestionPort } from "@/lib/acquisition/ports/acquisition-ingestion.port"
 import type {
@@ -610,5 +611,693 @@ describe("syncAcquisitionMailForCompany — isolation tenant curseur", () => {
 
     assert.equal(repoA.getCursor().lastHistoryId, "tenant-a-next")
     assert.equal(repoB.getCursor().lastHistoryId, "tenant-b-next")
+  })
+})
+
+describe("syncAcquisitionMailForCompany — ACQUISITION_GMAIL_DIAGNOSTIC", () => {
+  const prevDiag = process.env.ACQUISITION_GMAIL_DIAGNOSTIC
+  const prevAcquisition = process.env.PLANIFICATOR_ACQUISITION_ENABLED
+  const infoCalls: string[] = []
+  const originalInfo = console.info
+
+  beforeEach(() => {
+    infoCalls.length = 0
+    console.info = (...args: unknown[]) => {
+      infoCalls.push(args.map((a) => String(a)).join(" "))
+    }
+    delete process.env.ACQUISITION_GMAIL_DIAGNOSTIC
+    delete process.env.PLANIFICATOR_ACQUISITION_ENABLED
+  })
+
+  afterEach(() => {
+    console.info = originalInfo
+    if (prevDiag === undefined) delete process.env.ACQUISITION_GMAIL_DIAGNOSTIC
+    else process.env.ACQUISITION_GMAIL_DIAGNOSTIC = prevDiag
+    if (prevAcquisition === undefined) delete process.env.PLANIFICATOR_ACQUISITION_ENABLED
+    else process.env.PLANIFICATOR_ACQUISITION_ENABLED = prevAcquisition
+  })
+
+  function diagPayloads(): Record<string, unknown>[] {
+    return infoCalls
+      .filter((line) => line.startsWith("[acquisition-gmail-diag] "))
+      .map((line) => JSON.parse(line.slice("[acquisition-gmail-diag] ".length)))
+  }
+
+  function assertNoSensitiveLeak(forbidden: string[]) {
+    const blob = infoCalls.join("\n")
+    for (const s of forbidden) {
+      assert.equal(blob.includes(s), false, `leak: ${s}`)
+    }
+    assert.equal(blob.includes("ya29."), false)
+    assert.equal(/\bBearer\b/i.test(blob), false)
+    assert.equal(blob.includes("\n    at "), false)
+    assert.equal(blob.includes("@example.com"), false)
+    assert.equal(blob.includes("https://"), false)
+  }
+
+  it("flag OFF + provider fail => aucun diag ; code public inchangé", async () => {
+    delete process.env.ACQUISITION_GMAIL_DIAGNOSTIC
+    const { ingestion } = mockIngestion({})
+    const { repo } = mockRepository()
+    const leakMsg = "Gmail secret token leak ya29.ABC Bearer xyz"
+    const provider: MailProviderPort = {
+      source: "GMAIL",
+      listMessagesPage: async () => {
+        throw new GmailProviderError({
+          code: "GMAIL_TOKEN_REFRESH_FAILED",
+          message: leakMsg,
+          retryable: false,
+          global: true,
+        })
+      },
+    }
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "FAILED")
+    assert.equal(result.error?.code, "PROVIDER_LIST_FAILED")
+    assert.equal(diagPayloads().length, 0)
+  })
+
+  it("seules valeurs non-strictes du flag => aucun diag", async () => {
+    const { ingestion } = mockIngestion({})
+    const { repo } = mockRepository()
+    const provider: MailProviderPort = {
+      source: "GMAIL",
+      listMessagesPage: async () => {
+        throw new GmailProviderError({
+          code: "GMAIL_UNAUTHORIZED",
+          message: "leak",
+          retryable: false,
+          global: true,
+        })
+      },
+    }
+
+    for (const value of ["TRUE", "1", " true ", "", undefined] as const) {
+      infoCalls.length = 0
+      if (value === undefined) delete process.env.ACQUISITION_GMAIL_DIAGNOSTIC
+      else process.env.ACQUISITION_GMAIL_DIAGNOSTIC = value
+
+      const result = await syncAcquisitionMailForCompany({
+        companyId: COMPANY,
+        provider,
+        ingestion,
+        cursorRepository: repo,
+        now: () => NOW,
+      })
+
+      assert.equal(result.status, "FAILED")
+      assert.equal(result.error?.code, "PROVIDER_LIST_FAILED")
+      assert.equal(diagPayloads().length, 0, `flag=${JSON.stringify(value)}`)
+    }
+  })
+
+  it("flag ON + GMAIL_TOKEN_REFRESH_FAILED => diag allowlisté ; result.code inchangé", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { ingestion } = mockIngestion({})
+    const { repo } = mockRepository()
+    const leakMsg = "invalid_grant refresh token leaked ya29.SECRET"
+    const provider: MailProviderPort = {
+      source: "GMAIL",
+      listMessagesPage: async () => {
+        throw new GmailProviderError({
+          code: "GMAIL_TOKEN_REFRESH_FAILED",
+          message: leakMsg,
+          retryable: false,
+          global: true,
+        })
+      },
+    }
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "FAILED")
+    assert.equal(result.error?.code, "PROVIDER_LIST_FAILED")
+    assert.equal(result.error?.retryable, true)
+    assert.deepEqual(diagPayloads(), [
+      {
+        phase: "provider_list",
+        internalCode: "GMAIL_TOKEN_REFRESH_FAILED",
+        errorName: "GmailProviderError",
+        retryable: false,
+      },
+    ])
+    assertNoSensitiveLeak([leakMsg, "invalid_grant", "ya29.SECRET", "stack"])
+  })
+
+  it("flag ON + GMAIL_UNAUTHORIZED => diag avec code allowlisté uniquement", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { ingestion } = mockIngestion({})
+    const { repo } = mockRepository()
+    const leakMsg = "Gmail API unauthorized (list) Authorization: Bearer tok"
+    const provider: MailProviderPort = {
+      source: "GMAIL",
+      listMessagesPage: async () => {
+        throw new GmailProviderError({
+          code: "GMAIL_UNAUTHORIZED",
+          message: leakMsg,
+          retryable: false,
+          global: true,
+        })
+      },
+    }
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "FAILED")
+    assert.equal(result.error?.code, "PROVIDER_LIST_FAILED")
+    assert.deepEqual(diagPayloads(), [
+      {
+        phase: "provider_list",
+        internalCode: "GMAIL_UNAUTHORIZED",
+        errorName: "GmailProviderError",
+        retryable: false,
+      },
+    ])
+    assertNoSensitiveLeak([leakMsg, "Authorization", "Bearer tok"])
+  })
+
+  it("flag ON + GmailProviderError code getter stateful => une lecture diag ; pas de fuite", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { ingestion } = mockIngestion({})
+    const { repo } = mockRepository()
+
+    let codeAccessCount = 0
+    const evilSecond = "Bearer secret-token"
+    const err = new GmailProviderError({
+      code: "GMAIL_UNAUTHORIZED",
+      message: "safe-message",
+      retryable: false,
+      global: true,
+    })
+    Object.defineProperty(err, "code", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        codeAccessCount += 1
+        // 1 = métier, 2 = unique lecture diagnostic, 3+ = double-read bug
+        if (codeAccessCount <= 2) return "GMAIL_UNAUTHORIZED"
+        return evilSecond
+      },
+    })
+
+    const provider: MailProviderPort = {
+      source: "GMAIL",
+      listMessagesPage: async () => {
+        throw err
+      },
+    }
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "FAILED")
+    assert.equal(result.error?.code, "PROVIDER_LIST_FAILED")
+    // métier (1) + diag (1) — pas de 2e lecture diag
+    assert.equal(codeAccessCount, 2)
+    assert.deepEqual(diagPayloads(), [
+      {
+        phase: "provider_list",
+        internalCode: "GMAIL_UNAUTHORIZED",
+        errorName: "GmailProviderError",
+        retryable: false,
+      },
+    ])
+    assertNoSensitiveLeak([evilSecond, "Bearer secret-token"])
+  })
+
+  it("flag ON + code getter 2e valeur sensible => diag 1 lecture ; Bearer absent du log", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { ingestion } = mockIngestion({})
+    const { repo } = mockRepository()
+
+    let codeAccessCount = 0
+    const evilSecond = "Bearer secret-token"
+    const err = new GmailProviderError({
+      code: "GMAIL_UNAUTHORIZED",
+      message: "safe-message",
+      retryable: false,
+      global: true,
+    })
+    Object.defineProperty(err, "code", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        codeAccessCount += 1
+        if (codeAccessCount === 1) return "GMAIL_UNAUTHORIZED"
+        return evilSecond
+      },
+    })
+
+    const provider: MailProviderPort = {
+      source: "GMAIL",
+      listMessagesPage: async () => {
+        throw err
+      },
+    }
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "FAILED")
+    assert.equal(result.error?.code, "PROVIDER_LIST_FAILED")
+    // métier consomme le 1er accès ; le diag lit une seule fois (2e) → non allowlisté
+    assert.equal(codeAccessCount, 2)
+    assert.deepEqual(diagPayloads(), [
+      {
+        phase: "provider_list",
+        internalCode: "PROVIDER_LIST_FAILED",
+        errorName: "GmailProviderError",
+        retryable: false,
+      },
+    ])
+    assertNoSensitiveLeak([evilSecond, "Bearer secret-token"])
+  })
+
+  it("flag ON + retryable getter non-booléen/stateful => retryable boolean sûr", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { ingestion } = mockIngestion({})
+    const { repo } = mockRepository()
+
+    let retryableAccessCount = 0
+    const evilRetryable = "Bearer secret-token"
+    const err = new GmailProviderError({
+      code: "GMAIL_TOKEN_REFRESH_FAILED",
+      message: "safe-message",
+      retryable: false,
+      global: true,
+    })
+    Object.defineProperty(err, "retryable", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        retryableAccessCount += 1
+        if (retryableAccessCount === 1) return evilRetryable
+        return false
+      },
+    })
+
+    const provider: MailProviderPort = {
+      source: "GMAIL",
+      listMessagesPage: async () => {
+        throw err
+      },
+    }
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "FAILED")
+    assert.equal(result.error?.code, "PROVIDER_LIST_FAILED")
+    assert.equal(retryableAccessCount, 1)
+    const payloads = diagPayloads()
+    assert.equal(payloads.length, 1)
+    assert.equal(payloads[0]!.phase, "provider_list")
+    assert.equal(payloads[0]!.internalCode, "GMAIL_TOKEN_REFRESH_FAILED")
+    assert.equal(payloads[0]!.errorName, "GmailProviderError")
+    assert.equal(typeof payloads[0]!.retryable, "boolean")
+    assert.equal(payloads[0]!.retryable, true)
+    assertNoSensitiveLeak([evilRetryable, "Bearer secret-token"])
+  })
+
+  it("flag ON + code getter throw au 2e accès => diag retombe sans casser le métier", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { ingestion } = mockIngestion({})
+    const { repo } = mockRepository()
+
+    let codeAccessCount = 0
+    const err = new GmailProviderError({
+      code: "GMAIL_UNAUTHORIZED",
+      message: "safe-message",
+      retryable: true,
+      global: true,
+    })
+    Object.defineProperty(err, "code", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        codeAccessCount += 1
+        if (codeAccessCount === 1) return "GMAIL_UNAUTHORIZED"
+        throw new Error("code-getter-diag")
+      },
+    })
+
+    const provider: MailProviderPort = {
+      source: "GMAIL",
+      listMessagesPage: async () => {
+        throw err
+      },
+    }
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "FAILED")
+    assert.equal(result.error?.code, "PROVIDER_LIST_FAILED")
+    assert.equal(codeAccessCount, 2)
+    assert.deepEqual(diagPayloads(), [
+      {
+        phase: "provider_list",
+        internalCode: "PROVIDER_LIST_FAILED",
+        errorName: "GmailProviderError",
+        retryable: true,
+      },
+    ])
+  })
+
+  it("flag OFF + code getter throw au 2e accès => pas d'accès diag", async () => {
+    delete process.env.ACQUISITION_GMAIL_DIAGNOSTIC
+    const { ingestion } = mockIngestion({})
+    const { repo } = mockRepository()
+
+    let codeAccessCount = 0
+    const err = new GmailProviderError({
+      code: "GMAIL_UNAUTHORIZED",
+      message: "safe-message",
+      retryable: true,
+      global: true,
+    })
+    Object.defineProperty(err, "code", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        codeAccessCount += 1
+        if (codeAccessCount === 1) return "GMAIL_UNAUTHORIZED"
+        throw new Error("code-getter-diag")
+      },
+    })
+
+    const provider: MailProviderPort = {
+      source: "GMAIL",
+      listMessagesPage: async () => {
+        throw err
+      },
+    }
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "FAILED")
+    assert.equal(result.error?.code, "PROVIDER_LIST_FAILED")
+    assert.equal(codeAccessCount, 1)
+    assert.equal(diagPayloads().length, 0)
+  })
+
+  it("flag ON + code/name arbitraires malveillants => aucune fuite", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { ingestion } = mockIngestion({})
+    const { repo } = mockRepository()
+    const evilCode = "Bearer secret-token"
+    const evilName = "user@example.com"
+    const evilMsg = "https://evil.example/token?x=1 ya29.LEAK"
+    const provider: MailProviderPort = {
+      source: "GMAIL",
+      listMessagesPage: async () => {
+        throw {
+          code: evilCode,
+          name: evilName,
+          message: evilMsg,
+        }
+      },
+    }
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "FAILED")
+    assert.equal(result.error?.code, "PROVIDER_LIST_FAILED")
+    assert.deepEqual(diagPayloads(), [
+      {
+        phase: "provider_list",
+        internalCode: "PROVIDER_LIST_FAILED",
+        errorName: "UnknownError",
+        retryable: true,
+      },
+    ])
+    assertNoSensitiveLeak([evilCode, evilName, evilMsg, "secret-token", "user@example.com"])
+  })
+
+  it("flag OFF + getters throw sur name/code => métier OK ; name non lu pour diag", async () => {
+    delete process.env.ACQUISITION_GMAIL_DIAGNOSTIC
+    const { ingestion } = mockIngestion({})
+    const { repo } = mockRepository()
+    let nameAccessed = false
+    let codeAccessed = false
+    const provider: MailProviderPort = {
+      source: "GMAIL",
+      listMessagesPage: async () => {
+        throw {
+          get name() {
+            nameAccessed = true
+            throw new Error("name-getter")
+          },
+          get code() {
+            codeAccessed = true
+            throw new Error("code-getter")
+          },
+          message: "should-not-matter-for-diag",
+        }
+      },
+    }
+
+    // Métier préexistant lit `code` via String(e.code) → l'accès peut throw.
+    // On vérifie que le diagnostic OFF n'ajoute pas d'accès à `name`.
+    await assert.rejects(
+      () =>
+        syncAcquisitionMailForCompany({
+          companyId: COMPANY,
+          provider,
+          ingestion,
+          cursorRepository: repo,
+          now: () => NOW,
+        }),
+      (err: unknown) => err instanceof Error && err.message === "code-getter"
+    )
+    assert.equal(codeAccessed, true)
+    assert.equal(nameAccessed, false)
+    assert.equal(diagPayloads().length, 0)
+  })
+
+  it("flag OFF + getter name throw seulement => FAILED sans accès name", async () => {
+    delete process.env.ACQUISITION_GMAIL_DIAGNOSTIC
+    const { ingestion } = mockIngestion({})
+    const { repo } = mockRepository()
+    let nameAccessed = false
+    const provider: MailProviderPort = {
+      source: "GMAIL",
+      listMessagesPage: async () => {
+        throw {
+          get name() {
+            nameAccessed = true
+            throw new Error("name-getter")
+          },
+          message: "plain-fail",
+        }
+      },
+    }
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "FAILED")
+    assert.equal(result.error?.code, "PROVIDER_LIST_FAILED")
+    assert.equal(nameAccessed, false)
+    assert.equal(diagPayloads().length, 0)
+  })
+
+  it("flag ON + cursor failure => diag littéraux uniquement", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { ingestion } = mockIngestion({})
+    const leakMsg = "Prisma connection failed DATABASE_URL=secret"
+    const repo: AcquisitionScanCursorRepositoryPort = {
+      getOrCreate: async () => {
+        throw new Error(leakMsg)
+      },
+      saveSuccessfulPage: async () => makeCursor(),
+      recordFailure: async () =>
+        makeCursor({ consecutiveFailures: 1, lastErrorCode: "CURSOR_LOAD_FAILED" }),
+    }
+    const provider: MailProviderPort = {
+      source: "GMAIL",
+      listMessagesPage: async () => emptyPage(),
+    }
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "FAILED")
+    assert.equal(result.error?.code, "CURSOR_LOAD_FAILED")
+    assert.deepEqual(diagPayloads(), [
+      {
+        phase: "cursor",
+        internalCode: "CURSOR_LOAD_FAILED",
+        errorName: "Error",
+        retryable: true,
+      },
+    ])
+    assertNoSensitiveLeak([leakMsg, "DATABASE_URL=secret"])
+  })
+
+  it("flag ON + SUCCESS => aucun diag", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { ingestion } = mockIngestion({})
+    const { repo } = mockRepository(makeCursor({ lastHistoryId: null }))
+    const { provider } = mockProvider([
+      emptyPage({ nextHistoryId: "hist-ok", paginationMode: "lookback" }),
+    ])
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "SUCCESS")
+    assert.equal(diagPayloads().length, 0)
+  })
+
+  it("flag ON + PARTIAL => aucun diag", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { ingestion } = mockIngestion({
+      handler: () => new Error("ingest boom"),
+    })
+    const { repo } = mockRepository()
+    const { provider } = mockProvider([
+      {
+        messages: [mail()],
+        nextPageToken: null,
+        nextHistoryId: "hist-1",
+        hasMore: false,
+        paginationMode: "history",
+      },
+    ])
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "PARTIAL")
+    assert.equal(diagPayloads().length, 0)
+  })
+
+  it("flag ON + FEATURE_DISABLED SKIPPED => aucun diag", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { ingestion } = mockIngestion({ enabled: false })
+    const { repo } = mockRepository()
+    let providerCalled = false
+    const provider: MailProviderPort = {
+      source: "GMAIL",
+      listMessagesPage: async () => {
+        providerCalled = true
+        return emptyPage()
+      },
+    }
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "SKIPPED")
+    assert.equal(result.skipReason, "FEATURE_DISABLED")
+    assert.equal(providerCalled, false)
+    assert.equal(diagPayloads().length, 0)
+  })
+
+  it("flag ON + NO_ACTIVE_PARTNER_IDENTITIES => SKIPPED sans diag", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { ingestion } = mockIngestion({})
+    const { repo } = mockRepository()
+    const provider: MailProviderPort = {
+      source: "GMAIL",
+      listMessagesPage: async () => {
+        throw new GmailProviderError({
+          code: "NO_ACTIVE_PARTNER_IDENTITIES",
+          message: "Aucune identité partenaire active (domaine ou email)",
+          retryable: false,
+          global: false,
+        })
+      },
+    }
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "SKIPPED")
+    assert.equal(result.skipReason, "NO_ACTIVE_PARTNER_IDENTITIES")
+    assert.equal(diagPayloads().length, 0)
   })
 })
