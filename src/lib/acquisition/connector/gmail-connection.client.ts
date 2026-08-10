@@ -28,6 +28,35 @@ function logAcquisitionGmailConnectionDiag(stage: AcquisitionGmailConnectionDiag
   }
 }
 
+/**
+ * Diagnostic temporaire (PLAN-ACQ-GMAIL-CONTINUITY-DIAG-001).
+ * Flag OFF => no-op. Longueurs ciphertext uniquement — jamais de token/secret.
+ */
+function logAcquisitionGmailReadDiag(
+  companyId: string,
+  conn: {
+    id: string
+    updatedAt: Date
+    accessToken: string
+    refreshToken: string
+  }
+): void {
+  try {
+    if (process.env.ACQUISITION_GMAIL_DIAGNOSTIC !== "true") return
+    console.info(
+      `[acquisition-gmail-read-diag] ${JSON.stringify({
+        companyId,
+        connectionId: conn.id,
+        updatedAt: conn.updatedAt.toISOString(),
+        accessTokenLength: conn.accessToken.length,
+        refreshTokenLength: conn.refreshToken.length,
+      })}`
+    )
+  } catch {
+    // Le diagnostic ne doit jamais provoquer une nouvelle exception.
+  }
+}
+
 export interface GmailConnectionClient {
   getValidAccessToken(companyId: string): Promise<string>
 }
@@ -55,6 +84,8 @@ export class PrismaGmailConnectionClient implements GmailConnectionClient {
         global: true,
       })
     }
+
+    logAcquisitionGmailReadDiag(companyId, conn)
 
     let accessToken: string
     try {
