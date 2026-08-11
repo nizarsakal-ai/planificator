@@ -1301,3 +1301,283 @@ describe("syncAcquisitionMailForCompany — ACQUISITION_GMAIL_DIAGNOSTIC", () =>
     assert.equal(diagPayloads().length, 0)
   })
 })
+
+describe("syncAcquisitionMailForCompany — message ingestion diag", () => {
+  const PREFIX = "[acquisition-message-ingestion-diag]"
+  const prevDiag = process.env.ACQUISITION_GMAIL_DIAGNOSTIC
+  const prevAcquisition = process.env.PLANIFICATOR_ACQUISITION_ENABLED
+  const infoCalls: string[] = []
+  let originalInfo: typeof console.info
+
+  beforeEach(() => {
+    infoCalls.length = 0
+    originalInfo = console.info
+    console.info = (...args: unknown[]) => {
+      infoCalls.push(args.map((a) => String(a)).join(" "))
+    }
+    delete process.env.ACQUISITION_GMAIL_DIAGNOSTIC
+    delete process.env.PLANIFICATOR_ACQUISITION_ENABLED
+  })
+
+  afterEach(() => {
+    console.info = originalInfo
+    if (prevDiag === undefined) delete process.env.ACQUISITION_GMAIL_DIAGNOSTIC
+    else process.env.ACQUISITION_GMAIL_DIAGNOSTIC = prevDiag
+    if (prevAcquisition === undefined) delete process.env.PLANIFICATOR_ACQUISITION_ENABLED
+    else process.env.PLANIFICATOR_ACQUISITION_ENABLED = prevAcquisition
+  })
+
+  function ingestionDiagLogs(): string[] {
+    return infoCalls.filter((line) => line.startsWith(PREFIX))
+  }
+
+  function parseIngestionDiag(raw: string): Record<string, unknown> {
+    const payload = JSON.parse(raw.slice(PREFIX.length + 1)) as Record<string, unknown>
+    assert.deepEqual(Object.keys(payload).sort(), [
+      "errorCode",
+      "errorName",
+      "gmailMessageId",
+      "retryable",
+      "stage",
+    ])
+    return payload
+  }
+
+  it("flag OFF + ingestion throw => aucun message-ingestion-diag ; PARTIAL inchangé", async () => {
+    delete process.env.ACQUISITION_GMAIL_DIAGNOSTIC
+    const { ingestion } = mockIngestion({
+      handler: () => {
+        throw new Error("INGESTION_DOWN secret-token subject leak")
+      },
+    })
+    const { repo } = mockRepository()
+    const { provider } = mockProvider([
+      {
+        messages: [mail({ externalMessageId: "fail-msg-1" })],
+        nextPageToken: null,
+        nextHistoryId: "hist-x",
+        hasMore: false,
+        paginationMode: "history",
+      },
+    ])
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "PARTIAL")
+    assert.equal(result.partialReason, "MESSAGE_INGESTION_FAILED")
+    assert.equal(ingestionDiagLogs().length, 0)
+  })
+
+  it("flag ON + succès => aucun message-ingestion-diag", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { ingestion } = mockIngestion({})
+    const { repo } = mockRepository()
+    const { provider } = mockProvider([
+      {
+        messages: [mail({ externalMessageId: "ok-msg-1" })],
+        nextPageToken: null,
+        nextHistoryId: "hist-ok",
+        hasMore: false,
+        paginationMode: "history",
+      },
+    ])
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "SUCCESS")
+    assert.equal(ingestionDiagLogs().length, 0)
+  })
+
+  it("flag ON + ingestion throw => REGISTER_INCOMING_MESSAGE + gmailMessageId", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const leak = "INGESTION_DOWN ACCESS_TOKEN_SECRET_TEST user@example.com Bearer secret"
+    const { ingestion } = mockIngestion({
+      handler: (id) => {
+        if (id === "fail-1") throw new Error(leak)
+        return {
+          created: true,
+          outcome: "DRAFT_CREATED",
+          messageId: "ok",
+          draftId: "d-ok",
+        }
+      },
+    })
+    const { repo } = mockRepository(makeCursor({ lastHistoryId: "hist-before" }))
+    const { provider } = mockProvider([
+      {
+        messages: [
+          mail({ externalMessageId: "ok-1" }),
+          mail({ externalMessageId: "fail-1", fromHeader: "user@example.com", subject: "SECRET SUBJECT" }),
+        ],
+        nextPageToken: null,
+        nextHistoryId: "hist-after",
+        hasMore: false,
+        paginationMode: "history",
+      },
+    ])
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "PARTIAL")
+    assert.equal(result.partialReason, "MESSAGE_INGESTION_FAILED")
+    assert.equal(result.error?.code, "MESSAGE_INGESTION_FAILED")
+    assert.equal(result.error?.retryable, true)
+
+    const logs = ingestionDiagLogs()
+    assert.equal(logs.length, 1)
+    const payload = parseIngestionDiag(logs[0]!)
+    assert.equal(payload.gmailMessageId, "fail-1")
+    assert.equal(payload.stage, "REGISTER_INCOMING_MESSAGE")
+    assert.equal(payload.errorName, "Error")
+    assert.equal(payload.errorCode, "UNKNOWN")
+    assert.equal(payload.retryable, true)
+    assert.ok(!logs[0]!.includes(leak))
+    assert.ok(!logs[0]!.includes("ACCESS_TOKEN_SECRET_TEST"))
+    assert.ok(!logs[0]!.includes("user@example.com"))
+    assert.ok(!logs[0]!.includes("SECRET SUBJECT"))
+    assert.ok(!logs[0]!.includes("Bearer secret"))
+  })
+
+  it("erreur métier encapsulée (REJECTED) => aucun message-ingestion-diag", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { ingestion } = mockIngestion({
+      handler: () => ({
+        created: true,
+        outcome: "REJECTED",
+        messageId: "m-rej",
+        draftId: null,
+        errorCode: "SENDER_NOT_ELIGIBLE",
+      }),
+    })
+    const { repo } = mockRepository()
+    const { provider } = mockProvider([
+      {
+        messages: [mail({ externalMessageId: "rej-1" })],
+        nextPageToken: null,
+        nextHistoryId: "hist-rej",
+        hasMore: false,
+        paginationMode: "history",
+      },
+    ])
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "SUCCESS")
+    assert.equal(result.stats.rejected, 1)
+    assert.equal(ingestionDiagLogs().length, 0)
+  })
+
+  for (const value of ["", "TRUE", "1", " true "]) {
+    it(`flag "${value}" => aucun message-ingestion-diag`, async () => {
+      process.env.ACQUISITION_GMAIL_DIAGNOSTIC = value
+      const { ingestion } = mockIngestion({
+        handler: () => {
+          throw new Error("boom")
+        },
+      })
+      const { repo } = mockRepository()
+      const { provider } = mockProvider([
+        {
+          messages: [mail({ externalMessageId: "x-1" })],
+          nextPageToken: null,
+          nextHistoryId: "h",
+          hasMore: false,
+          paginationMode: "history",
+        },
+      ])
+
+      const result = await syncAcquisitionMailForCompany({
+        companyId: COMPANY,
+        provider,
+        ingestion,
+        cursorRepository: repo,
+        now: () => NOW,
+      })
+
+      assert.equal(result.status, "PARTIAL")
+      assert.equal(ingestionDiagLogs().length, 0)
+    })
+  }
+
+  it("stage profond uniquement : ELIGIBILITY_RESOLVE sans REGISTER_INCOMING_MESSAGE doublon", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { registerIncomingMessage } = await import(
+      "@/lib/acquisition/acquisition.service"
+    )
+    const err = Object.assign(new Error("resolver down"), { code: "P1001" })
+    const db = {
+      acquisitionMessage: {
+        findUnique: async () => null,
+      },
+      $transaction: async () => {
+        throw new Error("should not reach transaction")
+      },
+    }
+    const ingestion: AcquisitionIngestionPort = {
+      isEnabled: () => true,
+      registerIncomingMessage: (input) =>
+        registerIncomingMessage(input, db as never, {
+          eligibilityResolver: {
+            isDomainEligible: async () => {
+              throw err
+            },
+            resolveEligibleSender: async () => {
+              throw err
+            },
+          },
+        }),
+    }
+    const { repo } = mockRepository()
+    const { provider } = mockProvider([
+      {
+        messages: [mail({ externalMessageId: "deep-1", fromHeader: "user@lauralu.fr" })],
+        nextPageToken: null,
+        nextHistoryId: "hist-deep",
+        hasMore: false,
+        paginationMode: "history",
+      },
+    ])
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "PARTIAL")
+    assert.equal(result.partialReason, "MESSAGE_INGESTION_FAILED")
+    const logs = ingestionDiagLogs()
+    assert.equal(logs.length, 1)
+    const payload = parseIngestionDiag(logs[0]!)
+    assert.equal(payload.gmailMessageId, "deep-1")
+    assert.equal(payload.stage, "REGISTER_INCOMING_MESSAGE_ELIGIBILITY_RESOLVE")
+    assert.equal(payload.errorCode, "P1001")
+    assert.equal(payload.stage === "REGISTER_INCOMING_MESSAGE", false)
+  })
+})

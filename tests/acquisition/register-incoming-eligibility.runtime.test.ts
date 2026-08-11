@@ -6,7 +6,7 @@
  */
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 
-import { describe, it } from "node:test"
+import { describe, it, beforeEach, afterEach } from "node:test"
 import assert from "node:assert/strict"
 import { registerIncomingMessage } from "@/lib/acquisition/acquisition.service"
 import { PartnerEligibilityResolver } from "@/lib/acquisition/partner-eligibility.resolver"
@@ -423,5 +423,162 @@ describe("registerIncomingMessage × éligibilité (R2)", () => {
     assert.equal(track.transactionCalls, 0)
     assert.equal(track.messageCreateCalls, 0)
     assert.equal(track.created.length, 0)
+  })
+})
+
+describe("registerIncomingMessage — message ingestion diag", () => {
+  const PREFIX = "[acquisition-message-ingestion-diag]"
+  const prevDiag = process.env.ACQUISITION_GMAIL_DIAGNOSTIC
+  const infoCalls: string[] = []
+  let originalInfo: typeof console.info
+
+  beforeEach(() => {
+    infoCalls.length = 0
+    originalInfo = console.info
+    console.info = (...args: unknown[]) => {
+      infoCalls.push(args.map((a) => String(a)).join(" "))
+    }
+    delete process.env.ACQUISITION_GMAIL_DIAGNOSTIC
+  })
+
+  afterEach(() => {
+    console.info = originalInfo
+    if (prevDiag === undefined) delete process.env.ACQUISITION_GMAIL_DIAGNOSTIC
+    else process.env.ACQUISITION_GMAIL_DIAGNOSTIC = prevDiag
+  })
+
+  function ingestionDiagLogs(): string[] {
+    return infoCalls.filter((line) => line.startsWith(PREFIX))
+  }
+
+  it("flag OFF + eligibility throw => aucun diag", async () => {
+    delete process.env.ACQUISITION_GMAIL_DIAGNOSTIC
+    const err = Object.assign(new Error("db down"), { code: "P1001" })
+    const registry = trackingRegistry(new Map(), { throwOnFind: err })
+    const resolver = new PartnerEligibilityResolver(registry)
+    const track = trackingDb()
+
+    await assert.rejects(() =>
+      registerIncomingMessage(
+        baseInput("co_a", "carlene@lauralu.fr", "ext-fail-diag-off"),
+        track.db as never,
+        { eligibilityResolver: resolver }
+      )
+    )
+    assert.equal(ingestionDiagLogs().length, 0)
+  })
+
+  it("flag ON + eligibility throw => REGISTER_INCOMING_MESSAGE_ELIGIBILITY_RESOLVE", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const err = Object.assign(new Error("db down secret-token user@example.com"), {
+      code: "P1001",
+    })
+    const registry = trackingRegistry(new Map(), { throwOnFind: err })
+    const resolver = new PartnerEligibilityResolver(registry)
+    const track = trackingDb()
+
+    await assert.rejects(() =>
+      registerIncomingMessage(
+        baseInput("co_a", "carlene@lauralu.fr", "ext-fail-elig"),
+        track.db as never,
+        { eligibilityResolver: resolver }
+      )
+    )
+
+    const logs = ingestionDiagLogs()
+    assert.equal(logs.length, 1)
+    const payload = JSON.parse(logs[0]!.slice(PREFIX.length + 1)) as Record<string, unknown>
+    assert.deepEqual(Object.keys(payload).sort(), [
+      "errorCode",
+      "errorName",
+      "gmailMessageId",
+      "retryable",
+      "stage",
+    ])
+    assert.equal(payload.gmailMessageId, "ext-fail-elig")
+    assert.equal(payload.stage, "REGISTER_INCOMING_MESSAGE_ELIGIBILITY_RESOLVE")
+    assert.equal(payload.errorName, "Error")
+    assert.equal(payload.errorCode, "P1001")
+    assert.ok(!logs[0]!.includes("secret-token"))
+    assert.ok(!logs[0]!.includes("user@example.com"))
+    assert.ok(!logs[0]!.includes("carlene@lauralu.fr"))
+  })
+
+  it("flag ON + schema parse throw => REGISTER_INCOMING_MESSAGE_SCHEMA_PARSE", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const track = trackingDb()
+    await assert.rejects(() =>
+      registerIncomingMessage(
+        {
+          companyId: "co_a",
+          source: "GMAIL",
+          externalMessageId: "ext-zod-fail",
+          senderEmail: "x",
+          subject: "SECRET SUBJECT",
+          receivedAt: now,
+        } as never,
+        track.db as never,
+        {
+          eligibilityResolver: {
+            isDomainEligible: async () => false,
+            resolveEligibleSender: async () => null,
+          },
+        }
+      )
+    )
+
+    const logs = ingestionDiagLogs()
+    assert.equal(logs.length, 1)
+    const payload = JSON.parse(logs[0]!.slice(PREFIX.length + 1)) as Record<string, unknown>
+    assert.equal(payload.gmailMessageId, "ext-zod-fail")
+    assert.equal(payload.stage, "REGISTER_INCOMING_MESSAGE_SCHEMA_PARSE")
+    assert.equal(payload.errorName, "ZodError")
+    assert.equal(payload.errorCode, "ZOD_ERROR")
+    assert.ok(!logs[0]!.includes("SECRET SUBJECT"))
+  })
+
+  it("flag ON + REJECTED métier => aucun diag", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const registry = trackingRegistry(new Map())
+    const resolver = new PartnerEligibilityResolver(registry)
+    const track = trackingDb()
+
+    const r = await registerIncomingMessage(
+      baseInput("co_empty", "carlene@lauralu.fr", "ext-rej-diag"),
+      track.db as never,
+      { eligibilityResolver: resolver }
+    )
+    assert.equal(r.outcome, "REJECTED")
+    assert.equal(ingestionDiagLogs().length, 0)
+  })
+
+  it("flag ON + transaction throw => REGISTER_INCOMING_MESSAGE_TRANSACTION", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const registry = trackingRegistry(new Map())
+    const resolver = new PartnerEligibilityResolver(registry)
+    const db = {
+      acquisitionMessage: {
+        findUnique: async () => null,
+      },
+      $transaction: async () => {
+        throw Object.assign(new Error("tx failed ACCESS_TOKEN_SECRET_TEST"), { code: "P2028" })
+      },
+    }
+
+    await assert.rejects(() =>
+      registerIncomingMessage(
+        baseInput("co_a", "carlene@lauralu.fr", "ext-tx-fail"),
+        db as never,
+        { eligibilityResolver: resolver }
+      )
+    )
+
+    const logs = ingestionDiagLogs()
+    assert.equal(logs.length, 1)
+    const payload = JSON.parse(logs[0]!.slice(PREFIX.length + 1)) as Record<string, unknown>
+    assert.equal(payload.gmailMessageId, "ext-tx-fail")
+    assert.equal(payload.stage, "REGISTER_INCOMING_MESSAGE_TRANSACTION")
+    assert.equal(payload.errorCode, "P2028")
+    assert.ok(!logs[0]!.includes("ACCESS_TOKEN_SECRET_TEST"))
   })
 })

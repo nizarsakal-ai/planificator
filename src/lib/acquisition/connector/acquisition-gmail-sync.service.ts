@@ -55,6 +55,111 @@ function isAcquisitionGmailDiagnosticEnabled(): boolean {
   return process.env.ACQUISITION_GMAIL_DIAGNOSTIC === "true"
 }
 
+type MessageIngestionDiagStage =
+  | "MAP_GMAIL_MESSAGE_TO_ACQUISITION_INPUT"
+  | "REGISTER_INCOMING_MESSAGE"
+
+type MessageIngestionDiagErrorName = "ZodError" | "Error" | "UnknownError"
+
+/** Marqueur partagé : un seul log diag par exception (stage le plus profond). */
+const MESSAGE_INGESTION_DIAG_LOGGED = Symbol.for(
+  "planificator.acquisitionMessageIngestionDiagLogged"
+)
+
+function wasMessageIngestionDiagLogged(error: unknown): boolean {
+  try {
+    return Boolean(
+      error &&
+        typeof error === "object" &&
+        MESSAGE_INGESTION_DIAG_LOGGED in (error as object)
+    )
+  } catch {
+    return false
+  }
+}
+
+function markMessageIngestionDiagLogged(error: unknown): void {
+  try {
+    if (!error || typeof error !== "object") return
+    Object.defineProperty(error, MESSAGE_INGESTION_DIAG_LOGGED, {
+      value: true,
+      enumerable: false,
+      configurable: true,
+    })
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Diagnostic temporaire (PLAN-ACQ-MESSAGE-INGESTION-DIAG-001).
+ * Flag OFF => no-op. Uniquement exceptions inattendues sur la chaîne d'ingestion.
+ * Si un stage plus profond a déjà loggé cette exception → no-op.
+ */
+function logAcquisitionMessageIngestionDiag(
+  gmailMessageId: string,
+  stage: MessageIngestionDiagStage,
+  error: unknown
+): void {
+  try {
+    if (!isAcquisitionGmailDiagnosticEnabled()) return
+    if (wasMessageIngestionDiagLogged(error)) return
+
+    let errorName: MessageIngestionDiagErrorName = "UnknownError"
+    let errorCode = "UNKNOWN"
+    let retryable = true
+
+    try {
+      if (
+        error &&
+        typeof error === "object" &&
+        "name" in error &&
+        (error as { name: unknown }).name === "ZodError"
+      ) {
+        errorName = "ZodError"
+        errorCode = "ZOD_ERROR"
+      } else if (error instanceof Error) {
+        errorName = "Error"
+        let rawCode: unknown
+        try {
+          rawCode = (error as { code?: unknown }).code
+        } catch {
+          rawCode = undefined
+        }
+        if (typeof rawCode === "string" && /^P\d{4}$/.test(rawCode)) {
+          errorCode = rawCode
+        }
+      }
+
+      let rawRetryable: unknown
+      try {
+        rawRetryable =
+          error && typeof error === "object" && "retryable" in error
+            ? (error as { retryable: unknown }).retryable
+            : undefined
+      } catch {
+        rawRetryable = undefined
+      }
+      if (typeof rawRetryable === "boolean") retryable = rawRetryable
+    } catch {
+      // ignore property inspection failures
+    }
+
+    console.info(
+      `[acquisition-message-ingestion-diag] ${JSON.stringify({
+        gmailMessageId,
+        stage,
+        errorName,
+        errorCode,
+        retryable,
+      })}`
+    )
+    markMessageIngestionDiagLogged(error)
+  } catch {
+    // Le diagnostic ne doit jamais provoquer une nouvelle exception.
+  }
+}
+
 function logAcquisitionGmailCursorDiag(error: unknown): void {
   if (!isAcquisitionGmailDiagnosticEnabled()) return
   const payload: AcquisitionGmailDiagPayload = {
@@ -316,8 +421,29 @@ export async function syncAcquisitionMailForCompany(
 
     for (const message of page.messages) {
       try {
-        const registerInput = mapGmailMessageToAcquisitionInput(message, companyId)
-        const result = await ingestion.registerIncomingMessage(registerInput)
+        let registerInput
+        try {
+          registerInput = mapGmailMessageToAcquisitionInput(message, companyId)
+        } catch (error) {
+          logAcquisitionMessageIngestionDiag(
+            message.externalMessageId,
+            "MAP_GMAIL_MESSAGE_TO_ACQUISITION_INPUT",
+            error
+          )
+          throw error
+        }
+
+        let result
+        try {
+          result = await ingestion.registerIncomingMessage(registerInput)
+        } catch (error) {
+          logAcquisitionMessageIngestionDiag(
+            message.externalMessageId,
+            "REGISTER_INCOMING_MESSAGE",
+            error
+          )
+          throw error
+        }
 
         if (result.outcome === "DRAFT_CREATED") {
           if (result.created) base.stats.ingested++

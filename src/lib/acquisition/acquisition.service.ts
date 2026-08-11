@@ -21,6 +21,124 @@ import { PartnerRegistryRepository } from "@/lib/acquisition/persistence/partner
 
 export { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
 
+type RegisterIncomingMessageDiagStage =
+  | "REGISTER_INCOMING_MESSAGE_SCHEMA_PARSE"
+  | "REGISTER_INCOMING_MESSAGE_IDEMPOTENCE_LOOKUP"
+  | "REGISTER_INCOMING_MESSAGE_ELIGIBILITY_RESOLVE"
+  | "REGISTER_INCOMING_MESSAGE_TRANSACTION"
+
+type RegisterIncomingMessageDiagErrorName = "ZodError" | "Error" | "UnknownError"
+
+/** Marqueur partagé avec sync.service : un seul log diag par exception. */
+const MESSAGE_INGESTION_DIAG_LOGGED = Symbol.for(
+  "planificator.acquisitionMessageIngestionDiagLogged"
+)
+
+function wasMessageIngestionDiagLogged(error: unknown): boolean {
+  try {
+    return Boolean(
+      error &&
+        typeof error === "object" &&
+        MESSAGE_INGESTION_DIAG_LOGGED in (error as object)
+    )
+  } catch {
+    return false
+  }
+}
+
+function markMessageIngestionDiagLogged(error: unknown): void {
+  try {
+    if (!error || typeof error !== "object") return
+    Object.defineProperty(error, MESSAGE_INGESTION_DIAG_LOGGED, {
+      value: true,
+      enumerable: false,
+      configurable: true,
+    })
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Diagnostic temporaire (PLAN-ACQ-MESSAGE-INGESTION-DIAG-001).
+ * Flag OFF => no-op. Exceptions inattendues uniquement — jamais de contenu métier.
+ * Stage le plus profond uniquement (marque l'exception pour les catches englobants).
+ */
+function logRegisterIncomingMessageDiag(
+  gmailMessageId: string,
+  stage: RegisterIncomingMessageDiagStage,
+  error: unknown
+): void {
+  try {
+    if (process.env.ACQUISITION_GMAIL_DIAGNOSTIC !== "true") return
+    if (wasMessageIngestionDiagLogged(error)) return
+
+    let errorName: RegisterIncomingMessageDiagErrorName = "UnknownError"
+    let errorCode = "UNKNOWN"
+    let retryable = true
+
+    try {
+      if (
+        error &&
+        typeof error === "object" &&
+        "name" in error &&
+        (error as { name: unknown }).name === "ZodError"
+      ) {
+        errorName = "ZodError"
+        errorCode = "ZOD_ERROR"
+      } else if (error instanceof Error) {
+        errorName = "Error"
+        let rawCode: unknown
+        try {
+          rawCode = (error as { code?: unknown }).code
+        } catch {
+          rawCode = undefined
+        }
+        if (typeof rawCode === "string" && /^P\d{4}$/.test(rawCode)) {
+          errorCode = rawCode
+        }
+      }
+
+      let rawRetryable: unknown
+      try {
+        rawRetryable =
+          error && typeof error === "object" && "retryable" in error
+            ? (error as { retryable: unknown }).retryable
+            : undefined
+      } catch {
+        rawRetryable = undefined
+      }
+      if (typeof rawRetryable === "boolean") retryable = rawRetryable
+    } catch {
+      // ignore property inspection failures
+    }
+
+    console.info(
+      `[acquisition-message-ingestion-diag] ${JSON.stringify({
+        gmailMessageId,
+        stage,
+        errorName,
+        errorCode,
+        retryable,
+      })}`
+    )
+    markMessageIngestionDiagLogged(error)
+  } catch {
+    // Le diagnostic ne doit jamais provoquer une nouvelle exception.
+  }
+}
+
+function resolveDiagGmailMessageId(input: RegisterIncomingMessageInput): string {
+  try {
+    if (input && typeof input === "object" && typeof input.externalMessageId === "string") {
+      return input.externalMessageId
+    }
+  } catch {
+    // ignore
+  }
+  return ""
+}
+
 // ─── Normalisation expéditeur (sans décision d’éligibilité) ───────────────────
 // Composition root local : wiring défaut Resolver→Repository ici uniquement.
 // Le chemin métier n’appelle que PartnerEligibilityResolverPort (voir
@@ -102,19 +220,41 @@ export async function registerIncomingMessage(
   db: PrismaClient = prisma,
   deps: RegisterIncomingMessageDeps = {}
 ): Promise<RegisterIncomingMessageResult> {
-  const data = registerIncomingMessageSchema.parse(input)
+  const gmailMessageId = resolveDiagGmailMessageId(input)
+
+  let data
+  try {
+    data = registerIncomingMessageSchema.parse(input)
+  } catch (error) {
+    logRegisterIncomingMessageDiag(
+      gmailMessageId,
+      "REGISTER_INCOMING_MESSAGE_SCHEMA_PARSE",
+      error
+    )
+    throw error
+  }
 
   // Idempotence : si le message existe déjà pour CE tenant, ne rien réécrire.
-  const existing = await db.acquisitionMessage.findUnique({
-    where: {
-      companyId_source_externalMessageId: {
-        companyId: data.companyId,
-        source: data.source,
-        externalMessageId: data.externalMessageId,
+  let existing
+  try {
+    existing = await db.acquisitionMessage.findUnique({
+      where: {
+        companyId_source_externalMessageId: {
+          companyId: data.companyId,
+          source: data.source,
+          externalMessageId: data.externalMessageId,
+        },
       },
-    },
-    include: { draft: { select: { id: true } } },
-  })
+      include: { draft: { select: { id: true } } },
+    })
+  } catch (error) {
+    logRegisterIncomingMessageDiag(
+      data.externalMessageId,
+      "REGISTER_INCOMING_MESSAGE_IDEMPOTENCE_LOOKUP",
+      error
+    )
+    throw error
+  }
   if (existing)
     return toResult(existing.id, existing.draft?.id ?? null, existing.status, false, existing.lastErrorCode)
 
@@ -126,13 +266,22 @@ export async function registerIncomingMessage(
   let resolvedPartnerId: string | null = null
   let eligible = false
   if (normalized) {
-    const resolved = await eligibilityResolver.resolveEligibleSender(
-      data.companyId,
-      normalized.email,
-      normalized.domain
-    )
-    eligible = resolved !== null
-    resolvedPartnerId = resolved?.partner.id ?? null
+    try {
+      const resolved = await eligibilityResolver.resolveEligibleSender(
+        data.companyId,
+        normalized.email,
+        normalized.domain
+      )
+      eligible = resolved !== null
+      resolvedPartnerId = resolved?.partner.id ?? null
+    } catch (error) {
+      logRegisterIncomingMessageDiag(
+        data.externalMessageId,
+        "REGISTER_INCOMING_MESSAGE_ELIGIBILITY_RESOLVE",
+        error
+      )
+      throw error
+    }
   }
   const errorCode: "INVALID_SENDER" | "SENDER_NOT_ELIGIBLE" | null =
     normalized === null ? "INVALID_SENDER" : eligible ? null : "SENDER_NOT_ELIGIBLE"
@@ -211,6 +360,11 @@ export async function registerIncomingMessage(
       if (raced)
         return toResult(raced.id, raced.draft?.id ?? null, raced.status, false, raced.lastErrorCode)
     }
+    logRegisterIncomingMessageDiag(
+      data.externalMessageId,
+      "REGISTER_INCOMING_MESSAGE_TRANSACTION",
+      e
+    )
     throw e
   }
 }
