@@ -499,14 +499,18 @@ describe("registerIncomingMessage — message ingestion diag", () => {
     assert.equal(payload.stage, "REGISTER_INCOMING_MESSAGE_ELIGIBILITY_RESOLVE")
     assert.equal(payload.errorName, "Error")
     assert.equal(payload.errorCode, "P1001")
+    assert.equal("zodPath" in payload, false)
+    assert.equal("zodIssueCode" in payload, false)
     assert.ok(!logs[0]!.includes("secret-token"))
     assert.ok(!logs[0]!.includes("user@example.com"))
     assert.ok(!logs[0]!.includes("carlene@lauralu.fr"))
   })
 
-  it("flag ON + schema parse throw => REGISTER_INCOMING_MESSAGE_SCHEMA_PARSE", async () => {
+  it("flag ON + schema parse throw => zodPath senderEmail + zodIssueCode too_small", async () => {
     process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
     const track = trackingDb()
+    const sentinelEmail = "LEAK_SENDER_EMAIL_SENTINEL@example.com"
+    const sentinelSubject = "LEAK_SUBJECT_SECRET_BODY"
     await assert.rejects(() =>
       registerIncomingMessage(
         {
@@ -514,7 +518,7 @@ describe("registerIncomingMessage — message ingestion diag", () => {
           source: "GMAIL",
           externalMessageId: "ext-zod-fail",
           senderEmail: "x",
-          subject: "SECRET SUBJECT",
+          subject: sentinelSubject,
           receivedAt: now,
         } as never,
         track.db as never,
@@ -534,7 +538,323 @@ describe("registerIncomingMessage — message ingestion diag", () => {
     assert.equal(payload.stage, "REGISTER_INCOMING_MESSAGE_SCHEMA_PARSE")
     assert.equal(payload.errorName, "ZodError")
     assert.equal(payload.errorCode, "ZOD_ERROR")
-    assert.ok(!logs[0]!.includes("SECRET SUBJECT"))
+    assert.deepEqual(payload.zodPath, ["senderEmail"])
+    assert.equal(payload.zodIssueCode, "too_small")
+    assert.ok(!logs[0]!.includes(sentinelSubject))
+    assert.ok(!logs[0]!.includes(sentinelEmail))
+    assert.ok(!/"message"\s*:/.test(logs[0]!))
+    assert.ok(!/"received"\s*:/.test(logs[0]!))
+    assert.ok(!/"expected"\s*:/.test(logs[0]!))
+  })
+
+  it("flag ON + schema parse attachment => zodPath nested conservé", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const track = trackingDb()
+    const sentinelFilename = "LEAK_ATTACHMENT_FILENAME_SECRET.pdf"
+    await assert.rejects(() =>
+      registerIncomingMessage(
+        {
+          companyId: "co_a",
+          source: "GMAIL",
+          externalMessageId: "ext-zod-att",
+          senderEmail: "ok@example.fr",
+          subject: "ok",
+          receivedAt: now,
+          attachments: [
+            {
+              externalAttachmentId: "",
+              filename: sentinelFilename,
+              mimeType: "application/pdf",
+              sizeBytes: 1,
+            },
+          ],
+        } as never,
+        track.db as never,
+        {
+          eligibilityResolver: {
+            isDomainEligible: async () => false,
+            resolveEligibleSender: async () => null,
+          },
+        }
+      )
+    )
+
+    const logs = ingestionDiagLogs()
+    assert.equal(logs.length, 1)
+    const payload = JSON.parse(logs[0]!.slice(PREFIX.length + 1)) as Record<string, unknown>
+    assert.equal(payload.stage, "REGISTER_INCOMING_MESSAGE_SCHEMA_PARSE")
+    assert.deepEqual(payload.zodPath, ["attachments", 0, "externalAttachmentId"])
+    assert.equal(payload.zodIssueCode, "too_small")
+    assert.ok(!logs[0]!.includes(sentinelFilename))
+    assert.ok(!logs[0]!.includes("ok@example.fr"))
+  })
+
+  it("ZodError issues=[] => aucun zodPath ni zodIssueCode", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { registerIncomingMessageSchema } = await import("@/lib/validations/acquisition")
+    const originalParse = registerIncomingMessageSchema.parse
+    registerIncomingMessageSchema.parse = (() => {
+      const err = new Error("synthetic zod empty issues LEAK_VALUE_SHOULD_NOT_APPEAR")
+      err.name = "ZodError"
+      Object.assign(err, { issues: [] })
+      throw err
+    }) as typeof originalParse
+
+    try {
+      const track = trackingDb()
+      await assert.rejects(() =>
+        registerIncomingMessage(
+          baseInput("co_a", "carlene@lauralu.fr", "ext-zod-empty"),
+          track.db as never,
+          {
+            eligibilityResolver: {
+              isDomainEligible: async () => false,
+              resolveEligibleSender: async () => null,
+            },
+          }
+        )
+      )
+      const logs = ingestionDiagLogs()
+      assert.equal(logs.length, 1)
+      const payload = JSON.parse(logs[0]!.slice(PREFIX.length + 1)) as Record<string, unknown>
+      assert.equal(payload.errorName, "ZodError")
+      assert.equal(payload.errorCode, "ZOD_ERROR")
+      assert.equal("zodPath" in payload, false)
+      assert.equal("zodIssueCode" in payload, false)
+      assert.ok(!logs[0]!.includes("LEAK_VALUE_SHOULD_NOT_APPEAR"))
+    } finally {
+      registerIncomingMessageSchema.parse = originalParse
+    }
+  })
+
+  it("ZodError code invalide => zodIssueCode absent ; path valide conservé", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { registerIncomingMessageSchema } = await import("@/lib/validations/acquisition")
+    const originalParse = registerIncomingMessageSchema.parse
+    registerIncomingMessageSchema.parse = (() => {
+      const err = new Error("zod")
+      err.name = "ZodError"
+      Object.assign(err, {
+        issues: [
+          {
+            code: "TOO_SMALL",
+            path: ["senderEmail"],
+            message: "LEAK_ISSUE_MESSAGE secret@example.com",
+            received: "LEAK_RECEIVED",
+            expected: "LEAK_EXPECTED",
+          },
+        ],
+      })
+      throw err
+    }) as typeof originalParse
+
+    try {
+      const track = trackingDb()
+      await assert.rejects(() =>
+        registerIncomingMessage(
+          baseInput("co_a", "carlene@lauralu.fr", "ext-zod-bad-code"),
+          track.db as never,
+          {
+            eligibilityResolver: {
+              isDomainEligible: async () => false,
+              resolveEligibleSender: async () => null,
+            },
+          }
+        )
+      )
+      const logs = ingestionDiagLogs()
+      assert.equal(logs.length, 1)
+      const payload = JSON.parse(logs[0]!.slice(PREFIX.length + 1)) as Record<string, unknown>
+      assert.deepEqual(payload.zodPath, ["senderEmail"])
+      assert.equal("zodIssueCode" in payload, false)
+      assert.ok(!logs[0]!.includes("LEAK_ISSUE_MESSAGE"))
+      assert.ok(!logs[0]!.includes("secret@example.com"))
+      assert.ok(!logs[0]!.includes("LEAK_RECEIVED"))
+      assert.ok(!logs[0]!.includes("LEAK_EXPECTED"))
+    } finally {
+      registerIncomingMessageSchema.parse = originalParse
+    }
+  })
+
+  it("ZodError path invalide => zodPath absent ; code valide conservé", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { registerIncomingMessageSchema } = await import("@/lib/validations/acquisition")
+    const originalParse = registerIncomingMessageSchema.parse
+    registerIncomingMessageSchema.parse = (() => {
+      const err = new Error("zod")
+      err.name = "ZodError"
+      Object.assign(err, {
+        issues: [
+          {
+            code: "too_small",
+            path: ["senderEmail", { leak: "LEAK_PATH_OBJECT" }],
+            message: "nope",
+          },
+        ],
+      })
+      throw err
+    }) as typeof originalParse
+
+    try {
+      const track = trackingDb()
+      await assert.rejects(() =>
+        registerIncomingMessage(
+          baseInput("co_a", "carlene@lauralu.fr", "ext-zod-bad-path"),
+          track.db as never,
+          {
+            eligibilityResolver: {
+              isDomainEligible: async () => false,
+              resolveEligibleSender: async () => null,
+            },
+          }
+        )
+      )
+      const logs = ingestionDiagLogs()
+      assert.equal(logs.length, 1)
+      const payload = JSON.parse(logs[0]!.slice(PREFIX.length + 1)) as Record<string, unknown>
+      assert.equal("zodPath" in payload, false)
+      assert.equal(payload.zodIssueCode, "too_small")
+      assert.ok(!logs[0]!.includes("LEAK_PATH_OBJECT"))
+    } finally {
+      registerIncomingMessageSchema.parse = originalParse
+    }
+  })
+
+  it("Error non-Zod => aucun zodPath ni zodIssueCode", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const err = Object.assign(new Error("db down LEAK_NON_ZOD"), { code: "P1001" })
+    const registry = trackingRegistry(new Map(), { throwOnFind: err })
+    const resolver = new PartnerEligibilityResolver(registry)
+    const track = trackingDb()
+
+    await assert.rejects(() =>
+      registerIncomingMessage(
+        baseInput("co_a", "carlene@lauralu.fr", "ext-non-zod"),
+        track.db as never,
+        { eligibilityResolver: resolver }
+      )
+    )
+
+    const logs = ingestionDiagLogs()
+    assert.equal(logs.length, 1)
+    const payload = JSON.parse(logs[0]!.slice(PREFIX.length + 1)) as Record<string, unknown>
+    assert.equal(payload.errorName, "Error")
+    assert.equal("zodPath" in payload, false)
+    assert.equal("zodIssueCode" in payload, false)
+    assert.ok(!logs[0]!.includes("LEAK_NON_ZOD"))
+  })
+
+  function makeZodLikeError(): Error {
+    const err = new Error("LEAK_ZOD_MESSAGE secret@example.com")
+    err.name = "ZodError"
+    Object.assign(err, {
+      issues: [
+        {
+          code: "too_small",
+          path: ["senderEmail"],
+          message: "LEAK_ISSUE_MESSAGE",
+          received: "LEAK_RECEIVED",
+        },
+      ],
+    })
+    return err
+  }
+
+  it("IDEMPOTENCE_LOOKUP + ZodError => aucun zodPath / zodIssueCode", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const zodErr = makeZodLikeError()
+    const db = {
+      acquisitionMessage: {
+        findUnique: async () => {
+          throw zodErr
+        },
+      },
+      $transaction: async () => {
+        throw new Error("should not reach")
+      },
+    }
+    await assert.rejects(() =>
+      registerIncomingMessage(
+        baseInput("co_a", "carlene@lauralu.fr", "ext-zod-lookup"),
+        db as never,
+        {
+          eligibilityResolver: {
+            isDomainEligible: async () => false,
+            resolveEligibleSender: async () => null,
+          },
+        }
+      )
+    )
+    const logs = ingestionDiagLogs()
+    assert.equal(logs.length, 1)
+    const payload = JSON.parse(logs[0]!.slice(PREFIX.length + 1)) as Record<string, unknown>
+    assert.equal(payload.stage, "REGISTER_INCOMING_MESSAGE_IDEMPOTENCE_LOOKUP")
+    assert.equal(payload.errorName, "ZodError")
+    assert.equal(payload.errorCode, "ZOD_ERROR")
+    assert.equal("zodPath" in payload, false)
+    assert.equal("zodIssueCode" in payload, false)
+    assert.ok(!logs[0]!.includes("LEAK_ZOD_MESSAGE"))
+    assert.ok(!logs[0]!.includes("LEAK_ISSUE_MESSAGE"))
+    assert.ok(!logs[0]!.includes("secret@example.com"))
+  })
+
+  it("ELIGIBILITY_RESOLVE + ZodError => aucun zodPath / zodIssueCode", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const zodErr = makeZodLikeError()
+    const track = trackingDb()
+    await assert.rejects(() =>
+      registerIncomingMessage(
+        baseInput("co_a", "carlene@lauralu.fr", "ext-zod-elig"),
+        track.db as never,
+        {
+          eligibilityResolver: {
+            isDomainEligible: async () => {
+              throw zodErr
+            },
+            resolveEligibleSender: async () => {
+              throw zodErr
+            },
+          },
+        }
+      )
+    )
+    const logs = ingestionDiagLogs()
+    assert.equal(logs.length, 1)
+    const payload = JSON.parse(logs[0]!.slice(PREFIX.length + 1)) as Record<string, unknown>
+    assert.equal(payload.stage, "REGISTER_INCOMING_MESSAGE_ELIGIBILITY_RESOLVE")
+    assert.equal(payload.errorName, "ZodError")
+    assert.equal("zodPath" in payload, false)
+    assert.equal("zodIssueCode" in payload, false)
+    assert.ok(!logs[0]!.includes("LEAK_RECEIVED"))
+  })
+
+  it("TRANSACTION + ZodError => aucun zodPath / zodIssueCode", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const zodErr = makeZodLikeError()
+    const registry = trackingRegistry(new Map())
+    const resolver = new PartnerEligibilityResolver(registry)
+    const db = {
+      acquisitionMessage: {
+        findUnique: async () => null,
+      },
+      $transaction: async () => {
+        throw zodErr
+      },
+    }
+    await assert.rejects(() =>
+      registerIncomingMessage(
+        baseInput("co_a", "carlene@lauralu.fr", "ext-zod-tx"),
+        db as never,
+        { eligibilityResolver: resolver }
+      )
+    )
+    const logs = ingestionDiagLogs()
+    assert.equal(logs.length, 1)
+    const payload = JSON.parse(logs[0]!.slice(PREFIX.length + 1)) as Record<string, unknown>
+    assert.equal(payload.stage, "REGISTER_INCOMING_MESSAGE_TRANSACTION")
+    assert.equal(payload.errorName, "ZodError")
+    assert.equal("zodPath" in payload, false)
+    assert.equal("zodIssueCode" in payload, false)
   })
 
   it("flag ON + REJECTED métier => aucun diag", async () => {
@@ -579,6 +899,8 @@ describe("registerIncomingMessage — message ingestion diag", () => {
     assert.equal(payload.gmailMessageId, "ext-tx-fail")
     assert.equal(payload.stage, "REGISTER_INCOMING_MESSAGE_TRANSACTION")
     assert.equal(payload.errorCode, "P2028")
+    assert.equal("zodPath" in payload, false)
+    assert.equal("zodIssueCode" in payload, false)
     assert.ok(!logs[0]!.includes("ACCESS_TOKEN_SECRET_TEST"))
   })
 })

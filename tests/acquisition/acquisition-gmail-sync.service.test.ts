@@ -1333,13 +1333,16 @@ describe("syncAcquisitionMailForCompany — message ingestion diag", () => {
 
   function parseIngestionDiag(raw: string): Record<string, unknown> {
     const payload = JSON.parse(raw.slice(PREFIX.length + 1)) as Record<string, unknown>
-    assert.deepEqual(Object.keys(payload).sort(), [
-      "errorCode",
-      "errorName",
-      "gmailMessageId",
-      "retryable",
-      "stage",
-    ])
+    const required = ["errorCode", "errorName", "gmailMessageId", "retryable", "stage"]
+    for (const key of required) {
+      assert.ok(key in payload, `missing ${key}`)
+    }
+    for (const key of Object.keys(payload)) {
+      assert.ok(
+        required.includes(key) || key === "zodPath" || key === "zodIssueCode",
+        `unexpected key ${key}`
+      )
+    }
     return payload
   }
 
@@ -1579,5 +1582,72 @@ describe("syncAcquisitionMailForCompany — message ingestion diag", () => {
     assert.equal(payload.stage, "REGISTER_INCOMING_MESSAGE_ELIGIBILITY_RESOLVE")
     assert.equal(payload.errorCode, "P1001")
     assert.equal(payload.stage === "REGISTER_INCOMING_MESSAGE", false)
+  })
+
+  it("SCHEMA_PARSE ZodError profond => 1 log enrichi, aucun REGISTER_INCOMING_MESSAGE doublon", async () => {
+    process.env.ACQUISITION_GMAIL_DIAGNOSTIC = "true"
+    const { registerIncomingMessage } = await import(
+      "@/lib/acquisition/acquisition.service"
+    )
+    const db = {
+      acquisitionMessage: {
+        findUnique: async () => null,
+      },
+      $transaction: async () => {
+        throw new Error("should not reach transaction")
+      },
+    }
+    const ingestion: AcquisitionIngestionPort = {
+      isEnabled: () => true,
+      registerIncomingMessage: (input) =>
+        registerIncomingMessage(input, db as never, {
+          eligibilityResolver: {
+            isDomainEligible: async () => false,
+            resolveEligibleSender: async () => null,
+          },
+        }),
+    }
+    const { repo } = mockRepository()
+    const { provider } = mockProvider([
+      {
+        messages: [
+          mail({
+            externalMessageId: "zod-deep-1",
+            fromHeader: "x",
+            subject: "LEAK_SUBJECT_SHOULD_NOT_APPEAR",
+          }),
+        ],
+        nextPageToken: null,
+        nextHistoryId: "hist-zod",
+        hasMore: false,
+        paginationMode: "history",
+      },
+    ])
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+    })
+
+    assert.equal(result.status, "PARTIAL")
+    assert.equal(result.partialReason, "MESSAGE_INGESTION_FAILED")
+    assert.equal(result.error?.code, "MESSAGE_INGESTION_FAILED")
+    assert.equal(result.error?.retryable, true)
+
+    const logs = ingestionDiagLogs()
+    assert.equal(logs.length, 1)
+    const payload = parseIngestionDiag(logs[0]!)
+    assert.equal(payload.gmailMessageId, "zod-deep-1")
+    assert.equal(payload.stage, "REGISTER_INCOMING_MESSAGE_SCHEMA_PARSE")
+    assert.equal(payload.errorName, "ZodError")
+    assert.equal(payload.errorCode, "ZOD_ERROR")
+    assert.deepEqual(payload.zodPath, ["senderEmail"])
+    assert.equal(payload.zodIssueCode, "too_small")
+    assert.equal(payload.stage === "REGISTER_INCOMING_MESSAGE", false)
+    assert.ok(!logs[0]!.includes("LEAK_SUBJECT_SHOULD_NOT_APPEAR"))
+    assert.ok(!logs.some((l) => l.includes('"stage":"REGISTER_INCOMING_MESSAGE"')))
   })
 })

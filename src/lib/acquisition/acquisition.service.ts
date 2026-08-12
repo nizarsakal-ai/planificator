@@ -76,6 +76,8 @@ function logRegisterIncomingMessageDiag(
     let errorName: RegisterIncomingMessageDiagErrorName = "UnknownError"
     let errorCode = "UNKNOWN"
     let retryable = true
+    let zodPath: Array<string | number> | undefined
+    let zodIssueCode: string | undefined
 
     try {
       if (
@@ -86,6 +88,32 @@ function logRegisterIncomingMessageDiag(
       ) {
         errorName = "ZodError"
         errorCode = "ZOD_ERROR"
+
+        // PLAN-ACQ-MESSAGE-INGESTION-ZOD-PATH-001 — enrichissement Zod
+        // uniquement au stage SCHEMA_PARSE.
+        if (stage === "REGISTER_INCOMING_MESSAGE_SCHEMA_PARSE") {
+          try {
+            const issues = (error as { issues?: unknown }).issues
+            if (Array.isArray(issues) && issues.length > 0) {
+              const first = issues[0]
+              if (first && typeof first === "object") {
+                const rawCode = (first as { code?: unknown }).code
+                if (typeof rawCode === "string" && /^[a-z_]+$/.test(rawCode)) {
+                  zodIssueCode = rawCode
+                }
+                const rawPath = (first as { path?: unknown }).path
+                if (
+                  Array.isArray(rawPath) &&
+                  rawPath.every((p) => typeof p === "string" || typeof p === "number")
+                ) {
+                  zodPath = rawPath as Array<string | number>
+                }
+              }
+            }
+          } catch {
+            // ignore Zod issue inspection failures
+          }
+        }
       } else if (error instanceof Error) {
         errorName = "Error"
         let rawCode: unknown
@@ -120,6 +148,8 @@ function logRegisterIncomingMessageDiag(
         errorName,
         errorCode,
         retryable,
+        ...(zodPath !== undefined ? { zodPath } : {}),
+        ...(zodIssueCode !== undefined ? { zodIssueCode } : {}),
       })}`
     )
     markMessageIngestionDiagLogged(error)
