@@ -9,6 +9,7 @@
 //   devront vérifier isAcquisitionEnabled() avant tout traitement.
 
 import type { PrismaClient, Prisma } from "@prisma/client"
+import { createHash } from "crypto"
 import { prisma } from "@/lib/prisma"
 import {
   registerIncomingMessageSchema,
@@ -461,7 +462,10 @@ function isUniqueConstraintError(e: unknown): boolean {
 
 /**
  * Identité STABLE et déterministe d'une pièce jointe dans son message :
- * 1. "ext:<id>"  — identifiant Gmail normalisé (trim) s'il existe ;
+ * 1. "ext:<id>"  — identifiant Gmail normalisé (trim) s'il existe et clé courte ;
+ *    IDs longs : "ext-sha256:<digest>" pour protéger la taille de l'index B-tree
+ *    (@@unique acquisitionMessageId+attachmentKey). L'externalAttachmentId
+ *    complet reste stocké séparément pour le téléchargement Gmail.
  * 2. "part:<id>" — identifiant de partie MIME sinon ;
  * 3. "ord:<n>"   — ordinal (position dans le message) en dernier recours.
  * Le filename seul n'est JAMAIS utilisé comme identité. Combinée à
@@ -469,12 +473,19 @@ function isUniqueConstraintError(e: unknown): boolean {
  * l'enregistrement des pièces jointes idempotent même sans identifiant
  * Gmail exploitable.
  */
+const ATTACHMENT_KEY_MAX_SAFE_LENGTH = 1024
+
 export function buildAttachmentKey(
   attachment: { externalAttachmentId?: string; partId?: string },
   index: number
 ): string {
   const ext = attachment.externalAttachmentId?.trim()
-  if (ext) return `ext:${ext}`
+  if (ext) {
+    const rawKey = `ext:${ext}`
+    if (rawKey.length <= ATTACHMENT_KEY_MAX_SAFE_LENGTH) return rawKey
+    const digest = createHash("sha256").update(ext, "utf8").digest("hex")
+    return `ext-sha256:${digest}`
+  }
   const part = attachment.partId?.trim()
   if (part) return `part:${part}`
   return `ord:${index}`

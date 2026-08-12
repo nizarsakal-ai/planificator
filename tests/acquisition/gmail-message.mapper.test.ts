@@ -86,4 +86,51 @@ describe("mapGmailMessageToAcquisitionInput", () => {
     assert.deepEqual(meta.labels, ["INBOX", "UNREAD"])
     assert.equal(meta.threadId, "thread-abc")
   })
+
+  it("accepte externalAttachmentId Gmail opaque >255 (intact, pas de truncate)", () => {
+    const longId = "A".repeat(300)
+    const msg = baseMessage()
+    msg.attachments = [
+      {
+        externalAttachmentId: longId,
+        partId: "1",
+        filename: "plan.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 100,
+      },
+    ]
+    const parsed = registerIncomingMessageSchema.parse(
+      mapGmailMessageToAcquisitionInput(msg, "company-1")
+    )
+    assert.equal(parsed.attachments[0].externalAttachmentId?.length, 300)
+    assert.equal(parsed.attachments[0].externalAttachmentId, longId)
+  })
+
+  it("rejette externalAttachmentId au-delà de max 4096", () => {
+    const tooLong = "B".repeat(4097)
+    const msg = baseMessage()
+    msg.attachments = [
+      {
+        externalAttachmentId: tooLong,
+        partId: "1",
+        filename: "plan.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 100,
+      },
+    ]
+    const result = registerIncomingMessageSchema.safeParse(
+      mapGmailMessageToAcquisitionInput(msg, "company-1")
+    )
+    assert.equal(result.success, false)
+    if (!result.success) {
+      const issue = result.error.issues.find(
+        (i) =>
+          i.path[0] === "attachments" &&
+          i.path[1] === 0 &&
+          i.path[2] === "externalAttachmentId"
+      )
+      assert.ok(issue)
+      assert.equal(issue!.code, "too_big")
+    }
+  })
 })
