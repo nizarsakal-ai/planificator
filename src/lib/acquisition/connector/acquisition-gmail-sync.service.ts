@@ -13,217 +13,6 @@ import {
   type MailShadowRunContext,
 } from "@/lib/acquisition/connector/mail-shadow-hook"
 import type { MailShadowRunStats } from "@/lib/integration/connectors/mail-bridge/mail-shadow-run-stats"
-import {
-  GmailProviderError,
-  type GmailErrorCode,
-} from "@/lib/acquisition/connector/gmail.errors"
-
-/**
- * Instrumentation temporaire (PLAN-RUNTIME-DIAGNOSTIC-001) :
- * si `ACQUISITION_GMAIL_DIAGNOSTIC === "true"`, logue sur FAILED cursor/provider
- * uniquement des littéraux / codes allowlistés. Jamais message, stack, token, ni body.
- * Flag OFF → retour immédiat sans inspection de l'erreur.
- */
-type AcquisitionGmailDiagPhase = "cursor" | "provider_list"
-
-type AcquisitionGmailDiagErrorName =
-  | "GmailProviderError"
-  | "Error"
-  | "UnknownError"
-
-type AcquisitionGmailDiagPayload = {
-  phase: AcquisitionGmailDiagPhase
-  internalCode: string
-  errorName: AcquisitionGmailDiagErrorName
-  retryable: boolean
-}
-
-/** Codes GmailProviderError connus — seuls autorisés dans internalCode diag. */
-const GMAIL_DIAG_INTERNAL_CODE_ALLOWLIST: ReadonlySet<GmailErrorCode> = new Set([
-  "GMAIL_NOT_CONNECTED",
-  "GMAIL_TOKEN_REFRESH_FAILED",
-  "GMAIL_UNAUTHORIZED",
-  "GMAIL_RATE_LIMITED",
-  "GMAIL_HISTORY_EXPIRED",
-  "GMAIL_UNAVAILABLE",
-  "GMAIL_MESSAGE_NOT_FOUND",
-  "GMAIL_MESSAGE_PARSE_ERROR",
-  "NO_ACTIVE_PARTNER_IDENTITIES",
-])
-
-function isAcquisitionGmailDiagnosticEnabled(): boolean {
-  return process.env.ACQUISITION_GMAIL_DIAGNOSTIC === "true"
-}
-
-type MessageIngestionDiagStage =
-  | "MAP_GMAIL_MESSAGE_TO_ACQUISITION_INPUT"
-  | "REGISTER_INCOMING_MESSAGE"
-
-type MessageIngestionDiagErrorName = "ZodError" | "Error" | "UnknownError"
-
-/** Marqueur partagé : un seul log diag par exception (stage le plus profond). */
-const MESSAGE_INGESTION_DIAG_LOGGED = Symbol.for(
-  "planificator.acquisitionMessageIngestionDiagLogged"
-)
-
-function wasMessageIngestionDiagLogged(error: unknown): boolean {
-  try {
-    return Boolean(
-      error &&
-        typeof error === "object" &&
-        MESSAGE_INGESTION_DIAG_LOGGED in (error as object)
-    )
-  } catch {
-    return false
-  }
-}
-
-function markMessageIngestionDiagLogged(error: unknown): void {
-  try {
-    if (!error || typeof error !== "object") return
-    Object.defineProperty(error, MESSAGE_INGESTION_DIAG_LOGGED, {
-      value: true,
-      enumerable: false,
-      configurable: true,
-    })
-  } catch {
-    // ignore
-  }
-}
-
-/**
- * Diagnostic temporaire (PLAN-ACQ-MESSAGE-INGESTION-DIAG-001).
- * Flag OFF => no-op. Uniquement exceptions inattendues sur la chaîne d'ingestion.
- * Si un stage plus profond a déjà loggé cette exception → no-op.
- */
-function logAcquisitionMessageIngestionDiag(
-  gmailMessageId: string,
-  stage: MessageIngestionDiagStage,
-  error: unknown
-): void {
-  try {
-    if (!isAcquisitionGmailDiagnosticEnabled()) return
-    if (wasMessageIngestionDiagLogged(error)) return
-
-    let errorName: MessageIngestionDiagErrorName = "UnknownError"
-    let errorCode = "UNKNOWN"
-    let retryable = true
-
-    try {
-      if (
-        error &&
-        typeof error === "object" &&
-        "name" in error &&
-        (error as { name: unknown }).name === "ZodError"
-      ) {
-        errorName = "ZodError"
-        errorCode = "ZOD_ERROR"
-      } else if (error instanceof Error) {
-        errorName = "Error"
-        let rawCode: unknown
-        try {
-          rawCode = (error as { code?: unknown }).code
-        } catch {
-          rawCode = undefined
-        }
-        if (typeof rawCode === "string" && /^P\d{4}$/.test(rawCode)) {
-          errorCode = rawCode
-        }
-      }
-
-      let rawRetryable: unknown
-      try {
-        rawRetryable =
-          error && typeof error === "object" && "retryable" in error
-            ? (error as { retryable: unknown }).retryable
-            : undefined
-      } catch {
-        rawRetryable = undefined
-      }
-      if (typeof rawRetryable === "boolean") retryable = rawRetryable
-    } catch {
-      // ignore property inspection failures
-    }
-
-    console.info(
-      `[acquisition-message-ingestion-diag] ${JSON.stringify({
-        gmailMessageId,
-        stage,
-        errorName,
-        errorCode,
-        retryable,
-      })}`
-    )
-    markMessageIngestionDiagLogged(error)
-  } catch {
-    // Le diagnostic ne doit jamais provoquer une nouvelle exception.
-  }
-}
-
-function logAcquisitionGmailCursorDiag(error: unknown): void {
-  if (!isAcquisitionGmailDiagnosticEnabled()) return
-  const payload: AcquisitionGmailDiagPayload = {
-    phase: "cursor",
-    internalCode: "CURSOR_LOAD_FAILED",
-    errorName: error instanceof Error ? "Error" : "UnknownError",
-    retryable: true,
-  }
-  console.info(`[acquisition-gmail-diag] ${JSON.stringify(payload)}`)
-}
-
-function logAcquisitionGmailProviderListDiag(error: unknown): void {
-  if (!isAcquisitionGmailDiagnosticEnabled()) return
-
-  let internalCode = "PROVIDER_LIST_FAILED"
-  let errorName: AcquisitionGmailDiagErrorName = "UnknownError"
-  let retryable = true
-
-  try {
-    if (error instanceof GmailProviderError) {
-      errorName = "GmailProviderError"
-
-      let rawCode: unknown
-      try {
-        rawCode = error.code
-      } catch {
-        rawCode = undefined
-      }
-      if (
-        typeof rawCode === "string" &&
-        GMAIL_DIAG_INTERNAL_CODE_ALLOWLIST.has(rawCode as GmailErrorCode)
-      ) {
-        internalCode = rawCode
-      }
-
-      let rawRetryable: unknown
-      try {
-        rawRetryable = error.retryable
-      } catch {
-        rawRetryable = undefined
-      }
-      retryable = typeof rawRetryable === "boolean" ? rawRetryable : true
-    } else if (error instanceof Error) {
-      errorName = "Error"
-    }
-  } catch {
-    internalCode = "PROVIDER_LIST_FAILED"
-    errorName =
-      error instanceof GmailProviderError
-        ? "GmailProviderError"
-        : error instanceof Error
-          ? "Error"
-          : "UnknownError"
-    retryable = true
-  }
-
-  const payload: AcquisitionGmailDiagPayload = {
-    phase: "provider_list",
-    internalCode,
-    errorName,
-    retryable,
-  }
-  console.info(`[acquisition-gmail-diag] ${JSON.stringify(payload)}`)
-}
 
 function withShadow<T extends object>(
   result: T,
@@ -309,7 +98,6 @@ export async function syncAcquisitionMailForCompany(
     cursorRecord = await cursorRepository.getOrCreate(companyId, provider.source)
   } catch (e) {
     const message = e instanceof Error ? e.message : "CURSOR_LOAD_FAILED"
-    logAcquisitionGmailCursorDiag(e)
     await cursorRepository.recordFailure(companyId, provider.source, "CURSOR_LOAD_FAILED", now())
     return {
       ...base,
@@ -400,7 +188,6 @@ export async function syncAcquisitionMailForCompany(
         }
       }
       const message = e instanceof Error ? e.message : "PROVIDER_LIST_FAILED"
-      logAcquisitionGmailProviderListDiag(e)
       await cursorRepository.recordFailure(companyId, provider.source, "PROVIDER_LIST_FAILED", now())
       return withShadow({
         ...base,
@@ -421,29 +208,8 @@ export async function syncAcquisitionMailForCompany(
 
     for (const message of page.messages) {
       try {
-        let registerInput
-        try {
-          registerInput = mapGmailMessageToAcquisitionInput(message, companyId)
-        } catch (error) {
-          logAcquisitionMessageIngestionDiag(
-            message.externalMessageId,
-            "MAP_GMAIL_MESSAGE_TO_ACQUISITION_INPUT",
-            error
-          )
-          throw error
-        }
-
-        let result
-        try {
-          result = await ingestion.registerIncomingMessage(registerInput)
-        } catch (error) {
-          logAcquisitionMessageIngestionDiag(
-            message.externalMessageId,
-            "REGISTER_INCOMING_MESSAGE",
-            error
-          )
-          throw error
-        }
+        const registerInput = mapGmailMessageToAcquisitionInput(message, companyId)
+        const result = await ingestion.registerIncomingMessage(registerInput)
 
         if (result.outcome === "DRAFT_CREATED") {
           if (result.created) base.stats.ingested++

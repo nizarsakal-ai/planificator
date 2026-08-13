@@ -12,35 +12,6 @@ import {
 
 const APP_URL = process.env.NEXTAUTH_URL ?? "http://localhost:3000"
 
-/**
- * Diagnostic temporaire (PLAN-ACQ-GMAIL-CONTINUITY-DIAG-001).
- * Flag OFF => no-op. Longueurs ciphertext uniquement — jamais de token/secret.
- */
-function logAcquisitionGmailWriteDiag(
-  companyId: string,
-  connection: {
-    id: string
-    updatedAt: Date
-    accessToken: string
-    refreshToken: string
-  }
-): void {
-  try {
-    if (process.env.ACQUISITION_GMAIL_DIAGNOSTIC !== "true") return
-    console.info(
-      `[acquisition-gmail-write-diag] ${JSON.stringify({
-        companyId,
-        connectionId: connection.id,
-        updatedAt: connection.updatedAt.toISOString(),
-        accessTokenLength: connection.accessToken.length,
-        refreshTokenLength: connection.refreshToken.length,
-      })}`
-    )
-  } catch {
-    // Le diagnostic ne doit jamais provoquer une nouvelle exception.
-  }
-}
-
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
   const code  = searchParams.get("code")
@@ -113,7 +84,7 @@ export async function GET(req: NextRequest) {
 
   // Chiffrer et stocker
   const expiry = new Date(Date.now() + (tokenData.expires_in ?? 3600) * 1000)
-  const connection = await prisma.gmailConnection.upsert({
+  await prisma.gmailConnection.upsert({
     where:  { companyId },
     create: {
       companyId,
@@ -131,8 +102,6 @@ export async function GET(req: NextRequest) {
       connectedById: userId,
     },
   })
-
-  logAcquisitionGmailWriteDiag(companyId, connection)
 
   return NextResponse.redirect(`${APP_URL}/parametres?gmail=connected`)
 }
