@@ -468,12 +468,12 @@ Ne pas traiter les TBD comme des features promises.
 
 | Champ | Contenu |
 |-------|---------|
-| Objectif | **TBD / À SPÉCIFIER** — candidat : adoption de **cette SPEC** + gel des critères AUTO/REVIEW avant activation auto |
+| Objectif | Gate de gouvernance : adoption de PLAN-ACQ-012-0 ; gel AUTO/REVIEW ; checklist GO/NO-GO ; aucune activation runtime. SPEC : `docs/plan-acq-012-1-auto-review-adoption.spec.md` |
 | Préconditions | PLAN-ACQ-012-0 revue / acceptée |
 | Dépendances | Code Lot F / registre déjà présents |
-| Preuves nécessaires | Revue SPEC ; checklist GO selon §12 |
+| Preuves nécessaires | Revue SPEC 012-1 ; gel AUTO/REVIEW ; checklist GO/NO-GO ; gaps classés |
 | Interdictions | Pas d’activation auto/convert ; pas Booking ; pas Prisma |
-| Critère de sortie | **TBD** |
+| Critère de sortie | Défini dans `docs/plan-acq-012-1-auto-review-adoption.spec.md` §10 |
 
 ### PLAN-ACQ-012-2
 
