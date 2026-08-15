@@ -490,12 +490,12 @@ Ne pas traiter les TBD comme des features promises.
 
 | Champ | Contenu |
 |-------|---------|
-| Objectif | **TBD / À SPÉCIFIER** — candidat : activation **contrôlée auto-convert** (après 012-2) |
-| Préconditions | 012-2 OK ; conversion fully ; `allowCreateClient` explicite **si NEW** ; détection duplicate validée |
-| Dépendances | conversion.service ; matching |
-| Preuves nécessaires | Idempotence convert (`ALREADY_CONVERTED` / version) ; auto-convert bloqué lorsqu’un doublon est **détecté** par l’algo courant |
-| Interdictions | Contournement review ; Booking ; affirmer une absence globale de doublons |
-| Critère de sortie | **TBD** |
+| Objectif | Encadrement d’un futur pilote **AUTO_APPROVE_CONVERT** contrôlé (après SPEC 012-2). Aucune activation runtime dans le lot SPEC. SPEC : `docs/plan-acq-012-3-auto-convert-controlled.spec.md` |
+| Préconditions | 012-0 ; 012-1 ; 012-2 SPEC ; pilote runtime 012-2 validé avant phase runtime convert ; conversion fully ; `allowCreateClient` si NEW ; duplicate heuristique ; fencing périmètre |
+| Dépendances | `conversion.service` ; matching ; `auto-decision.*` |
+| Preuves nécessaires | Idempotence convert (`ALREADY_CONVERTED` / version) ; convert bloqué si doublon **détecté** ; checklist 012-3 |
+| Interdictions | Contournement `HUMAN_REVIEW_REQUIRED` ; Booking ; absence globale de doublons ; activation runtime dans le lot SPEC |
+| Critère de sortie | Défini dans `docs/plan-acq-012-3-auto-convert-controlled.spec.md` §16 (DONE SPEC ≠ auto-convert activé) |
 
 ### PLAN-ACQ-012-4
 
