@@ -6,7 +6,7 @@
  */
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 
-import { describe, it } from "node:test"
+import { describe, it, beforeEach, afterEach } from "node:test"
 import assert from "node:assert/strict"
 import { registerIncomingMessage } from "@/lib/acquisition/acquisition.service"
 import { PartnerEligibilityResolver } from "@/lib/acquisition/partner-eligibility.resolver"
@@ -280,6 +280,109 @@ describe("registerIncomingMessage × éligibilité (R2)", () => {
     assert.equal(r.outcome, "DRAFT_CREATED")
     assert.equal(track.created[0]?.status, "DRAFT_CREATED")
     assert.equal(track.created[0]?.lastErrorCode, null)
+  })
+
+  it("externalAttachmentId long => persist OK + clé bornée + idempotence message", async () => {
+    const { buildAttachmentKey } = await import("@/lib/acquisition/acquisition.service")
+    const longId = "L".repeat(1200)
+    const p = partner({ id: "p1", companyId: "co_a", code: "lauralu", active: true })
+    const d = domain({
+      id: "d1",
+      companyId: "co_a",
+      partnerId: "p1",
+      domainNormalized: "lauralu.fr",
+      active: true,
+    })
+    const registry = trackingRegistry(new Map([["co_a::lauralu.fr", hit(p, d)]]))
+    const resolver = new PartnerEligibilityResolver(registry)
+
+    type StoredAtt = {
+      externalAttachmentId: string | null
+      attachmentKey: string
+      filename: string
+    }
+    let storedMessage: {
+      id: string
+      status: string
+      lastErrorCode: string | null
+      draft: { id: string } | null
+    } | null = null
+    const storedAttachments: StoredAtt[] = []
+    let messageCreateCalls = 0
+    let attachmentCreateCalls = 0
+    let transactionCalls = 0
+
+    const db = {
+      acquisitionMessage: {
+        findUnique: async () => storedMessage,
+        create: async ({ data }: { data: { status: string; lastErrorCode: string | null } }) => {
+          messageCreateCalls += 1
+          storedMessage = {
+            id: "msg_long_att",
+            status: data.status,
+            lastErrorCode: data.lastErrorCode,
+            draft: null,
+          }
+          return { id: storedMessage.id, status: data.status }
+        },
+      },
+      acquisitionAttachment: {
+        createMany: async ({ data }: { data: StoredAtt[] }) => {
+          attachmentCreateCalls += 1
+          storedAttachments.push(...data)
+          return { count: data.length }
+        },
+      },
+      worksiteImportDraft: {
+        create: async () => {
+          if (storedMessage) storedMessage.draft = { id: "draft_long" }
+          return { id: "draft_long" }
+        },
+      },
+      $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+        transactionCalls += 1
+        return fn(db)
+      },
+    }
+
+    const input = {
+      companyId: "co_a",
+      source: "GMAIL" as const,
+      externalMessageId: "msg-long-att-1",
+      senderEmail: "user@lauralu.fr",
+      subject: "Test long att",
+      receivedAt: now,
+      attachments: [
+        {
+          externalAttachmentId: longId,
+          filename: "plan.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 100,
+        },
+      ],
+    }
+
+    const r1 = await registerIncomingMessage(input, db as never, { eligibilityResolver: resolver })
+    assert.equal(r1.created, true)
+    assert.equal(r1.outcome, "DRAFT_CREATED")
+    assert.equal(messageCreateCalls, 1)
+    assert.equal(attachmentCreateCalls, 1)
+    assert.equal(storedAttachments.length, 1)
+    assert.equal(storedAttachments[0]!.externalAttachmentId, longId)
+    assert.equal(storedAttachments[0]!.externalAttachmentId!.length, 1200)
+    assert.equal(
+      storedAttachments[0]!.attachmentKey,
+      buildAttachmentKey({ externalAttachmentId: longId }, 0)
+    )
+    assert.ok(storedAttachments[0]!.attachmentKey.startsWith("ext-sha256:"))
+    assert.ok(!storedAttachments[0]!.attachmentKey.includes(longId))
+
+    const r2 = await registerIncomingMessage(input, db as never, { eligibilityResolver: resolver })
+    assert.equal(r2.created, false)
+    assert.equal(r2.messageId, "msg_long_att")
+    assert.equal(messageCreateCalls, 1)
+    assert.equal(attachmentCreateCalls, 1)
+    assert.equal(transactionCalls, 1)
   })
 
   it("partenaire inactif → REJECTED SENDER_NOT_ELIGIBLE", async () => {

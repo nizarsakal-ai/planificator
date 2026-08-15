@@ -6,8 +6,10 @@ import assert from "node:assert/strict"
 import {
   normalizeSenderAddress,
   categorizeAttachment,
+  buildAttachmentKey,
 } from "@/lib/acquisition/acquisition.service"
 import { registerIncomingMessageSchema } from "@/lib/validations/acquisition"
+import { createHash } from "crypto"
 
 describe("normalizeSenderAddress", () => {
   it("normalise trim + minuscules", () => {
@@ -87,5 +89,54 @@ describe("categorizeAttachment", () => {
     assert.equal(categorizeAttachment("image/jpeg", "photo.jpg"), "PHOTO")
     assert.equal(categorizeAttachment("application/zip", "docs.zip"), "ARCHIVE")
     assert.equal(categorizeAttachment("application/x-msdownload", "setup.exe"), "UNSUPPORTED")
+  })
+})
+
+describe("buildAttachmentKey", () => {
+  it("ID court => format historique ext:<id>", () => {
+    assert.equal(buildAttachmentKey({ externalAttachmentId: "att-1" }, 0), "ext:att-1")
+  })
+
+  it("ID longueur <=255 => format historique ext:<id>", () => {
+    const id = "C".repeat(255)
+    assert.equal(buildAttachmentKey({ externalAttachmentId: id }, 0), `ext:${id}`)
+  })
+
+  it("ID long (rawKey > 1024) => ext-sha256:<digest> borné, sans ID complet", () => {
+    // "ext:" (4) + 1021 = 1025 > 1024
+    const longId = "D".repeat(1021)
+    const key = buildAttachmentKey({ externalAttachmentId: longId }, 0)
+    const expected = `ext-sha256:${createHash("sha256").update(longId, "utf8").digest("hex")}`
+    assert.equal(key, expected)
+    assert.ok(key.startsWith("ext-sha256:"))
+    assert.equal(key.length, "ext-sha256:".length + 64)
+    assert.ok(!key.includes(longId))
+  })
+
+  it("déterminisme : même ID long => même clé", () => {
+    const longId = "E".repeat(1200)
+    assert.equal(
+      buildAttachmentKey({ externalAttachmentId: longId }, 0),
+      buildAttachmentKey({ externalAttachmentId: longId }, 7)
+    )
+  })
+
+  it("IDs longs distincts => clés distinctes", () => {
+    const a = buildAttachmentKey({ externalAttachmentId: "F".repeat(1200) }, 0)
+    const b = buildAttachmentKey({ externalAttachmentId: "G".repeat(1200) }, 0)
+    assert.notEqual(a, b)
+  })
+
+  it("hash sur ID trimé (espaces ignorés pour la clé)", () => {
+    const id = "H".repeat(1200)
+    assert.equal(
+      buildAttachmentKey({ externalAttachmentId: `  ${id}  ` }, 0),
+      buildAttachmentKey({ externalAttachmentId: id }, 0)
+    )
+  })
+
+  it("branches part: et ord: inchangées", () => {
+    assert.equal(buildAttachmentKey({ partId: "1.2" }, 0), "part:1.2")
+    assert.equal(buildAttachmentKey({}, 3), "ord:3")
   })
 })

@@ -1,11 +1,12 @@
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 
-import { describe, it, beforeEach } from "node:test"
+import { describe, it, beforeEach, afterEach } from "node:test"
 import assert from "node:assert/strict"
 import {
   syncAcquisitionMailForCompany,
   DEFAULT_GMAIL_PAGE_SIZE,
 } from "@/lib/acquisition/connector/acquisition-gmail-sync.service"
+import { GmailProviderError } from "@/lib/acquisition/connector/gmail.errors"
 import type { MailProviderPort } from "@/lib/acquisition/ports/mail-provider.port"
 import type { AcquisitionIngestionPort } from "@/lib/acquisition/ports/acquisition-ingestion.port"
 import type {

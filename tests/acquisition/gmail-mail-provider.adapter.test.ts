@@ -1,6 +1,6 @@
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 
-import { describe, it, beforeEach, mock } from "node:test"
+import { describe, it, beforeEach, afterEach, mock } from "node:test"
 import assert from "node:assert/strict"
 import {
   GmailMailProviderAdapter,
@@ -411,6 +411,10 @@ describe("GmailMailProviderAdapter", () => {
 
 describe("PrismaGmailConnectionClient (refresh token)", () => {
   it("refresh échoué → GMAIL_TOKEN_REFRESH_FAILED", async () => {
+    const previousGoogleClientId = process.env.GOOGLE_CLIENT_ID
+    const previousGoogleClientSecret = process.env.GOOGLE_CLIENT_SECRET
+    const previousGmailTokenEncryptionKey = process.env.GMAIL_TOKEN_ENCRYPTION_KEY
+
     process.env.GOOGLE_CLIENT_ID = "client-id"
     process.env.GOOGLE_CLIENT_SECRET = "client-secret"
     process.env.GMAIL_TOKEN_ENCRYPTION_KEY = "test-encryption-key-32chars-min!!"
@@ -450,6 +454,12 @@ describe("PrismaGmailConnectionClient (refresh token)", () => {
       )
     } finally {
       globalThis.fetch = originalFetch
+      if (previousGoogleClientId === undefined) delete process.env.GOOGLE_CLIENT_ID
+      else process.env.GOOGLE_CLIENT_ID = previousGoogleClientId
+      if (previousGoogleClientSecret === undefined) delete process.env.GOOGLE_CLIENT_SECRET
+      else process.env.GOOGLE_CLIENT_SECRET = previousGoogleClientSecret
+      if (previousGmailTokenEncryptionKey === undefined) delete process.env.GMAIL_TOKEN_ENCRYPTION_KEY
+      else process.env.GMAIL_TOKEN_ENCRYPTION_KEY = previousGmailTokenEncryptionKey
     }
   })
 })

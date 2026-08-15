@@ -7,7 +7,7 @@ import { z } from "zod"
 
 /** Métadonnées d'une pièce jointe détectée (aucun téléchargement en V1). */
 export const acquisitionAttachmentMetadataSchema = z.object({
-  externalAttachmentId: z.string().min(1).max(255).optional(),
+  externalAttachmentId: z.string().min(1).max(4096).optional(),
   /** Identifiant de partie MIME (ex : "2" ou "1.2") si le connecteur le fournit. */
   partId: z.string().min(1).max(64).optional(),
   filename: z.string().min(1).max(255),
