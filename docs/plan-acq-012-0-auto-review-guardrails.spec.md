@@ -479,12 +479,12 @@ Ne pas traiter les TBD comme des features promises.
 
 | Champ | Contenu |
 |-------|---------|
-| Objectif | **TBD / À SPÉCIFIER** — candidat : activation **contrôlée auto-approve only** (convert OFF) sur tenant pilote |
-| Préconditions | 012-0 ; system actor valide pour le tenant ; policies ; fencing suffisant |
+| Objectif | Encadrement d’un pilote **AUTO_APPROVE_ONLY** (convert OFF) sur un tenant explicite. Aucune activation runtime dans le lot SPEC. SPEC : `docs/plan-acq-012-2-auto-approve-pilot.spec.md` |
+| Préconditions | 012-0 ; 012-1 ; system actor valide pour le tenant ; policies ; fencing suffisant pour le périmètre ; TENANT_PILOT identifié avant runtime |
 | Dépendances | `auto-decision.*`, review service |
-| Preuves nécessaires | Tests §14 ; journal `AUTO_APPROVE_ONLY` / `HUMAN_REVIEW_REQUIRED` |
-| Interdictions | Auto-convert ; NEW client non autorisé ; Booking |
-| Critère de sortie | **TBD** |
+| Preuves nécessaires | Tests §14 ; journal `AUTO_APPROVE_ONLY` / `HUMAN_REVIEW_REQUIRED` ; checklist 012-2 |
+| Interdictions | Auto-convert ; NEW client ; création chantier auto ; Booking ; activation runtime dans le lot SPEC |
+| Critère de sortie | Défini dans `docs/plan-acq-012-2-auto-approve-pilot.spec.md` §14 (DONE SPEC ≠ pilote runtime activé) |
 
 ### PLAN-ACQ-012-3
 
