@@ -501,12 +501,12 @@ Ne pas traiter les TBD comme des features promises.
 
 | Champ | Contenu |
 |-------|---------|
-| Objectif | **TBD / À SPÉCIFIER** — candidat : fencing mid-worker non-Gmail (`PLAN-ACQ-V2-FENCING-WORKERS`) |
-| Préconditions | Doc fencing ; orchestrateur stable |
+| Objectif | SPEC normative fencing/concurrence workers Acquisition **non-Gmail** (mid-worker, `LEASE_STOLEN`, heartbeat / `assertOwned`, chemin UI). Aucune implémentation dans le lot SPEC. SPEC : `docs/plan-acq-012-4-non-gmail-worker-fencing.spec.md` |
+| Préconditions | 012-0 … 012-3 ; doc fencing V2 ; orchestrateur + lease existants |
 | Dépendances | orchestrator-workers / lease |
-| Preuves nécessaires | Tests expiration mid-run / LEASE_STOLEN |
-| Interdictions | Activer auto large sans §11.2 |
-| Critère de sortie | **TBD** |
+| Preuves nécessaires | Oracles **TEST_DEFINED** 012-4 §14 (A–F) ; **TEST_IMPLEMENTED** / **TEST_PASSING hors** lot SPEC |
+| Interdictions | Activer auto large sans §11.2 ; implémenter fencing dans le lot SPEC ; Booking ; `gmail-scan` |
+| Critère de sortie | Défini dans `docs/plan-acq-012-4-non-gmail-worker-fencing.spec.md` §16 (DONE SPEC ≠ fencing livré) |
 
 ### PLAN-ACQ-012-5
 
@@ -597,3 +597,5 @@ Ne pas traiter les TBD comme des features promises.
 |------|------|
 | 2026-08-15 | Création SPEC suite audit READ-ONLY `SPEC_SCOPE_PROVEN` (HEAD `3139725`) |
 | 2026-08-15 | R1 — bornage garanties (master, readiness, duplicate, idempotence, actor, cursor technique) |
+| 2026-08-15 | Mapping **fonctionnel** PLAN-ACQ-012-4 → `docs/plan-acq-012-4-non-gmail-worker-fencing.spec.md` ; 012-5…012-7 inchangés ; entrée historique documentaire (SPEC ≠ fencing livré ; G-FENCE inchangé) |
+| 2026-08-16 | 012-4 R1 : historique 012-0 reformulé (mapping 012-4 seulement + ligne d’historique) |
