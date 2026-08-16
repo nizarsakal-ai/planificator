@@ -512,12 +512,12 @@ Ne pas traiter les TBD comme des features promises.
 
 | Champ | Contenu |
 |-------|---------|
-| Objectif | **TBD / À SPÉCIFIER** — candidat : runbook activation flags (OPS-007) |
-| Préconditions | OPS-001 |
-| Dépendances | Docs ops existantes |
-| Preuves nécessaires | Runbook publié ; rollback flags |
-| Interdictions | Secrets dans docs |
-| Critère de sortie | **TBD** |
+| Objectif | SPEC normative d’encadrement d’un **futur** runbook d’activation / rollback des flags Acquisition (OPS-007). Aucune publication OPS-007 ni activation runtime dans le lot SPEC. SPEC : `docs/plan-acq-012-5-activation-flags-runbook.spec.md` |
+| Préconditions | 012-0 … 012-4 ; OPS-001 ; docs ops existantes (pas OPS-007) |
+| Dépendances | `acquisition-flag-matrix` ; readiness staging ; 012-2/012-3/012-4 (AUTO / fencing) |
+| Preuves nécessaires | Inventaire flags ; ordre d’activation ; stop/rollback ; no-secrets ; checklist 012-5. **OPS-007 publié hors** lot SPEC |
+| Interdictions | Secrets dans docs ; activer flags ; contourner G-FENCE ; Booking ; `gmail-scan` ; création OPS-007 dans le lot SPEC |
+| Critère de sortie | Défini dans `docs/plan-acq-012-5-activation-flags-runbook.spec.md` §20 (DONE SPEC ≠ OPS-007 publié ≠ runtime ready) |
 
 ### PLAN-ACQ-012-6
 
@@ -599,3 +599,4 @@ Ne pas traiter les TBD comme des features promises.
 | 2026-08-15 | R1 — bornage garanties (master, readiness, duplicate, idempotence, actor, cursor technique) |
 | 2026-08-15 | Mapping **fonctionnel** PLAN-ACQ-012-4 → `docs/plan-acq-012-4-non-gmail-worker-fencing.spec.md` ; 012-5…012-7 inchangés ; entrée historique documentaire (SPEC ≠ fencing livré ; G-FENCE inchangé) |
 | 2026-08-16 | 012-4 R1 : historique 012-0 reformulé (mapping 012-4 seulement + ligne d’historique) |
+| 2026-08-16 | Mapping **fonctionnel** PLAN-ACQ-012-5 → `docs/plan-acq-012-5-activation-flags-runbook.spec.md` ; 012-6…012-7 inchangés ; G-RB / G-FENCE inchangés (SPEC ≠ OPS-007 publié) |
