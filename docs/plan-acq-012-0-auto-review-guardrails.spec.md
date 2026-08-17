@@ -5,7 +5,7 @@
 | **Ticket** | PLAN-ACQ-012-0 |
 | **Type** | SPEC normative (documentation seule) |
 | **Statut** | DRAFT — prêt pour revue R2 |
-| **HEAD de référence** | `31397257901aa0f9c1cf425299d7dae645a157ae` (main, post PR #52) |
+| **HEAD de référence** | `a04f635a5a49888c060003e5de3e316ea54dad85` (main, post PR #53) |
 | **Implémentation** | **Interdite** dans ce lot |
 | **Activation runtime** | **Interdite** dans ce lot |
 
@@ -393,22 +393,29 @@ Acquisition (consultations / import drafts / registre) et Booking (gmail-scan / 
 
 ## 11. Fencing / concurrence
 
-### 11.1 État réel (documenté, pas à coder ici)
+### 11.1 État réel (post PR #53)
 
 | Élément | État | Réf. |
 |---------|------|------|
 | Lease orchestrateur | **Existant** | lease repository + service |
 | `assertOwned` avant chaque step | **Existant** | orchestrator.service |
-| Heartbeat mid-run Gmail (`shouldContinue` + `renew`) | **Existant** | orchestrator-workers (gmail) |
-| Heartbeat mid-run attachment / content / extraction | **Incomplet** | `docs/acquisition-ops-v2-fencing-workers.md` |
+| Heartbeat mid-run Gmail (`shouldContinue` + `renew`) | **Existant** `PAGE_BOUNDARY_PARTIAL` — **pas** fully fenced, **pas** intra-page | orchestrator-workers (gmail) |
+| Heartbeat mid-run recovery / download / content / extraction | **EXISTING** frontière d’**item** / **draft** (`assertOwned` puis `renew`, capability WeakMap). **Pas** fence continu ni cancellation I/O | orchestrator-workers ; 012-4 |
+| UI extraction AUTO | **Interdit** (`UI_MANUAL`) — **pas** de lease UI | extraction.service |
+| Unit crons | **Hors lease** ; extraction `UNIT_CRON` = AUTO interdit ; dual ∥ orchestrateur = **PRECONDITION** ops | 012-4 `UNIT_CRON_GAP` |
 
 ### 11.2 Précondition activation
 
-**PRECONDITION — auto/convert large ou traitements longs prod :**
-soit livrer le fencing mid-worker non-Gmail (ticket technique déjà nommé `PLAN-ACQ-V2-FENCING-WORKERS` dans le doc fencing),
-soit prouver que chaque worker a `maxDurationMs` **strictement** sous le TTL lease avec marge (critère du même doc).
+**PRECONDITION — auto/convert large ou traitements longs prod (012-0 historique) :**
+soit livrer le fencing mid-worker non-Gmail, soit prouver `maxDurationMs` **strictement** sous le TTL lease avec marge.
 
-012-0 **ne code pas** cette solution ; elle la rend **bloquante** pour un GO auto/convert large (§12).
+**Statut post-PR #53 :** le fencing mid-worker non-Gmail **orchestré** est **livré** → cette précondition **§11.2 est SATISFAITE**. **G-FENCE = CLOSED** (ce sens uniquement).
+
+Limites **inchangées** (hors G-FENCE) : Gmail `PAGE_BOUNDARY_PARTIAL` ; unit crons non leased ; intra-item non continu.
+
+**`AUTO_RUNTIME_STATUS = OFF`.** G-FENCE CLOSED **≠** AUTO_APPROVE ON **≠** AUTO_CONVERT ON **≠** pilote 012-2/012-3 exécuté **≠** production ready.
+
+012-0 **n’active pas** AUTO. Les autres cases GO §12.3 restent requises.
 
 ---
 
@@ -448,7 +455,7 @@ Ce sont des **recommandations opérationnelles**, pas des champs du calcul `read
 - [ ] `autoApprove` / `autoConvert` contrôlés (env ∩ partner) ; `allowCreateClient` seulement si NEW autorisé
 - [ ] Détection duplicate **heuristique** validée (tests + scénario) — pas une preuve d’absence globale
 - [ ] Mécanismes d’idempotence §9 validés sur leurs périmètres
-- [ ] Fencing **suffisant** pour le niveau (§11.2)
+- [ ] Fencing **suffisant** pour le niveau — **§11.2 SATISFAITE** (PR #53 / G-FENCE **CLOSED**). Reste : autres cases GO + `AUTO_RUNTIME_STATUS = OFF` jusqu’à autorisation dédiée
 - [ ] Rollback documenté (flags OFF + master OFF sur **entrées gated**)
 - [ ] Logs / journal exploitables
 
@@ -501,12 +508,12 @@ Ne pas traiter les TBD comme des features promises.
 
 | Champ | Contenu |
 |-------|---------|
-| Objectif | SPEC normative fencing/concurrence workers Acquisition **non-Gmail** (mid-worker, `LEASE_STOLEN`, heartbeat / `assertOwned`, chemin UI). Aucune implémentation dans le lot SPEC. SPEC : `docs/plan-acq-012-4-non-gmail-worker-fencing.spec.md` |
+| Objectif | SPEC normative fencing/concurrence workers Acquisition **non-Gmail**. Lot SPEC = documentation only. **Implémentation** = **PR #53** (`a04f635`). SPEC : `docs/plan-acq-012-4-non-gmail-worker-fencing.spec.md` |
 | Préconditions | 012-0 … 012-3 ; doc fencing V2 ; orchestrateur + lease existants |
 | Dépendances | orchestrator-workers / lease |
-| Preuves nécessaires | Oracles **TEST_DEFINED** 012-4 §14 (A–F) ; **TEST_IMPLEMENTED** / **TEST_PASSING hors** lot SPEC |
-| Interdictions | Activer auto large sans §11.2 ; implémenter fencing dans le lot SPEC ; Booking ; `gmail-scan` |
-| Critère de sortie | Défini dans `docs/plan-acq-012-4-non-gmail-worker-fencing.spec.md` §16 (DONE SPEC ≠ fencing livré) |
+| Preuves nécessaires | Oracles §14 ; **TEST_IMPLEMENTED = YES** ; **TEST_PASSING = YES** (`plan-acq-012-4-fencing.test.ts` 25/25) |
+| Interdictions | Activer AUTO large sans reste du GO §12.3 ; Booking ; `gmail-scan` |
+| Critère de sortie | Défini dans 012-4 §16. **FENCING_IMPLEMENTATION_READY = YES**. **G-FENCE CLOSED** (§11.2). **AUTO_RUNTIME_STATUS = OFF** |
 
 ### PLAN-ACQ-012-5
 
@@ -582,7 +589,7 @@ Ne pas traiter les TBD comme des features promises.
 | ID | Type | Description |
 |----|------|-------------|
 | G-INV | GAP | `INV_*` détectés mais non bloquants process |
-| G-FENCE | GAP / PRECONDITION | Heartbeat mid-worker non-Gmail incomplet avant auto/convert large |
+| G-FENCE | **CLOSED** | Précondition §11.2 (fencing mid-worker non-Gmail **orchestré**) satisfaite (PR #53). Limites : Gmail `PAGE_BOUNDARY_PARTIAL` ; unit crons non leased ; intra-item non continu. **≠** AUTO ON |
 | G-RB | GAP | Runbook `RB-PLAN-ACQ-001-activation-flags.md` (OPS-007) absent |
 | G-MASTER-SERVICE-SCOPE | GAP | Master non enforceé dans chaque service interne (`registerIncomingMessage`, `maybeRunAutoDecisionAfterExtraction`, …) — protection via entrées gated |
 | P-ACTOR | PRECONDITION | User `ACQUISITION_SYSTEM_ACTOR_USER_ID` valide **pour le tenant cible** avant AUTO (env unique, pas config multi-tenant native) |
@@ -599,4 +606,5 @@ Ne pas traiter les TBD comme des features promises.
 | 2026-08-15 | R1 — bornage garanties (master, readiness, duplicate, idempotence, actor, cursor technique) |
 | 2026-08-15 | Mapping **fonctionnel** PLAN-ACQ-012-4 → `docs/plan-acq-012-4-non-gmail-worker-fencing.spec.md` ; 012-5…012-7 inchangés ; entrée historique documentaire (SPEC ≠ fencing livré ; G-FENCE inchangé) |
 | 2026-08-16 | 012-4 R1 : historique 012-0 reformulé (mapping 012-4 seulement + ligne d’historique) |
-| 2026-08-16 | Mapping **fonctionnel** PLAN-ACQ-012-5 → `docs/plan-acq-012-5-activation-flags-runbook.spec.md` ; 012-6…012-7 inchangés ; G-RB / G-FENCE inchangés (SPEC ≠ OPS-007 publié) |
+| 2026-08-16 | Mapping **fonctionnel** PLAN-ACQ-012-5 → `docs/plan-acq-012-5-activation-flags-runbook.spec.md` ; 012-6…012-7 inchangés ; G-RB inchangé (SPEC ≠ OPS-007 publié) |
+| 2026-08-17 | PR #53 MERGED `a04f635` — fencing non-Gmail livré ; **G-FENCE CLOSED** (§11.2) ; `FENCING_IMPLEMENTATION_READY = YES` ; **AUTO_RUNTIME_STATUS = OFF** ; G-INV / G-RB / G-MASTER inchangés |

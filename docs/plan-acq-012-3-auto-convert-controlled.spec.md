@@ -78,7 +78,7 @@ Aucune condition runtime n’est **GO** sans preuve. Specs sur `main` ≠ activa
 | P11 | Duplicate detection (algo courant) opérationnelle | Mécanisme **existant** ; preuve ops **PRECONDITION** |
 | P12 | Tenant isolation chemins review/convert | Mécanismes **existants** ; preuve tenant **PRECONDITION** |
 | P13 | Idempotence conversion bornée (§10) | Mécanismes **existants** ; pas « retry safe » universel |
-| P14 | Fencing / concurrence sur **tous** les chemins d’extraction activés (cron/orchestrateur **et** UI) | **GAP / PRECONDITION / NO-GO** — **G-FENCE** (§11) ; lease orchestrateur **non** globale |
+| P14 | Fencing / concurrence sur les chemins d’extraction **activables pour AUTO** | **GO** fencing orchestré (**G-FENCE CLOSED**). UI / UNIT_CRON : AUTO **interdit** (pas de lease UI / unit). Dual unit ∥ orchestrateur : **PRECONDITION_ONLY** |
 | P15 | Logs / journal exploitables | Chemins documentés ; preuve ops **PRECONDITION** |
 | P16 | Rollback défini | **Défini documentairement** §14 ; **non exécuté** |
 | P17 | Booking isolation | Règle figée 012-0 §10 ; 012-3 n’y touche pas |
@@ -197,37 +197,38 @@ Cette affirmation correspond au code actuel. 012-3 **n’autorise pas** de bypas
 
 ## 11. Fencing
 
-**G-FENCE** ouvert (012-0 §11 ; 012-2 §7). **Aucun heartbeat mid-run sur l’extraction.** 012-3 **ne code pas** de solution.
+**G-FENCE CLOSED** (012-0 §11.2 ; PR #53). Heartbeat extraction orchestrée : **EXISTING** frontière de draft + fences persist/AUTO. 012-3 **ne code pas** de solution (déjà livrée hors 012-3). **`AUTO_RUNTIME_STATUS = OFF`.**
 
 ### 11.1 Déclenchement réel de l’auto-decision
 
-`maybeRunAutoDecisionAfterExtraction` est appelé **après extraction réussie** depuis `runDraftExtractionCore` (`extraction.service.ts`).
-
-Ce core peut être appelé depuis **au moins deux** classes de chemins :
+`maybeRunAutoDecisionAfterExtraction` n’est appelé que depuis `runDraftExtractionCore` si `kind === "ORCHESTRATOR_AUTO"` **et** capability WeakMap encore `OWNED`.
 
 | PATH | ORCHESTRATOR_LEASE | Heartbeat extraction | FENCING_STATUS | AUTO-CONVERT |
 |------|--------------------|----------------------|----------------|--------------|
-| Cron / orchestrateur → `runDraftExtractionSystem` → `runDraftExtractionCore` → `maybeRunAutoDecisionAfterExtraction` | Possible (lease step `extraction` : `assertOwned` **entre** steps ; **pas** de `renew` / `shouldContinue` pendant l’extraction) | **NON** | **NOT PROVEN / G-FENCE** | **NO-GO** sans preuve de concurrence sur **tous** les chemins activés |
-| UI extraction → `runDraftExtraction` → `runDraftExtractionCore` → `maybeRunAutoDecisionAfterExtraction` | **NO** | **NON** | **NOT PROVEN / G-FENCE** | **NO-GO** sans preuve de concurrence sur **tous** les chemins activés |
+| Orchestrateur → `runDraftExtractionOrchestrated` → core → hook AUTO **si** owned | Oui (`ownerRunId` + WeakMap) | **Oui** claim / persist / AUTO (`assertOwned`+`renew`) | **EXISTING** (frontière draft ; **pas** intra-item continu) | **NO-GO runtime** (012-3 non exécuté ; flags OFF). Fencing **n’est plus** le NO-GO G-FENCE |
+| Unit cron → `runDraftExtractionSystem` → **`UNIT_CRON`** | **NO** | **NO** (hors lease) | **PRECONDITION_ONLY** — **pas UNIT_CRON FENCED** ; **AUTO interdit** | Impossible (AUTO interdit) |
+| UI → `runDraftExtraction` → **`UI_MANUAL`** | **NO** (lease UI **NOT_APPLICABLE**) | **NO** | **UI_GAP CLOSED** par séparation (AUTO interdit). Pas de lease UI | Impossible (AUTO interdit) |
 
-La lease orchestrateur **seule** n’est **pas** une garantie globale de fencing pour l’auto-decision (le chemin UI n’y est pas couvert ; le worker extraction n’a pas de heartbeat mid-run).
+La lease orchestrateur **seule** ne fencait pas l’UI : l’écart AUTO UI est **fermé** par **interdiction AUTO**, pas par une lease UI.
 
-Autres steps orchestrateur (rappel, inchangé) : `gmailSync` a heartbeat ; recovery / download / content **non**.
+Autres steps orchestrateur : `gmailSync` = `PAGE_BOUNDARY_PARTIAL` ; recovery / download / content = **EXISTING** inter-items.
 
 ### 11.2 Conséquence pour une future activation
 
-Une future phase runtime `AUTO_APPROVE_CONVERT` doit **prouver** le contrôle de concurrence pour **tous** les chemins d’extraction réellement activés (cron/orchestrateur **et** UI, s’ils restent joignables).
+Une future phase runtime `AUTO_APPROVE_CONVERT` doit **toujours** : pilote 012-2 runtime validé, tenant, P-ACTOR, flags/policies, **AUTO seulement** via `ORCHESTRATOR_AUTO`.
 
-En l’absence de cette preuve : **PRECONDITION / NO-GO**.
+UI / unit cron **ne doivent pas** être ré-ouverts vers AUTO sans SPEC.
 
 | Niveau | Décision |
 |--------|----------|
-| Auto-convert **large** / traitements longs | **NO-GO** |
-| Un seul chemin « sous lease » sans traiter l’UI | **NO-GO** |
-| Sans preuve durée/`maxDurationMs` vs TTL **et** sans restriction des chemins UI | **NO-GO** runtime |
-| Preuve concurrence **tous chemins** **ou** fencing dédié (hors 012-3) | **PRECONDITION** |
+| Auto-convert **large** | **NO-GO** (012-3 runtime + flags + G-RB) — **G-FENCE n’est plus** le bloqueur fencing |
+| Réintroduire AUTO sur UI | **NO-GO** |
+| Dual unit cron ∥ orchestrateur | **PRECONDITION** ops |
+| Gmail intra-page | Hors G-FENCE non-Gmail (`PAGE_BOUNDARY_PARTIAL`) |
 
-012-4+ / `PLAN-ACQ-V2-FENCING-WORKERS` restent hors scope.
+Le fencing a été livré **hors** 012-3 (**PR #53**). 012-3 **n’active toujours pas** AUTO_CONVERT.
+
+---
 
 ---
 
@@ -249,7 +250,7 @@ En l’absence de cette preuve : **PRECONDITION / NO-GO**.
 | Chemin NEW / `allowCreateClient` | **PRECONDITION** | ON seulement si NEW voulu ; OFF = pas de NEW | **YES** si NEW sans flag |
 | Duplicate heuristique 500/2000 | **PRECONDITION** | 012-0 §4.2 | **YES** si contournée |
 | Idempotence convert bornée | **PRECONDITION** | §10 | **YES** si garantie universelle postulée |
-| Fencing extraction (orchestrateur **et** UI) | **GAP** | **G-FENCE** ; §11 — lease seule insuffisante | **YES** large / sans preuve concurrence **tous chemins** |
+| Fencing extraction (orchestrateur **et** chemins AUTO) | **GO** (fencing) | **G-FENCE CLOSED** ; §11 — UI/UNIT_CRON AUTO interdit | **YES** si AUTO réintroduit hors orchestrateur / flags ON sans 012-3 runtime |
 | Logs / journal | **PRECONDITION** | Preuve ops manquante | **YES** runtime |
 | Rollback défini | **GO** | §14 documentaire | NO pour DONE SPEC |
 | Booking isolation | **GO** | 012-0 §10 ; 012-3 n’y touche pas | **YES** si violation |
@@ -311,7 +312,7 @@ Le rollback **n’annule pas** un `CONVERTED` déjà persisté.
 - Prisma / migrations ;
 - Booking / `/api/cron/gmail-scan` ;
 - Vercel / Raspberry Pi / scheduler ;
-- fermeture code **G-FENCE** / **G-INV** / **G-RB** ;
+- fermeture **G-INV** / **G-RB** (G-FENCE déjà fermé par 012-4 / PR #53) ;
 - PLAN-ACQ-012-4+.
 
 ---
@@ -326,7 +327,7 @@ Le rollback **n’annule pas** un `CONVERTED` déjà persisté.
 4. la checklist GO/NO-GO est **complète** ;
 5. les tests d’acceptation sont **définis** (non nécessairement ajoutés/exécutés ici) ;
 6. le rollback est **défini** ;
-7. les gaps (**G-FENCE**, **G-INV**, **G-MASTER-SERVICE-SCOPE**, pilote 012-2 runtime, tenant TBD) sont **explicites** ;
+7. les gaps (**G-INV**, **G-MASTER-SERVICE-SCOPE**, pilote 012-2 runtime, tenant TBD) sont **explicites** ; **G-FENCE CLOSED** (hors 012-3) ;
 8. **aucune** activation runtime n’a eu lieu dans 012-3 ;
 9. **aucun** code métier n’a été modifié.
 
@@ -340,7 +341,7 @@ DONE SPEC **≠** auto-convert activé, **≠** production ready, **≠** TENANT
 
 - 012-0 / 012-1 : source AUTO/REVIEW.
 - 012-2 : convert **interdit** jusqu’à phase runtime **post-012-3** autorisée.
-- 012-4+ : hors scope (fencing, runbook flags, etc.).
+- 012-4+ : hors **lot** 012-3 (fencing livré ensuite par PR #53 ; runbook flags = 012-5).
 
 ---
 
@@ -349,3 +350,4 @@ DONE SPEC **≠** auto-convert activé, **≠** production ready, **≠** TENANT
 | Date | Note |
 |------|------|
 | 2026-08-15 | Création SPEC 012-3 suite audit `012_3_SCOPE_NOT_DEFINED` ; encadrement `AUTO_APPROVE_CONVERT` sans activation runtime |
+| 2026-08-17 | Alignement : **G-FENCE CLOSED** ; AUTO UI/UNIT_CRON interdit ; **AUTO_RUNTIME_STATUS = OFF** |

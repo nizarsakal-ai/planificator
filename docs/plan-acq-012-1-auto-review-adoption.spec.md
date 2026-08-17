@@ -138,7 +138,7 @@ Gel documentaire des invariants 012-0 (aucune réécriture métier) :
 | Idempotence | Bornée aux mécanismes 012-0 §9 (message, attachmentKey, version review, convert, cursor) |
 | Master scope | Kill-switch d’**entrée gated** — pas universel par service (**G-MASTER-SERVICE-SCOPE**) |
 | Booking isolation | Pipelines disjoints ; pas d’import Acquisition → Booking ; pas toucher gmail-scan |
-| Fencing non-Gmail | Heartbeat mid-worker hors Gmail **incomplet** (**G-FENCE**) |
+| Fencing non-Gmail | Mid-worker orchestré **EXISTING** (PR #53, frontière item/draft). **G-FENCE CLOSED** (012-0 §11.2). Gmail `PAGE_BOUNDARY_PARTIAL`. Unit crons **PRECONDITION_ONLY**. **AUTO_RUNTIME_STATUS = OFF** |
 | `INV_*` | Détection matrice seule — **non** enforcement cron (**G-INV**) |
 
 Inertie crons (012-0 §5) : distinguer **écriture métier** vs **écriture technique** ; SKIPPED ≠ toujours zéro écriture (`getOrCreate` possible avant `NO_ACTIVE_PARTNER_IDENTITIES`).
@@ -168,7 +168,7 @@ Légende :
 | C8 | `conversionFully` | **PRECONDITION** | Code `readyForOrchestratorE2E` exige `!flags.conversionFully` ; ≠ `autoConvert` seul |
 | C9 | Duplicate protection (heuristique) | **PRECONDITION** | Mécanisme existant ; validation activation = tests + scénario ; pas garantie globale |
 | C10 | Idempotence bornée §9 | **PRECONDITION** | Mécanismes existants ; validation sur périmètres documentés |
-| C11 | Fencing suffisant pour auto/convert large | **GAP** | **G-FENCE** — bloque GO auto large (012-0 §11.2) |
+| C11 | Fencing suffisant pour auto/convert large (§11.2) | **GO** (précondition fencing) | **G-FENCE CLOSED** — PR #53. **≠** GO AUTO flags. Vérifier encore Gmail partiel / unit crons ops / intra-item |
 | C12 | Rollback documenté (flags / master sur entrées gated) | **PRECONDITION** | Runbook flags OPS-007 encore **G-RB** |
 | C13 | Logs / journal exploitables | **PRECONDITION** | Chemins log documentés 012-0 ; preuve ops non fournie par 012-1 |
 | C14 | Booking isolation | **GO** | Règle figée 012-0 §10 + constat structurel ; 012-1 n’y touche pas |
@@ -177,7 +177,7 @@ Légende :
 | C17 | `INV_*` comme kill-switch | **NO-GO** / **GAP** | **G-INV** — ne pas s’y fier pour activer |
 | C18 | Activation autoApprove / autoConvert dans 012-1 | **NO-GO** | Interdit §8 |
 
-**Règle :** ne pas marquer **GO** un élément d’activation non prouvé. Les items C3–C13 restent PRECONDITION ou GAP jusqu’à preuves ops / lots futurs.
+**Règle :** ne pas marquer **GO** un élément d’activation non prouvé. Les items C3–C10 et C12–C13 restent PRECONDITION. **C11** (fencing §11.2) est **GO** post-PR #53 **sans** activer AUTO.
 
 ---
 
@@ -188,14 +188,14 @@ Repris de 012-0 §16 — **sans résolution** dans 012-1.
 | ID | STATUS | IMPACT | BLOCKS_AUTO_ACTIVATION | EVIDENCE_REQUIRED |
 |----|--------|--------|------------------------|-------------------|
 | **G-INV** | Ouvert | `INV_*` détectés, non bloquants process / non gate cron | **YES** si on s’y fie comme kill-switch ; sinon mitigé par vérif flags explicites | Checklist flags cohérents ; ne pas traiter `INV_*` comme enforcement |
-| **G-FENCE** | Ouvert | Heartbeat mid-worker non-Gmail incomplet | **YES** pour auto/convert **large** ou traitements longs (012-0 §11.2) | Fencing livré **ou** preuve `maxDurationMs` &lt; TTL+marge |
+| **G-FENCE** | **Fermé** (§11.2) | Fencing mid-worker non-Gmail **orchestré** livré (PR #53). Limites : Gmail `PAGE_BOUNDARY_PARTIAL` ; unit crons non leased ; intra-item non continu | **NO** pour le gap fencing. **YES** si on active AUTO sans reste du GO 012-0 §12.3 | Preuve : 012-4 READY + tests 25/25. **AUTO_RUNTIME_STATUS = OFF** |
 | **G-RB** | Ouvert | Runbook `RB-PLAN-ACQ-001-activation-flags.md` (OPS-007) absent | **YES** pour rollback / activation ops documentée | Runbook publié (hors 012-1) |
 | **G-MASTER-SERVICE-SCOPE** | Ouvert | Master non enforceé dans chaque service interne | **YES** si appels directs hors entrées gated | Respecter chemins d’entrée documentés ; pas d’appel direct non gated en ops |
 | **P-ACTOR** | Précondition | System actor env valide pour tenant cible | **YES** pour AUTO effectif | UserId env + appartenance tenant + rôle + actif |
 | **P-CONV** | Précondition | Conversion fully + policies auto-convert ; `allowCreateClient` si NEW | **YES** pour auto-convert | Flags + partner + actor |
 | **P-STAGE** | Précondition | Distinguer contrat code `readyForOrchestratorE2E` vs reco ops | **YES** si mal interprété (faux GO staging) | Lire 012-0 §12.1 / §12.2 avant activation |
 
-012-1 **classifie** ces gaps ; il **ne les ferme pas**.
+012-1 **classifie** ces gaps ; il **ne les ferme pas** (sauf **G-FENCE**, fermé **ultérieurement** par l’implémentation 012-4 / PR #53 — hors lot 012-1).
 
 ---
 
@@ -246,7 +246,7 @@ La résolution des gaps **G-*** / **P-*** **n’est pas** une preuve requise de 
 6. **aucun** code métier n’a été modifié dans le cadre de 012-1 ;
 7. Booking / gmail-scan / Prisma / scheduler n’ont **pas** été touchés.
 
-DONE **n’exige pas** la fermeture de G-FENCE, G-INV, G-RB, G-MASTER-SERVICE-SCOPE, ni la satisfaction ops de P-ACTOR / P-CONV / P-STAGE.
+DONE **n’exigeait pas** la fermeture de G-FENCE / G-INV / G-RB / G-MASTER-SERVICE-SCOPE, ni la satisfaction ops de P-ACTOR / P-CONV / P-STAGE. **Post-PR #53 :** **G-FENCE CLOSED** ; **G-INV** / **G-RB** / **G-MASTER** / **P-*** inchangés.
 
 ---
 
@@ -277,3 +277,4 @@ DONE **n’exige pas** la fermeture de G-FENCE, G-INV, G-RB, G-MASTER-SERVICE-SC
 | Date | Note |
 |------|------|
 | 2026-08-15 | Création SPEC 012-1 suite audit `012_1_SCOPE_NOT_DEFINED` ; adoption documentaire de 012-0 (`6c685e2`) |
+| 2026-08-17 | Alignement état courant : **G-FENCE CLOSED** (PR #53 / 012-4) ; C11 GO fencing ≠ GO AUTO ; G-INV / G-RB / G-MASTER inchangés |

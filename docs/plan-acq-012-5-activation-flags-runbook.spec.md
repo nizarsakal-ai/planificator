@@ -31,7 +31,7 @@ Ce lot :
 
 - **ne crée pas** OPS-007 / `RB-PLAN-ACQ-001-activation-flags.md` ;
 - **ne modifie aucun** flag runtime, scheduler, Vercel, Raspberry Pi, Prisma, Booking, `gmail-scan` ;
-- **ne contourne pas** **G-FENCE** (OPEN) ni `FENCING_IMPLEMENTATION_READY` = **NO** ;
+- **ne contourne pas** **G-FENCE CLOSED** (012-0 §11.2) ni `FENCING_IMPLEMENTATION_READY` = **YES** (fencing **≠** activation AUTO) ;
 - **n’affirme pas** que les pilotes runtime 012-2 / 012-3 ont eu lieu.
 
 **012-5 SPEC DONE ≠ OPS-007 publié ≠ runtime ready ≠ production ready.**
@@ -80,14 +80,14 @@ Aucun secret, token, user id réel, URL, host DB dans ce tableau.
 | `ACQUISITION_ORCHESTRATOR_CRON_ENABLED` | Cron orchestrateur V2 (5 steps in-process) | OFF | Master | `INV_ORCHESTRATOR_WITHOUT_MASTER` | Pipeline complet sous **une** lease globale (012-4) | unset / ≠ `"true"` |
 | `ACQUISITION_CONVERSION_ENABLED` | Flag **brut** conversion ; participe à `conversionFully` (master ∩ brut) | OFF | Master pour que `conversionFully` soit true (`INV_CONVERSION_WITHOUT_MASTER` = détection) | `INV_CONVERSION_WITHOUT_MASTER` | Voir distinction **conversion manuelle vs AUTO-CONVERT** ci-dessous. **Ne pas** lire ce flag comme « exige une partner policy » | unset / ≠ `"true"` |
 | `ACQUISITION_AUTO_APPROVE_ENABLED` | Kill-switch env auto-approve (early return service) | OFF | Master (matrice). Partner `autoApproveEnabled` **indépendant** | `INV_AUTO_APPROVE_WITHOUT_MASTER` | Approve auto post-extraction **si** policy AUTO | unset / ≠ `"true"` |
-| `ACQUISITION_AUTO_CONVERT_ENABLED` | Kill-switch env auto-convert | OFF | autoApprove env + conversion brut (matrice) + `conversionFully` runtime convert + partner | `INV_AUTO_CONVERT_WITHOUT_AUTO_APPROVE` / `_WITHOUT_CONVERSION` | Convert auto — **NO-GO** 012-3/012-4 tant que G-FENCE | unset / ≠ `"true"` |
+| `ACQUISITION_AUTO_CONVERT_ENABLED` | Kill-switch env auto-convert | OFF | autoApprove env + conversion brut (matrice) + `conversionFully` runtime convert + partner | `INV_AUTO_CONVERT_WITHOUT_AUTO_APPROVE` / `_WITHOUT_CONVERSION` | Convert auto — **NO-GO** 012-3 (runtime non exécuté) ; fencing **G-FENCE CLOSED** ≠ GO convert | unset / ≠ `"true"` |
 
 **Capacité effective conversion** : `isAcquisitionConversionFullyEnabled()` = master **ET** `ACQUISITION_CONVERSION_ENABLED`. Ne pas confondre brut et fully (012-0 / OPS-001).
 
 | Chemin | Ce dont il dépend | Ce dont il **ne** dépend pas du seul fait d’être « conversion » |
 |--------|-------------------|------------------------------------------------------------------|
 | **Conversion manuelle** (`convertImportDraft` / review humaine) | Règles **propres** au service de conversion (`conversionFully`, AuthZ ADMIN/SUPER_ADMIN **ou** actor SYSTEM, état `APPROVED`, claim version, etc. — 012-0 / 012-3 §5) | **Pas** de partner `autoConvertEnabled` **uniquement parce que** le convert est manuel |
-| **AUTO-CONVERT** | Décision policy `AUTO_APPROVE_CONVERT` ; env `ACQUISITION_AUTO_CONVERT_ENABLED` ; partner `autoConvertEnabled` ; `conversionFully` ; actor SYSTEM ; garde-fous 012-0…012-4 (**G-FENCE OPEN**) | — |
+| **AUTO-CONVERT** | Décision policy `AUTO_APPROVE_CONVERT` ; env `ACQUISITION_AUTO_CONVERT_ENABLED` ; partner `autoConvertEnabled` ; `conversionFully` ; actor SYSTEM ; garde-fous 012-0…012-4 (**G-FENCE CLOSED** ≠ GO convert ; **AUTO_RUNTIME_STATUS = OFF**) | — |
 
 `ACQUISITION_CONVERSION_ENABLED` **autorise la capacité de conversion métier** lorsqu’il est combiné avec le master (`conversionFully`). Il **ne doit pas** être présenté comme exigeant une policy partenaire pour la **conversion manuelle**.
 
@@ -154,7 +154,7 @@ Un flag **n’est pas** « activable » du seul fait qu’il existe. Chaque pali
 | **P3** | Capacités worker | content → extraction ; download → (cron download / recovery / access) | Matrice | Futur OPS-007. Conversion **brut** reste **OFF** jusqu’à preuves 012-3 |
 | **P4** | Pipeline jusqu’à `PENDING_REVIEW` | **Préférer** orchestrateur V2 (`ACQUISITION_ORCHESTRATOR_CRON_ENABLED`) plutôt que 5 unit crons en parallèle (`acquisition-ops-v2-staging-activation.md`) | OPS-001/002 ; 012-4 unit crons **GAP** si ∥ | Contrat documentaire = **Lot C staging** déjà décrit ; 012-5 ne l’exécute pas |
 | **P5** | AUTO_APPROVE_ONLY | Env autoApprove + partner `autoApproveEnabled` + actor | **012-2** | **NO-GO dans 012-5**. Futur OPS-007 **interdit** tant que preuves 012-2 runtime **absentes** |
-| **P6** | Conversion fully / AUTO_CONVERT | conversion brut + fully + autoConvert + partner + `allowCreateClient` si NEW | **012-3** + **012-4 fencing** | **NO-GO**. **G-FENCE OPEN** ; `FENCING_IMPLEMENTATION_READY` = **NO** |
+| **P6** | Conversion fully / AUTO_CONVERT | conversion brut + fully + autoConvert + partner + `allowCreateClient` si NEW | **012-3** + **012-4 fencing** | **NO-GO**. **G-FENCE CLOSED** ; `FENCING_IMPLEMENTATION_READY` = **YES**. Convert reste **NO-GO** : 012-3 runtime non exécuté |
 
 `ACQUISITION_ORCHESTRATOR_ALLOW_STUBS` : **hors matrice** (§3.1.1) ; **jamais** dans un ordre d’activation métier (tests/debug uniquement).
 
@@ -177,7 +177,7 @@ Activation future `ACQUISITION_AUTO_APPROVE_ENABLED === "true"` **exige** (préc
 - partner `autoApproveEnabled` ON **pour ce partenaire** ; `autoConvertEnabled` OFF ;
 - env autoConvert OFF ; conversion fully **OFF** (012-2) ;
 - journal `HUMAN_REVIEW_REQUIRED` / `AUTO_APPROVE_ONLY` comme preuves ;
-- fencing **suffisant pour le périmètre** (012-0 §11.2 ; **G-FENCE** reste bloquant pour **large**) ;
+- fencing **suffisant pour le périmètre** (012-0 §11.2 **SATISFAITE** / **G-FENCE CLOSED** — **≠** GO AUTO ; reste TENANT / P-ACTOR / pilote 012-2) ;
 - **pas** NEW client ; **pas** création chantier auto.
 
 **012-5 ne publie pas d’autorisation d’activer autoApprove.** OPS-007 futur : section AUTO_APPROVE = **PRECONDITION / NO-GO** tant que ces preuves n’existent pas.
@@ -194,11 +194,15 @@ En particulier (inchangé) :
 
 | ID | Statut pour tout runbook / activation visée par 012-5 |
 |----|--------------------------------------------------------|
-| **G-FENCE** | **OPEN** |
-| **`FENCING_IMPLEMENTATION_READY`** | **NO** (012-4 SPEC ≠ fencing livré) |
+| **G-FENCE** | **CLOSED** (012-0 §11.2 — frontière item/draft orchestrée ; Gmail `PAGE_BOUNDARY_PARTIAL`) |
+| **`FENCING_IMPLEMENTATION_READY`** | **YES** (PR #53) — **≠** AUTO ON |
 | Pilote runtime 012-2 | **Non exécuté** — PRECONDITION 012-3 |
+| **`AUTO_RUNTIME_STATUS`** | **OFF** |
+| **`OPS_007_STATUS`** | **NOT_CREATED** |
+| **`OPS_007_READY`** | **NO** |
+| **G-RB** | **OPEN** |
 
-012-5 **ne contourne pas** ce blocage. Un OPS-007 qui dirait « mettre autoConvert ON » **sans** 012-3 + 012-4 implementation-ready **viole** cette SPEC.
+012-5 **ne contourne pas** ce blocage **d’activation**. Un OPS-007 qui dirait « mettre autoConvert ON » **sans** 012-3 runtime **viole** cette SPEC. Fencing READY **n’autorise pas** P6.
 
 `INV_AUTO_CONVERT_WITHOUT_*` **détecte** des combos incohérentes ; **n’empêche pas** le process de démarrer (**G-INV**).
 
@@ -210,12 +214,16 @@ Réf. **PLAN-ACQ-012-4**.
 
 | Affirmation | Statut |
 |-------------|--------|
-| SPEC 012-4 approuvée / présente | **≠** fencing livré |
-| `GMAIL_CURRENT_FENCING` | `PAGE_BOUNDARY_PARTIAL` seulement |
-| Mid-worker non-Gmail / UI / unit crons | **GAP** |
-| `FENCING_IMPLEMENTATION_READY` | **NO** |
+| SPEC 012-4 approuvée / présente | Lot SPEC historique ≠ code. **Code** = PR #53 |
+| `GMAIL_CURRENT_FENCING` | `PAGE_BOUNDARY_PARTIAL` seulement (**pas** FULLY_FENCED) |
+| Mid-worker non-Gmail orchestré | **EXISTING** frontière item/draft |
+| UI | **UI_GAP CLOSED** (`UI_MANUAL`, AUTO interdit ; **pas** de lease UI) |
+| Unit crons | **PRECONDITION_ONLY** — **pas UNIT_CRON FENCED** |
+| `FENCING_IMPLEMENTATION_READY` | **YES** |
+| `G-FENCE` | **CLOSED** (sens §11.2 uniquement) |
+| `AUTO_RUNTIME_STATUS` | **OFF** |
 
-Tant que `FENCING_IMPLEMENTATION_READY` = **NO**, le **futur** runbook **ne doit pas** autoriser un **AUTO large** sur les chemins concernés (extraction orchestrateur, UI, unit crons, traitements longs).
+`FENCING_IMPLEMENTATION_READY` = **YES** **n’autorise pas** un AUTO large. Le futur runbook **reste** NO-GO AUTO tant que 012-2/012-3 **runtime**, tenant, P-ACTOR, flags explicites ne sont pas prouvés. UI / unit cron **ne doivent pas** réintroduire AUTO.
 
 Un palier Lot C jusqu’à `PENDING_REVIEW` avec autoApprove **OFF** n’est **pas** un GO AUTO. Il reste soumis aux docs staging existantes — **hors publication OPS-007 dans 012-5**.
 
@@ -333,8 +341,8 @@ Arrêt immédiat / **NO-GO** d’une étape du futur runbook si :
 | Readiness **A** KO **pour le palier qui s’en sert** | Ne pas exiger `readyForOrchestratorE2E` après autoApprove ON |
 | `AUTO_APPROVE_CONVERT` **inattendu** (journal / policy) | 012-2 |
 | Conversion fully **ON** alors qu’interdite pour le palier | Lot C / 012-2 |
-| Auto large / auto-convert alors que **G-FENCE** non résolu | 012-3/012-4 |
-| `FENCING_IMPLEMENTATION_READY` = NO et palier P5 **large** ou P6 | 012-4 |
+| Auto large / auto-convert alors que 012-2/012-3 **runtime** non prouvés | 012-2/012-3. **G-FENCE CLOSED** ≠ GO AUTO |
+| Palier P5 large ou P6 alors que `AUTO_RUNTIME_STATUS = OFF` / OPS-007 absent | 012-4 READY **≠** P5/P6 |
 | Logs / journal insuffisants | 012-0 §12.3 |
 | Impact Booking / `gmail-scan` | Isolation |
 | `INV_*` **critique détecté** | **Signal ops** à investiguer ; **pas** un crash auto. **G-INV** : ne **pas** prétendre que `INV_*` bloque le process |
@@ -418,7 +426,7 @@ Légende : SETUP / EXPECTED / FORBIDDEN / EVIDENCE (preuves **futures**).
 | T-RB | Appliquer §15 documentaire | autoApprove OFF avant de s’appuyer sur master | « Déconvertir » ; toucher Booking | check-list |
 | T-SEC | Grep runbook | Aucune VALUE secrète | Coller `CRON_SECRET=...` | revue humaine |
 | T-BOOK | Suites Booking | Non-régression | Import Acquisition→Booking | `tests/booking/**` |
-| T-FENCE | Palier AUTO large / convert | **NO-GO** tant que G-FENCE OPEN / fencing not READY | OPS-007 qui active P5 large ou P6 | 012-4 §16.2 |
+| T-FENCE | Palier AUTO large / convert | **NO-GO** runtime (012-2/012-3 non exécutés ; `AUTO_RUNTIME_STATUS = OFF`). G-FENCE **CLOSED** / READY **YES** ≠ GO P5/P6 | OPS-007 qui active P5 large ou P6 sans preuves runtime | 012-4 §16.2 ; 012-2 ; 012-3 |
 
 ---
 
@@ -442,8 +450,8 @@ Trois niveaux **non équivalents** :
 | Ordre P0–P6 | **GO** documentaire | §5 | YES si palier AUTO sans PRECONDITION | P5/P6 **YES** |
 | AUTO_APPROVE runtime | **PRECONDITION** / **NO-GO** 012-5 | 012-2 ; pas de pilote exécuté | NO pour SPEC DONE | **YES** |
 | AUTO_CONVERT | **NO-GO** | 012-3 | YES si OPS-007 l’autorise tôt | **YES** |
-| **G-FENCE** | **OPEN** / **NO-GO** large | 012-4 | YES si runbook ignore | **YES** AUTO large / P6 |
-| `FENCING_IMPLEMENTATION_READY` | **NO** | 012-4 §16.2 | YES si prétendu READY | **YES** |
+| **G-FENCE** | **CLOSED** | 012-4 / PR #53 | YES si runbook ignore les **limites** (Gmail partiel, unit crons, intra-item) **ou** active AUTO comme si fencing = GO flags | **YES** AUTO sans 012-2/012-3 runtime |
+| `FENCING_IMPLEMENTATION_READY` | **YES** | 012-4 §16.2 | YES si prétendu = AUTO ON | **YES** si P5/P6 sans autres preuves |
 | G-INV | **GAP** | matrice détection | NO (décrire) | **YES** si on s’y fie comme kill-switch |
 | G-MASTER-SERVICE-SCOPE | **GAP** | 012-0 §4.1 | YES si rollback = master seul pour couper AUTO | **YES** mal rollbacké |
 | G-RB | **GAP** | OPS-007 absent | **YES** publication | **YES** activation ops documentée |
@@ -457,7 +465,7 @@ Trois niveaux **non équivalents** :
 | `OPS_007_READY` | **NO** | fichier absent | — | — |
 | `RUNTIME_READY` | **NO** | aucun palier armé ici | — | — |
 
-Ne **pas** marquer GO l’activation AUTO, le fencing livré, ou OPS-007 publié.
+Ne **pas** marquer GO l’activation AUTO ni OPS-007 publié. **Fencing livré** (`FENCING_IMPLEMENTATION_READY = YES`) **≠** GO AUTO.
 
 ---
 
@@ -490,7 +498,7 @@ Minimum :
 
 1. Fichier `docs/RB-PLAN-ACQ-001-activation-flags.md` (ou chemin **exact** figé OPS-001) **existe**.
 2. Conforme §§12–16 de **cette** SPEC (placeholders only).
-3. Palier AUTO **absent** ou **NO-GO explicite** tant que 012-2 runtime / 012-3 / `FENCING_IMPLEMENTATION_READY` ne sont pas **prouvés**.
+3. Palier AUTO **absent** ou **NO-GO explicite** tant que 012-2 runtime / 012-3 runtime ne sont pas **prouvés** (`FENCING_IMPLEMENTATION_READY` **déjà YES** ; **≠** `OPS_007_READY`).
 4. Scan secrets **PASS**.
 5. Booking / `gmail-scan` non concernés.
 6. Re-audit **G-RB**.
@@ -518,7 +526,10 @@ Ce lot met à jour `docs/plan-acq-012-0-auto-review-guardrails.spec.md` :
 - **mapping fonctionnel** modifier **uniquement** **PLAN-ACQ-012-5** ;
 - **PLAN-ACQ-012-6** et **012-7 inchangés** (TBD) ;
 - une **entrée d’historique documentaire** 012-0 peut être ajoutée ;
-- **G-RB** / **G-FENCE** lignes §16 de 012-0 : **inchangées** (G-RB reste GAP « runbook absent » ; 012-5 SPEC ≠ runbook publié).
+- **G-RB** ligne §16 de 012-0 : **inchangée** (GAP « runbook absent » ; 012-5 SPEC ≠ runbook publié).
+- **G-FENCE** : désormais **CLOSED** (aligné 012-0 post-PR #53) — **sans** clore G-RB.
+
+---
 
 ---
 
@@ -526,4 +537,5 @@ Ce lot met à jour `docs/plan-acq-012-0-auto-review-guardrails.spec.md` :
 
 | Date | Note |
 |------|------|
-| 2026-08-16 | Création SPEC 012-5 (DOC ONLY) HEAD `97b92f5` ; OPS-007 NOT_CREATED ; G-FENCE OPEN ; fencing READY = NO |
+| 2026-08-16 | Création SPEC 012-5 (DOC ONLY) HEAD `97b92f5` ; OPS-007 NOT_CREATED ; G-FENCE OPEN (état alors) ; fencing READY = NO (état alors) |
+| 2026-08-17 | Alignement post-PR #53 : **G-FENCE CLOSED** ; `FENCING_IMPLEMENTATION_READY = YES` ; **OPS_007_STATUS = NOT_CREATED** ; **OPS_007_READY = NO** ; **G-RB OPEN** ; **AUTO_RUNTIME_STATUS = OFF** |

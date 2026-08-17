@@ -80,7 +80,7 @@ Aucune de ces conditions n’est marquée **satisfaite** par 012-2 seul, sauf pr
 | P12 | Idempotence **bornée** 012-0 §9 applicable | Mécanismes **existants** ; pas une garantie universelle de retries |
 | P13 | Logs / journal exploitables | Chemins documentés ; preuve ops **PRECONDITION** |
 | P14 | Rollback / kill-switch défini | **Défini documentairement** §12 ; **non exécuté** |
-| P15 | Fencing **suffisant pour le périmètre exécuté** | **GAP / PRECONDITION** — **G-FENCE** (§7) |
+| P15 | Fencing **suffisant pour le périmètre exécuté** | **GO** (fencing orchestré PR #53 / **G-FENCE CLOSED**). **PRECONDITION** reste : pilote runtime, `TENANT_PILOT`, P-ACTOR. **AUTO_RUNTIME_STATUS = OFF** |
 
 Distinguer : capacité **code** déjà présente ≠ **GO** d’activation.
 
@@ -135,33 +135,35 @@ Source : 012-0 §11 ; `docs/acquisition-ops-v2-fencing-workers.md` ; **G-FENCE**
 
 ### 7.1 Chemin worker du pilote
 
-Auto-approve s’exécute **après extraction** (`maybeRunAutoDecisionAfterExtraction` depuis `extraction.service.ts`).
+Auto-approve s’exécute **après extraction** (`maybeRunAutoDecisionAfterExtraction` depuis `extraction.service.ts`) **uniquement** si le contexte est **`ORCHESTRATOR_AUTO`** + capability WeakMap `OWNED`.
+
+**UI_MANUAL** / **UNIT_CRON** : extraction possible, **AUTO interdit**.
 
 Chemin orchestrateur nominatif :
 
-`gmailSync` → `attachmentRecovery` → `attachmentDownload` → `contentFetch` → **`extraction`** → (hook auto-decision + `approveImportDraft` si AUTO)
+`gmailSync` → `attachmentRecovery` → `attachmentDownload` → `contentFetch` → **`extraction`** (`runDraftExtractionOrchestrated`) → (hook auto-decision **si** flags ON **et** ownership valide)
 
-| Étape | Heartbeat mid-run (`shouldContinue` / `renew`) | Fence inter-étapes `assertOwned` |
-|-------|-----------------------------------------------|----------------------------------|
-| `gmailSync` | **Oui** | Oui |
-| `attachmentRecovery` / `download` / `contentFetch` | **Non** | Oui (entre steps) |
-| `extraction` | **Non** | Oui (entre steps) |
+| Étape | Heartbeat mid-run | Fence inter-étapes `assertOwned` |
+|-------|-------------------|----------------------------------|
+| `gmailSync` | **Oui** page-head (`PAGE_BOUNDARY_PARTIAL`) | Oui |
+| `attachmentRecovery` / `download` / `contentFetch` | **Oui — frontière d’item** (`assertOwned`+`renew`) | Oui |
+| `extraction` | **Oui — frontière de draft** + fences avant persist / AUTO | Oui |
 
-Lease orchestrateur + budget enfant clampé : **existants**. Heartbeat mid-run **extraction** : **incomplet**.
+Lease orchestrateur : **existante**. **Même autorité** acquire/assert/renew/release. **Pas** de reacquire.
 
 ### 7.2 Suffisance pour le pilote
 
-012-0 §11.2 : GO auto/convert **large** ou traitements **longs** prod seulement si fencing mid-worker non-Gmail **ou** preuve `maxDurationMs` **strictement** &lt; TTL lease + marge.
+012-0 §11.2 : **SATISFAITE** (PR #53). **G-FENCE CLOSED**.
 
-Cette preuve **n’est pas** fournie par 012-2. **G-FENCE** reste ouvert.
+**`AUTO_RUNTIME_STATUS = OFF`.** 012-2 **n’active pas** le pilote. Gmail reste `PAGE_BOUNDARY_PARTIAL`. Unit crons : **PRECONDITION_ONLY**.
 
 | Niveau | Fencing | Décision |
 |--------|---------|----------|
-| Activation auto **large** / traitements longs | Non prouvée | **NO-GO** |
-| Pilote borné (tenant unique, durée worker extraite **prouvée** &lt; TTL+marge) | Non encore prouvée | **PRECONDITION** |
-| Absence de preuve `maxDurationMs` vs TTL | — | **NO-GO** runtime jusqu’à preuve ou fencing |
+| Activation auto **large** / traitements longs | §11.2 satisfaite | **NO-GO** runtime : flags OFF + TENANT_PILOT TBD + P-ACTOR + 012-2 runtime non exécuté |
+| Pilote borné | Fencing orchestré EXISTING | **PRECONDITION** ops (pas GO AUTO par 012-2) |
+| Gmail intra-page / unit cron dual | Non-GO fencing | Hors G-FENCE non-Gmail |
 
-012-2 **ne code pas** le fencing (**PLAN-ACQ-V2-FENCING-WORKERS** / 012-0 mapping 012-4 restent hors scope).
+012-2 **ne code pas** le fencing (livré par 012-4 / PR #53, hors scope 012-2).
 
 ---
 
@@ -243,7 +245,7 @@ Ne pas marquer **GO** sans preuve.
 | `conversionFully` OFF | **PRECONDITION** | 012-0 §12.1 | **YES** si ON (sortie du contrat Lot C / risque convert métier) |
 | NEW client / convert / chantier auto | **NO-GO** | §6 / §13 | **YES** si tenté |
 | Duplicate heuristique + idempotence bornée | **PRECONDITION** | 012-0 §§4.2, 9 | **YES** si mécanismes contournés |
-| Fencing périmètre exécuté | **GAP** | **G-FENCE** ; §7 | **YES** large / longs ; **YES** pilote tant que `maxDuration` vs TTL non prouvé |
+| Fencing périmètre exécuté | **GO** (fencing) | **G-FENCE CLOSED** PR #53 ; §7. **≠** GO AUTO | **YES** runtime AUTO si flags ON sans 012-2 runtime / P-ACTOR / TENANT |
 | Staging preuves §9 | **PRECONDITION** | Non collectées par 012-2 | **YES** (runtime) |
 | Rollback défini | **GO** | §12 documentaire | NO pour DONE SPEC |
 | Booking isolation | **GO** | 012-0 §10 ; 012-2 n’y touche pas | **YES** si violation |
@@ -278,7 +280,7 @@ Limite : le rollback **flags** arrête de **nouveaux** auto-approves via le chem
 - OAuth / Gmail parser / mapper ;
 - scheduler Raspberry Pi / Vercel / production rollout **global** ;
 - autres tenants que le pilote (quand identifié) ;
-- fermeture **G-FENCE** / **G-INV** / **G-RB** (sauf preuve `maxDuration` optionnelle, hors code 012-2) ;
+- fermeture **G-INV** / **G-RB** (G-FENCE fermé par 012-4 / PR #53, hors 012-2) ;
 - PLAN-ACQ-012-3+ (auto-convert, fencing lot, runbook OPS-007, etc.).
 
 ---
@@ -299,7 +301,7 @@ DONE SPEC **ne signifie pas** :
 
 - que le pilote runtime est activé ;
 - que `TENANT_PILOT` est choisi ;
-- que G-FENCE / P-ACTOR / preuves staging sont clos ;
+- que **G-FENCE** n’est clos que via 012-4/PR #53 (fait) **sans** clore P-ACTOR / preuves staging / TENANT_PILOT ;
 - que l’auto est prête en production.
 
 **Phase runtime (hors DONE 012-2) :** activation flags/policies sur un tenant identifié, uniquement après GO des PRECONDITION/GAP §11, ticket/autorisation **séparé** (non 012-3+ sauf SPEC dédiée).
@@ -319,3 +321,4 @@ DONE SPEC **ne signifie pas** :
 | Date | Note |
 |------|------|
 | 2026-08-15 | Création SPEC 012-2 suite audit `012_2_SCOPE_NOT_DEFINED` ; encadrement pilote `AUTO_APPROVE_ONLY` sans activation runtime |
+| 2026-08-17 | Alignement : **G-FENCE CLOSED** (PR #53) ; §7 heartbeat non-Gmail EXISTING item/draft ; **AUTO_RUNTIME_STATUS = OFF** |
