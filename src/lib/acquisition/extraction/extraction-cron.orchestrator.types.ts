@@ -7,6 +7,7 @@ import type {
   ExtractionCronSelectionRepository,
 } from "@/lib/acquisition/extraction/extraction-cron.selection.repository"
 import type { ExtractDraftResult } from "@/lib/acquisition/extraction/extraction.types"
+import type { OrchestratorItemOwnershipCheck } from "@/lib/acquisition/orchestrator/orchestrator-ownership"
 
 export type ExtractionCronRunStatus = "SKIPPED" | "SUCCESS" | "PARTIAL" | "FAILED"
 
@@ -60,7 +61,7 @@ export interface ExtractionCronCompanyResult {
 export interface ExtractionCronRunResult {
   status: ExtractionCronRunStatus
   runId: string
-  skipReason?: AcquisitionCronSkipReason
+  skipReason?: AcquisitionCronSkipReason | "LEASE_STOLEN"
   budgetReached?: ExtractionCronBudgetReason
   startedAt: string
   finishedAt: string
@@ -92,6 +93,8 @@ export type ExtractionCronExtractPort = (input: {
   draftId: string
   now?: () => Date
 }) => Promise<ExtractDraftResult>
+
+export type { OrchestratorItemOwnershipCheck }
 
 export type {
   ExtractionCronCandidate,

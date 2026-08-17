@@ -33,7 +33,7 @@ export type AttachmentRecoveryCronCompanyResult = {
 export type AttachmentRecoveryCronRunResult = {
   status: AttachmentRecoveryCronRunStatus
   runId: string
-  skipReason?: AcquisitionCronSkipReason
+  skipReason?: AcquisitionCronSkipReason | "LEASE_STOLEN"
   startedAt: string
   finishedAt: string
   durationMs: number

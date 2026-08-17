@@ -29,8 +29,10 @@ export type ExtractionOutcome =
   | "FORBIDDEN"
   | "FAILED"
   | "MAX_ATTEMPTS_REACHED"
+  | "LEASE_STOLEN"
 
 export type ExtractionErrorCode =
+  | "LEASE_STOLEN"
   | "EXTRACTION_DISABLED"
   | "ACQUISITION_DISABLED"
   | "CONTENT_FETCH_DISABLED"

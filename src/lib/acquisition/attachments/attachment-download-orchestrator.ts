@@ -19,6 +19,10 @@ import {
   type AttachmentDownloadOrchestratorDownloadPort,
   type AttachmentDownloadOrchestratorRepository,
 } from "@/lib/acquisition/attachments/attachment-download-orchestrator.types"
+import {
+  isOrchestratorOwnershipValid,
+  type OrchestratorItemOwnershipCheck,
+} from "@/lib/acquisition/orchestrator/orchestrator-ownership"
 
 const LOG_PREFIX = "[acquisition-attachment-download-cron]"
 
@@ -29,6 +33,8 @@ export interface RunAttachmentDownloadOrchestratorInput {
   clock?: () => Date
   createRunId?: () => string
   config?: AttachmentDownloadCronConfig
+  /** Présent uniquement sur le chemin orchestrateur. Unité cron : omis. */
+  ensureOwnership?: OrchestratorItemOwnershipCheck
 }
 
 function defaultLog(event: string, payload?: Record<string, unknown>): void {
@@ -152,8 +158,10 @@ export async function runAcquisitionAttachmentDownloadOrchestrator(
   let companiesFailed = 0
   let companiesSkipped = 0
   let budgetReached: AttachmentDownloadCronBudgetReason | undefined
+  let leaseStolen = false
 
   for (const companyId of companyIds) {
+    if (leaseStolen) break
     if (globalStats.attempted >= config.maxPerRun) {
       budgetReached = "MAX_ATTACHMENTS_PER_RUN"
       log("DOWNLOAD_BUDGET_REACHED", { runId, reason: budgetReached })
@@ -226,6 +234,7 @@ export async function runAcquisitionAttachmentDownloadOrchestrator(
     }
 
     let stoppedByBudget = false
+    let stoppedByLease = false
     for (const candidate of candidates) {
       if (globalStats.attempted >= config.maxPerRun) {
         budgetReached = "MAX_ATTACHMENTS_PER_RUN"
@@ -237,6 +246,16 @@ export async function runAcquisitionAttachmentDownloadOrchestrator(
         budgetReached = "MAX_DURATION_MS"
         stoppedByBudget = true
         log("DOWNLOAD_BUDGET_REACHED", { runId, reason: budgetReached, companyId })
+        break
+      }
+      if (!(await isOrchestratorOwnershipValid(input.ensureOwnership))) {
+        leaseStolen = true
+        stoppedByLease = true
+        log("DOWNLOAD_LEASE_STOLEN", {
+          runId,
+          companyId,
+          attachmentId: candidate.id,
+        })
         break
       }
 
@@ -261,7 +280,9 @@ export async function runAcquisitionAttachmentDownloadOrchestrator(
       }
     }
 
-    if (stoppedByBudget) {
+    if (stoppedByLease) {
+      companyStatus = companyStats.attempted === 0 ? "FAILED" : "PARTIAL"
+    } else if (stoppedByBudget) {
       companyStatus = companyStats.attempted === 0 ? "SKIPPED" : "PARTIAL"
       if (companyStatus === "SKIPPED") {
         companySkipReason = "BUDGET_REACHED"
@@ -281,6 +302,7 @@ export async function runAcquisitionAttachmentDownloadOrchestrator(
 
     if (companyStatus === "SUCCESS") companiesSucceeded++
     else if (companyStatus === "PARTIAL") companiesPartial++
+    else if (companyStatus === "FAILED") companiesFailed++
     else companiesSkipped++
 
     log(companyLogEvent(companyStatus), {
@@ -304,7 +326,7 @@ export async function runAcquisitionAttachmentDownloadOrchestrator(
       partialReason: companyPartialReason,
     })
 
-    if (stoppedByBudget) break
+    if (stoppedByBudget || stoppedByLease) break
   }
 
   if (!budgetReached && hasMoreCompanies) {
@@ -322,6 +344,7 @@ export async function runAcquisitionAttachmentDownloadOrchestrator(
     companiesSkipped,
     budgetReached,
     globalFailed: globalStats.failed,
+    leaseStolen,
   })
 
   log("DOWNLOAD_CRON_FINISHED", {
@@ -335,12 +358,14 @@ export async function runAcquisitionAttachmentDownloadOrchestrator(
     companiesSkipped,
     globalStats,
     ...(budgetReached ? { budgetReached } : {}),
+    ...(leaseStolen ? { skipReason: "LEASE_STOLEN" } : {}),
   })
 
   return {
     status: runStatus,
     runId,
     ...(budgetReached ? { budgetReached } : {}),
+    ...(leaseStolen ? { skipReason: "LEASE_STOLEN" as const } : {}),
     startedAt: startedAt.toISOString(),
     finishedAt: finishedAt.toISOString(),
     durationMs,
@@ -363,7 +388,15 @@ function computeRunStatus(input: {
   companiesSkipped: number
   budgetReached?: AttachmentDownloadCronBudgetReason
   globalFailed: number
+  leaseStolen?: boolean
 }): AttachmentDownloadCronRunStatus {
+  if (input.leaseStolen) {
+    return input.companiesSucceeded > 0 ||
+      input.companiesPartial > 0 ||
+      input.globalFailed > 0
+      ? "PARTIAL"
+      : "FAILED"
+  }
   if (input.budgetReached) return "PARTIAL"
   if (input.globalFailed > 0 || input.companiesFailed > 0 || input.companiesPartial > 0) {
     return "PARTIAL"

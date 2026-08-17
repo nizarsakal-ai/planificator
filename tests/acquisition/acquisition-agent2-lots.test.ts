@@ -7,8 +7,8 @@ import { evaluateAutoDecision } from "@/lib/acquisition/policy/auto-decision.pol
 import { buildAcquisitionGmailLookbackQuery } from "@/lib/acquisition/connector/gmail-mail-provider.adapter"
 import { buildAttachmentTextExcerpts } from "@/lib/acquisition/extraction/attachment-text-excerpts"
 import { normalizeAddressKey } from "@/lib/acquisition/matching/client-match.service"
-import { createProductionStepRunners } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
-import { ORCHESTRATOR_STEP_KEYS } from "@/lib/acquisition/orchestrator/acquisition-orchestrator.types"
+import * as orchestratorWorkers from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
+import { runProductionAcquisitionOrchestrator } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
 
 describe("evaluateAutoDecision", () => {
   const base = {
@@ -104,11 +104,10 @@ describe("normalizeAddressKey Lot G", () => {
   })
 })
 
-describe("createProductionStepRunners Lot B", () => {
-  it("expose les 5 runners", () => {
-    const runners = createProductionStepRunners()
-    for (const key of ORCHESTRATOR_STEP_KEYS) {
-      assert.equal(typeof runners[key], "function")
-    }
+describe("Lot B production wiring", () => {
+  it("entrée production unique, factory runners non exportée", () => {
+    assert.equal(typeof runProductionAcquisitionOrchestrator, "function")
+    assert.equal("createProductionStepRunners" in orchestratorWorkers, false)
+    assert.equal("ProductionStepRunnersDeps" in orchestratorWorkers, false)
   })
 })

@@ -227,6 +227,33 @@ describe("extraction.service R1", () => {
     assert.equal(repo.worksiteCreates, 0)
   })
 
+  it("UI_MANUAL : AUTO jamais appelé même flags AUTO ON", async () => {
+    process.env.ACQUISITION_AUTO_APPROVE_ENABLED = "true"
+    process.env.ACQUISITION_AUTO_CONVERT_ENABLED = "true"
+    const repo = createFakeRepo()
+    let autoCalls = 0
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      {
+        repository: repo as never,
+        runAutoDecisionAfterExtraction: async () => {
+          autoCalls += 1
+        },
+      }
+    )
+    assert.equal(result.ok, true)
+    if (result.ok) {
+      assert.equal(result.outcome, "EXTRACTED")
+      assert.equal(result.status, "PENDING_REVIEW")
+    }
+    assert.equal(repo.draft?.status, "PENDING_REVIEW")
+    assert.equal(autoCalls, 0)
+    assert.equal(repo.persists.length, 1)
+    assert.equal(repo.persists[0]?.status, "PENDING_REVIEW")
+    delete process.env.ACQUISITION_AUTO_APPROVE_ENABLED
+    delete process.env.ACQUISITION_AUTO_CONVERT_ENABLED
+  })
+
   it("ALREADY_EXTRACTED si même hash + schema", async () => {
     const repo = createFakeRepo({
       draft: {

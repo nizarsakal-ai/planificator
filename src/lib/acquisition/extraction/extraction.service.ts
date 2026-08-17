@@ -43,6 +43,8 @@ import type {
   RunDraftExtractionInput,
 } from "@/lib/acquisition/extraction/extraction.types"
 import { maybeRunAutoDecisionAfterExtraction } from "@/lib/acquisition/policy/auto-decision.service"
+import type { OrchestratorAutoCapability } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
+import { resolveOrchestratorAutoOwnership } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
 
 const LOG_PREFIX = "[acquisition-extraction]"
 const ALLOWED_ROLES = new Set<Role>(["ADMIN", "SUPER_ADMIN"])
@@ -55,6 +57,13 @@ export interface ExtractionServiceDeps {
   /** Charge bytes PDF STORED — injectable (tests). */
   loadAttachmentBytes?: AttachmentBytesLoader
   log?: (event: string, payload?: Record<string, unknown>) => void
+  /**
+   * Hook post-persist. Ignoré hors ORCHESTRATOR_AUTO + ownership valide.
+   */
+  runAutoDecisionAfterExtraction?: (input: {
+    companyId: string
+    draftId: string
+  }) => Promise<unknown>
 }
 
 function defaultLog(event: string, payload?: Record<string, unknown>): void {
@@ -107,18 +116,57 @@ function mapPersistOutcome(
   }) as Extract<ExtractDraftResult, { ok: false }>
 }
 
-export type RunDraftExtractionCoreInput = {
+type ExtractionExecutionContext =
+  | { readonly kind: "UI_MANUAL" }
+  | { readonly kind: "UNIT_CRON" }
+  | {
+      readonly kind: "ORCHESTRATOR_AUTO"
+      readonly capability: OrchestratorAutoCapability
+    }
+
+const UI_MANUAL_EXTRACTION_CONTEXT = { kind: "UI_MANUAL" } as const
+const UNIT_CRON_EXTRACTION_CONTEXT = { kind: "UNIT_CRON" } as const
+
+type RunDraftExtractionCoreInput = {
   companyId: string
   draftId: string
   force?: boolean
   now?: () => Date
+  executionContext: ExtractionExecutionContext
+}
+
+function isOrchestratorAutoContext(
+  ctx: ExtractionExecutionContext
+): ctx is Extract<ExtractionExecutionContext, { kind: "ORCHESTRATOR_AUTO" }> {
+  return ctx.kind === "ORCHESTRATOR_AUTO"
+}
+
+async function ensureOrchestratorOwned(
+  ctx: ExtractionExecutionContext
+): Promise<boolean> {
+  if (!isOrchestratorAutoContext(ctx)) return true
+  try {
+    return (await resolveOrchestratorAutoOwnership(ctx.capability)) === "OWNED"
+  } catch {
+    return false
+  }
+}
+
+function failLeaseStolen(
+  draftId?: string,
+  extra?: Partial<Extract<ExtractDraftResult, { ok: false }>>
+): ExtractDraftResult {
+  return fail("LEASE_STOLEN", "LEASE_STOLEN", "Lease orchestrateur perdue", {
+    draftId,
+    ...extra,
+  })
 }
 
 /**
  * Cœur métier 005B — sans AuthZ Role.
- * Appelé par le wrapper UI et le wrapper système OPS-004.
+ * Non exporté : UI / UNIT_CRON / ORCHESTRATOR_AUTO uniquement via wrappers.
  */
-export async function runDraftExtractionCore(
+async function runDraftExtractionCore(
   input: RunDraftExtractionCoreInput,
   deps: ExtractionServiceDeps = {}
 ): Promise<ExtractDraftResult> {
@@ -126,6 +174,7 @@ export async function runDraftExtractionCore(
   const log = deps.log ?? defaultLog
   const nowFn = input.now ?? (() => new Date())
   const now = nowFn()
+  const executionContext = input.executionContext
 
   if (!isAcquisitionEnabled()) {
     return fail("DISABLED", "ACQUISITION_DISABLED", "Acquisition désactivée")
@@ -231,6 +280,11 @@ export async function runDraftExtractionCore(
     companyId,
     draft.acquisitionMessageId
   )
+
+  if (!(await ensureOrchestratorOwned(executionContext))) {
+    log("EXTRACTION_LEASE_STOLEN_BEFORE_CLAIM", { draftId: draft.id })
+    return failLeaseStolen(draft.id)
+  }
 
   const claimed = await repository.claimExtracting({
     companyId,
@@ -338,6 +392,11 @@ export async function runDraftExtractionCore(
       }),
       deps.timeoutMs ?? getExtractionTimeoutMs()
     )
+
+    if (!(await ensureOrchestratorOwned(executionContext))) {
+      log("EXTRACTION_LEASE_STOLEN_AFTER_PROVIDER", { draftId: draft.id })
+      return failLeaseStolen(draft.id)
+    }
 
     let normalized: ReturnType<typeof normalizeProviderResult>
     try {
@@ -457,21 +516,36 @@ export async function runDraftExtractionCore(
       warningCount: gate.warnings.length,
     }
 
-    // Lot F — policy non bloquante : échec auto ≠ échec extraction.
-    try {
-      await maybeRunAutoDecisionAfterExtraction({
-        companyId,
-        draftId: draft.id,
-      })
-    } catch (autoErr) {
-      log("AUTO_DECISION_HOOK_FAILED", {
-        draftId: draft.id,
-        message: autoErr instanceof Error ? autoErr.message : "unknown",
-      })
+    // AUTO : uniquement ORCHESTRATOR_AUTO + ownership encore valide.
+    // Perte de lease après persist : mutation conservée, run ≠ SUCCESS.
+    if (isOrchestratorAutoContext(executionContext)) {
+      if (await ensureOrchestratorOwned(executionContext)) {
+        try {
+          const runAuto =
+            deps.runAutoDecisionAfterExtraction ?? maybeRunAutoDecisionAfterExtraction
+          await runAuto({
+            companyId,
+            draftId: draft.id,
+          })
+        } catch (autoErr) {
+          log("AUTO_DECISION_HOOK_FAILED", {
+            draftId: draft.id,
+            message: autoErr instanceof Error ? autoErr.message : "unknown",
+          })
+        }
+        return extractedResult
+      }
+      log("AUTO_DECISION_SKIPPED_LEASE_STOLEN", { draftId: draft.id })
+      return failLeaseStolen(draft.id, { status: "PENDING_REVIEW" })
     }
 
     return extractedResult
   } catch (error) {
+    if (!(await ensureOrchestratorOwned(executionContext))) {
+      log("EXTRACTION_LEASE_STOLEN_AFTER_PROVIDER", { draftId: draft.id })
+      return failLeaseStolen(draft.id)
+    }
+
     const completedAt = nowFn()
     let code: ExtractionErrorCode = "INTERNAL_ERROR"
     /** Deny-by-default : seule une ExtractionProviderError.retryable=true (ou timeout enveloppe) autorise RETRY_ALLOWED. */
@@ -561,6 +635,7 @@ export async function runDraftExtraction(
       draftId: input.draftId,
       force: input.force,
       now: input.now,
+      executionContext: UI_MANUAL_EXTRACTION_CONTEXT,
     },
     deps
   )
@@ -569,6 +644,7 @@ export async function runDraftExtraction(
 /**
  * Wrapper système OPS-004 — aucun Role / faux ADMIN.
  * force toujours false. Appel uniquement après auth cron réussie.
+ * Contexte UNIT_CRON : extraction possible, AUTO impossible, pas de lease.
  */
 export async function runDraftExtractionSystem(
   input: { companyId: string; draftId: string; now?: () => Date },
@@ -580,6 +656,28 @@ export async function runDraftExtractionSystem(
       draftId: input.draftId,
       force: false,
       now: input.now,
+      executionContext: UNIT_CRON_EXTRACTION_CONTEXT,
+    },
+    deps
+  )
+}
+
+/**
+ * Chemin orchestrateur — exporté pour le wiring workers uniquement.
+ * AUTHENTIFIE la capability via WeakMap privé : { ensureOwned } n’est jamais OWNED.
+ */
+export async function runDraftExtractionOrchestrated(
+  input: { companyId: string; draftId: string; now?: () => Date },
+  capability: OrchestratorAutoCapability,
+  deps: ExtractionServiceDeps = {}
+): Promise<ExtractDraftResult> {
+  return runDraftExtractionCore(
+    {
+      companyId: input.companyId,
+      draftId: input.draftId,
+      force: false,
+      now: input.now,
+      executionContext: { kind: "ORCHESTRATOR_AUTO", capability },
     },
     deps
   )

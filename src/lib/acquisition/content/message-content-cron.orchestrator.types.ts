@@ -49,7 +49,7 @@ export interface ContentCronCompanyResult {
 export interface ContentCronRunResult {
   status: ContentCronRunStatus
   runId: string
-  skipReason?: AcquisitionCronSkipReason
+  skipReason?: AcquisitionCronSkipReason | "LEASE_STOLEN"
   budgetReached?: ContentCronBudgetReason
   startedAt: string
   finishedAt: string

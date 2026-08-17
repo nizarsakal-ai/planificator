@@ -19,6 +19,10 @@ import {
   type ContentFetchOrchestratorRepository,
 } from "@/lib/acquisition/content/message-content-cron.orchestrator.types"
 import type { FetchMessageContentResult } from "@/lib/acquisition/content/message-content.types"
+import {
+  isOrchestratorOwnershipValid,
+  type OrchestratorItemOwnershipCheck,
+} from "@/lib/acquisition/orchestrator/orchestrator-ownership"
 
 const LOG_PREFIX = "[acquisition-content-cron]"
 const BUDGET_MARGIN_MS = 5_000
@@ -30,6 +34,8 @@ export interface RunContentCronOrchestratorInput {
   clock?: () => Date
   createRunId?: () => string
   config?: ContentCronConfig
+  /** Présent uniquement sur le chemin orchestrateur. Unité cron : omis. */
+  ensureOwnership?: OrchestratorItemOwnershipCheck
 }
 
 function defaultLog(event: string, payload?: Record<string, unknown>): void {
@@ -57,7 +63,16 @@ function resolveRunStatus(input: {
   companiesPartial: number
   budgetReached?: ContentCronBudgetReason
   global: ContentCronRunStats
+  leaseStolen?: boolean
 }): ContentCronRunResult["status"] {
+  if (input.leaseStolen) {
+    return input.global.fetched +
+      input.global.alreadyPresent +
+      input.global.updated >
+      0
+      ? "PARTIAL"
+      : "FAILED"
+  }
   if (input.budgetReached) return "PARTIAL"
   if (input.companiesFailed > 0 && input.global.fetched + input.global.alreadyPresent === 0) {
     return "FAILED"
@@ -163,12 +178,14 @@ export async function runAcquisitionContentCronOrchestrator(
   let budgetReached: ContentCronBudgetReason | undefined
   let remainingRun = config.maxPerRun
   let backlogHint = 0
+  let leaseStolen = false
 
   if (hasMoreCompanies) {
     budgetReached = "MAX_COMPANIES_PER_RUN"
   }
 
   for (const companyId of companyIds) {
+    if (leaseStolen) break
     if (remainingRun <= 0) {
       budgetReached = "MAX_MESSAGES_PER_RUN"
       break
@@ -237,6 +254,19 @@ export async function runAcquisitionContentCronOrchestrator(
         skipReason = "BUDGET_REACHED"
         companyStatus = "PARTIAL"
         stopCompany = true
+        break
+      }
+
+      if (!(await isOrchestratorOwnershipValid(input.ensureOwnership))) {
+        leaseStolen = true
+        companyStatus = stats.selected > 0 ? "PARTIAL" : "FAILED"
+        errorCode = "LEASE_STOLEN"
+        stopCompany = true
+        log("CONTENT_LEASE_STOLEN", {
+          companyId,
+          acquisitionMessageId: candidate.acquisitionMessageId,
+          draftId: candidate.draftId,
+        })
         break
       }
 
@@ -449,6 +479,7 @@ export async function runAcquisitionContentCronOrchestrator(
     companiesPartial,
     budgetReached,
     global: globalStats,
+    leaseStolen,
   })
 
   log("CONTENT_RUN_FINISHED", {
@@ -465,6 +496,7 @@ export async function runAcquisitionContentCronOrchestrator(
     status,
     runId,
     budgetReached,
+    ...(leaseStolen ? { skipReason: "LEASE_STOLEN" as const } : {}),
     startedAt: startedAt.toISOString(),
     finishedAt: finishedAt.toISOString(),
     durationMs,
@@ -498,5 +530,6 @@ export async function runAcquisitionContentCronOrchestratorDefault(
     clock: overrides.clock,
     createRunId: overrides.createRunId,
     config: overrides.config,
+    ensureOwnership: overrides.ensureOwnership,
   })
 }
