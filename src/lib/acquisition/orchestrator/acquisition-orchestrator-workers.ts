@@ -1,5 +1,6 @@
 /**
- * PLAN-ACQ-V2-001 Lot B / R2 — Wiring des 5 workers réels (in-process).
+ * PLAN-ACQ-V2-001 Lot B / PLAN-ACQ-012-4 — Wiring des 5 workers réels.
+ * Capability AUTO créée uniquement ici. Pas de factory publique.
  * Budgets enfants bornés par remainingMs. Gmail : clamp + heartbeat lease.
  */
 
@@ -20,7 +21,7 @@ import { runAcquisitionContentCronOrchestratorDefault } from "@/lib/acquisition/
 import { getExtractionCronConfig } from "@/lib/acquisition/extraction/extraction-cron-feature-flag"
 import { runAcquisitionExtractionCronOrchestrator } from "@/lib/acquisition/extraction/extraction-cron.orchestrator"
 import { acquisitionExtractionCronSelectionRepository } from "@/lib/acquisition/extraction/extraction-cron.selection.repository"
-import { runDraftExtractionSystem } from "@/lib/acquisition/extraction/extraction.service"
+import { runDraftExtractionOrchestrated } from "@/lib/acquisition/extraction/extraction.service"
 import { acquisitionIngestionAdapter } from "@/lib/acquisition/ports/acquisition-ingestion.adapter"
 import { acquisitionScanCursorRepository } from "@/lib/acquisition/persistence/acquisition-scan-cursor.repository"
 import { gmailConnectionListingAdapter } from "@/lib/acquisition/persistence/gmail-connection-listing.adapter"
@@ -28,15 +29,82 @@ import {
   ACQUISITION_ORCHESTRATOR_LEASE_KEY,
   getAcquisitionOrchestratorConfig,
 } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-feature-flag"
-import {
-  acquisitionOrchestratorLeaseRepository,
-  type PrismaAcquisitionOrchestratorLeaseRepository,
-} from "@/lib/acquisition/orchestrator/acquisition-orchestrator-lease.repository"
+import { acquisitionOrchestratorLeaseRepository } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-lease.repository"
+import { runAcquisitionOrchestrator } from "@/lib/acquisition/orchestrator/acquisition-orchestrator.service"
 import type {
   AcquisitionOrchestratorLeaseRepositoryPort,
+  AcquisitionOrchestratorRunResult,
   AcquisitionOrchestratorStepRunners,
   OrchestratorStepRunnerResult,
 } from "@/lib/acquisition/orchestrator/acquisition-orchestrator.types"
+import {
+  checkOrchestratorLeaseHeartbeat,
+  type OrchestratorItemOwnershipCheck,
+  type OrchestratorOwnershipState,
+} from "@/lib/acquisition/orchestrator/orchestrator-ownership"
+
+const ORCHESTRATOR_AUTO_BRAND: unique symbol = Symbol(
+  "ORCHESTRATOR_AUTO_CAPABILITY"
+)
+
+/**
+ * Token opaque : unique symbol non exporté. PAS de méthode ensureOwned.
+ * Membership WeakMap = seule preuve d’authenticité (pas la forme de l’objet).
+ */
+export type OrchestratorAutoCapability = {
+  readonly [ORCHESTRATOR_AUTO_BRAND]: true
+}
+
+type OrchestratorAutoInternals = {
+  heartbeat: () => Promise<OrchestratorOwnershipState>
+}
+
+const autoCapabilityInternals = new WeakMap<
+  OrchestratorAutoCapability,
+  OrchestratorAutoInternals
+>()
+
+/**
+ * Factory AUTO interne au wiring orchestrateur. Non exportée.
+ */
+function createOrchestratorAutoCapability(input: {
+  leaseRepository: AcquisitionOrchestratorLeaseRepositoryPort
+  ownerRunId: string
+}): OrchestratorAutoCapability {
+  const capability: OrchestratorAutoCapability = {
+    [ORCHESTRATOR_AUTO_BRAND]: true,
+  }
+  autoCapabilityInternals.set(capability, {
+    heartbeat: () =>
+      checkOrchestratorLeaseHeartbeat({
+        leaseRepository: input.leaseRepository,
+        ownerRunId: input.ownerRunId,
+      }),
+  })
+  return capability
+}
+
+/**
+ * Autorité privée : heartbeat WeakMap uniquement.
+ * Un objet { ensureOwned } n’est jamais OWNED.
+ */
+export async function resolveOrchestratorAutoOwnership(
+  capability: OrchestratorAutoCapability
+): Promise<OrchestratorOwnershipState> {
+  const ops = autoCapabilityInternals.get(capability)
+  if (!ops) return "NOT_OWNED"
+  try {
+    return await ops.heartbeat()
+  } catch {
+    return "NOT_OWNED"
+  }
+}
+
+function ownershipCheckFrom(
+  capability: OrchestratorAutoCapability
+): OrchestratorItemOwnershipCheck {
+  return () => resolveOrchestratorAutoOwnership(capability)
+}
 
 function mapWorkerStatus(
   status: string
@@ -60,6 +128,37 @@ function publicWorkerResult(result: unknown): unknown {
     companiesSucceeded: r.companiesSucceeded,
     companiesFailed: r.companiesFailed,
     companiesPartial: r.companiesPartial,
+  }
+}
+
+function mapChildWorkerResult(result: {
+  status: string
+  skipReason?: string
+  error?: { code: string; message: string }
+  errorCode?: string
+}): OrchestratorStepRunnerResult {
+  const stolen =
+    result.skipReason === "LEASE_STOLEN" || result.errorCode === "LEASE_STOLEN"
+  const mapped = mapWorkerStatus(result.status)
+  return {
+    status: stolen && mapped === "SUCCESS" ? "FAILED" : mapped,
+    result: publicWorkerResult(result),
+    ...(stolen
+      ? {
+          skipReason: "LEASE_STOLEN",
+          error: {
+            code: "LEASE_STOLEN",
+            message: "Lease perdu pendant le worker",
+          },
+        }
+      : {
+          ...(result.skipReason ? { skipReason: result.skipReason } : {}),
+          ...(result.error
+            ? { error: result.error }
+            : result.errorCode
+              ? { error: { code: result.errorCode, message: result.errorCode } }
+              : {}),
+        }),
   }
 }
 
@@ -142,17 +241,22 @@ async function runGmailSync(input: {
   }
 }
 
-export function createProductionStepRunners(deps?: {
-  leaseRepository?: AcquisitionOrchestratorLeaseRepositoryPort | PrismaAcquisitionOrchestratorLeaseRepository
-}): AcquisitionOrchestratorStepRunners {
-  const leaseRepository =
-    deps?.leaseRepository ?? acquisitionOrchestratorLeaseRepository
-
+/**
+ * Workers AUTO internes. leaseRepository imposé par l’appelant unique
+ * `runProductionAcquisitionOrchestrator` — jamais exporté.
+ */
+function createProductionStepRunners(
+  leaseRepository: AcquisitionOrchestratorLeaseRepositoryPort
+): AcquisitionOrchestratorStepRunners {
   return {
     gmailSync: async ({ runId, remainingMs }) =>
       runGmailSync({ runId, remainingMs, leaseRepository }),
 
     attachmentRecovery: async ({ runId, remainingMs }) => {
+      const capability = createOrchestratorAutoCapability({
+        leaseRepository,
+        ownerRunId: runId,
+      })
       const base = getAttachmentRecoveryCronConfig()
       const result = await runAcquisitionAttachmentRecoveryOrchestrator({
         repository: acquisitionAttachmentRepository,
@@ -161,15 +265,16 @@ export function createProductionStepRunners(deps?: {
           ...base,
           maxDurationMs: clampChildBudget(remainingMs, base.maxDurationMs),
         },
+        ensureOwnership: ownershipCheckFrom(capability),
       })
-      return {
-        status: mapWorkerStatus(result.status),
-        result: publicWorkerResult(result),
-        ...(result.skipReason ? { skipReason: result.skipReason } : {}),
-      }
+      return mapChildWorkerResult(result)
     },
 
     attachmentDownload: async ({ runId, remainingMs }) => {
+      const capability = createOrchestratorAutoCapability({
+        leaseRepository,
+        ownerRunId: runId,
+      })
       const base = getAttachmentDownloadCronConfig()
       const result = await runAcquisitionAttachmentDownloadOrchestrator({
         repository: acquisitionAttachmentRepository,
@@ -179,15 +284,16 @@ export function createProductionStepRunners(deps?: {
           ...base,
           maxDurationMs: clampChildBudget(remainingMs, base.maxDurationMs),
         },
+        ensureOwnership: ownershipCheckFrom(capability),
       })
-      return {
-        status: mapWorkerStatus(result.status),
-        result: publicWorkerResult(result),
-        ...(result.skipReason ? { skipReason: result.skipReason } : {}),
-      }
+      return mapChildWorkerResult(result)
     },
 
     contentFetch: async ({ runId, remainingMs }) => {
+      const capability = createOrchestratorAutoCapability({
+        leaseRepository,
+        ownerRunId: runId,
+      })
       const base = getContentCronConfig()
       const result = await runAcquisitionContentCronOrchestratorDefault({
         createRunId: () => `${runId}:content`,
@@ -195,31 +301,47 @@ export function createProductionStepRunners(deps?: {
           ...base,
           maxDurationMs: clampChildBudget(remainingMs, base.maxDurationMs),
         },
+        ensureOwnership: ownershipCheckFrom(capability),
       })
-      return {
-        status: mapWorkerStatus(result.status),
-        result: publicWorkerResult(result),
-        ...(result.skipReason ? { skipReason: result.skipReason } : {}),
-      }
+      return mapChildWorkerResult(result)
     },
 
     extraction: async ({ runId, remainingMs }) => {
+      const capability = createOrchestratorAutoCapability({
+        leaseRepository,
+        ownerRunId: runId,
+      })
       const base = getExtractionCronConfig()
       const result = await runAcquisitionExtractionCronOrchestrator({
         repository: acquisitionExtractionCronSelectionRepository,
         extractDraft: ({ companyId, draftId, now }) =>
-          runDraftExtractionSystem({ companyId, draftId, now }),
+          runDraftExtractionOrchestrated({ companyId, draftId, now }, capability),
         createRunId: () => `${runId}:extraction`,
         config: {
           ...base,
           maxDurationMs: clampChildBudget(remainingMs, base.maxDurationMs),
         },
+        ensureOwnership: ownershipCheckFrom(capability),
       })
-      return {
-        status: mapWorkerStatus(result.status),
-        result: publicWorkerResult(result),
-        ...(result.skipReason ? { skipReason: result.skipReason } : {}),
-      }
+      return mapChildWorkerResult(result)
     },
   }
+}
+
+/**
+ * Unique entrée production AUTO.
+ * Une seule autorité : `acquisitionOrchestratorLeaseRepository` pour
+ * acquire / assertOwned / renew / release / capability workers.
+ * Aucun paramètre leaseRepository ou steps.
+ */
+export async function runProductionAcquisitionOrchestrator(input: {
+  runId: string
+}): Promise<AcquisitionOrchestratorRunResult> {
+  const leaseRepository = acquisitionOrchestratorLeaseRepository
+  return runAcquisitionOrchestrator({
+    runId: input.runId,
+    leaseRepository,
+    steps: createProductionStepRunners(leaseRepository),
+    config: getAcquisitionOrchestratorConfig(),
+  })
 }

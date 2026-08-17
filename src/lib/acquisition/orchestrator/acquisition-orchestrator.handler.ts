@@ -10,7 +10,7 @@ import {
   createUnwiredStepRunners,
   runAcquisitionOrchestrator,
 } from "@/lib/acquisition/orchestrator/acquisition-orchestrator.service"
-import { createProductionStepRunners } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
+import { runProductionAcquisitionOrchestrator } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
 import type { AcquisitionOrchestratorRunResult } from "@/lib/acquisition/orchestrator/acquisition-orchestrator.types"
 
 export interface AcquisitionOrchestratorRouteDeps {
@@ -19,16 +19,15 @@ export interface AcquisitionOrchestratorRouteDeps {
 }
 
 async function defaultRun(runId: string): Promise<AcquisitionOrchestratorRunResult> {
-  const steps = isAcquisitionOrchestratorStubsAllowed()
-    ? createDefaultStubStepRunners()
-    : createProductionStepRunners()
-
-  return runAcquisitionOrchestrator({
-    runId,
-    leaseRepository: acquisitionOrchestratorLeaseRepository,
-    steps,
-    config: getAcquisitionOrchestratorConfig(),
-  })
+  if (isAcquisitionOrchestratorStubsAllowed()) {
+    return runAcquisitionOrchestrator({
+      runId,
+      leaseRepository: acquisitionOrchestratorLeaseRepository,
+      steps: createDefaultStubStepRunners(),
+      config: getAcquisitionOrchestratorConfig(),
+    })
+  }
+  return runProductionAcquisitionOrchestrator({ runId })
 }
 
 /**

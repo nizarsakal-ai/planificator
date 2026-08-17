@@ -83,7 +83,7 @@ export interface AttachmentDownloadCronCompanyResult {
 export interface AttachmentDownloadCronRunResult {
   status: AttachmentDownloadCronRunStatus
   runId: string
-  skipReason?: AcquisitionCronSkipReason
+  skipReason?: AcquisitionCronSkipReason | "LEASE_STOLEN"
   error?: PublicAttachmentDownloadCronError
   errorCode?: string
   budgetReached?: AttachmentDownloadCronBudgetReason

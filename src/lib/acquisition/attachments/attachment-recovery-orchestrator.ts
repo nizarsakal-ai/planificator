@@ -19,6 +19,10 @@ import {
   type AttachmentRecoveryOrchestratorRepository,
   type AttachmentRecoveryPhaseStats,
 } from "@/lib/acquisition/attachments/attachment-recovery-orchestrator.types"
+import {
+  isOrchestratorOwnershipValid,
+  type OrchestratorItemOwnershipCheck,
+} from "@/lib/acquisition/orchestrator/orchestrator-ownership"
 
 const LOG_PREFIX = "[acquisition-attachment-recovery]"
 
@@ -28,6 +32,8 @@ export interface RunAttachmentRecoveryOrchestratorInput {
   clock?: () => Date
   createRunId?: () => string
   config?: AttachmentRecoveryCronConfig
+  /** Présent uniquement sur le chemin orchestrateur. Unité cron : omis. */
+  ensureOwnership?: OrchestratorItemOwnershipCheck
 }
 
 function defaultLog(event: string, payload?: Record<string, unknown>): void {
@@ -43,8 +49,12 @@ function aggregateStatus(
   reclaim: AttachmentRecoveryPhaseStats,
   retry: AttachmentRecoveryPhaseStats,
   budgetReason: AttachmentRecoveryCronBudgetReason | undefined,
-  hadCompanyFailure: boolean
+  hadCompanyFailure: boolean,
+  leaseStolen: boolean
 ): AttachmentRecoveryCronRunStatus {
+  if (leaseStolen) {
+    return reclaim.transitioned > 0 || retry.transitioned > 0 ? "PARTIAL" : "FAILED"
+  }
   if (hadCompanyFailure && reclaim.transitioned === 0 && retry.transitioned === 0) {
     return "FAILED"
   }
@@ -73,6 +83,7 @@ export async function runAcquisitionAttachmentRecoveryOrchestrator(
   let budgetReason: AttachmentRecoveryCronBudgetReason | undefined
   let hadCompanyFailure = false
   let globalTransitioned = 0
+  let leaseStolen = false
 
   const publicConfig = {
     reclaimTtlMs: config.reclaimTtlMs,
@@ -162,6 +173,7 @@ export async function runAcquisitionAttachmentRecoveryOrchestrator(
   }
 
   for (const companyId of reclaimCompanyIds) {
+    if (leaseStolen) break
     if (isTimeBudgetExceeded(startedAt, clock(), config.maxDurationMs)) {
       budgetReason = "MAX_DURATION_MS"
       log("RECOVERY_BUDGET_REACHED", { runId, reason: budgetReason, phase: "RECLAIM" })
@@ -202,6 +214,17 @@ export async function runAcquisitionAttachmentRecoveryOrchestrator(
             log("RECOVERY_BUDGET_REACHED", { runId, reason: budgetReason, phase: "RECLAIM" })
             break
           }
+          if (!(await isOrchestratorOwnershipValid(input.ensureOwnership))) {
+            leaseStolen = true
+            companyStatus = attempted > 0 ? "PARTIAL" : "FAILED"
+            log("RECOVERY_LEASE_STOLEN", {
+              runId,
+              companyId,
+              attachmentId: candidate.id,
+              phase: "RECLAIM",
+            })
+            break
+          }
           attempted++
           const result = await input.repository.reclaimPendingDownload({
             companyId,
@@ -220,10 +243,11 @@ export async function runAcquisitionAttachmentRecoveryOrchestrator(
             noop++
           }
         }
-        if (companyStatus !== "PARTIAL") {
+        if (companyStatus !== "PARTIAL" && companyStatus !== "FAILED") {
           companyStatus = "SUCCESS"
         }
         if (companyStatus === "SUCCESS") reclaim.companiesSucceeded++
+        else if (companyStatus === "FAILED") reclaim.companiesFailed++
         else reclaim.companiesPartial++
       }
     } catch (error) {
@@ -253,6 +277,7 @@ export async function runAcquisitionAttachmentRecoveryOrchestrator(
   let retryHasMoreCompanies = false
 
   const canStartRetry =
+    !leaseStolen &&
     !isTimeBudgetExceeded(startedAt, clock(), config.maxDurationMs) &&
     globalTransitioned < config.maxPerRun
 
@@ -281,6 +306,7 @@ export async function runAcquisitionAttachmentRecoveryOrchestrator(
     }
 
     for (const companyId of retryCompanyIds) {
+      if (leaseStolen) break
       if (isTimeBudgetExceeded(startedAt, clock(), config.maxDurationMs)) {
         budgetReason = "MAX_DURATION_MS"
         log("RECOVERY_BUDGET_REACHED", { runId, reason: budgetReason, phase: "RETRY" })
@@ -324,6 +350,17 @@ export async function runAcquisitionAttachmentRecoveryOrchestrator(
               log("RECOVERY_BUDGET_REACHED", { runId, reason: budgetReason, phase: "RETRY" })
               break
             }
+            if (!(await isOrchestratorOwnershipValid(input.ensureOwnership))) {
+              leaseStolen = true
+              companyStatus = attempted > 0 ? "PARTIAL" : "FAILED"
+              log("RECOVERY_LEASE_STOLEN", {
+                runId,
+                companyId,
+                attachmentId: candidate.id,
+                phase: "RETRY",
+              })
+              break
+            }
             attempted++
             const result = await input.repository.scheduleRetryToDiscovered({
               companyId,
@@ -344,8 +381,9 @@ export async function runAcquisitionAttachmentRecoveryOrchestrator(
               noop++
             }
           }
-          if (companyStatus !== "PARTIAL") companyStatus = "SUCCESS"
+          if (companyStatus !== "PARTIAL" && companyStatus !== "FAILED") companyStatus = "SUCCESS"
           if (companyStatus === "SUCCESS") retry.companiesSucceeded++
+          else if (companyStatus === "FAILED") retry.companiesFailed++
           else retry.companiesPartial++
         }
       } catch (error) {
@@ -373,7 +411,7 @@ export async function runAcquisitionAttachmentRecoveryOrchestrator(
 
   const finishedAt = clock()
   const durationMs = finishedAt.getTime() - startedAt.getTime()
-  const status = aggregateStatus(reclaim, retry, budgetReason, hadCompanyFailure)
+  const status = aggregateStatus(reclaim, retry, budgetReason, hadCompanyFailure, leaseStolen)
 
   log("RECOVERY_CRON_FINISHED", {
     runId,
@@ -382,11 +420,13 @@ export async function runAcquisitionAttachmentRecoveryOrchestrator(
     reclaimTransitioned: reclaim.transitioned,
     retryTransitioned: retry.transitioned,
     budgetReason,
+    ...(leaseStolen ? { skipReason: "LEASE_STOLEN" } : {}),
   })
 
   return {
     status,
     runId,
+    ...(leaseStolen ? { skipReason: "LEASE_STOLEN" as const } : {}),
     startedAt: startedAt.toISOString(),
     finishedAt: finishedAt.toISOString(),
     durationMs,

@@ -24,6 +24,10 @@ import {
   type ExtractionCronRunStats,
   type ExtractionCronSelectionRepository,
 } from "@/lib/acquisition/extraction/extraction-cron.orchestrator.types"
+import {
+  isOrchestratorOwnershipValid,
+  type OrchestratorItemOwnershipCheck,
+} from "@/lib/acquisition/orchestrator/orchestrator-ownership"
 
 const LOG_PREFIX = "[acquisition-extraction-cron]"
 
@@ -35,6 +39,8 @@ export interface RunExtractionCronOrchestratorInput {
   clock?: () => Date
   createRunId?: () => string
   config?: ExtractionCronConfig
+  /** Présent uniquement sur le chemin orchestrateur. Unité cron : omis. */
+  ensureOwnership?: OrchestratorItemOwnershipCheck
 }
 
 function defaultLog(event: string, payload?: Record<string, unknown>): void {
@@ -100,6 +106,10 @@ export function mapExtractionOutcomeToStats(
       stats.maxAttemptsReached++
       log("EXTRACTION_DRAFT_MAX_ATTEMPTS", { ...ctx, outcome: result.outcome, errorCode: result.code })
       return
+    case "LEASE_STOLEN":
+      stats.failed++
+      log("EXTRACTION_DRAFT_LEASE_STOLEN", { ...ctx, outcome: result.outcome, errorCode: result.code })
+      return
     default:
       stats.failed++
       log("EXTRACTION_DRAFT_FAILED", {
@@ -146,7 +156,11 @@ function resolveRunStatus(input: {
   budgetReached?: ExtractionCronBudgetReason
   global: ExtractionCronRunStats
   providerConfigFailed?: boolean
+  leaseStolen?: boolean
 }): ExtractionCronRunResult["status"] {
+  if (input.leaseStolen) {
+    return hasUsefulProgress(input.global) ? "PARTIAL" : "FAILED"
+  }
   if (input.providerConfigFailed) {
     return hasUsefulProgress(input.global) ? "PARTIAL" : "FAILED"
   }
@@ -320,12 +334,14 @@ export async function runAcquisitionExtractionCronOrchestrator(
   let companiesSkipped = 0
   let budgetReached: ExtractionCronBudgetReason | undefined
   let remainingRun = config.maxPerRun
+  let leaseStolen = false
 
   if (hasMoreCompanies) {
     budgetReached = "MAX_COMPANIES_PER_RUN"
   }
 
   for (const companyId of companyIds) {
+    if (leaseStolen) break
     if (remainingRun <= 0) {
       budgetReached = "MAX_DRAFTS_PER_RUN"
       break
@@ -409,6 +425,12 @@ export async function runAcquisitionExtractionCronOrchestrator(
         break
       }
 
+      if (!(await isOrchestratorOwnershipValid(input.ensureOwnership))) {
+        leaseStolen = true
+        log("EXTRACTION_LEASE_STOLEN", { runId, companyId, draftId: candidate.draftId })
+        break
+      }
+
       processedDraftIds.add(candidate.draftId)
       stats.selected++
       remainingRun--
@@ -426,6 +448,10 @@ export async function runAcquisitionExtractionCronOrchestrator(
           now: clock,
         })
         mapExtractionOutcomeToStats(stats, result, log, ctx)
+        if (!result.ok && result.outcome === "LEASE_STOLEN") {
+          leaseStolen = true
+          break
+        }
       } catch {
         stats.unexpectedFailed++
         log("EXTRACTION_UNEXPECTED_FAILURE", ctx)
@@ -433,7 +459,10 @@ export async function runAcquisitionExtractionCronOrchestrator(
     }
 
     companyStatus = companyStatusFromStats(stats, companyBudgetHit)
-    if (companyBudgetHit) {
+    if (leaseStolen) {
+      companyStatus =
+        stats.selected > 0 || hasUsefulProgress(stats) ? "PARTIAL" : "FAILED"
+    } else if (companyBudgetHit) {
       skipReason = "BUDGET_REACHED"
     }
 
@@ -459,6 +488,7 @@ export async function runAcquisitionExtractionCronOrchestrator(
     companiesPartial,
     budgetReached,
     global: globalStats,
+    leaseStolen,
   })
 
   log("EXTRACTION_RUN_FINISHED", {
@@ -468,12 +498,14 @@ export async function runAcquisitionExtractionCronOrchestrator(
     budgetReached,
     selected: globalStats.selected,
     extracted: globalStats.extracted,
+    ...(leaseStolen ? { skipReason: "LEASE_STOLEN" } : {}),
   })
 
   return {
     status,
     runId,
     budgetReached,
+    ...(leaseStolen ? { skipReason: "LEASE_STOLEN" as const } : {}),
     startedAt: startedAt.toISOString(),
     finishedAt: finishedAt.toISOString(),
     durationMs,
