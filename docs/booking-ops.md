@@ -32,6 +32,13 @@ Ne pas exposer ces variables au client.
 | `otherIgnoredCount` | Autres hors-confirmation (promo, identité, etc.) |
 | `ambiguousCount` | Passages classifiés AMBIGU (chaque tentative compte) |
 
+## Table lifecycle Gmail Booking
+
+Modèle Prisma : `ProcessedGmailMessage`.
+Table physique PostgreSQL (Prisma `@@map`) : **`processed_gmail_messages`**.
+Colonnes : camelCase entre guillemets (`"companyId"`, `"messageId"`, `"errorCode"`, …).
+Ne jamais cibler `"ProcessedGmailMessage"` en SQL brut.
+
 ## `BOOKING_EMAIL_INTENT_AMBIGUOUS` (AMBIGU)
 
 ### Signification
@@ -52,7 +59,7 @@ Hors-confirmation **prouvé** (host, reçu, annulation, autre) reste en **ignore
 ```sql
 -- Ambigu en attente de retry
 SELECT "companyId", "messageId", "attemptCount", "nextRetryAt", "errorCode", "updatedAt"
-FROM "ProcessedGmailMessage"
+FROM processed_gmail_messages
 WHERE "errorCode" = 'BOOKING_EMAIL_INTENT_AMBIGUOUS'
   AND "status" = 'RETRYABLE_FAILURE'
 ORDER BY "updatedAt" DESC
@@ -60,7 +67,7 @@ LIMIT 100;
 
 -- Ambigu définitivement ignorés (plafond atteint)
 SELECT "companyId", "messageId", "attemptCount", "errorCode", "errorMessage", "updatedAt"
-FROM "ProcessedGmailMessage"
+FROM processed_gmail_messages
 WHERE "errorCode" = 'BOOKING_EMAIL_INTENT_AMBIGUOUS'
   AND "status" = 'PERMANENTLY_IGNORED'
 ORDER BY "updatedAt" DESC
@@ -69,7 +76,7 @@ LIMIT 100;
 
 Surveiller aussi `ambiguousCount` dans la réponse JSON / logs du cron `[CRON gmail-scan]`.
 
-### Reprise contrôlée après amélioration du classifieur
+### Reprise contrôlée après amélioration du classifieur (AMBIGU)
 
 Aucune route HTTP de reset. Pas de `deleteMany({})`.
 
@@ -82,7 +89,7 @@ Procédure scoped et auditée (ops / admin DB uniquement) :
 ```sql
 -- DRY-RUN : mêmes prédicats que l’UPDATE scoped (doit retourner exactement 1 ligne)
 SELECT "companyId", "messageId", "status", "errorCode", "attemptCount", "errorMessage", "updatedAt"
-FROM "ProcessedGmailMessage"
+FROM processed_gmail_messages
 WHERE "companyId" = '<COMPANY_ID>'
   AND "messageId" = '<GMAIL_MESSAGE_ID>'
   AND "errorCode" = 'BOOKING_EMAIL_INTENT_AMBIGUOUS'
@@ -93,7 +100,7 @@ WHERE "companyId" = '<COMPANY_ID>'
 
 ```sql
 -- UPDATE scoped : prédicats identiques au dry-run
-UPDATE "ProcessedGmailMessage"
+UPDATE processed_gmail_messages
 SET
   "status" = 'RETRYABLE_FAILURE',
   "nextRetryAt" = NOW(),
@@ -113,7 +120,7 @@ WHERE "companyId" = '<COMPANY_ID>'
 ```sql
 -- POST-CHECK : la ligne doit être RETRYABLE_FAILURE, code ambigu conservé
 SELECT "companyId", "messageId", "status", "errorCode", "attemptCount", "nextRetryAt", "updatedAt"
-FROM "ProcessedGmailMessage"
+FROM processed_gmail_messages
 WHERE "companyId" = '<COMPANY_ID>'
   AND "messageId" = '<GMAIL_MESSAGE_ID>'
   AND "errorCode" = 'BOOKING_EMAIL_INTENT_AMBIGUOUS'
@@ -125,3 +132,44 @@ WHERE "companyId" = '<COMPANY_ID>'
 
 Ne jamais resetter en masse sans liste nominative et validation.
 Ne jamais exécuter l’UPDATE si le dry-run ne retourne pas exactement une ligne.
+
+## `IGNORED_BOOKING_HOST_MESSAGE` (HOST)
+
+### Signification
+
+Email classifié `MESSAGE_ETABLISSEMENT` (message établissement/hôte, hors confirmation initiale).
+Ignore permanent immédiat. Claims suivants : `SKIP` / `PERMANENTLY_IGNORED`.
+
+### Inspecter (lecture seule)
+
+```sql
+SELECT "companyId", "messageId", "status", "errorCode", "attemptCount", "updatedAt"
+FROM processed_gmail_messages
+WHERE "errorCode" = 'IGNORED_BOOKING_HOST_MESSAGE'
+  AND "status" = 'PERMANENTLY_IGNORED'
+ORDER BY "updatedAt" DESC
+LIMIT 100;
+```
+
+### Reprise contrôlée après correction faux positif HOST
+
+**Prérequis obligatoires :**
+
+1. Classifieur corrigé **déjà déployé**.
+2. `companyId` exact.
+3. **Gmail API `messageId` exact** (≠ référence Booking métier).
+4. Dry-run retournant **exactement une** ligne.
+5. **Aucun** reset global ; **aucun** UPDATE de plusieurs lignes HOST en bloc.
+6. Une reprise = une ligne nominative.
+
+```sql
+-- DRY-RUN (1 ligne attendue) — ne pas UPDATE tant que messageId Gmail non identifié
+SELECT "companyId", "messageId", "status", "errorCode", "attemptCount", "errorMessage", "updatedAt"
+FROM processed_gmail_messages
+WHERE "companyId" = '<COMPANY_ID>'
+  AND "messageId" = '<GMAIL_MESSAGE_ID>'
+  AND "errorCode" = 'IGNORED_BOOKING_HOST_MESSAGE'
+  AND "status" = 'PERMANENTLY_IGNORED';
+```
+
+L’UPDATE de reprise (même prédicats) n’est **pas** exécuté dans le lot de correction code ; il reste une opération ops manuelle post-déploiement, ligne par ligne, après dry-run = 1.
