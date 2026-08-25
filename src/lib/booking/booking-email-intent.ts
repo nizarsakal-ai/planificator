@@ -111,16 +111,47 @@ function anyMatch(
   return false
 }
 
-const HOST_MESSAGE_PATTERNS: RegExp[] = [
+/**
+ * Message hôte / établissement annoncé dans le SUJET (ignore immédiat).
+ * Ne s’applique pas au corps — les CTA corporels sont gérés plus bas.
+ */
+const HOST_SUBJECT_PATTERNS: RegExp[] = [
+  /\bnouveau message\b/,
+  /\byou have a new message\b/,
+  /\bnew message from (?:the property|(?:your )?host)\b/,
+]
+
+/**
+ * Signaux HOST / CTA présents dans le CORPS uniquement.
+ * Peuvent être surpassés uniquement par une confirmation forte (sujet + ref + dates).
+ */
+const HOST_BODY_PATTERNS: RegExp[] = [
   /vous avez un nouveau message de l['’]?etablissement/,
   /nouveau message de l['’]?etablissement/,
-  /you have a new message from the property/,
-  /new message from the property/,
-  /you have a new message from (?:your )?host/,
-  // CTA « voir les messages » seul est trop fréquent en footer de confirmation :
-  // exiger un signal « nouveau message » à proximité.
+  // CTA « voir les messages » : exiger « nouveau message » à proximité.
   /nouveau message[\s\S]{0,80}voir les messages/,
+  /you have a new message from the property/,
+  /you have a new message from (?:your )?host/,
+  /new message from the property/,
   /new message[\s\S]{0,80}view messages/,
+]
+
+/**
+ * Signal explicite de confirmation dans le SUJET seul (borné, ne traverse pas le corps).
+ * « Merci ! Votre réservation » sans « est confirmée » / équivalent → insuffisant.
+ */
+const STRONG_SUBJECT_CONFIRMATION_PATTERNS: RegExp[] = [
+  /confirmation de reservation/,
+  /reservation confirmee/,
+  /votre reservation .{1,120}est confirmee/,
+  /votre appartement est confirme/,
+  /voici votre confirmation/,
+  /confirmation booking/,
+  /booking confirmation/,
+  /your booking is confirmed/,
+  /your reservation .{1,120}is confirmed/,
+  /reservation confirmed/,
+  /booking\.com confirmation/,
 ]
 
 const CANCELLATION_PATTERNS: RegExp[] = [
@@ -197,15 +228,17 @@ const AUTRE_PATTERNS: RegExp[] = [
   /newsletter/,
 ]
 
-/** Lexique confirmation — insuffisant seul. */
+/** Lexique confirmation (combined) — historique ; insuffisant seul. Pas de « merci…réservation » nu. */
 const CONFIRMATION_LEXICON: RegExp[] = [
   /confirmation de reservation/,
   /reservation confirmee/,
+  /votre reservation .{1,120}est confirmee/,
   /votre appartement est confirme/,
   /voici votre confirmation/,
   /confirmation booking/,
   /booking confirmation/,
   /your booking is confirmed/,
+  /your reservation .{1,120}is confirmed/,
   /reservation confirmed/,
   /booking\.com confirmation/,
 ]
@@ -289,10 +322,40 @@ function noteSecondaryReceiptCtas(combined: string, evidence: string[]): void {
   )
 }
 
+function hasHostBodySignal(body: string, evidence: string[]): boolean {
+  return anyMatch(body, HOST_BODY_PATTERNS, evidence, "weak:host_cta")
+}
+
+/**
+ * Confirmation forte pour surpasser un CTA HOST du corps uniquement :
+ * signal explicite dans le SUJET + ref Booking + dates (seuils structurels existants).
+ */
+function canOverrideBodyHostWithStrongConfirmation(
+  hasStrongSubjectConfirmation: boolean,
+  hasRef: boolean,
+  hasDates: boolean
+): boolean {
+  return hasStrongSubjectConfirmation && hasRef && hasDates
+}
+
+/** Chemin historique CONFIRMATION (hors override HOST corps). */
+function isHistoricalConfirmation(
+  hasLexicon: boolean,
+  hasRef: boolean,
+  hasDates: boolean,
+  score: number
+): boolean {
+  if (hasLexicon && score >= 2) return true
+  if (!hasLexicon && hasRef && hasDates && score >= 3) return true
+  return false
+}
+
 /**
  * Classification déterministe FR/EN.
- * Ordre : host → cancel → reçu principal → autre → confirmation → AMBIGU.
- * Les CTA facture/reçu en footer de confirmation = mention secondaire (pas RECU).
+ * Ordre :
+ *   host SUJET → cancel → reçu principal → autre →
+ *   (HOST corps noté) → override confirmation forte (sujet+ref+dates) →
+ *   HOST corps → confirmation historique → AMBIGU.
  */
 export function classifyBookingEmailIntent(input: {
   subject: string
@@ -303,8 +366,8 @@ export function classifyBookingEmailIntent(input: {
   const body = normalizeForMatch(input.bodyText ?? "")
   const combined = `${subject}\n${body}`
 
-  // 1) Hors-périmètre fort (prioritaire même si le sujet dit « confirmation »)
-  if (anyMatch(combined, HOST_MESSAGE_PATTERNS, evidence, "neg:host_message")) {
+  // A) Message hôte explicite dans le sujet → ignore immédiat
+  if (anyMatch(subject, HOST_SUBJECT_PATTERNS, evidence, "neg:host_message")) {
     return {
       intent: "MESSAGE_ETABLISSEMENT",
       confidence: "high",
@@ -312,6 +375,7 @@ export function classifyBookingEmailIntent(input: {
     }
   }
 
+  // B) Annulation / reçu / autre
   if (anyMatch(combined, CANCELLATION_PATTERNS, evidence, "neg:cancellation")) {
     return {
       intent: "ANNULATION",
@@ -320,10 +384,8 @@ export function classifyBookingEmailIntent(input: {
     }
   }
 
-  // Mentions CTA facture/reçu : evidence seulement (ne court-circuitent pas)
   noteSecondaryReceiptCtas(combined, evidence)
 
-  // Reçu / facture comme intent principal (pas un CTA secondaire)
   if (isPrimaryReceiptIntent(subject, body, combined, evidence)) {
     return {
       intent: "RECU",
@@ -340,21 +402,26 @@ export function classifyBookingEmailIntent(input: {
     }
   }
 
-  // 2) Confirmation : lexique + structure, ou structure forte seule
-  const hasLexicon = anyMatch(
-    combined,
-    CONFIRMATION_LEXICON,
+  // D) Signaux HOST dans le corps seul (CTA)
+  const bodyHasHost = hasHostBodySignal(body, evidence)
+
+  // C) Confirmation forte : sujet seul + structure ref/dates
+  const hasStrongSubjectConfirmation = anyMatch(
+    subject,
+    STRONG_SUBJECT_CONFIRMATION_PATTERNS,
     evidence,
-    "pos:confirmation_lexicon"
+    "pos:strong_subject_confirmation"
   )
-  // « confirmation » isolé (sujet) — signal faible, pas une preuve seule
-  if (/\bconfirmation\b/.test(subject) || /\bconfirmation\b/.test(body)) {
-    pushEvidence(evidence, "weak:confirmation_word")
-  }
 
   const { score, hasDates, hasRef } = structuralScore(combined, evidence)
 
-  if (hasLexicon && score >= 2) {
+  if (
+    canOverrideBodyHostWithStrongConfirmation(
+      hasStrongSubjectConfirmation,
+      hasRef,
+      hasDates
+    )
+  ) {
     return {
       intent: "CONFIRMATION",
       confidence: score >= 3 ? "high" : "medium",
@@ -362,16 +429,34 @@ export function classifyBookingEmailIntent(input: {
     }
   }
 
-  // Structure typique confirmation sans lexique explicite
-  if (!hasLexicon && hasRef && hasDates && score >= 3) {
+  if (bodyHasHost) {
+    pushEvidence(evidence, "neg:host_message")
     return {
-      intent: "CONFIRMATION",
-      confidence: "medium",
+      intent: "MESSAGE_ETABLISSEMENT",
+      confidence: "high",
       evidence,
     }
   }
 
-  // Ref + nom établissement sans dates → ambigu (cas 11)
+  // E) Confirmation historique (lexique combined + structure, ou structure forte)
+  const hasLexicon = anyMatch(
+    combined,
+    CONFIRMATION_LEXICON,
+    evidence,
+    "pos:confirmation_lexicon"
+  )
+  if (/\bconfirmation\b/.test(subject) || /\bconfirmation\b/.test(body)) {
+    pushEvidence(evidence, "weak:confirmation_word")
+  }
+
+  if (isHistoricalConfirmation(hasLexicon, hasRef, hasDates, score)) {
+    return {
+      intent: "CONFIRMATION",
+      confidence: hasLexicon && score >= 3 ? "high" : "medium",
+      evidence,
+    }
+  }
+
   if (hasRef && !hasDates && score < 3) {
     pushEvidence(evidence, "ambig:partial_structure")
     return {

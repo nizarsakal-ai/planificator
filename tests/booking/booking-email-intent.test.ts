@@ -291,6 +291,110 @@ Départ : 12 janvier 2026
     })
     assert.equal(r.intent, "CONFIRMATION")
   })
+
+  it("T1 régression: confirmation + CTA Nouveau message / Voir les messages → CONFIRMATION", () => {
+    const r = classifyBookingEmailIntent({
+      subject:
+        "Merci ! Votre réservation à l'établissement Maison de vacances est confirmée",
+      bodyText: `
+Numéro de réservation : 1111222233
+Établissement : Maison de vacances
+Adresse : 10 rue des Lilas, 17000 La Rochelle
+Arrivée : 24 août 2026
+Départ : 27 août 2026
+Nouveau message de l'établissement
+Voir les messages
+`,
+    })
+    assert.equal(r.intent, "CONFIRMATION")
+    assert.ok(r.evidence.includes("weak:host_cta"))
+    assert.ok(r.evidence.includes("pos:strong_subject_confirmation"))
+    const disposition = resolveBookingIntentScanDisposition(r)
+    assert.equal(disposition.action, "PROCEED_CONFIRMATION")
+  })
+
+  it("T2: confirmation + contactez hôte / e-mail établissement → CONFIRMATION", () => {
+    const r = classifyBookingEmailIntent({
+      subject:
+        "Merci ! Votre réservation à l'établissement Maison de vacances est confirmée",
+      bodyText: `
+Numéro de réservation : 1111222233
+Établissement : Maison de vacances
+Adresse : 10 rue des Lilas, 17000 La Rochelle
+Arrivée : 24 août 2026
+Départ : 27 août 2026
+Pour toute question, contactez votre hôte.
+Envoyer un e-mail à l'établissement.
+`,
+    })
+    assert.equal(r.intent, "CONFIRMATION")
+    assert.equal(
+      resolveBookingIntentScanDisposition(r).action,
+      "PROCEED_CONFIRMATION"
+    )
+  })
+
+  it("R1-T1: phrase HOST primaire mid-body + sujet fort → CONFIRMATION", () => {
+    const r = classifyBookingEmailIntent({
+      subject:
+        "Merci ! Votre réservation à l'établissement Maison de vacances est confirmée",
+      bodyText: `
+Numéro de réservation : 1111222233
+Établissement : Maison de vacances
+Adresse : 10 rue des Lilas, 17000 La Rochelle
+Arrivée : 24 août 2026
+Départ : 27 août 2026
+Détails du séjour ci-dessous.
+Vous avez un nouveau message de l'établissement.
+`,
+    })
+    assert.equal(r.intent, "CONFIRMATION")
+    assert.ok(r.evidence.includes("weak:host_cta"))
+    assert.equal(
+      resolveBookingIntentScanDisposition(r).action,
+      "PROCEED_CONFIRMATION"
+    )
+  })
+
+  it("R1-T2: phrase HOST au début du corps + sujet fort → CONFIRMATION", () => {
+    const r = classifyBookingEmailIntent({
+      subject:
+        "Merci ! Votre réservation à l'établissement Maison de vacances est confirmée",
+      bodyText: `
+Vous avez un nouveau message de l'établissement.
+Numéro de réservation : 1111222233
+Établissement : Maison de vacances
+Adresse : 10 rue des Lilas, 17000 La Rochelle
+Arrivée : 24 août 2026
+Départ : 27 août 2026
+`,
+    })
+    assert.equal(r.intent, "CONFIRMATION")
+    assert.equal(
+      resolveBookingIntentScanDisposition(r).action,
+      "PROCEED_CONFIRMATION"
+    )
+  })
+
+  it("R1-T3: confirmation EN + CTA You have a new message from the property → CONFIRMATION", () => {
+    const r = classifyBookingEmailIntent({
+      subject: "Your booking is confirmed — Harbour View Flat",
+      bodyText: `
+${CONFIRMATION_BODY_EN}
+You have a new message from the property.
+View messages
+`,
+    })
+    assert.equal(r.intent, "CONFIRMATION")
+  })
+
+  it("R1-T6: Merci ! Votre réservation + adresse seule → pas CONFIRMATION", () => {
+    const r = classifyBookingEmailIntent({
+      subject: "Merci ! Votre réservation",
+      bodyText: `Adresse : 10 rue des Lilas, 17000 La Rochelle`,
+    })
+    assert.notEqual(r.intent, "CONFIRMATION")
+  })
 })
 
 describe("classifyBookingEmailIntent — hors confirmation", () => {
@@ -305,6 +409,71 @@ Adresse : 12 rue de la Paix
 `,
     })
     assert.equal(r.intent, "MESSAGE_ETABLISSEMENT")
+  })
+
+  it("T3: véritable message établissement → MESSAGE_ETABLISSEMENT + IGNORED_BOOKING_HOST_MESSAGE", () => {
+    const r = classifyBookingEmailIntent({
+      subject: "Nouveau message",
+      bodyText: `
+Vous avez un nouveau message de l'établissement.
+Cliquez pour répondre.
+Numéro de réservation : 99887766
+`,
+    })
+    assert.equal(r.intent, "MESSAGE_ETABLISSEMENT")
+    assert.ok(r.evidence.includes("neg:host_message"))
+    const disposition = resolveBookingIntentScanDisposition(r)
+    assert.equal(disposition.action, "PERMANENT_IGNORE")
+    if (disposition.action === "PERMANENT_IGNORE") {
+      assert.equal(disposition.code, "IGNORED_BOOKING_HOST_MESSAGE")
+    }
+  })
+
+  it("R1-T4: sujet Nouveau message de l'établissement + footer ref/dates → HOST", () => {
+    const r = classifyBookingEmailIntent({
+      subject: "Nouveau message de l'établissement",
+      bodyText: `
+Bonjour, merci pour votre séjour.
+Numéro de réservation : 99887766
+Arrivée : 1 septembre 2026
+Départ : 3 septembre 2026
+Adresse : 5 avenue Victor
+`,
+    })
+    assert.equal(r.intent, "MESSAGE_ETABLISSEMENT")
+    const disposition = resolveBookingIntentScanDisposition(r)
+    assert.equal(disposition.action, "PERMANENT_IGNORE")
+    if (disposition.action === "PERMANENT_IGNORE") {
+      assert.equal(disposition.code, "IGNORED_BOOKING_HOST_MESSAGE")
+    }
+  })
+
+  it("R1-T5: sujet neutre + corps HOST → MESSAGE_ETABLISSEMENT", () => {
+    const r = classifyBookingEmailIntent({
+      subject: "Booking.com",
+      bodyText: `
+Vous avez un nouveau message de l'établissement.
+Numéro de réservation : 99887766
+Arrivée : 1 septembre 2026
+Départ : 3 septembre 2026
+Adresse : 5 avenue Victor
+Établissement : Studio
+`,
+    })
+    assert.equal(r.intent, "MESSAGE_ETABLISSEMENT")
+  })
+
+  it("CTA host secondaire seul sans confirmation structurée → MESSAGE_ETABLISSEMENT", () => {
+    const r = classifyBookingEmailIntent({
+      subject: "Booking.com",
+      bodyText: `
+Nouveau message de l'établissement
+Voir les messages
+`,
+    })
+    assert.equal(r.intent, "MESSAGE_ETABLISSEMENT")
+    assert.ok(r.evidence.includes("weak:host_cta"))
+    assert.ok(r.evidence.includes("neg:host_message"))
   })
 
   it("reçu avec ref + dates + adresse → RECU", () => {
@@ -511,6 +680,42 @@ describe("applyBookingEmailIntentGate — chemin réel gmail-scan", () => {
     assert.equal(permanentCalls, 0)
     assert.equal(failureCalls, 0)
     assert.equal(stats.confirmationCount, 1)
+  })
+
+  it("T1 gate: confirmation + CTA host secondaire → CONTINUE_CONFIRMATION (pas HOST ignore)", async () => {
+    let permanentCalls = 0
+    const stats = emptyStats()
+    const out = await applyBookingEmailIntentGate({
+      companyId: "co1",
+      messageId: "m-host-cta-fp",
+      subject:
+        "Merci ! Votre réservation à l'établissement Maison de vacances est confirmée",
+      bodyText: `
+Numéro de réservation : 1111222233
+Établissement : Maison de vacances
+Adresse : 10 rue des Lilas, 17000 La Rochelle
+Arrivée : 24 août 2026
+Départ : 27 août 2026
+Nouveau message de l'établissement
+Voir les messages
+`,
+      stats,
+      markPermanentIgnored: async () => {
+        permanentCalls++
+        return {
+          status: "PERMANENTLY_IGNORED",
+          errorCode: "IGNORED_BOOKING_HOST_MESSAGE",
+        }
+      },
+      markFailure: async () => {
+        throw new Error("should not fail")
+      },
+    })
+    assert.equal(out.action, "CONTINUE_CONFIRMATION")
+    assert.equal(out.classification.intent, "CONFIRMATION")
+    assert.equal(permanentCalls, 0)
+    assert.equal(stats.confirmationCount, 1)
+    assert.equal(stats.hostMessageIgnoredCount, 0)
   })
 
   it("hors-confirmation prouvée → markPermanentIgnored + compteur ; pas d’extract", async () => {
