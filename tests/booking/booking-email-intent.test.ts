@@ -10,8 +10,10 @@ import { afterEach, describe, it } from "node:test"
 import { fileURLToPath } from "node:url"
 import {
   BOOKING_INTENT_IGNORE_CODES,
+  HOST_BODY_OPENING_MAX_CHARS,
   classifyBookingEmailIntent,
   extractGmailSubject,
+  hostBodyPrimaryMatchStartIndex,
   resolveBookingIntentScanDisposition,
   type BookingEmailClassification,
 } from "@/lib/booking/booking-email-intent"
@@ -334,7 +336,7 @@ Envoyer un e-mail à l'établissement.
     )
   })
 
-  it("R1-T1: phrase HOST primaire mid-body + sujet fort → CONFIRMATION", () => {
+  it("R1-T1: CTA HOST secondaire mid-body + sujet fort → CONFIRMATION", () => {
     const r = classifyBookingEmailIntent({
       subject:
         "Merci ! Votre réservation à l'établissement Maison de vacances est confirmée",
@@ -356,7 +358,7 @@ Vous avez un nouveau message de l'établissement.
     )
   })
 
-  it("R1-T2: phrase HOST au début du corps + sujet fort → CONFIRMATION", () => {
+  it("R1-T2: ouverture HOST primaire en tête de corps + sujet fort → MESSAGE_ETABLISSEMENT", () => {
     const r = classifyBookingEmailIntent({
       subject:
         "Merci ! Votre réservation à l'établissement Maison de vacances est confirmée",
@@ -369,11 +371,111 @@ Arrivée : 24 août 2026
 Départ : 27 août 2026
 `,
     })
+    assert.equal(r.intent, "MESSAGE_ETABLISSEMENT")
+    assert.ok(r.evidence.includes("neg:host_message"))
+    const disposition = resolveBookingIntentScanDisposition(r)
+    assert.equal(disposition.action, "PERMANENT_IGNORE")
+    if (disposition.action === "PERMANENT_IGNORE") {
+      assert.equal(disposition.code, "IGNORED_BOOKING_HOST_MESSAGE")
+    }
+  })
+
+  it("R1-T2b: ouverture HOST EN en tête de corps + sujet fort → MESSAGE_ETABLISSEMENT", () => {
+    const r = classifyBookingEmailIntent({
+      subject: "Your booking is confirmed — Harbour View Flat",
+      bodyText: `
+You have a new message from the property.
+Confirmation number: 99887766
+Property: Harbour View Flat
+Address: 42 Queen Street
+Check-in: 2026-09-01
+Check-out: 2026-09-05
+`,
+    })
+    assert.equal(r.intent, "MESSAGE_ETABLISSEMENT")
+  })
+
+  it("R2: HOST primaire index 0 → primaire", () => {
+    const phrase = "Vous avez un nouveau message de l'établissement."
+    assert.equal(hostBodyPrimaryMatchStartIndex(phrase.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "")), 0)
+    const r = classifyBookingEmailIntent({
+      subject:
+        "Merci ! Votre réservation à l'établissement Maison de vacances est confirmée",
+      bodyText: `${phrase}
+Numéro de réservation : 1111222233
+Arrivée : 24 août 2026
+Départ : 27 août 2026
+`,
+    })
+    assert.equal(r.intent, "MESSAGE_ETABLISSEMENT")
+    assert.ok(r.evidence.includes("neg:host_message"))
+    assert.equal(r.evidence.includes("weak:host_cta"), false)
+  })
+
+  it("R2: HOST commençant juste avant la borne mais finissant après → primaire", () => {
+    const phrase = "vous avez un nouveau message de l'etablissement"
+    const prefixLen = HOST_BODY_OPENING_MAX_CHARS - 1
+    const body = `${"x".repeat(prefixLen)}${phrase}`
+    assert.equal(hostBodyPrimaryMatchStartIndex(body), prefixLen)
+    assert.ok(prefixLen + phrase.length > HOST_BODY_OPENING_MAX_CHARS)
+    const r = classifyBookingEmailIntent({
+      subject:
+        "Merci ! Votre réservation à l'établissement Maison de vacances est confirmée",
+      bodyText: `${body}
+Numéro de réservation : 1111222233
+Arrivée : 24 août 2026
+Départ : 27 août 2026
+`,
+    })
+    assert.equal(r.intent, "MESSAGE_ETABLISSEMENT")
+  })
+
+  it("R2: HOST commençant à la borne → secondaire (overridable)", () => {
+    const phrase = "vous avez un nouveau message de l'etablissement"
+    const body = `${"x".repeat(HOST_BODY_OPENING_MAX_CHARS)}${phrase}`
+    assert.equal(hostBodyPrimaryMatchStartIndex(body), HOST_BODY_OPENING_MAX_CHARS)
+    const r = classifyBookingEmailIntent({
+      subject:
+        "Merci ! Votre réservation à l'établissement Maison de vacances est confirmée",
+      bodyText: `${body}
+Numéro de réservation : 1111222233
+Arrivée : 24 août 2026
+Départ : 27 août 2026
+`,
+    })
     assert.equal(r.intent, "CONFIRMATION")
-    assert.equal(
-      resolveBookingIntentScanDisposition(r).action,
-      "PROCEED_CONFIRMATION"
-    )
+    assert.ok(r.evidence.includes("weak:host_cta"))
+  })
+
+  it("R2: HOST commençant juste après la borne → secondaire", () => {
+    const phrase = "you have a new message from the property"
+    const body = `${"x".repeat(HOST_BODY_OPENING_MAX_CHARS + 1)}${phrase}`
+    assert.equal(hostBodyPrimaryMatchStartIndex(body), HOST_BODY_OPENING_MAX_CHARS + 1)
+    const r = classifyBookingEmailIntent({
+      subject: "Your booking is confirmed",
+      bodyText: `${body}
+Confirmation number: 99887766
+Check-in: 2026-09-01
+Check-out: 2026-09-05
+`,
+    })
+    assert.equal(r.intent, "CONFIRMATION")
+    assert.ok(r.evidence.includes("weak:host_cta"))
+  })
+
+  it("R2: ouverture primaire + confirmation forte → MESSAGE_ETABLISSEMENT (non overridable)", () => {
+    const r = classifyBookingEmailIntent({
+      subject:
+        "Merci ! Votre réservation à l'établissement Maison de vacances est confirmée",
+      bodyText: `
+Vous avez un nouveau message de l'établissement.
+Numéro de réservation : 1111222233
+Arrivée : 24 août 2026
+Départ : 27 août 2026
+Adresse : 10 rue des Lilas
+`,
+    })
+    assert.equal(r.intent, "MESSAGE_ETABLISSEMENT")
   })
 
   it("R1-T3: confirmation EN + CTA You have a new message from the property → CONFIRMATION", () => {
@@ -463,10 +565,24 @@ Adresse : 5 avenue Victor
     assert.equal(r.intent, "MESSAGE_ETABLISSEMENT")
   })
 
-  it("CTA host secondaire seul sans confirmation structurée → MESSAGE_ETABLISSEMENT", () => {
+  it("CTA host en ouverture de corps sans confirmation → MESSAGE_ETABLISSEMENT (primaire)", () => {
     const r = classifyBookingEmailIntent({
       subject: "Booking.com",
       bodyText: `
+Nouveau message de l'établissement
+Voir les messages
+`,
+    })
+    assert.equal(r.intent, "MESSAGE_ETABLISSEMENT")
+    assert.ok(r.evidence.includes("neg:host_message"))
+  })
+
+  it("CTA host secondaire mid-body sans confirmation structurée → MESSAGE_ETABLISSEMENT", () => {
+    const r = classifyBookingEmailIntent({
+      subject: "Booking.com",
+      bodyText: `
+Informations générales sur votre compte Booking.com et vos préférences de voyage.
+Consultez également notre centre d'aide pour les questions fréquentes sur les séjours.
 Nouveau message de l'établissement
 Voir les messages
 `,
