@@ -68,61 +68,93 @@ export interface MarkFailureInput {
   now?: Date
 }
 
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code: string }).code === "P2002"
-  )
-}
+/** createMany count=0 puis ligne absente (course d'insertion incohérente). */
+export const BOOKING_GMAIL_CLAIM_MISSING_AFTER_RACE =
+  "BOOKING_GMAIL_CLAIM_MISSING_AFTER_RACE"
+
+/** createMany count=1 puis ligne absente au findUnique (incohérence post-insert). */
+export const BOOKING_GMAIL_CLAIM_MISSING_AFTER_INSERT =
+  "BOOKING_GMAIL_CLAIM_MISSING_AFTER_INSERT"
 
 export class BookingGmailMessageLifecycle {
   constructor(private readonly db: BookingLifecycleDb = prisma) {}
 
   /**
    * Réserve un message pour traitement (création PROCESSING ou reprise).
-   * Concurrence : contrainte unique + updateMany conditionnel.
+   * Concurrence : findUnique + createMany(skipDuplicates) + updateMany conditionnel.
+   * Pas de create() sur le chemin normal (évite P2002 attendus dans les logs Prisma).
    */
   async claimForProcessing(
     companyId: string,
     messageId: string,
-    now = new Date(),
-    _reentry = false
+    now = new Date()
   ): Promise<ClaimOutcome> {
     const maxAttempts = getBookingGmailMaxAttempts()
     const staleBefore = new Date(now.getTime() - getBookingGmailProcessingStaleMs())
 
-    try {
-      const created = await this.db.processedGmailMessage.create({
-        data: {
-          companyId,
-          messageId,
-          status: "PROCESSING",
-          attemptCount: 1,
-          firstAttemptAt: now,
-          lastAttemptAt: now,
-          nextRetryAt: null,
-          errorCode: null,
-          errorMessage: null,
-          resultType: null,
-          resultEntityId: null,
-          succeededAt: null,
-        },
-      })
-      return { action: "CLAIMED", record: created, isNew: true }
-    } catch (error) {
-      if (!isUniqueViolation(error)) throw error
-    }
-
     const existing = await this.db.processedGmailMessage.findUnique({
       where: { companyId_messageId: { companyId, messageId } },
     })
-    if (!existing) {
-      if (_reentry) throw new Error("BOOKING_GMAIL_CLAIM_RACE")
-      return this.claimForProcessing(companyId, messageId, now, true)
+    if (existing) {
+      return this.continueClaimOnExisting(existing, now, maxAttempts, staleBefore)
     }
 
+    const insertData = {
+      companyId,
+      messageId,
+      status: "PROCESSING" as const,
+      attemptCount: 1,
+      firstAttemptAt: now,
+      lastAttemptAt: now,
+      nextRetryAt: null,
+      errorCode: null,
+      errorMessage: null,
+      resultType: null,
+      resultEntityId: null,
+      succeededAt: null,
+    }
+
+    const inserted = await this.db.processedGmailMessage.createMany({
+      data: [insertData],
+      skipDuplicates: true,
+    })
+
+    if (inserted.count === 1) {
+      // createMany ne retourne pas la ligne ; relecture sur la clé composite.
+      const record = await this.db.processedGmailMessage.findUnique({
+        where: { companyId_messageId: { companyId, messageId } },
+      })
+      if (!record) {
+        throw new Error(BOOKING_GMAIL_CLAIM_MISSING_AFTER_INSERT)
+      }
+      return { action: "CLAIMED", record, isNew: true }
+    }
+
+    if (inserted.count === 0) {
+      const raced = await this.db.processedGmailMessage.findUnique({
+        where: { companyId_messageId: { companyId, messageId } },
+      })
+      if (!raced) {
+        throw new Error(BOOKING_GMAIL_CLAIM_MISSING_AFTER_RACE)
+      }
+      return this.continueClaimOnExisting(raced, now, maxAttempts, staleBefore)
+    }
+
+    throw new Error(
+      `BOOKING_GMAIL_CLAIM_UNEXPECTED_CREATEMANY_COUNT:${inserted.count}`
+    )
+  }
+
+  /**
+   * Machine d'états sur une ligne déjà connue (terminaux, retry, PROCESSING).
+   * Aucun create / createMany ici.
+   */
+  private async continueClaimOnExisting(
+    existing: ProcessedGmailMessage,
+    now: Date,
+    maxAttempts: number,
+    staleBefore: Date
+  ): Promise<ClaimOutcome> {
     if (existing.status === "SUCCEEDED") {
       return { action: "SKIP", reason: "SUCCEEDED" }
     }
@@ -141,7 +173,8 @@ export class BookingGmailMessageLifecycle {
           data: {
             status: "PERMANENTLY_IGNORED",
             errorCode: existing.errorCode ?? "MAX_ATTEMPTS_EXCEEDED",
-            errorMessage: existing.errorMessage ?? "Nombre maximal de tentatives atteint",
+            errorMessage:
+              existing.errorMessage ?? "Nombre maximal de tentatives atteint",
             nextRetryAt: null,
             lastAttemptAt: now,
             resultType: "IGNORED",

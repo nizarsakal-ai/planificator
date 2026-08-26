@@ -94,6 +94,25 @@ function createFakeLifecycleDb(): {
         rows.set(k, row)
         return { ...row }
       },
+      async createMany({
+        data,
+        skipDuplicates,
+      }: {
+        data: Array<Partial<Row> & { companyId: string; messageId: string }>
+        skipDuplicates?: boolean
+      }) {
+        let count = 0
+        for (const item of data) {
+          const k = key(item.companyId, item.messageId)
+          if (rows.has(k)) {
+            if (skipDuplicates) continue
+            throw Object.assign(new Error("Unique"), { code: "P2002" })
+          }
+          await api.processedGmailMessage.create({ data: item })
+          count++
+        }
+        return { count }
+      },
       async findUnique({
         where,
       }: {

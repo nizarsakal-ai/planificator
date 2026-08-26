@@ -531,6 +531,43 @@ END $$;
     assert.equal(acc.bookingReference, null)
   })
 
+  it("claim createMany: inconnu → CLAIMED isNew; SUCCEEDED → SKIP sans mutation statut", async () => {
+    const msg = `cm_new_${Date.now()}`
+    const claim = await life().claimForProcessing(companyId, msg)
+    assert.equal(claim.action, "CLAIMED")
+    if (claim.action === "CLAIMED") {
+      assert.equal(claim.isNew, true)
+      assert.equal(claim.record.status, "PROCESSING")
+      assert.ok(claim.record.id, "record.id doit être non vide (ligne PG réelle)")
+      assert.notEqual(claim.record.id, "")
+    }
+    const row = await db.processedGmailMessage.findUniqueOrThrow({
+      where: { companyId_messageId: { companyId, messageId: msg } },
+    })
+    assert.equal(row.status, "PROCESSING")
+    assert.equal(row.attemptCount, 1)
+    if (claim.action === "CLAIMED") {
+      assert.equal(claim.record.id, row.id)
+    }
+
+    await db.processedGmailMessage.update({
+      where: { id: row.id },
+      data: {
+        status: "SUCCEEDED",
+        succeededAt: new Date(),
+        resultType: "ACCOMMODATION",
+        resultEntityId: "acc_cm",
+      },
+    })
+    const again = await life().claimForProcessing(companyId, msg)
+    assert.deepEqual(again, { action: "SKIP", reason: "SUCCEEDED" })
+    const after = await db.processedGmailMessage.findUniqueOrThrow({
+      where: { id: row.id },
+    })
+    assert.equal(after.status, "SUCCEEDED")
+    assert.equal(after.resultEntityId, "acc_cm")
+  })
+
   it("markFailure n'écrase pas SUCCEEDED après course statut", async () => {
     const msg = `m_race_${Date.now()}`
     await life().claimForProcessing(companyId, msg)
