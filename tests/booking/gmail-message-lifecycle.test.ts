@@ -15,6 +15,8 @@ import type {
 } from "@prisma/client"
 import {
   BookingGmailMessageLifecycle,
+  BOOKING_GMAIL_CLAIM_MISSING_AFTER_INSERT,
+  BOOKING_GMAIL_CLAIM_MISSING_AFTER_RACE,
   BOOKING_GMAIL_SUCCESS_STATUS_UPDATE_FAILED,
   computeNextRetryAt,
   getBookingGmailMaxAttempts,
@@ -39,43 +41,76 @@ function makeFakeDb(): {
   api: NonNullable<ConstructorParameters<typeof BookingGmailMessageLifecycle>[0]>
   rows: Map<string, Row>
   key: (companyId: string, messageId: string) => string
+  calls: {
+    findUnique: number
+    create: number
+    createMany: number
+    updateMany: number
+  }
 } {
   const rows = new Map<string, Row>()
   const key = (companyId: string, messageId: string) => `${companyId}::${messageId}`
+  const calls = { findUnique: 0, create: 0, createMany: 0, updateMany: 0 }
+
+  function insertRow(data: Partial<Row> & { companyId: string; messageId: string }): Row {
+    const row: Row = {
+      id: `id_${rows.size + 1}`,
+      companyId: data.companyId,
+      messageId: data.messageId,
+      processedAt: data.processedAt ?? new Date(),
+      status: (data.status as BookingGmailMessageStatus) ?? "SUCCEEDED",
+      attemptCount: data.attemptCount ?? 0,
+      firstAttemptAt: data.firstAttemptAt ?? null,
+      lastAttemptAt: data.lastAttemptAt ?? null,
+      nextRetryAt: data.nextRetryAt ?? null,
+      succeededAt: data.succeededAt ?? null,
+      errorCode: data.errorCode ?? null,
+      errorMessage: data.errorMessage ?? null,
+      resultType: (data.resultType as BookingGmailResultType) ?? null,
+      resultEntityId: data.resultEntityId ?? null,
+      updatedAt: new Date(),
+    }
+    rows.set(key(data.companyId, data.messageId), row)
+    return { ...row }
+  }
 
   const api = {
     processedGmailMessage: {
       async create({ data }: { data: Partial<Row> & { companyId: string; messageId: string } }) {
+        calls.create++
         const k = key(data.companyId, data.messageId)
         if (rows.has(k)) {
           const err = Object.assign(new Error("Unique"), { code: "P2002" })
           throw err
         }
-        const row: Row = {
-          id: `id_${rows.size + 1}`,
-          companyId: data.companyId,
-          messageId: data.messageId,
-          processedAt: data.processedAt ?? new Date(),
-          status: (data.status as BookingGmailMessageStatus) ?? "SUCCEEDED",
-          attemptCount: data.attemptCount ?? 0,
-          firstAttemptAt: data.firstAttemptAt ?? null,
-          lastAttemptAt: data.lastAttemptAt ?? null,
-          nextRetryAt: data.nextRetryAt ?? null,
-          succeededAt: data.succeededAt ?? null,
-          errorCode: data.errorCode ?? null,
-          errorMessage: data.errorMessage ?? null,
-          resultType: (data.resultType as BookingGmailResultType) ?? null,
-          resultEntityId: data.resultEntityId ?? null,
-          updatedAt: new Date(),
+        return insertRow(data)
+      },
+      async createMany({
+        data,
+        skipDuplicates,
+      }: {
+        data: Array<Partial<Row> & { companyId: string; messageId: string }>
+        skipDuplicates?: boolean
+      }) {
+        calls.createMany++
+        let count = 0
+        for (const item of data) {
+          const k = key(item.companyId, item.messageId)
+          if (rows.has(k)) {
+            if (skipDuplicates) continue
+            throw Object.assign(new Error("Unique"), { code: "P2002" })
+          }
+          insertRow(item)
+          count++
         }
-        rows.set(k, row)
-        return { ...row }
+        return { count }
       },
       async findUnique({
         where,
       }: {
         where: { id?: string; companyId_messageId?: { companyId: string; messageId: string } }
       }) {
+        calls.findUnique++
         if (where.id) {
           for (const r of rows.values()) if (r.id === where.id) return { ...r }
           return null
@@ -99,6 +134,7 @@ function makeFakeDb(): {
         where: Record<string, unknown>
         data: Record<string, unknown>
       }) {
+        calls.updateMany++
         let count = 0
         for (const [k, row] of rows) {
           let ok = true
@@ -170,6 +206,7 @@ function makeFakeDb(): {
     >,
     rows,
     key,
+    calls,
   }
 }
 
@@ -210,7 +247,193 @@ describe("booking gmail lifecycle", () => {
       assert.equal(claim.record.status, "PROCESSING")
       assert.equal(claim.record.attemptCount, 1)
       assert.equal(claim.isNew, true)
+      assert.ok(claim.record.id, "record.id doit être non vide (ligne PG réelle)")
+      assert.notEqual(claim.record.id, "")
+      const persisted = await fake.api.processedGmailMessage.findUnique({
+        where: { companyId_messageId: { companyId: "coA", messageId: "msg1" } },
+      })
+      assert.ok(persisted)
+      assert.equal(claim.record.id, persisted!.id)
+      assert.deepEqual(claim.record, persisted)
     }
+    assert.equal(fake.calls.create, 0)
+    assert.equal(fake.calls.createMany, 1)
+    // findUnique initial (absent) + relecture post-createMany + assertion persistée
+    assert.equal(fake.calls.findUnique, 3)
+  })
+
+  it("claim-log: createMany count=1 puis ligne introuvable → erreur explicite", async () => {
+    let finds = 0
+    const pgm = fake.api.processedGmailMessage as unknown as {
+      findUnique: () => Promise<Row | null>
+      createMany: () => Promise<{ count: number }>
+    }
+    pgm.findUnique = async () => {
+      finds++
+      return null
+    }
+    pgm.createMany = async () => ({ count: 1 })
+    await assert.rejects(
+      () => life.claimForProcessing("coA", "ghostInsert"),
+      (err: unknown) =>
+        err instanceof Error && err.message === BOOKING_GMAIL_CLAIM_MISSING_AFTER_INSERT
+    )
+    assert.equal(finds, 2)
+  })
+
+  it("claim-log: SUCCEEDED connu — un findUnique, aucun create/createMany, aucune mutation", async () => {
+    await fake.api.processedGmailMessage.create({
+      data: {
+        companyId: "coA",
+        messageId: "msgS2",
+        status: "SUCCEEDED",
+        attemptCount: 1,
+        succeededAt: new Date(),
+      },
+    })
+    fake.calls.findUnique = 0
+    fake.calls.create = 0
+    fake.calls.createMany = 0
+    fake.calls.updateMany = 0
+    const claim = await life.claimForProcessing("coA", "msgS2")
+    assert.deepEqual(claim, { action: "SKIP", reason: "SUCCEEDED" })
+    assert.equal(fake.calls.findUnique, 1)
+    assert.equal(fake.calls.create, 0)
+    assert.equal(fake.calls.createMany, 0)
+    assert.equal(fake.calls.updateMany, 0)
+  })
+
+  it("claim-log: PERMANENTLY_IGNORED connu — SKIP sans mutation", async () => {
+    await fake.api.processedGmailMessage.create({
+      data: {
+        companyId: "coA",
+        messageId: "msgP2",
+        status: "PERMANENTLY_IGNORED",
+        attemptCount: 1,
+        errorCode: "EMPTY_MESSAGE_BODY",
+      },
+    })
+    fake.calls.updateMany = 0
+    fake.calls.createMany = 0
+    const claim = await life.claimForProcessing("coA", "msgP2")
+    assert.deepEqual(claim, { action: "SKIP", reason: "PERMANENTLY_IGNORED" })
+    assert.equal(fake.calls.updateMany, 0)
+    assert.equal(fake.calls.createMany, 0)
+  })
+
+  it("claim-log: RETRYABLE_FAILURE non dû → NOT_DUE", async () => {
+    await life.claimForProcessing("coA", "msgND")
+    const failed = await life.markFailure({
+      companyId: "coA",
+      messageId: "msgND",
+      error: new Error("fetch failed timeout"),
+      now: new Date("2026-07-20T10:00:00Z"),
+    })
+    fake.calls.createMany = 0
+    fake.calls.updateMany = 0
+    const tooEarly = await life.claimForProcessing(
+      "coA",
+      "msgND",
+      new Date("2026-07-20T10:01:00Z")
+    )
+    assert.deepEqual(tooEarly, { action: "SKIP", reason: "NOT_DUE" })
+    assert.equal(fake.calls.createMany, 0)
+    assert.equal(fake.calls.updateMany, 0)
+    assert.ok(failed.nextRetryAt)
+  })
+
+  it("claim-log: RETRYABLE_FAILURE dû → updateMany CLAIMED", async () => {
+    await life.claimForProcessing("coA", "msgDue")
+    const failed = await life.markFailure({
+      companyId: "coA",
+      messageId: "msgDue",
+      error: new Error("fetch failed timeout"),
+      now: new Date("2026-07-20T10:00:00Z"),
+    })
+    fake.calls.createMany = 0
+    const due = await life.claimForProcessing("coA", "msgDue", failed.nextRetryAt!)
+    assert.equal(due.action, "CLAIMED")
+    if (due.action === "CLAIMED") {
+      assert.equal(due.record.status, "PROCESSING")
+      assert.equal(due.record.attemptCount, 2)
+      assert.equal(due.isNew, false)
+    }
+    assert.equal(fake.calls.createMany, 0)
+    assert.ok(fake.calls.updateMany >= 1)
+  })
+
+  it("claim-log: PROCESSING récent → IN_FLIGHT", async () => {
+    await life.claimForProcessing("coA", "msgFresh")
+    fake.calls.createMany = 0
+    fake.calls.updateMany = 0
+    const again = await life.claimForProcessing("coA", "msgFresh")
+    assert.deepEqual(again, { action: "SKIP", reason: "IN_FLIGHT" })
+    assert.equal(fake.calls.createMany, 0)
+    assert.equal(fake.calls.updateMany, 0)
+  })
+
+  it("claim-log: course createMany count=0 → relecture sans P2002", async () => {
+    await fake.api.processedGmailMessage.create({
+      data: {
+        companyId: "coA",
+        messageId: "raceIns",
+        status: "PROCESSING",
+        attemptCount: 1,
+        firstAttemptAt: new Date(),
+        lastAttemptAt: new Date(),
+      },
+    })
+    let finds = 0
+    const pgm = fake.api.processedGmailMessage as unknown as {
+      findUnique: (args: unknown) => Promise<Row | null>
+      createMany: (args: unknown) => Promise<{ count: number }>
+    }
+    const origFind = pgm.findUnique.bind(pgm)
+    pgm.findUnique = async (args: unknown) => {
+      finds++
+      if (finds === 1) return null
+      return origFind(args)
+    }
+
+    fake.calls.create = 0
+    fake.calls.createMany = 0
+    const claim = await life.claimForProcessing("coA", "raceIns")
+    assert.deepEqual(claim, { action: "SKIP", reason: "IN_FLIGHT" })
+    assert.equal(fake.calls.createMany, 1)
+    assert.equal(fake.calls.create, 0)
+    assert.equal(finds, 2)
+  })
+
+  it("claim-log: createMany count=0 puis ligne introuvable → erreur explicite", async () => {
+    const pgm = fake.api.processedGmailMessage as unknown as {
+      findUnique: () => Promise<null>
+      createMany: () => Promise<{ count: number }>
+    }
+    pgm.findUnique = async () => null
+    pgm.createMany = async () => ({ count: 0 })
+    await assert.rejects(
+      () => life.claimForProcessing("coA", "ghost"),
+      (err: unknown) =>
+        err instanceof Error && err.message === BOOKING_GMAIL_CLAIM_MISSING_AFTER_RACE
+    )
+  })
+
+  it("claim-log: erreur DB réelle createMany toujours propagée", async () => {
+    const pgm = fake.api.processedGmailMessage as unknown as {
+      findUnique: () => Promise<null>
+      createMany: () => Promise<{ count: number }>
+    }
+    pgm.findUnique = async () => null
+    pgm.createMany = async () => {
+      throw Object.assign(new Error("Can't reach database"), { code: "P1001" })
+    }
+    await assert.rejects(
+      () => life.claimForProcessing("coA", "dbFail"),
+      (err: unknown) =>
+        err instanceof Error &&
+        "code" in err &&
+        (err as { code: string }).code === "P1001"
+    )
   })
 
   it("6. SUCCEEDED ignoré", async () => {
