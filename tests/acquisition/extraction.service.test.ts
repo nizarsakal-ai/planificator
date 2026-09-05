@@ -56,7 +56,7 @@ function createFakeRepo(seed?: {
 
   const message: MessageLite | null =
     seed?.message === undefined
-      ? { id: "msg1", subject: "Consultation Tour Alpha" }
+      ? { id: "msg1", subject: "Consultation Tour Alpha", receivedAt: new Date("2026-01-15T12:00:00.000Z") }
       : seed.message
 
   const attachments = seed?.attachments ?? []
@@ -486,7 +486,7 @@ describe("extraction.service R1", () => {
   it("dates inversées → FAILED DATE_RANGE_INVALID", async () => {
     const repo = createFakeRepo({
       content: { normalizedText: "Chantier : Beta", contentHash: "hash-dates" },
-      message: { id: "msg1", subject: "x" },
+      message: { id: "msg1", subject: "x", receivedAt: new Date("2026-01-15T12:00:00.000Z") },
     })
     const provider: ExtractionProviderPort = {
       async extract() {
@@ -594,4 +594,45 @@ describe("extraction.service R1", () => {
     const warningJson = JSON.stringify(repo.persists[0]?.warningData ?? [])
     assert.equal(warningJson.includes(secret), false)
   })
+
+
+  it("FIX-002 — receivedAt depuis findMessage matérialise S36 sans année", async () => {
+    const receivedAt = new Date("2026-08-27T10:00:00.000Z")
+    const repo = createFakeRepo({
+      message: {
+        id: "msg1",
+        subject: "Consultation S36",
+        receivedAt,
+      },
+      content: {
+        normalizedText: "Chantier : Tour Alpha\nInstallation prévue S36",
+        contentHash: "hash-abc",
+      },
+    })
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        return {
+          fields: {
+            worksiteName: { value: "Tour Alpha", confidence: 0.7 },
+            requestedWeekNumber: { value: 36, confidence: 0.8 },
+          },
+          warnings: [],
+          providerMetadata: { providerId: "test", model: "t" },
+        }
+      },
+    }
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+    assert.equal(result.ok, true)
+    assert.equal(repo.persists.length, 1)
+    const persisted = repo.persists[0]!
+    assert.equal(persisted.fields.requestedWeekNumber, 36)
+    assert.equal(persisted.fields.requestedWeekYear, 2026)
+    assert.equal(persisted.fields.requestedStartDate, "2026-08-31")
+    assert.equal(persisted.fields.requestedEndDate, "2026-09-06")
+    assert.ok(!persisted.warningData.some((w) => w.code === "DATE_AMBIGUOUS"))
+  })
+
 })
