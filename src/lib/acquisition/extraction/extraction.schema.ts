@@ -105,6 +105,8 @@ export const extractionProviderFieldsSchema = z
     clientReference: optionalField,
     requestClassification: optionalField,
     estimatedDurationHours: optionalField,
+    requestedWeekNumber: optionalField,
+    requestedWeekYear: optionalField,
   })
   .strict()
 
@@ -244,6 +246,22 @@ export const extractionCanonicalFieldsSchema = z.object({
     .max(1000)
     .nullish()
     .transform((v) => (v == null || Number.isNaN(v) ? null : Math.round(v * 10) / 10)),
+  requestedWeekNumber: z
+    .number()
+    .finite()
+    .int()
+    .min(1)
+    .max(53)
+    .nullish()
+    .transform((v) => (v == null || Number.isNaN(v) ? null : v)),
+  requestedWeekYear: z
+    .number()
+    .finite()
+    .int()
+    .min(1970)
+    .max(2100)
+    .nullish()
+    .transform((v) => (v == null || Number.isNaN(v) ? null : v)),
 })
 
 export const extractionConfidenceMapSchema = z.record(

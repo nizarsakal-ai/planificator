@@ -27,6 +27,7 @@ import {
   buildExtractedDataPayload,
   evaluateExtractionGate,
   normalizeProviderResult,
+  applyDeterministicPostEnrichment,
 } from "@/lib/acquisition/extraction/extraction-normalize"
 import {
   appendAttachmentTextToBody,
@@ -401,6 +402,11 @@ async function runDraftExtractionCore(
     let normalized: ReturnType<typeof normalizeProviderResult>
     try {
       normalized = normalizeProviderResult(raw)
+      normalized = applyDeterministicPostEnrichment(normalized, {
+        subject: message?.subject ?? null,
+        body: enrichedText,
+        receivedAt: message?.receivedAt ?? null,
+      })
     } catch {
       const marked = await repository.markFailedWhileExtracting({
         companyId,

@@ -32,6 +32,7 @@ export type MessageContentLite = {
 export type MessageLite = {
   id: string
   subject: string | null
+  receivedAt: Date
 }
 
 export type AttachmentMetaRow = {
@@ -109,7 +110,7 @@ export class DraftExtractionRepository {
   async findMessage(companyId: string, messageId: string): Promise<MessageLite | null> {
     const row = await this.db.acquisitionMessage.findFirst({
       where: { id: messageId, companyId },
-      select: { id: true, subject: true },
+      select: { id: true, subject: true, receivedAt: true },
     })
     return row
   }

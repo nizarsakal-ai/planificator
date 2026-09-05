@@ -13,6 +13,10 @@ import type {
   ExtractionCanonicalFields,
   ExtractionWarning,
 } from "@/lib/acquisition/extraction/extraction.types"
+import {
+  isoWeekToDateRange,
+  resolveIsoWeekYearFromReferenceDate,
+} from "@/lib/acquisition/extraction/iso-week"
 
 const CANONICAL_KEYS = [
   "worksiteName",
@@ -35,6 +39,8 @@ const CANONICAL_KEYS = [
   "clientReference",
   "requestClassification",
   "estimatedDurationHours",
+  "requestedWeekNumber",
+  "requestedWeekYear",
 ] as const
 
 type CanonicalKey = (typeof CANONICAL_KEYS)[number]
@@ -247,7 +253,118 @@ export function buildExtractedDataPayload(
     clientReference: fields.clientReference,
     requestClassification: fields.requestClassification,
     estimatedDurationHours: fields.estimatedDurationHours,
+    requestedWeekNumber: fields.requestedWeekNumber,
+    requestedWeekYear: fields.requestedWeekYear,
     evidence: evidenceData,
     contentHashAtExtraction,
+  }
+}
+
+function extractExplicitCalendarWeek(
+  subject: string | null,
+  body: string
+): { week: number; quote: string } | null {
+  const sources = [body, subject ?? ""]
+
+  for (const source of sources) {
+    const matches = source.matchAll(/(?:\bS\s*|\bsemaine\s+)(\d{1,2})\b/gi)
+
+    for (const match of matches) {
+      const week = Number(match[1])
+      if (!Number.isInteger(week) || week < 1 || week > 53) continue
+
+      return {
+        week,
+        quote: match[0].slice(0, 120),
+      }
+    }
+  }
+
+  return null
+}
+
+export type DeterministicPostEnrichmentContext = {
+  subject: string | null
+  body: string
+  /** Date réelle du message (Gmail) — FIX-002. Absent/null → pas de résolution d’année. */
+  receivedAt?: Date | null
+}
+
+/**
+ * Enrichissement déterministe post-provider :
+ * - ISO week → dates si année+semaine valides et dates encore vides
+ * - semaine sans année + receivedAt → résolution année ISO (FIX-002B) puis plage
+ * - semaine sans année sans résolution → DATE_AMBIGUOUS
+ */
+export function applyDeterministicPostEnrichment(
+  normalized: NormalizedExtraction,
+  ctx: DeterministicPostEnrichmentContext
+): NormalizedExtraction {
+  const fields = { ...normalized.fields }
+  const confidenceData = { ...normalized.confidenceData }
+  const evidenceData = { ...normalized.evidenceData }
+  const warnings = [...normalized.warnings]
+  const receivedAt = ctx.receivedAt ?? null
+
+  if (fields.requestedWeekNumber == null) {
+    const explicitWeek = extractExplicitCalendarWeek(ctx.subject, ctx.body)
+    if (explicitWeek) {
+      fields.requestedWeekNumber = explicitWeek.week
+      evidenceData.requestedWeekNumber = {
+        source: "HEURISTIC",
+        quote: explicitWeek.quote,
+      }
+    }
+  }
+
+  const week = fields.requestedWeekNumber
+  let year = fields.requestedWeekYear
+  const hasStart = Boolean(fields.requestedStartDate)
+  const hasEnd = Boolean(fields.requestedEndDate)
+
+  // FIX-002B : résoudre l’année ISO avant la branche DATE_AMBIGUOUS.
+  // Ne jamais écraser une année explicite (R1).
+  if (week != null && year == null && receivedAt != null) {
+    const resolved = resolveIsoWeekYearFromReferenceDate(week, receivedAt)
+    if (resolved != null) {
+      year = resolved
+      fields.requestedWeekYear = resolved
+      evidenceData.requestedWeekYear = { source: "HEURISTIC" }
+    }
+  }
+
+  if (week != null && year == null) {
+    warnings.push(catalogWarning("DATE_AMBIGUOUS", { field: "requestedWeekNumber", source: "SERVICE" }))
+    const c = fields.constraints?.trim() ?? ""
+    const tag = `S${week}`
+    if (!c.includes(tag)) {
+      fields.constraints = c ? `${c} ; ${tag}` : tag
+    }
+  } else if (week != null && year != null && !hasStart && !hasEnd) {
+    const range = isoWeekToDateRange(week, year)
+    if (range) {
+      fields.requestedStartDate = range.startDate
+      fields.requestedEndDate = range.endDate
+      confidenceData.requestedStartDate = Math.min(
+        confidenceData.requestedWeekNumber ?? 0.7,
+        0.7
+      )
+      confidenceData.requestedEndDate = confidenceData.requestedStartDate
+      // FIX-002B — dates dérivées : HEURISTIC sans pseudo-citation.
+      evidenceData.requestedStartDate = { source: "HEURISTIC" }
+      evidenceData.requestedEndDate = { source: "HEURISTIC" }
+    } else {
+      warnings.push(
+        catalogWarning("DATE_AMBIGUOUS", { field: "requestedWeekNumber", source: "SERVICE" })
+      )
+    }
+  }
+
+  return {
+    ...normalized,
+    fields,
+    confidenceData,
+    evidenceData,
+    warnings: dedupeWarnings(warnings),
   }
 }
