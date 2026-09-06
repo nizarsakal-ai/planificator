@@ -33,6 +33,7 @@ export type ConvertImportDraftFailure = {
     | "DISABLED"
     | "INTERNAL_ERROR"
     | "DUPLICATE_REQUIRES_ACK"
+    | "LEASE_NOT_OWNED"
   code: string
   message: string
   existingWorksiteId?: string
@@ -45,5 +46,14 @@ export class ConversionClaimConflictError extends Error {
   constructor() {
     super("CONVERSION_CLAIM_CONFLICT")
     this.name = "ConversionClaimConflictError"
+  }
+}
+
+/** Lease orchestrateur perdue / absente sous fence transactionnel (LOT-3F). */
+export class ConversionLeaseNotOwnedError extends Error {
+  readonly code = "LEASE_NOT_OWNED"
+  constructor() {
+    super("LEASE_NOT_OWNED")
+    this.name = "ConversionLeaseNotOwnedError"
   }
 }

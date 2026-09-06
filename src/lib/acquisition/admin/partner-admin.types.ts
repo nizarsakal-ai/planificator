@@ -18,6 +18,7 @@ export type PartnerAdminPartner = {
   autoConvertEnabled: boolean
   allowCreateClient: boolean
   minConfidence: number | null
+  clientId: string | null
   createdAt: Date
   updatedAt: Date
 }
@@ -73,4 +74,11 @@ export type UpdatePartnerPolicyInput = {
   minConfidence?: number | null
   requireExactEmail?: boolean
   priority?: number
+}
+
+/** PLAN-ACQ-CONSULTATIONS-FIX-005 — lien Partner → Client (hors policy). */
+export type SetPartnerClientInput = {
+  companyId: string
+  partnerId: string
+  clientId: string | null
 }

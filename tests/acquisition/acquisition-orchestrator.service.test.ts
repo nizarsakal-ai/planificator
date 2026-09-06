@@ -32,13 +32,11 @@ function trackingRunners(
       return inner(ctx)
     }
   }
-  return {
-    gmailSync: wrap("gmailSync"),
-    attachmentRecovery: wrap("attachmentRecovery"),
-    attachmentDownload: wrap("attachmentDownload"),
-    contentFetch: wrap("contentFetch"),
-    extraction: wrap("extraction"),
+  const runners = {} as AcquisitionOrchestratorStepRunners
+  for (const key of ORCHESTRATOR_STEP_KEYS) {
+    runners[key] = wrap(key)
   }
+  return runners
 }
 
 const cfg = {
@@ -95,7 +93,7 @@ describe("runAcquisitionOrchestrator", () => {
     assert.equal(result.steps.gmailSync.error?.code, "WORKERS_NOT_WIRED")
   })
 
-  it("ordre exact des cinq étapes", async () => {
+  it("ordre exact des huit étapes", async () => {
     const called: OrchestratorStepKey[] = []
     const result = await runAcquisitionOrchestrator({
       runId: "run-order",

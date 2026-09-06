@@ -920,6 +920,14 @@ describe("PLAN-ACQ-012-4 fencing", () => {
         typeof orchestratorWorkers.runProductionAcquisitionOrchestrator,
         "function"
       )
+      assert.equal(
+        typeof orchestratorWorkers.createPostExtractionPlaceholderRunner,
+        "function"
+      )
+      assert.equal(
+        typeof orchestratorWorkers.createOrchestratorAutoCapabilityForTests,
+        "function"
+      )
     })
 
     it("wiring production : acquire + worker réel + même autorité assertOwned/renew + LEASE_STOLEN", async () => {

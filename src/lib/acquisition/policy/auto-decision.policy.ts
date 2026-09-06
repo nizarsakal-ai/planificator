@@ -8,6 +8,7 @@ import { getAcquisitionAutoMinConfidence } from "@/lib/acquisition/policy/auto-d
 export type AutoDecisionCode =
   | "AUTO_APPROVE_CONVERT"
   | "AUTO_APPROVE_ONLY"
+  | "AUTO_REJECT_CANCELLED"
   | "HUMAN_REVIEW_REQUIRED"
 
 export type AutoDecisionInput = {
@@ -30,6 +31,10 @@ export type AutoDecisionInput = {
   clientAmbiguous?: boolean
   /** Au moins une PJ indispensable (PLAN) non lisible. */
   requiredDocumentUnreadable?: boolean
+  /** Consultation annulée (classification + warning blocking). */
+  consultationCancelled?: boolean
+  /** Client déterministe déjà résolu (Partner / proposed). */
+  hasResolvedClient?: boolean
 }
 
 export type AutoDecisionResult = {
@@ -59,14 +64,28 @@ function hasBlockingWarnings(warningData: unknown): boolean {
   )
 }
 
-export function evaluateAutoDecision(input: AutoDecisionInput): AutoDecisionResult {
-  const min = input.minConfidence ?? getAcquisitionAutoMinConfidence()
+/**
+ * Règles auto-decision pures — `minConfidence` obligatoire (aucun env).
+ * PLAN-ACQ-AGENTS-LOT-2 : réutilisable par ConsultationValidationCapability.
+ */
+export function evaluateAutoDecisionRules(
+  input: AutoDecisionInput & { minConfidence: number }
+): AutoDecisionResult {
+  const min = input.minConfidence
   const reasons: string[] = []
   const scores = { ...input.confidenceData }
   const codes = warningCodes(input.warningData)
 
   if (!input.autoApproveEnabled) {
     return { code: "HUMAN_REVIEW_REQUIRED", reasons: ["AUTO_APPROVE_DISABLED"], scores }
+  }
+
+  if (input.consultationCancelled || codes.has("CONSULTATION_CANCELLED")) {
+    return {
+      code: "AUTO_REJECT_CANCELLED",
+      reasons: ["CONSULTATION_CANCELLED"],
+      scores,
+    }
   }
 
   const name = input.worksiteName?.trim() ?? ""
@@ -80,7 +99,6 @@ export function evaluateAutoDecision(input: AutoDecisionInput): AutoDecisionResu
 
   const addr = input.address?.trim() ?? ""
   const city = input.city?.trim() ?? ""
-  const postal = input.postalCode?.trim() ?? ""
   // Auto : adresse complète exigée (rue + ville) — sinon ambiguë / incomplète
   if (!addr || !city) {
     reasons.push("AMBIGUOUS_ADDRESS")
@@ -89,7 +107,9 @@ export function evaluateAutoDecision(input: AutoDecisionInput): AutoDecisionResu
   }
 
   const hasClient =
-    Boolean(input.clientName?.trim()) || Boolean(input.clientEmail?.trim())
+    Boolean(input.hasResolvedClient) ||
+    Boolean(input.clientName?.trim()) ||
+    Boolean(input.clientEmail?.trim())
   if (!hasClient) reasons.push("MISSING_CLIENT_IDENTITY")
 
   if (input.clientAmbiguous || codes.has("CLIENT_IDENTITY_AMBIGUOUS")) {
@@ -149,4 +169,9 @@ export function evaluateAutoDecision(input: AutoDecisionInput): AutoDecisionResu
     reasons: ["THRESHOLDS_OK", "AUTO_CONVERT_DISABLED"],
     scores,
   }
+}
+
+export function evaluateAutoDecision(input: AutoDecisionInput): AutoDecisionResult {
+  const min = input.minConfidence ?? getAcquisitionAutoMinConfidence()
+  return evaluateAutoDecisionRules({ ...input, minConfidence: min })
 }

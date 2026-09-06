@@ -31,6 +31,7 @@ const prisma = new PrismaClient()
 function asBootstrapDb(client: PrismaClient): PartnerRegistryBootstrapDb {
   return {
     company: client.company,
+    client: client.client,
     acquisitionPartner: client.acquisitionPartner,
     acquisitionPartnerDomain: client.acquisitionPartnerDomain,
     acquisitionPartnerEmail: client.acquisitionPartnerEmail,

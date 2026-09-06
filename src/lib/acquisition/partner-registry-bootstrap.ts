@@ -58,7 +58,7 @@ export type PartnerRegistryBootstrapResult = {
   failed: PartnerRegistryBootstrapFailure[]
 }
 
-type PartnerRow = { id: string; companyId: string; code: string }
+type PartnerRow = { id: string; companyId: string; code: string; clientId: string | null }
 type DomainRow = {
   id: string
   companyId: string
@@ -73,10 +73,16 @@ export type PartnerRegistryBootstrapTx = {
       orderBy: { id: "asc" }
     }) => Promise<Array<{ id: string }>>
   }
+  client: {
+    findFirst: (args: {
+      where: { id: string; companyId: string; active: true }
+      select: { id: true }
+    }) => Promise<{ id: string } | null>
+  }
   acquisitionPartner: {
     findUnique: (args: {
       where: { companyId_code: { companyId: string; code: string } }
-      select: { id: true; companyId: true; code: true }
+      select: { id: true; companyId: true; code: true; clientId: true }
     }) => Promise<PartnerRow | null>
     create: (args: {
       data: {
@@ -92,9 +98,14 @@ export type PartnerRegistryBootstrapTx = {
         autoConvertEnabled?: boolean
         allowCreateClient?: boolean
         minConfidence?: number | null
+        clientId?: string | null
       }
-      select: { id: true; companyId: true; code: true }
+      select: { id: true; companyId: true; code: true; clientId: true }
     }) => Promise<PartnerRow>
+    updateMany: (args: {
+      where: { id: string; companyId: string; clientId: null }
+      data: { clientId: string }
+    }) => Promise<{ count: number }>
   }
   acquisitionPartnerDomain: {
     findUnique: (args: {
@@ -183,8 +194,17 @@ class DomainConflictError extends Error {
   }
 }
 
+/** Seed.clientId invalide (absent / autre tenant / inactif) — fail-closed. */
+class SeedClientInvalidError extends Error {
+  constructor() {
+    super("SEED_CLIENT_INVALID")
+    this.name = "SeedClientInvalidError"
+  }
+}
+
 function classifyNonP2002Error(error: unknown): BootstrapErrorCode {
   if (error instanceof DomainConflictError) return BOOTSTRAP_ERROR.DOMAIN_CONFLICT
+  if (error instanceof SeedClientInvalidError) return BOOTSTRAP_ERROR.UNKNOWN_ERROR
   if (
     typeof error === "object" &&
     error !== null &&
@@ -223,10 +243,21 @@ export async function runCompanySeedTx(
 
   let partner = await tx.acquisitionPartner.findUnique({
     where: { companyId_code: { companyId, code } },
-    select: { id: true, companyId: true, code: true },
+    select: { id: true, companyId: true, code: true, clientId: true },
   })
 
   if (!partner) {
+    let resolvedClientId: string | undefined
+    if (seed.clientId) {
+      // Valider AVANT création — fail-closed (absent / autre tenant / inactif)
+      const client = await tx.client.findFirst({
+        where: { id: seed.clientId, companyId, active: true },
+        select: { id: true },
+      })
+      if (!client) throw new SeedClientInvalidError()
+      resolvedClientId = client.id
+    }
+
     partner = await tx.acquisitionPartner.create({
       data: {
         companyId,
@@ -241,10 +272,24 @@ export async function runCompanySeedTx(
         autoConvertEnabled: seed.autoConvertEnabled ?? false,
         allowCreateClient: seed.allowCreateClient ?? false,
         minConfidence: seed.minConfidence ?? null,
+        ...(resolvedClientId ? { clientId: resolvedClientId } : {}),
       },
-      select: { id: true, companyId: true, code: true },
+      select: { id: true, companyId: true, code: true, clientId: true },
     })
     partnersCreated = 1
+  } else if (seed.clientId) {
+    // Déjà lié → no-op idempotent (ne pas écraser, ne pas échouer).
+    if (partner.clientId == null) {
+      const client = await tx.client.findFirst({
+        where: { id: seed.clientId, companyId, active: true },
+        select: { id: true },
+      })
+      if (!client) throw new SeedClientInvalidError()
+      await tx.acquisitionPartner.updateMany({
+        where: { id: partner.id, companyId, clientId: null },
+        data: { clientId: client.id },
+      })
+    }
   }
 
   let allDomainsPresent = true
@@ -441,7 +486,12 @@ export async function bootstrapPartnerRegistryFromSeeds(
 export async function bootstrapLauraluPartnerRegistry(
   db: PartnerRegistryBootstrapDb
 ): Promise<PartnerRegistryBootstrapResult> {
-  return bootstrapPartnerRegistryFromSeeds(db, DEFAULT_CONSULTATION_PARTNER_SEEDS)
+  // Compat : bootstrap nommé LAURALU ne crée que ce seed.
+  // Le catalogue DEFAULT peut contenir d’autres seeds (ex. hall-expo) pour ops explicites.
+  return bootstrapPartnerRegistryFromSeeds(
+    db,
+    DEFAULT_CONSULTATION_PARTNER_SEEDS.filter((s) => s.code === LAURALU_PARTNER_CODE)
+  )
 }
 
 /** Compat tests cutover. */

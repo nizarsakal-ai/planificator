@@ -132,6 +132,7 @@ export async function fetchAndStoreMessageContentCore(
     where: { id: input.acquisitionMessageId, companyId },
     select: { id: true, externalMessageId: true, companyId: true },
   })
+
   if (!message) {
     return fail("NOT_FOUND", "CONTENT_NOT_FOUND", publicMessage("CONTENT_NOT_FOUND"))
   }

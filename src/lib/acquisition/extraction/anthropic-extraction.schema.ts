@@ -66,6 +66,9 @@ export const anthropicExtractionRawSchema = z
         clientReference: optionalField,
         requestClassification: optionalField,
         estimatedDurationHours: optionalField,
+        endClientName: optionalField,
+        requestedWeekNumber: optionalField,
+        requestedWeekYear: optionalField,
       })
       .strict(),
     warnings: z
@@ -120,11 +123,25 @@ export const EXTRACTION_TOOL_INPUT_JSON_SCHEMA: {
           "clientReference",
           "requestClassification",
           "estimatedDurationHours",
+          "endClientName",
+          "requestedWeekNumber",
+          "requestedWeekYear",
         ].map((k) => [
           k,
           {
             type: "object",
             additionalProperties: false,
+            ...(k === "requestedWeekNumber"
+              ? {
+                  description:
+                    "Numéro de semaine calendaire explicitement présent dans la source (ex. S36, S 36, semaine 36 → 36). Ne pas inventer l'année.",
+                }
+              : k === "requestedWeekYear"
+                ? {
+                    description:
+                      "Année explicitement et fiablement associée à requestedWeekNumber. Ne jamais l'inférer depuis la date du message ou le contexte.",
+                  }
+                : {}),
             required: ["value", "confidence"],
             properties: {
               value: {},

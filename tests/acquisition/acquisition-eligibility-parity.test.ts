@@ -42,6 +42,7 @@ function lauraluOnlyRegistry(): PartnerRegistryRepositoryPort {
     autoConvertEnabled: false,
     allowCreateClient: false,
     minConfidence: null,
+    clientId: null,
     createdAt: now,
     updatedAt: now,
   }

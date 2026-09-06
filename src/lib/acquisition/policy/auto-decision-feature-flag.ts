@@ -2,6 +2,9 @@
  * PLAN-ACQ-V2 Lot F — Flags auto-approve / auto-convert.
  */
 
+/** Fallback historique unique pour le seuil de confiance auto / validation. */
+export const DEFAULT_ACQUISITION_AUTO_MIN_CONFIDENCE = 0.75
+
 export function isAcquisitionAutoApproveEnabled(): boolean {
   return process.env.ACQUISITION_AUTO_APPROVE_ENABLED === "true"
 }
@@ -12,9 +15,9 @@ export function isAcquisitionAutoConvertEnabled(): boolean {
 
 export function getAcquisitionAutoMinConfidence(): number {
   const raw = process.env.ACQUISITION_AUTO_MIN_CONFIDENCE
-  if (raw == null || raw.trim() === "") return 0.75
+  if (raw == null || raw.trim() === "") return DEFAULT_ACQUISITION_AUTO_MIN_CONFIDENCE
   const n = Number.parseFloat(raw)
-  if (!Number.isFinite(n) || n < 0 || n > 1) return 0.75
+  if (!Number.isFinite(n) || n < 0 || n > 1) return DEFAULT_ACQUISITION_AUTO_MIN_CONFIDENCE
   return Math.round(n * 100) / 100
 }
 

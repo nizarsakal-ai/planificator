@@ -1,6 +1,14 @@
 /**
  * PLAN-ACQ-V2 Lot F R2 — Exécution auto-approve / auto-convert + journal.
  * Kill-switch env ∩ policy partenaire. SYSTEM actor validé. Pas de client NEW par défaut.
+ *
+ * PLAN-ACQ-AGENTS-LOT-3E — La conversion reste UNIQUEMENT dans ce chemin legacy
+ * (maybeRunAutoDecisionAfterExtraction). Le worker steps n’importe jamais ce module
+ * de conversion : voir acquisition-auto-decision.worker.ts.
+ *
+ * CORRECTION-4B — Ce chemin legacy conserve `applyCancellationFollowUp` non
+ * transactionnel (mutation puis journal séparés). Le worker post-extraction utilise
+ * `applyCancellationFollowUpTransactionally` (XOR feature flags).
  */
 
 import type { PrismaClient } from "@prisma/client"
@@ -32,6 +40,7 @@ import {
   PartnerRegistryRepository,
   type PartnerRegistryRepositoryPort,
 } from "@/lib/acquisition/persistence/partner-registry.repository"
+import { applyCancellationFollowUp } from "@/lib/acquisition/policy/cancellation-followup"
 
 const LOG_PREFIX = "[acquisition-auto-decision]"
 
@@ -56,6 +65,7 @@ export type AutoDecisionServiceDeps = {
     clientName: string | null
     clientEmail: string | null
     proposedClientId: string | null
+    partnerLinkedClientId?: string | null
     db?: PrismaClient
   }) => Promise<ClientMatchResult>
   log?: (event: string, payload?: Record<string, unknown>) => void
@@ -86,6 +96,32 @@ function hasRequiredDocUnreadable(warningData: unknown): boolean {
           (w as { field?: string }).field === "PLAN") ||
         ((w as { code?: string }).code === "PDF_NO_TEXT_LAYER" &&
           (w as { field?: string }).field === "PLAN"))
+  )
+}
+
+function readExtractedClientEmail(extractedData: unknown): string | null {
+  if (!extractedData || typeof extractedData !== "object" || Array.isArray(extractedData)) {
+    return null
+  }
+  const v = (extractedData as Record<string, unknown>).clientEmail
+  return typeof v === "string" && v.trim() ? v.trim() : null
+}
+
+function readRequestClassification(extractedData: unknown): string | null {
+  if (!extractedData || typeof extractedData !== "object" || Array.isArray(extractedData)) {
+    return null
+  }
+  const v = (extractedData as Record<string, unknown>).requestClassification
+  return typeof v === "string" ? v : null
+}
+
+function hasConsultationCancelledWarning(warningData: unknown): boolean {
+  if (!Array.isArray(warningData)) return false
+  return warningData.some(
+    (w) =>
+      w &&
+      typeof w === "object" &&
+      (w as { code?: string }).code === "CONSULTATION_CANCELLED"
   )
 }
 
@@ -128,7 +164,11 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
       warningData: true,
       extractedData: true,
       acquisitionMessage: {
-        select: { resolvedPartnerId: true, senderDomain: true },
+        select: {
+          resolvedPartnerId: true,
+          senderDomain: true,
+          threadId: true,
+        },
       },
     },
   })
@@ -141,6 +181,7 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
   let minConfidence = getAcquisitionAutoMinConfidence()
   let partnerId: string | null = draft.acquisitionMessage?.resolvedPartnerId ?? null
   let partnerCode: string | null = null
+  let partnerLinkedClientId: string | null = null
 
   if (partnerId) {
     const partner = await registry.findPartnerById(input.companyId, partnerId)
@@ -150,6 +191,7 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
       allowCreateClient = partner.allowCreateClient === true
       if (partner.minConfidence != null) minConfidence = partner.minConfidence
       partnerCode = partner.code
+      partnerLinkedClientId = partner.clientId ?? null
     }
   } else if (draft.acquisitionMessage?.senderDomain) {
     // Fallback domaine uniquement si le partenaire n’exige pas l’email exact
@@ -166,6 +208,7 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
       allowCreateClient = byDomain.allowCreateClient === true
       if (byDomain.minConfidence != null) minConfidence = byDomain.minConfidence
       partnerCode = byDomain.code
+      partnerLinkedClientId = byDomain.clientId ?? null
     }
   }
 
@@ -186,13 +229,19 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
     db,
   })
 
+  const extractedClientEmail = readExtractedClientEmail(draft.extractedData)
   const clientMatch = await matchClient({
     companyId: input.companyId,
     clientName: draft.proposedClientName,
-    clientEmail: draft.proposedContactEmail,
+    clientEmail: extractedClientEmail,
     proposedClientId: draft.proposedClientId,
+    partnerLinkedClientId,
     db,
   })
+
+  const consultationCancelled =
+    readRequestClassification(draft.extractedData) === "CANCELLED_CONSULTATION" ||
+    hasConsultationCancelledWarning(draft.warningData)
 
   const decision = evaluateAutoDecision({
     worksiteName: draft.proposedWorksiteName,
@@ -202,7 +251,7 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
     postalCode: draft.proposedPostalCode,
     city: draft.proposedCity,
     clientName: draft.proposedClientName,
-    clientEmail: draft.proposedContactEmail,
+    clientEmail: extractedClientEmail,
     confidenceData: asConfidenceMap(draft.confidenceData),
     warningData: draft.warningData,
     autoApproveEnabled,
@@ -211,6 +260,8 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
     potentialDuplicate: Boolean(dup.worksiteId),
     clientAmbiguous: Boolean(clientMatch.ambiguous),
     requiredDocumentUnreadable: hasRequiredDocUnreadable(draft.warningData),
+    consultationCancelled,
+    hasResolvedClient: Boolean(clientMatch.clientId),
   })
 
   const systemActor = await resolveSystemActor(input.companyId, db)
@@ -227,6 +278,8 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
       version: draft.version,
       partnerId,
       partnerCode,
+      partnerLinkedClientId,
+      clientMatchKind: clientMatch.matchKind,
       minConfidence,
       allowCreateClient,
       systemActorOk: systemActor.ok,
@@ -243,6 +296,43 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
     reasons: decision.reasons,
     partnerCode,
   })
+
+  if (decision.code === "AUTO_REJECT_CANCELLED") {
+    if (systemActor.ok) {
+      await review.rejectImportDraft(
+        {
+          actorUserId: systemActor.userId,
+          actorRole: "SYSTEM",
+          companyId: input.companyId,
+        },
+        {
+          draftId: draft.id,
+          expectedVersion: draft.version,
+          rejectionReason: "CANCELLED_INITIAL",
+        }
+      )
+      const follow = await applyCancellationFollowUp({
+        companyId: input.companyId,
+        sourceDraftId: draft.id,
+        threadId: draft.acquisitionMessage?.threadId ?? null,
+        db,
+      })
+      await journal.append({
+        companyId: input.companyId,
+        draftId: draft.id,
+        decisionCode: follow.journalCode,
+        reasons: decision.reasons,
+        scores: decision.scores,
+        actorUserId: systemActor.userId,
+        metadata: {
+          linkedDraftIdsRejected: follow.linkedDraftIdsRejected,
+          convertedWorksiteIdsUntouched: follow.convertedWorksiteIdsUntouched,
+          ambiguous: follow.ambiguous,
+        },
+      })
+    }
+    return
+  }
 
   if (decision.code === "HUMAN_REVIEW_REQUIRED") return
 
@@ -282,11 +372,12 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
   if (decision.code !== "AUTO_APPROVE_CONVERT") return
 
   // R2-MAJOR-002 : pas de NEW sauf allowCreateClient + identité claire + pas d’ambiguïté
+  // endClientName n’est jamais une identité Client.
   if (clientMatch.clientId == null) {
     if (
       !allowCreateClient ||
       clientMatch.ambiguous ||
-      !(draft.proposedClientName?.trim() || draft.proposedContactEmail?.trim())
+      !(draft.proposedClientName?.trim() || extractedClientEmail)
     ) {
       log("AUTO_CONVERT_SKIPPED_NO_CLIENT", {
         draftId: draft.id,
@@ -312,7 +403,7 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
           clientMode: "NEW" as const,
           newClient: {
             name: (draft.proposedClientName ?? "").trim().slice(0, 100),
-            email: draft.proposedContactEmail,
+            email: extractedClientEmail,
             phone: null,
             address: [draft.proposedAddress, draft.proposedPostalCode, draft.proposedCity]
               .filter(Boolean)

@@ -1,5 +1,5 @@
 /**
- * PLAN-ACQ-CONSULTATIONS — ISO week FIX-001/002/002B (ISO-only index proof subset).
+ * PLAN-ACQ-CONSULTATIONS-FIX-001 — Matrice C/W/P/R + fixtures LAURALU / HALL EXPO.
  * Tests purement locaux (pas de DB distante, pas d’API Anthropic).
  */
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
@@ -8,13 +8,23 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import {
   applyDeterministicPostEnrichment,
+  buildExtractedDataPayload,
+  evaluateExtractionGate,
   normalizeProviderResult,
 } from "@/lib/acquisition/extraction/extraction-normalize"
+import { catalogWarning } from "@/lib/acquisition/extraction/extraction.schema"
+import { corroborateCancellationText } from "@/lib/acquisition/extraction/cancellation-corroboration"
 import {
   isoWeekToDateRange,
   isoWeeksInYear,
   resolveIsoWeekYearFromReferenceDate,
 } from "@/lib/acquisition/extraction/iso-week"
+import { evaluateAutoDecision } from "@/lib/acquisition/policy/auto-decision.policy"
+import { applyCancellationFollowUp } from "@/lib/acquisition/policy/cancellation-followup"
+import { matchClientForDraft } from "@/lib/acquisition/matching/client-match.service"
+import { ANTHROPIC_EXTRACTION_SYSTEM_PROMPT } from "@/lib/acquisition/extraction/anthropic-extraction.prompt"
+import { EXTRACTION_TOOL_INPUT_JSON_SCHEMA } from "@/lib/acquisition/extraction/anthropic-extraction.schema"
+import { DEFAULT_CONSULTATION_PARTNER_SEEDS } from "@/lib/acquisition/partner-registry-seed"
 import type { ExtractionCanonicalFields } from "@/lib/acquisition/extraction/extraction.types"
 
 function fields(over: Partial<ExtractionCanonicalFields> = {}): ExtractionCanonicalFields {
@@ -39,6 +49,7 @@ function fields(over: Partial<ExtractionCanonicalFields> = {}): ExtractionCanoni
     clientReference: null,
     requestClassification: null,
     estimatedDurationHours: null,
+    endClientName: null,
     requestedWeekNumber: null,
     requestedWeekYear: null,
     ...over,
@@ -233,6 +244,807 @@ describe("FIX-001 — dates BODY vs subject (W4 TAX FREE)", () => {
     assert.equal(out.fields.requestedEndDate, "2026-08-29")
   })
 })
+
+describe("FIX-001 — annulation (C1–C4)", () => {
+  it("corroboration : positif vs négation", () => {
+    assert.equal(
+      corroborateCancellationText("Re: site", "consultation annulée"),
+      true
+    )
+    assert.equal(
+      corroborateCancellationText("Re: site", "non annulée pour le moment"),
+      false
+    )
+  })
+
+  it("corroboration : substantif seul / mention conditionnelle → false", () => {
+    assert.equal(
+      corroborateCancellationText(null, "Voir les conditions en cas d'annulation."),
+      false
+    )
+    assert.equal(
+      corroborateCancellationText(null, "Les frais d'annulation s'appliquent."),
+      false
+    )
+    assert.equal(
+      corroborateCancellationText("Cancel", "Please review cancel policy"),
+      false
+    )
+  })
+
+  it("corroboration : formulations d'annulation effective → true", () => {
+    assert.equal(
+      corroborateCancellationText(null, "cette consultation est annulée"),
+      true
+    )
+    assert.equal(
+      corroborateCancellationText(null, "nous annulons cette consultation"),
+      true
+    )
+    assert.equal(
+      corroborateCancellationText(null, "This consultation has been cancelled."),
+      true
+    )
+  })
+
+  it("A — CANCELLED + evidence valide + corroboration → CONSULTATION_CANCELLED blocking", () => {
+    const body = "Cette consultation est annulée."
+    const out = applyDeterministicPostEnrichment(
+      {
+        fields: fields({
+          worksiteName: "LYCEE LANGON 33",
+          requestClassification: "CANCELLED_CONSULTATION",
+        }),
+        confidenceData: { requestClassification: 0.9 },
+        evidenceData: {
+          requestClassification: {
+            source: "BODY",
+            quote: "Cette consultation est annulée",
+          },
+        },
+        warnings: [],
+        providerId: "anthropic",
+        model: "t",
+      },
+      {
+        subject: "CONSULTATION EQUIPE-LYCEE LANGON 33 — ANNULEE",
+        body,
+      }
+    )
+    assert.equal(out.fields.requestClassification, "CANCELLED_CONSULTATION")
+    assert.ok(out.warnings.some((w) => w.code === "CONSULTATION_CANCELLED" && w.blocking))
+  })
+
+  it("B — CANCELLED + corroboration false → pas cancel blocking", () => {
+    const out = applyDeterministicPostEnrichment(
+      {
+        fields: fields({
+          worksiteName: "Site",
+          requestClassification: "CANCELLED_CONSULTATION",
+        }),
+        confidenceData: {},
+        evidenceData: {
+          requestClassification: { source: "BODY", quote: "Merci de chiffrer" },
+        },
+        warnings: [],
+        providerId: "anthropic",
+        model: "t",
+      },
+      { subject: "Consultation normale", body: "Merci de chiffrer" }
+    )
+    assert.equal(out.fields.requestClassification, "CONSULTATION")
+    assert.ok(!out.warnings.some((w) => w.code === "CONSULTATION_CANCELLED"))
+  })
+
+  it("C — CONSULTATION + corroboration positive → pas d'auto-CANCELLED", () => {
+    const out = applyDeterministicPostEnrichment(
+      {
+        fields: fields({
+          worksiteName: "Site",
+          requestClassification: "CONSULTATION",
+        }),
+        confidenceData: {},
+        evidenceData: {},
+        warnings: [],
+        providerId: "anthropic",
+        model: "t",
+      },
+      {
+        subject: "Re: site",
+        body: "cette consultation est annulée — merci",
+      }
+    )
+    assert.equal(out.fields.requestClassification, "CONSULTATION")
+    assert.ok(!out.warnings.some((w) => w.code === "CONSULTATION_CANCELLED" && w.blocking))
+  })
+
+  it("D — CANCELLED + evidence absente/invalide → pas cancel blocking", () => {
+    const body = "Cette consultation est annulée."
+    const absent = applyDeterministicPostEnrichment(
+      {
+        fields: fields({
+          worksiteName: "Site",
+          requestClassification: "CANCELLED_CONSULTATION",
+        }),
+        confidenceData: {},
+        evidenceData: {},
+        warnings: [],
+        providerId: "anthropic",
+        model: "t",
+      },
+      { subject: "Annulation", body }
+    )
+    assert.equal(absent.fields.requestClassification, "CONSULTATION")
+    assert.ok(!absent.warnings.some((w) => w.code === "CONSULTATION_CANCELLED"))
+
+    const invalid = applyDeterministicPostEnrichment(
+      {
+        fields: fields({
+          worksiteName: "Site",
+          requestClassification: "CANCELLED_CONSULTATION",
+        }),
+        confidenceData: {},
+        evidenceData: {
+          requestClassification: {
+            source: "BODY",
+            quote: "quote inventée absente du mail",
+          },
+        },
+        warnings: [],
+        providerId: "anthropic",
+        model: "t",
+      },
+      { subject: "Annulation", body }
+    )
+    assert.equal(invalid.fields.requestClassification, "CONSULTATION")
+    assert.ok(!invalid.warnings.some((w) => w.code === "CONSULTATION_CANCELLED"))
+  })
+
+  it("E — phrase cancel sans classification provider → fail-closed", () => {
+    const out = applyDeterministicPostEnrichment(
+      {
+        fields: fields({
+          worksiteName: "Site",
+          requestClassification: null,
+        }),
+        confidenceData: {},
+        evidenceData: {},
+        warnings: [],
+        providerId: "anthropic",
+        model: "t",
+      },
+      { subject: null, body: "cette consultation est annulée" }
+    )
+    assert.notEqual(out.fields.requestClassification, "CANCELLED_CONSULTATION")
+    assert.ok(!out.warnings.some((w) => w.code === "CONSULTATION_CANCELLED" && w.blocking))
+  })
+})
+
+describe("FIX-004 — cancel warning authority + gate routing", () => {
+  it("1 — provider CONSULTATION_CANCELLED seul → aucun cancel autoritaire après normalize", () => {
+    const n = normalizeProviderResult({
+      fields: {
+        worksiteName: { value: "Site A", confidence: 0.8 },
+      },
+      warnings: [{ code: "CONSULTATION_CANCELLED" }],
+      providerMetadata: { providerId: "anthropic", model: "t" },
+    })
+    assert.ok(!n.warnings.some((w) => w.code === "CONSULTATION_CANCELLED"))
+    assert.ok(n.warnings.some((w) => w.code === "PROVIDER_PARTIAL_RESULT" && w.source === "PROVIDER"))
+  })
+
+  it("2 — triple garde-fou → CONSULTATION_CANCELLED source SERVICE", () => {
+    const body = "Cette consultation est annulée."
+    const out = applyDeterministicPostEnrichment(
+      {
+        fields: fields({
+          worksiteName: "Site",
+          requestClassification: "CANCELLED_CONSULTATION",
+        }),
+        confidenceData: {},
+        evidenceData: {
+          requestClassification: {
+            source: "BODY",
+            quote: "Cette consultation est annulée",
+          },
+        },
+        warnings: [],
+        providerId: "anthropic",
+        model: "t",
+      },
+      { subject: "Re", body }
+    )
+    const w = out.warnings.find((x) => x.code === "CONSULTATION_CANCELLED")
+    assert.ok(w)
+    assert.equal(w!.source, "SERVICE")
+    assert.equal(w!.blocking, true)
+  })
+
+  it("3+4 — gate : cancel seul + contenu valide → pass, warning conservé", () => {
+    const cancel = catalogWarning("CONSULTATION_CANCELLED", { source: "SERVICE" })
+    const gate = evaluateExtractionGate(
+      fields({
+        worksiteName: "LYCEE LANGON 33",
+        address: "1 rue Test",
+        requestedStartDate: "2026-10-26",
+        requestedEndDate: "2026-11-05",
+      }),
+      [cancel]
+    )
+    assert.equal(gate.pass, true)
+    assert.equal(gate.failureCode, null)
+    assert.ok(gate.warnings.some((w) => w.code === "CONSULTATION_CANCELLED" && w.blocking))
+  })
+
+  it("5 — autre blocking ERROR → gate fail inchangé", () => {
+    const gate = evaluateExtractionGate(
+      fields({ worksiteName: "Site OK" }),
+      [catalogWarning("EMPTY_EXTRACTION", { source: "SERVICE" })]
+    )
+    assert.equal(gate.pass, false)
+    assert.equal(gate.failureCode, "EMPTY_EXTRACTION")
+  })
+
+  it("6 — chaîne locale : cancel validé → gate pass → AUTO_REJECT_CANCELLED", () => {
+    const body = "Cette consultation est annulée."
+    const enriched = applyDeterministicPostEnrichment(
+      {
+        fields: fields({
+          worksiteName: "LYCEE LANGON 33",
+          address: "1 rue X",
+          city: "Langon",
+          requestedStartDate: "2026-10-26",
+          requestedEndDate: "2026-11-05",
+          requestClassification: "CANCELLED_CONSULTATION",
+        }),
+        confidenceData: {
+          worksiteName: 0.9,
+          requestedStartDate: 0.9,
+          requestedEndDate: 0.9,
+        },
+        evidenceData: {
+          requestClassification: {
+            source: "BODY",
+            quote: "Cette consultation est annulée",
+          },
+        },
+        warnings: [],
+        providerId: "anthropic",
+        model: "t",
+      },
+      { subject: "ANNULEE", body }
+    )
+    const gate = evaluateExtractionGate(enriched.fields, enriched.warnings)
+    assert.equal(gate.pass, true, "persistirait PENDING_REVIEW, pas FAILED")
+    assert.ok(gate.warnings.some((w) => w.code === "CONSULTATION_CANCELLED"))
+
+    const decision = evaluateAutoDecision({
+      worksiteName: enriched.fields.worksiteName,
+      startDate: new Date("2026-10-26"),
+      endDate: new Date("2026-11-05"),
+      address: enriched.fields.address,
+      city: enriched.fields.city,
+      clientName: null,
+      clientEmail: null,
+      confidenceData: enriched.confidenceData,
+      warningData: gate.warnings,
+      autoApproveEnabled: true,
+      autoConvertEnabled: true,
+      consultationCancelled: true,
+      hasResolvedClient: true,
+    })
+    assert.equal(decision.code, "AUTO_REJECT_CANCELLED")
+  })
+})
+
+describe("FIX-001 — annulation follow-up + policy", () => {
+  it("policy C1 → AUTO_REJECT_CANCELLED (0 convert path)", () => {
+    const r = evaluateAutoDecision({
+      worksiteName: "LYCEE LANGON 33",
+      startDate: new Date("2026-10-26"),
+      endDate: new Date("2026-11-05"),
+      address: "1 rue X",
+      city: "Langon",
+      clientName: null,
+      clientEmail: null,
+      confidenceData: {
+        worksiteName: 0.9,
+        requestedStartDate: 0.9,
+        requestedEndDate: 0.9,
+      },
+      warningData: [{ code: "CONSULTATION_CANCELLED", blocking: true }],
+      autoApproveEnabled: true,
+      autoConvertEnabled: true,
+      consultationCancelled: true,
+      hasResolvedClient: true,
+    })
+    assert.equal(r.code, "AUTO_REJECT_CANCELLED")
+  })
+
+  it("C2 follow-up thread exact → reject 1 draft lié", async () => {
+    const drafts = [
+      {
+        id: "d_src",
+        status: "PENDING_REVIEW",
+        createdWorksiteId: null as string | null,
+      },
+      {
+        id: "d_prev",
+        status: "PENDING_REVIEW",
+        createdWorksiteId: null as string | null,
+      },
+    ]
+    const db = {
+      acquisitionMessage: {
+        findMany: async () => [
+          { id: "m1", draft: drafts[0] },
+          { id: "m2", draft: drafts[1] },
+        ],
+      },
+      worksiteImportDraft: {
+        updateMany: async (args: {
+          where: { id: string }
+          data: { status: string }
+        }) => {
+          const d = drafts.find((x) => x.id === args.where.id)
+          if (d) d.status = args.data.status
+          return { count: d ? 1 : 0 }
+        },
+      },
+    }
+    const r = await applyCancellationFollowUp({
+      companyId: "co1",
+      sourceDraftId: "d_src",
+      threadId: "thread-1",
+      db: db as never,
+    })
+    assert.deepEqual(r.linkedDraftIdsRejected, ["d_prev"])
+    assert.equal(drafts[1]!.status, "REJECTED")
+    assert.equal(r.journalCode, "CANCELLATION_FOLLOWUP_APPLIED")
+  })
+
+  it("C3 après conversion → worksite intact, journal AFTER_CONVERSION", async () => {
+    const drafts = [
+      { id: "d_src", status: "PENDING_REVIEW", createdWorksiteId: null as string | null },
+      {
+        id: "d_done",
+        status: "CONVERTED",
+        createdWorksiteId: "ws_1",
+      },
+    ]
+    let updates = 0
+    const db = {
+      acquisitionMessage: {
+        findMany: async () => [
+          { id: "m1", draft: drafts[0] },
+          { id: "m2", draft: drafts[1] },
+        ],
+      },
+      worksiteImportDraft: {
+        updateMany: async () => {
+          updates++
+          return { count: 0 }
+        },
+      },
+    }
+    const r = await applyCancellationFollowUp({
+      companyId: "co1",
+      sourceDraftId: "d_src",
+      threadId: "thread-1",
+      db: db as never,
+    })
+    assert.equal(updates, 0)
+    assert.deepEqual(r.linkedDraftIdsRejected, [])
+    assert.deepEqual(r.convertedWorksiteIdsUntouched, ["ws_1"])
+    assert.equal(r.journalCode, "CANCELLATION_AFTER_CONVERSION")
+  })
+
+  it("C3b CONVERTED + pendingLike → fail-closed, 0 mutation liée", async () => {
+    const drafts = [
+      { id: "d_src", status: "PENDING_REVIEW", createdWorksiteId: null as string | null },
+      {
+        id: "d_done",
+        status: "CONVERTED",
+        createdWorksiteId: "ws_1",
+      },
+      {
+        id: "d_pending",
+        status: "PENDING_REVIEW",
+        createdWorksiteId: null as string | null,
+      },
+    ]
+    let updates = 0
+    const db = {
+      acquisitionMessage: {
+        findMany: async () =>
+          drafts.map((d, i) => ({ id: `m${i}`, draft: d })),
+      },
+      worksiteImportDraft: {
+        updateMany: async () => {
+          updates++
+          return { count: 1 }
+        },
+      },
+    }
+    const r = await applyCancellationFollowUp({
+      companyId: "co1",
+      sourceDraftId: "d_src",
+      threadId: "thread-1",
+      db: db as never,
+    })
+    assert.equal(updates, 0)
+    assert.deepEqual(r.linkedDraftIdsRejected, [])
+    assert.deepEqual(r.convertedWorksiteIdsUntouched, ["ws_1"])
+    assert.equal(drafts[2]!.status, "PENDING_REVIEW")
+    assert.equal(r.journalCode, "CANCELLATION_AFTER_CONVERSION")
+  })
+
+  it("C4 ambigu (2 drafts non convertis) → aucune mutation", async () => {
+    const drafts = [
+      { id: "d_src", status: "PENDING_REVIEW", createdWorksiteId: null },
+      { id: "d_a", status: "PENDING_REVIEW", createdWorksiteId: null },
+      { id: "d_b", status: "APPROVED", createdWorksiteId: null },
+    ]
+    let updates = 0
+    const db = {
+      acquisitionMessage: {
+        findMany: async () =>
+          drafts.map((d, i) => ({ id: `m${i}`, draft: d })),
+      },
+      worksiteImportDraft: {
+        updateMany: async () => {
+          updates++
+          return { count: 1 }
+        },
+      },
+    }
+    const r = await applyCancellationFollowUp({
+      companyId: "co1",
+      sourceDraftId: "d_src",
+      threadId: "thread-1",
+      db: db as never,
+    })
+    assert.equal(updates, 0)
+    assert.equal(r.ambiguous, true)
+    assert.equal(r.journalCode, "CANCELLATION_TARGET_AMBIGUOUS")
+  })
+})
+
+describe("FIX-001 — client match P1–P6", () => {
+  it("P1 Partner→Client même tenant", async () => {
+    const r = await matchClientForDraft({
+      companyId: "co1",
+      clientName: null,
+      clientEmail: null,
+      partnerLinkedClientId: "cli_a",
+      db: {
+        client: {
+          findFirst: async (args: { where: { id: string; companyId: string } }) =>
+            args.where.id === "cli_a" && args.where.companyId === "co1"
+              ? { id: "cli_a" }
+              : null,
+          findMany: async () => [],
+        },
+      } as never,
+    })
+    assert.equal(r.matchKind, "PARTNER_LINK")
+    assert.equal(r.clientId, "cli_a")
+  })
+
+  it("P2 cross-tenant impossible", async () => {
+    const r = await matchClientForDraft({
+      companyId: "co1",
+      clientName: null,
+      clientEmail: null,
+      partnerLinkedClientId: "cli_other",
+      db: {
+        client: {
+          findFirst: async () => null,
+          findMany: async () => [],
+        },
+      } as never,
+    })
+    assert.equal(r.matchKind, "NONE")
+    assert.equal(r.clientId, null)
+  })
+
+  it("P3 PROPOSED_ID bat PARTNER_LINK", async () => {
+    const calls: string[] = []
+    const r = await matchClientForDraft({
+      companyId: "co1",
+      clientName: null,
+      clientEmail: null,
+      proposedClientId: "cli_human",
+      partnerLinkedClientId: "cli_partner",
+      db: {
+        client: {
+          findFirst: async (args: { where: { id: string } }) => {
+            calls.push(args.where.id)
+            return { id: args.where.id }
+          },
+          findMany: async () => [],
+        },
+      } as never,
+    })
+    assert.equal(r.matchKind, "PROPOSED_ID")
+    assert.equal(r.clientId, "cli_human")
+    assert.equal(calls[0], "cli_human")
+  })
+
+  it("P4 contactEmail jamais utilisé — seul clientEmail", async () => {
+    const r = await matchClientForDraft({
+      companyId: "co1",
+      clientName: null,
+      clientEmail: null,
+      db: {
+        client: {
+          findFirst: async () => null,
+          findMany: async () => [{ id: "should-not" }],
+        },
+      } as never,
+    })
+    assert.equal(r.matchKind, "NONE")
+  })
+
+  it("P5 endClientName jamais matching", async () => {
+    const r = await matchClientForDraft({
+      companyId: "co1",
+      clientName: null,
+      clientEmail: null,
+      // endClientName n’est pas un paramètre du matcher
+      db: {
+        client: {
+          findFirst: async () => null,
+          findMany: async () => [{ id: "selevents" }],
+        },
+      } as never,
+    })
+    assert.equal(r.clientId, null)
+  })
+
+  it("P6 partner connu → EXISTING path (hasResolvedClient) sans NEW", () => {
+    const r = evaluateAutoDecision({
+      worksiteName: "PROVIDENCE",
+      startDate: new Date("2026-09-01"),
+      endDate: new Date("2026-09-05"),
+      address: "33 avenue Gustave Ferrie",
+      city: "Angers",
+      clientName: null,
+      clientEmail: null,
+      confidenceData: {
+        worksiteName: 0.9,
+        requestedStartDate: 0.9,
+        requestedEndDate: 0.9,
+      },
+      warningData: [],
+      autoApproveEnabled: true,
+      autoConvertEnabled: true,
+      hasResolvedClient: true,
+    })
+    assert.equal(r.code, "AUTO_APPROVE_CONVERT")
+    assert.ok(!r.reasons.includes("MISSING_CLIENT_IDENTITY"))
+  })
+})
+
+describe("FIX-001 — persistence R1–R3 + extractedData", () => {
+  it("R3 payload conserve clientEmail/phone + endClientName", () => {
+    const payload = buildExtractedDataPayload(
+      fields({
+        clientEmail: "compta@example.com",
+        clientPhone: "+33100000000",
+        contactEmail: "marco@example.com",
+        contactPhone: "+33645097611",
+        endClientName: "SELEVENTS (Fabrice Berthon)",
+        postalCode: "13008",
+        city: "Marseille",
+      }),
+      {},
+      "hash"
+    )
+    assert.equal(payload.clientEmail, "compta@example.com")
+    assert.equal(payload.clientPhone, "+33100000000")
+    assert.equal(payload.contactEmail, "marco@example.com")
+    assert.equal(payload.endClientName, "SELEVENTS (Fabrice Berthon)")
+    assert.equal(payload.postalCode, "13008")
+    assert.equal(payload.city, "Marseille")
+  })
+
+  it("R1 mapping conceptuel contact ≠ client (via fields séparés)", () => {
+    const f = fields({
+      clientEmail: "compta@example.com",
+      contactEmail: "marco@example.com",
+      contactName: "Marco Rodrigues",
+      contactPhone: "+33645097611",
+      postalCode: "49000",
+      city: "Angers",
+    })
+    // Persistance attendue (vérifiée aussi côté repository) :
+    assert.equal(f.contactEmail, "marco@example.com")
+    assert.notEqual(f.contactEmail, f.clientEmail)
+    assert.equal(f.postalCode, "49000")
+    assert.equal(f.city, "Angers")
+  })
+})
+
+describe("FIX-001 — fixtures noms chantier ≠ Client", () => {
+  const worksites = [
+    "LYCEE LA PROVIDENCE 49",
+    "LYCEE LANGON 33",
+    "YESYES PADEL CARRIERES SOUS POISSY 78",
+    "ITM SBO 42 PHASE 142 ST BONNET LES OULES",
+    "LEROY MERLIN 77 REAU",
+    "CERACO AMBONIL 26",
+    "LIVE TERACT INVIVO RETAIL 09 2026",
+    "SOMMET DE L'ELEVAGE 09 2026",
+    "CONGRES ESPE 09 2026",
+    "TAX FREE — Phase 1",
+  ]
+
+  it("prompt définit worksite ≠ client ≠ endClient ≠ contact", () => {
+    assert.match(ANTHROPIC_EXTRACTION_SYSTEM_PROMPT, /worksiteName/)
+    assert.match(ANTHROPIC_EXTRACTION_SYSTEM_PROMPT, /endClientName/)
+    assert.match(ANTHROPIC_EXTRACTION_SYSTEM_PROMPT, /CANCELLED_CONSULTATION/)
+    assert.match(ANTHROPIC_EXTRACTION_SYSTEM_PROMPT, /requestedWeekNumber/)
+    assert.match(ANTHROPIC_EXTRACTION_SYSTEM_PROMPT, /Client Planificator/)
+  })
+
+  it("FIX-007 — contrat Anthropic extrait Sxx sans inventer l'année", () => {
+    const toolSchema = JSON.stringify(EXTRACTION_TOOL_INPUT_JSON_SCHEMA)
+
+    assert.match(ANTHROPIC_EXTRACTION_SYSTEM_PROMPT, /S36, S 36, semaine 36/)
+    assert.match(
+      ANTHROPIC_EXTRACTION_SYSTEM_PROMPT,
+      /renseigne requestedWeekNumber, omets requestedWeekYear et les dates ISO/,
+    )
+    assert.match(
+      ANTHROPIC_EXTRACTION_SYSTEM_PROMPT,
+      /n'infère jamais l'année depuis la date du message ou le contexte/,
+    )
+    assert.match(toolSchema, /Numéro de semaine calendaire explicitement présent/)
+    assert.match(
+      toolSchema,
+      /Année explicitement et fiablement associée à requestedWeekNumber/,
+    )
+  })
+
+  it("fixtures LAURALU/HALL EXPO restent des worksiteName", () => {
+    for (const name of worksites) {
+      const f = fields({ worksiteName: name, endClientName: null, clientName: null })
+      assert.equal(f.worksiteName, name)
+      assert.equal(f.clientName, null)
+    }
+  })
+
+  it("SOMMET : endClientName SELEVENTS ≠ clientName", () => {
+    const f = fields({
+      worksiteName: "SOMMET DE L'ELEVAGE 09 2026",
+      endClientName: "SELEVENTS (Fabrice Berthon)",
+      contactName: "Nathanael SIRE",
+      clientName: null,
+    })
+    assert.equal(f.endClientName?.includes("SELEVENTS"), true)
+    assert.equal(f.clientName, null)
+  })
+
+  it("seeds registry génériques sans ID Staging", () => {
+    assert.ok(DEFAULT_CONSULTATION_PARTNER_SEEDS.some((s) => s.code === "lauralu"))
+    assert.ok(DEFAULT_CONSULTATION_PARTNER_SEEDS.some((s) => s.code === "hall-expo"))
+    for (const s of DEFAULT_CONSULTATION_PARTNER_SEEDS) {
+      assert.equal(s.clientId ?? null, null)
+      assert.equal(s.autoApproveEnabled, false)
+      assert.equal(s.autoConvertEnabled, false)
+      assert.equal(s.allowCreateClient, false)
+    }
+  })
+})
+
+describe("FIX-001 — normalizeProviderResult accepte nouveaux champs", () => {
+  it("endClientName + week + CANCELLED", () => {
+    const n = normalizeProviderResult({
+      fields: {
+        worksiteName: { value: "TAX FREE", confidence: 0.8 },
+        endClientName: { value: "SELEVENTS", confidence: 0.7 },
+        requestedWeekNumber: { value: 36, confidence: 0.7 },
+        requestedWeekYear: { value: 2026, confidence: 0.7 },
+        requestClassification: {
+          value: "CANCELLED_CONSULTATION",
+          confidence: 0.8,
+        },
+      },
+      warnings: [],
+      providerMetadata: { providerId: "anthropic", model: "t" },
+    })
+    assert.equal(n.fields.endClientName, "SELEVENTS")
+    assert.equal(n.fields.requestedWeekNumber, 36)
+    assert.equal(n.fields.requestClassification, "CANCELLED_CONSULTATION")
+  })
+})
+
+describe("FIX-001 — persistExtraction mapping R1/R2", () => {
+  it("écrit contact* et postal/city, jamais clientEmail dans proposedContact*", async () => {
+    const { DraftExtractionRepository } = await import(
+      "@/lib/acquisition/extraction/extraction.repository"
+    )
+    let written: Record<string, unknown> | null = null
+    const db = {
+      $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+        const tx = {
+          worksiteImportDraft: {
+            findFirst: async () => ({ acquisitionMessageId: "m1" }),
+            updateMany: async (args: { data: Record<string, unknown> }) => {
+              written = args.data
+              return { count: 1 }
+            },
+          },
+          acquisitionMessageContent: {
+            findFirst: async () => ({ contentHash: "h1" }),
+          },
+        }
+        return fn(tx)
+      },
+    }
+    const repo = new DraftExtractionRepository(db as never)
+    const outcome = await repo.persistExtraction({
+      companyId: "co1",
+      draftId: "d1",
+      expectedVersion: 1,
+      expectedContentHash: "h1",
+      status: "PENDING_REVIEW",
+      fields: fields({
+        clientName: "LAURALU",
+        worksiteName: "PROVIDENCE",
+        address: "33 av Ferrie",
+        postalCode: "49000",
+        city: "Angers",
+        clientEmail: "compta@example.com",
+        clientPhone: "+33111111111",
+        contactName: "Marco",
+        contactEmail: "marco@example.com",
+        contactPhone: "+33645097611",
+        description: "élec",
+      }),
+      confidenceData: {},
+      warningData: [],
+      extractedData: {},
+      providerId: "anthropic",
+      model: "t",
+      errorCode: null,
+      now: new Date(),
+    })
+    assert.equal(outcome, "OK")
+    assert.ok(written)
+    assert.equal(written!.proposedContactEmail, "marco@example.com")
+    assert.equal(written!.proposedContactPhone, "+33645097611")
+    assert.equal(written!.proposedContactName, "Marco")
+    assert.equal(written!.proposedPostalCode, "49000")
+    assert.equal(written!.proposedCity, "Angers")
+    assert.notEqual(written!.proposedContactEmail, "compta@example.com")
+  })
+})
+
+describe("FIX-001 — Partner.clientId FK delete policy (RESTRICT)", () => {
+  it("Prisma + SQL : ON DELETE RESTRICT (pas SET NULL sur FK composite)", async () => {
+    const { readFileSync } = await import("node:fs")
+    const { join } = await import("node:path")
+    const root = join(process.cwd())
+    const schema = readFileSync(join(root, "prisma/schema.prisma"), "utf8")
+    const sql = readFileSync(
+      join(root, "prisma/migrations/20260902180000_acq_partner_client_link/migration.sql"),
+      "utf8"
+    )
+    const partnerBlock =
+      schema.match(/model AcquisitionPartner \{[\s\S]*?@@map\("acquisition_partners"\)/)?.[0] ??
+      ""
+    assert.ok(partnerBlock.length > 0, "bloc AcquisitionPartner introuvable")
+    assert.match(partnerBlock, /fields:\s*\[clientId,\s*companyId\]/)
+    assert.match(partnerBlock, /onDelete:\s*Restrict/)
+    assert.doesNotMatch(partnerBlock, /onDelete:\s*SetNull/)
+    assert.match(sql, /FOREIGN KEY \("clientId", "companyId"\)/)
+    assert.match(sql, /ON DELETE RESTRICT/)
+    assert.doesNotMatch(sql, /ON DELETE SET NULL/)
+  })
+})
+
 
 describe("FIX-002B — résolution année ISO fail-closed depuis receivedAt", () => {
   const baseNorm = (over: Partial<ReturnType<typeof fields>> = {}) => ({
@@ -482,4 +1294,3 @@ describe("FIX-002B — résolution année ISO fail-closed depuis receivedAt", ()
     })
   })
 })
-

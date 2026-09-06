@@ -65,6 +65,12 @@ export interface ExtractionServiceDeps {
     companyId: string
     draftId: string
   }) => Promise<unknown>
+  /**
+   * PLAN-ACQ-AGENTS-LOT-3C — snapshot run orchestrateur.
+   * true ⇒ interdit le hook legacy (XOR avec steps post-extraction).
+   * Default false = comportement historique.
+   */
+  postExtractionStepsEnabled?: boolean
 }
 
 function defaultLog(event: string, payload?: Record<string, unknown>): void {
@@ -524,20 +530,24 @@ async function runDraftExtractionCore(
 
     // AUTO : uniquement ORCHESTRATOR_AUTO + ownership encore valide.
     // Perte de lease après persist : mutation conservée, run ≠ SUCCESS.
+    // LOT-3C XOR : postExtractionStepsEnabled=true ⇒ hook legacy interdit.
     if (isOrchestratorAutoContext(executionContext)) {
       if (await ensureOrchestratorOwned(executionContext)) {
-        try {
-          const runAuto =
-            deps.runAutoDecisionAfterExtraction ?? maybeRunAutoDecisionAfterExtraction
-          await runAuto({
-            companyId,
-            draftId: draft.id,
-          })
-        } catch (autoErr) {
-          log("AUTO_DECISION_HOOK_FAILED", {
-            draftId: draft.id,
-            message: autoErr instanceof Error ? autoErr.message : "unknown",
-          })
+        const postSteps = Boolean(deps.postExtractionStepsEnabled)
+        if (!postSteps) {
+          try {
+            const runAuto =
+              deps.runAutoDecisionAfterExtraction ?? maybeRunAutoDecisionAfterExtraction
+            await runAuto({
+              companyId,
+              draftId: draft.id,
+            })
+          } catch (autoErr) {
+            log("AUTO_DECISION_HOOK_FAILED", {
+              draftId: draft.id,
+              message: autoErr instanceof Error ? autoErr.message : "unknown",
+            })
+          }
         }
         return extractedResult
       }

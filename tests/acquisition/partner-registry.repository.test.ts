@@ -140,6 +140,7 @@ function partner(
     autoApproveEnabled: partial.autoApproveEnabled ?? false,
     autoConvertEnabled: partial.autoConvertEnabled ?? false,
     minConfidence: partial.minConfidence ?? null,
+    clientId: partial.clientId ?? null,
     createdAt: partial.createdAt ?? now,
     updatedAt: partial.updatedAt ?? now,
     ...partial,

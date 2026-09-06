@@ -27,6 +27,7 @@ type Partner = {
   connector: "GMAIL"
   pipeline: string
   active: boolean
+  clientId: string | null
 }
 
 type Domain = {
@@ -102,6 +103,9 @@ function createPgLikeFake(
           .sort((a, b) => a.id.localeCompare(b.id))
           .map((c) => ({ id: c.id })),
     },
+    client: {
+      findFirst: async () => null,
+    },
     acquisitionPartner: {
       findUnique: async ({ where }) => {
         const hit = partners.find(
@@ -110,7 +114,12 @@ function createPgLikeFake(
             p.code === where.companyId_code.code
         )
         return hit
-          ? { id: hit.id, companyId: hit.companyId, code: hit.code }
+          ? {
+              id: hit.id,
+              companyId: hit.companyId,
+              code: hit.code,
+              clientId: hit.clientId,
+            }
           : null
       },
       create: async ({ data }) => {
@@ -129,10 +138,30 @@ function createPgLikeFake(
           connector: data.connector,
           pipeline: data.pipeline,
           active: data.active,
+          clientId: data.clientId ?? null,
         }
         partners.push(row)
         writes.push({ op: "create_partner" })
-        return { id: row.id, companyId: row.companyId, code: row.code }
+        return {
+          id: row.id,
+          companyId: row.companyId,
+          code: row.code,
+          clientId: row.clientId,
+        }
+      },
+      updateMany: async ({ where, data }) => {
+        let count = 0
+        for (const p of partners) {
+          if (
+            p.id === where.id &&
+            p.companyId === where.companyId &&
+            p.clientId === null
+          ) {
+            p.clientId = data.clientId
+            count += 1
+          }
+        }
+        return { count }
       },
     },
     acquisitionPartnerDomain: {
@@ -200,6 +229,7 @@ function createPgLikeFake(
 
       const tx: PartnerRegistryBootstrapTx = {
         company: root.company,
+        client: root.client,
         acquisitionPartner: {
           findUnique: async (args) => {
             if (aborted) throw abortedTxError()
@@ -217,6 +247,7 @@ function createPgLikeFake(
                 connector: "GMAIL",
                 pipeline: LAURALU_PARTNER_PIPELINE,
                 active: true,
+                clientId: null,
               }
               external.partners.push(raced)
               if (options.racePartnerComplete) {
@@ -237,6 +268,10 @@ function createPgLikeFake(
               if (isUniqueConstraintError(e)) aborted = true
               throw e
             }
+          },
+          updateMany: async (args) => {
+            if (aborted) throw abortedTxError()
+            return root.acquisitionPartner.updateMany(args)
           },
         },
         acquisitionPartnerDomain: {
@@ -457,6 +492,7 @@ describe("bootstrapLauraluPartnerRegistry — R4", () => {
           connector: "GMAIL",
           pipeline: LAURALU_PARTNER_PIPELINE,
           active: true,
+          clientId: null,
         },
       ],
       domains: [
@@ -521,6 +557,7 @@ describe("bootstrapLauraluPartnerRegistry — R4", () => {
           connector: "GMAIL",
           pipeline: "kept",
           active: false,
+          clientId: null,
         },
       ],
       domains: [
@@ -539,5 +576,500 @@ describe("bootstrapLauraluPartnerRegistry — R4", () => {
     assert.equal(partners[0]!.pipeline, "kept")
     assert.equal(domains[0]!.active, false)
     assert.equal(writes.length, 0)
+  })
+})
+
+describe("FIX-005 — bootstrap seed.clientId hardening", () => {
+  type Client = { id: string; companyId: string; active: boolean }
+  type PartnerFull = Partner & {
+    clientId: string | null
+    priority: number
+    autoApproveEnabled: boolean
+    autoConvertEnabled: boolean
+    allowCreateClient: boolean
+  }
+
+  function createSeedClientFake(seed: {
+    companies: Company[]
+    partners?: PartnerFull[]
+    domains?: Domain[]
+    clients?: Client[]
+  }) {
+    const companies = seed.companies.map((c) => ({ ...c }))
+    const partners = (seed.partners ?? []).map((p) => ({ ...p }))
+    const domains = (seed.domains ?? []).map((d) => ({ ...d }))
+    const clients = (seed.clients ?? []).map((c) => ({ ...c }))
+    let seq = 0
+    const nextId = (prefix: string) => `${prefix}_${++seq}`
+
+    const root: PartnerRegistryBootstrapTx = {
+      company: {
+        findMany: async () =>
+          [...companies]
+            .sort((a, b) => a.id.localeCompare(b.id))
+            .map((c) => ({ id: c.id })),
+      },
+      client: {
+        findFirst: async ({ where }) => {
+          const hit = clients.find(
+            (c) =>
+              c.id === where.id &&
+              c.companyId === where.companyId &&
+              c.active === where.active
+          )
+          return hit ? { id: hit.id } : null
+        },
+      },
+      acquisitionPartner: {
+        findUnique: async ({ where }) => {
+          const hit = partners.find(
+            (p) =>
+              p.companyId === where.companyId_code.companyId &&
+              p.code === where.companyId_code.code
+          )
+          return hit
+            ? {
+                id: hit.id,
+                companyId: hit.companyId,
+                code: hit.code,
+                clientId: hit.clientId,
+              }
+            : null
+        },
+        create: async ({ data }) => {
+          const row: PartnerFull = {
+            id: nextId("partner"),
+            companyId: data.companyId,
+            name: data.name,
+            code: data.code,
+            connector: data.connector,
+            pipeline: data.pipeline,
+            active: data.active,
+            clientId: data.clientId ?? null,
+            priority: data.priority ?? 100,
+            autoApproveEnabled: data.autoApproveEnabled ?? false,
+            autoConvertEnabled: data.autoConvertEnabled ?? false,
+            allowCreateClient: data.allowCreateClient ?? false,
+          }
+          partners.push(row)
+          return {
+            id: row.id,
+            companyId: row.companyId,
+            code: row.code,
+            clientId: row.clientId,
+          }
+        },
+        updateMany: async ({ where, data }) => {
+          let count = 0
+          for (const p of partners) {
+            if (
+              p.id === where.id &&
+              p.companyId === where.companyId &&
+              p.clientId === null
+            ) {
+              p.clientId = data.clientId
+              count += 1
+            }
+          }
+          return { count }
+        },
+      },
+      acquisitionPartnerDomain: {
+        findUnique: async ({ where }) => {
+          const hit = domains.find(
+            (d) =>
+              d.companyId === where.companyId_domainNormalized.companyId &&
+              d.domainNormalized ===
+                where.companyId_domainNormalized.domainNormalized
+          )
+          return hit
+            ? {
+                id: hit.id,
+                companyId: hit.companyId,
+                partnerId: hit.partnerId,
+                domainNormalized: hit.domainNormalized,
+              }
+            : null
+        },
+        create: async ({ data }) => {
+          const row: Domain = {
+            id: nextId("domain"),
+            companyId: data.companyId,
+            partnerId: data.partnerId,
+            domainNormalized: data.domainNormalized,
+            active: data.active,
+          }
+          domains.push(row)
+          return {
+            id: row.id,
+            companyId: row.companyId,
+            partnerId: row.partnerId,
+            domainNormalized: row.domainNormalized,
+          }
+        },
+      },
+    }
+
+    const db: PartnerRegistryBootstrapDb = {
+      ...root,
+      $transaction: async (fn) => fn(root),
+    }
+
+    return { db, partners, domains, clients }
+  }
+
+  const baseSeed = {
+    code: "acme",
+    name: "Acme",
+    domains: ["acme.test"],
+    autoApproveEnabled: false,
+    autoConvertEnabled: false,
+    allowCreateClient: false,
+  }
+
+  it("9 — nouveau Partner + seed.clientId valide → création avec clientId", async () => {
+    const { db, partners } = createSeedClientFake({
+      companies: [{ id: "co_a", name: "A" }],
+      clients: [{ id: "cli_a", companyId: "co_a", active: true }],
+    })
+    const { runCompanySeedTx } = await import(
+      "@/lib/acquisition/partner-registry-bootstrap"
+    )
+    const r = await runCompanySeedTx(db, "co_a", {
+      ...baseSeed,
+      clientId: "cli_a",
+    })
+    assert.equal(r.status, "created")
+    assert.equal(partners[0]?.clientId, "cli_a")
+  })
+
+  it("10 — nouveau Partner + client inexistant → fail", async () => {
+    const { db, partners } = createSeedClientFake({
+      companies: [{ id: "co_a", name: "A" }],
+      clients: [],
+    })
+    const { runCompanySeedTx } = await import(
+      "@/lib/acquisition/partner-registry-bootstrap"
+    )
+    await assert.rejects(() =>
+      runCompanySeedTx(db, "co_a", { ...baseSeed, clientId: "missing" })
+    )
+    assert.equal(partners.length, 0)
+  })
+
+  it("11 — nouveau Partner + client autre tenant → fail", async () => {
+    const { db, partners } = createSeedClientFake({
+      companies: [{ id: "co_a", name: "A" }],
+      clients: [{ id: "cli_b", companyId: "co_b", active: true }],
+    })
+    const { runCompanySeedTx } = await import(
+      "@/lib/acquisition/partner-registry-bootstrap"
+    )
+    await assert.rejects(() =>
+      runCompanySeedTx(db, "co_a", { ...baseSeed, clientId: "cli_b" })
+    )
+    assert.equal(partners.length, 0)
+  })
+
+  it("12 — nouveau Partner + client inactif → fail", async () => {
+    const { db, partners } = createSeedClientFake({
+      companies: [{ id: "co_a", name: "A" }],
+      clients: [{ id: "cli_a", companyId: "co_a", active: false }],
+    })
+    const { runCompanySeedTx } = await import(
+      "@/lib/acquisition/partner-registry-bootstrap"
+    )
+    await assert.rejects(() =>
+      runCompanySeedTx(db, "co_a", { ...baseSeed, clientId: "cli_a" })
+    )
+    assert.equal(partners.length, 0)
+  })
+
+  it("13 — Partner existant + clientId null → comportement inchangé", async () => {
+    const { db, partners } = createSeedClientFake({
+      companies: [{ id: "co_a", name: "A" }],
+      partners: [
+        {
+          id: "p1",
+          companyId: "co_a",
+          name: "Acme",
+          code: "acme",
+          connector: "GMAIL",
+          pipeline: "consultations",
+          active: true,
+          clientId: null,
+          priority: 100,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+        },
+      ],
+      domains: [
+        {
+          id: "d1",
+          companyId: "co_a",
+          partnerId: "p1",
+          domainNormalized: "acme.test",
+          active: true,
+        },
+      ],
+    })
+    const { runCompanySeedTx } = await import(
+      "@/lib/acquisition/partner-registry-bootstrap"
+    )
+    const r = await runCompanySeedTx(db, "co_a", baseSeed)
+    assert.equal(r.status, "already_present")
+    assert.equal(partners[0]?.clientId, null)
+  })
+
+  it("14 — Partner existant avec clientId non-null → seed ne l’écrase pas", async () => {
+    const { db, partners } = createSeedClientFake({
+      companies: [{ id: "co_a", name: "A" }],
+      partners: [
+        {
+          id: "p1",
+          companyId: "co_a",
+          name: "Acme",
+          code: "acme",
+          connector: "GMAIL",
+          pipeline: "consultations",
+          active: true,
+          clientId: "cli_existing",
+          priority: 100,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+        },
+      ],
+      domains: [
+        {
+          id: "d1",
+          companyId: "co_a",
+          partnerId: "p1",
+          domainNormalized: "acme.test",
+          active: true,
+        },
+      ],
+      clients: [{ id: "cli_new", companyId: "co_a", active: true }],
+    })
+    const { runCompanySeedTx } = await import(
+      "@/lib/acquisition/partner-registry-bootstrap"
+    )
+    const r = await runCompanySeedTx(db, "co_a", {
+      ...baseSeed,
+      clientId: "cli_new",
+    })
+    assert.equal(r.status, "already_present")
+    assert.equal(partners[0]?.clientId, "cli_existing")
+  })
+
+  it("15 — seeds défaut : pas de clientId, auto flags OFF", async () => {
+    const { DEFAULT_CONSULTATION_PARTNER_SEEDS } = await import(
+      "@/lib/acquisition/partner-registry-seed"
+    )
+    for (const s of DEFAULT_CONSULTATION_PARTNER_SEEDS) {
+      assert.equal(s.clientId ?? null, null)
+      assert.equal(s.autoApproveEnabled, false)
+      assert.equal(s.autoConvertEnabled, false)
+      assert.equal(s.allowCreateClient, false)
+    }
+  })
+
+  it("16 — Partner existant clientId null + seed client inexistant → reject", async () => {
+    const { db, partners } = createSeedClientFake({
+      companies: [{ id: "co_a", name: "A" }],
+      partners: [
+        {
+          id: "p1",
+          companyId: "co_a",
+          name: "Acme",
+          code: "acme",
+          connector: "GMAIL",
+          pipeline: "consultations",
+          active: true,
+          clientId: null,
+          priority: 100,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+        },
+      ],
+      domains: [
+        {
+          id: "d1",
+          companyId: "co_a",
+          partnerId: "p1",
+          domainNormalized: "acme.test",
+          active: true,
+        },
+      ],
+    })
+    const { runCompanySeedTx } = await import(
+      "@/lib/acquisition/partner-registry-bootstrap"
+    )
+    await assert.rejects(() =>
+      runCompanySeedTx(db, "co_a", { ...baseSeed, clientId: "missing" })
+    )
+    assert.equal(partners[0]?.clientId, null)
+  })
+
+  it("17 — Partner existant clientId null + seed client autre tenant → reject", async () => {
+    const { db, partners } = createSeedClientFake({
+      companies: [{ id: "co_a", name: "A" }],
+      partners: [
+        {
+          id: "p1",
+          companyId: "co_a",
+          name: "Acme",
+          code: "acme",
+          connector: "GMAIL",
+          pipeline: "consultations",
+          active: true,
+          clientId: null,
+          priority: 100,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+        },
+      ],
+      domains: [
+        {
+          id: "d1",
+          companyId: "co_a",
+          partnerId: "p1",
+          domainNormalized: "acme.test",
+          active: true,
+        },
+      ],
+      clients: [{ id: "cli_b", companyId: "co_b", active: true }],
+    })
+    const { runCompanySeedTx } = await import(
+      "@/lib/acquisition/partner-registry-bootstrap"
+    )
+    await assert.rejects(() =>
+      runCompanySeedTx(db, "co_a", { ...baseSeed, clientId: "cli_b" })
+    )
+    assert.equal(partners[0]?.clientId, null)
+  })
+
+  it("18 — Partner existant clientId null + seed client inactif → reject", async () => {
+    const { db, partners } = createSeedClientFake({
+      companies: [{ id: "co_a", name: "A" }],
+      partners: [
+        {
+          id: "p1",
+          companyId: "co_a",
+          name: "Acme",
+          code: "acme",
+          connector: "GMAIL",
+          pipeline: "consultations",
+          active: true,
+          clientId: null,
+          priority: 100,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+        },
+      ],
+      domains: [
+        {
+          id: "d1",
+          companyId: "co_a",
+          partnerId: "p1",
+          domainNormalized: "acme.test",
+          active: true,
+        },
+      ],
+      clients: [{ id: "cli_a", companyId: "co_a", active: false }],
+    })
+    const { runCompanySeedTx } = await import(
+      "@/lib/acquisition/partner-registry-bootstrap"
+    )
+    await assert.rejects(() =>
+      runCompanySeedTx(db, "co_a", { ...baseSeed, clientId: "cli_a" })
+    )
+    assert.equal(partners[0]?.clientId, null)
+  })
+
+  it("19 — Partner existant clientId null + seed client valide → lien créé", async () => {
+    const { db, partners } = createSeedClientFake({
+      companies: [{ id: "co_a", name: "A" }],
+      partners: [
+        {
+          id: "p1",
+          companyId: "co_a",
+          name: "Acme",
+          code: "acme",
+          connector: "GMAIL",
+          pipeline: "consultations",
+          active: true,
+          clientId: null,
+          priority: 100,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+        },
+      ],
+      domains: [
+        {
+          id: "d1",
+          companyId: "co_a",
+          partnerId: "p1",
+          domainNormalized: "acme.test",
+          active: true,
+        },
+      ],
+      clients: [{ id: "cli_a", companyId: "co_a", active: true }],
+    })
+    const { runCompanySeedTx } = await import(
+      "@/lib/acquisition/partner-registry-bootstrap"
+    )
+    const r = await runCompanySeedTx(db, "co_a", {
+      ...baseSeed,
+      clientId: "cli_a",
+    })
+    assert.equal(r.status, "already_present")
+    assert.equal(partners[0]?.clientId, "cli_a")
+  })
+
+  it("20 — Partner déjà lié + seed.clientId différent → pas d’écrasement", async () => {
+    const { db, partners } = createSeedClientFake({
+      companies: [{ id: "co_a", name: "A" }],
+      partners: [
+        {
+          id: "p1",
+          companyId: "co_a",
+          name: "Acme",
+          code: "acme",
+          connector: "GMAIL",
+          pipeline: "consultations",
+          active: true,
+          clientId: "cli_existing",
+          priority: 100,
+          autoApproveEnabled: false,
+          autoConvertEnabled: false,
+          allowCreateClient: false,
+        },
+      ],
+      domains: [
+        {
+          id: "d1",
+          companyId: "co_a",
+          partnerId: "p1",
+          domainNormalized: "acme.test",
+          active: true,
+        },
+      ],
+      clients: [{ id: "cli_new", companyId: "co_a", active: true }],
+    })
+    const { runCompanySeedTx } = await import(
+      "@/lib/acquisition/partner-registry-bootstrap"
+    )
+    const r = await runCompanySeedTx(db, "co_a", {
+      ...baseSeed,
+      clientId: "cli_new",
+    })
+    assert.equal(r.status, "already_present")
+    assert.equal(partners[0]?.clientId, "cli_existing")
   })
 })

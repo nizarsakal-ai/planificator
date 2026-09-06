@@ -120,6 +120,9 @@ describe("extraction-normalize gate R1", () => {
         clientReference: null,
         requestClassification: null,
         estimatedDurationHours: null,
+        endClientName: null,
+        requestedWeekNumber: null,
+        requestedWeekYear: null,
       }),
       false
     )
@@ -244,6 +247,9 @@ describe("extraction-normalize gate R1", () => {
         clientReference: null,
         requestClassification: null,
         estimatedDurationHours: null,
+        endClientName: null,
+        requestedWeekNumber: null,
+        requestedWeekYear: null,
       }),
       true
     )

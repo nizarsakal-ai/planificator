@@ -180,6 +180,7 @@ export function ConsultationProposedForm({ form: dto }: { form: ConsultationProp
           value={form.proposedStartDate}
           onChange={(v) => setField("proposedStartDate", v)}
           disabled={readOnly || loading}
+          showEmptyValueHint
         />
         <Field
           label="Date de fin"
@@ -187,6 +188,7 @@ export function ConsultationProposedForm({ form: dto }: { form: ConsultationProp
           value={form.proposedEndDate}
           onChange={(v) => setField("proposedEndDate", v)}
           disabled={readOnly || loading}
+          showEmptyValueHint
         />
         <div className="sm:col-span-2 space-y-1.5">
           <Label htmlFor="proposedDescription">Description</Label>
@@ -287,6 +289,7 @@ function Field({
   disabled,
   type = "text",
   className,
+  showEmptyValueHint = false,
 }: {
   label: string
   value: string
@@ -294,11 +297,15 @@ function Field({
   disabled?: boolean
   type?: string
   className?: string
+  showEmptyValueHint?: boolean
 }) {
   const id = label.replace(/\s+/g, "-").toLowerCase()
   return (
     <div className={className ? `${className} space-y-1.5` : "space-y-1.5"}>
       <Label htmlFor={id}>{label}</Label>
+      {showEmptyValueHint && !value ? (
+        <div className="text-xs text-muted-foreground">Non renseignée</div>
+      ) : null}
       <Input
         id={id}
         type={type}

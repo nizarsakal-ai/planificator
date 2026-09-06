@@ -47,6 +47,9 @@ export function createDefaultStubStepRunners(): AcquisitionOrchestratorStepRunne
     attachmentDownload: createStubStepRunner("attachmentDownload"),
     contentFetch: createStubStepRunner("contentFetch"),
     extraction: createStubStepRunner("extraction"),
+    validation: createStubStepRunner("validation"),
+    autoDecision: createStubStepRunner("autoDecision"),
+    worksiteCreation: createStubStepRunner("worksiteCreation"),
   }
 }
 
@@ -66,6 +69,9 @@ export function createUnwiredStepRunners(): AcquisitionOrchestratorStepRunners {
     attachmentDownload: fail,
     contentFetch: fail,
     extraction: fail,
+    validation: fail,
+    autoDecision: fail,
+    worksiteCreation: fail,
   }
 }
 

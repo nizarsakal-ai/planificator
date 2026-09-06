@@ -1,6 +1,6 @@
 /**
  * PLAN-ACQ-V2 Lot I — Spécifications de seed registre (données, pas code pipeline).
- * LAURALU n’est qu’un exemple de seed ops — zéro littéral dans l’orchestrateur.
+ * LAURALU / HALL EXPO n’est qu’un exemple de seed ops — zéro littéral dans le moteur.
  */
 
 export type PartnerRegistrySeedSpec = {
@@ -15,17 +15,34 @@ export type PartnerRegistrySeedSpec = {
   autoConvertEnabled?: boolean
   allowCreateClient?: boolean
   minConfidence?: number | null
+  /**
+   * Client Planificator du même tenant — optionnel.
+   * Ne jamais hardcoder un ID Staging/Production dans le code produit.
+   */
+  clientId?: string | null
 }
 
 /**
  * Seed ops historique de continuité cutover — **donnée configurable**,
  * pas une dépendance architecture. Remplaçable / extensible sans toucher le pipeline.
+ * Aucun clientId hardcodé.
  */
 export const DEFAULT_CONSULTATION_PARTNER_SEEDS: PartnerRegistrySeedSpec[] = [
   {
     code: "lauralu",
     name: "LAURALU",
     domains: ["lauralu.fr"],
+    pipeline: "consultations",
+    priority: 100,
+    requireExactEmail: false,
+    autoApproveEnabled: false,
+    autoConvertEnabled: false,
+    allowCreateClient: false,
+  },
+  {
+    code: "hall-expo",
+    name: "HALL EXPO",
+    domains: ["gl-events.com"],
     pipeline: "consultations",
     priority: 100,
     requireExactEmail: false,

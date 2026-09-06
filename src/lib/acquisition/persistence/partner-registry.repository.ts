@@ -20,6 +20,8 @@ export type AcquisitionPartnerRecord = {
   autoConvertEnabled: boolean
   allowCreateClient: boolean
   minConfidence: number | null
+  /** Client Planificator lié (nullable) — PLAN-ACQ-CONSULTATIONS-FIX-001 */
+  clientId: string | null
   createdAt: Date
   updatedAt: Date
 }

@@ -28,6 +28,7 @@ import {
   domainRefSchema,
   partnerRefSchema,
   renamePartnerSchema,
+  setPartnerClientSchema,
   updatePartnerPolicySchema,
 } from "@/lib/acquisition/admin/partner-admin.schema"
 import {
@@ -39,6 +40,7 @@ import {
   isUniqueConstraintError,
   PartnerAdminPersistenceError,
   PartnerAlreadyExistsError,
+  PartnerClientNotFoundError,
   PartnerNotFoundError,
 } from "@/lib/acquisition/admin/partner-admin.errors"
 import type {
@@ -49,6 +51,7 @@ import type {
   PartnerAdminPartner,
   PartnerRefInput,
   RenamePartnerInput,
+  SetPartnerClientInput,
   UpdatePartnerPolicyInput,
 } from "@/lib/acquisition/admin/partner-admin.types"
 
@@ -72,6 +75,9 @@ export type PartnerAdminDb = {
     findUnique: (args: unknown) => Promise<DomainRow | null>
     create: (args: unknown) => Promise<DomainRow>
     updateMany: (args: unknown) => Promise<{ count: number }>
+  }
+  client: {
+    findFirst: (args: unknown) => Promise<{ id: string } | null>
   }
   $transaction: <T>(fn: (tx: PartnerAdminDb) => Promise<T>) => Promise<T>
 }
@@ -110,6 +116,7 @@ function mapPersistence(error: unknown): never {
     error instanceof PartnerAlreadyExistsError ||
     error instanceof DomainAlreadyExistsError ||
     error instanceof PartnerNotFoundError ||
+    error instanceof PartnerClientNotFoundError ||
     error instanceof DomainNotFoundError ||
     error instanceof InvalidDomainError ||
     error instanceof InvalidPartnerCodeError ||
@@ -312,6 +319,62 @@ export class AcquisitionPartnerAdminService {
       })
     } catch (e) {
       if (e instanceof PartnerNotFoundError) throw e
+      mapPersistence(e)
+    }
+  }
+
+  /**
+   * PLAN-ACQ-CONSULTATIONS-FIX-005 — lie / délie un Client Planificator.
+   * Hors policy : n’écrit que `clientId`. Vérifications applicatives tenant-safe
+   * avant écriture (ne se repose pas uniquement sur la FK).
+   */
+  async setPartnerClient(
+    input: SetPartnerClientInput
+  ): Promise<PartnerAdminPartner> {
+    const data = parseOrThrow(() => setPartnerClientSchema.parse(input))
+
+    try {
+      return await this.db.$transaction(async (tx) => {
+        const partner = await tx.acquisitionPartner.findFirst({
+          where: { id: data.partnerId, companyId: data.companyId },
+        })
+        if (!partner) throw new PartnerNotFoundError()
+
+        if (data.clientId !== null) {
+          const client = await tx.client.findFirst({
+            where: {
+              id: data.clientId,
+              companyId: data.companyId,
+              active: true,
+            },
+            select: { id: true },
+          })
+          if (!client) throw new PartnerClientNotFoundError()
+        }
+
+        const updated = await tx.acquisitionPartner.updateMany({
+          where: { id: data.partnerId, companyId: data.companyId },
+          data: { clientId: data.clientId },
+        })
+        if (updated.count === 0) throw new PartnerNotFoundError()
+
+        const row = await tx.acquisitionPartner.findFirst({
+          where: { id: data.partnerId, companyId: data.companyId },
+        })
+        if (!row) throw new PartnerNotFoundError()
+
+        console.log(`${LOG_PREFIX} PARTNER_CLIENT_SET`, {
+          companyId: data.companyId,
+          partnerId: data.partnerId,
+          partnerCode: row.code,
+          clientId: row.clientId,
+        })
+
+        return row
+      })
+    } catch (e) {
+      if (e instanceof PartnerNotFoundError) throw e
+      if (e instanceof PartnerClientNotFoundError) throw e
       mapPersistence(e)
     }
   }

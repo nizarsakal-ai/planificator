@@ -12,13 +12,38 @@ const MAX_LEASE_TTL_MS_CAP = 3_600_000
 
 export const ACQUISITION_ORCHESTRATOR_LEASE_KEY = "acquisition-orchestrator" as const
 
-export function isAcquisitionOrchestratorCronEnabled(): boolean {
-  return process.env.ACQUISITION_ORCHESTRATOR_CRON_ENABLED === "true"
+export type AcquisitionOrchestratorEnv = {
+  ACQUISITION_ORCHESTRATOR_CRON_ENABLED?: string
+  ACQUISITION_ORCHESTRATOR_ALLOW_STUBS?: string
+  ACQUISITION_ORCHESTRATOR_MAX_DURATION_MS?: string
+  ACQUISITION_ORCHESTRATOR_SAFETY_MARGIN_MS?: string
+  ACQUISITION_ORCHESTRATOR_LEASE_TTL_MS?: string
+  ACQUISITION_ORCHESTRATOR_POST_EXTRACTION_STEPS?: string
+  [key: string]: string | undefined
+}
+
+export function isAcquisitionOrchestratorCronEnabled(
+  env: AcquisitionOrchestratorEnv = process.env
+): boolean {
+  return env.ACQUISITION_ORCHESTRATOR_CRON_ENABLED === "true"
 }
 
 /** Autorise explicitement les stubs SUCCESS (tests / debug uniquement). */
-export function isAcquisitionOrchestratorStubsAllowed(): boolean {
-  return process.env.ACQUISITION_ORCHESTRATOR_ALLOW_STUBS === "true"
+export function isAcquisitionOrchestratorStubsAllowed(
+  env: AcquisitionOrchestratorEnv = process.env
+): boolean {
+  return env.ACQUISITION_ORCHESTRATOR_ALLOW_STUBS === "true"
+}
+
+/**
+ * PLAN-ACQ-AGENTS-LOT-3C — Active les steps post-extraction (validation / autoDecision / worksiteCreation).
+ * Default false. XOR avec le hook legacy post-extraction.
+ * Résoudre UNE FOIS par run orchestrateur, puis propager le boolean (pas de re-lecture env).
+ */
+export function isAcquisitionOrchestratorPostExtractionStepsEnabled(
+  env: AcquisitionOrchestratorEnv = process.env
+): boolean {
+  return env.ACQUISITION_ORCHESTRATOR_POST_EXTRACTION_STEPS === "true"
 }
 
 function parseBoundedInt(
@@ -43,22 +68,24 @@ export interface AcquisitionOrchestratorConfig {
  * Invariant R1 : leaseTtlMs >= maxDurationMs + safetyMarginMs
  * (évite vol de lease pendant qu’un run est encore vivant).
  */
-export function getAcquisitionOrchestratorConfig(): AcquisitionOrchestratorConfig {
+export function getAcquisitionOrchestratorConfig(
+  env: AcquisitionOrchestratorEnv = process.env
+): AcquisitionOrchestratorConfig {
   const maxDurationMs = parseBoundedInt(
-    process.env.ACQUISITION_ORCHESTRATOR_MAX_DURATION_MS,
+    env.ACQUISITION_ORCHESTRATOR_MAX_DURATION_MS,
     DEFAULT_MAX_DURATION_MS,
     MIN_POSITIVE,
     MAX_DURATION_MS_CAP
   )
   const safetyMarginMs = parseBoundedInt(
-    process.env.ACQUISITION_ORCHESTRATOR_SAFETY_MARGIN_MS,
+    env.ACQUISITION_ORCHESTRATOR_SAFETY_MARGIN_MS,
     DEFAULT_SAFETY_MARGIN_MS,
     MIN_POSITIVE,
     60_000
   )
   const minLease = maxDurationMs + safetyMarginMs
   const rawLease = parseBoundedInt(
-    process.env.ACQUISITION_ORCHESTRATOR_LEASE_TTL_MS,
+    env.ACQUISITION_ORCHESTRATOR_LEASE_TTL_MS,
     Math.max(DEFAULT_LEASE_TTL_MS, minLease),
     MIN_POSITIVE,
     MAX_LEASE_TTL_MS_CAP

@@ -152,6 +152,7 @@ export function ConsultationDetail({
         </CardHeader>
         <CardContent>
           <ConsultationProposedForm
+            key={`${draft.id}:${draft.version}`}
             form={toConsultationProposedFormDto(draft, extractionEnabled)}
           />
         </CardContent>
