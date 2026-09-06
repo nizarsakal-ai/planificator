@@ -46,6 +46,7 @@ export type ImportDraftReviewBundle = {
     proposedCity: string | null
     proposedStartDate: Date | null
     proposedEndDate: Date | null
+    clientConsultationDate: Date | null
     proposedDescription: string | null
     proposedContactName: string | null
     proposedContactEmail: string | null

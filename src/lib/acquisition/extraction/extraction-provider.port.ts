@@ -31,7 +31,7 @@ export type NormalizedExtractInput = {
   attachmentMetadata: NormalizedExtractAttachmentMeta[]
   /** Extraits texte PJ optionnels (multimodal progressif). */
   attachmentTextExcerpts?: AttachmentTextExcerpt[]
-  extractionSchemaVersion: "1" | "2"
+  extractionSchemaVersion: "1" | "2" | "3"
 }
 
 export type ExtractionProviderFieldValue = {

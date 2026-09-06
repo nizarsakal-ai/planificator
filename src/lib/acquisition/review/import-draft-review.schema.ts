@@ -13,6 +13,7 @@ export const REVIEW_STATUSES = [
   "APPROVED",
   "REJECTED",
   "CONVERTED",
+  "OBSOLETE",
 ] as const satisfies readonly WorksiteImportDraftStatus[]
 
 export const reviewStatusFilterSchema = z.enum(REVIEW_STATUSES)

@@ -184,6 +184,8 @@ enum WorksiteImportDraftStatus {
   REJECTED
   CONVERTED
   FAILED
+  /// Consultation authentique dont la période de prestation est terminée (≠ REJECTED).
+  OBSOLETE
 }
 
 enum AcquisitionAttachmentStatus {
@@ -1364,6 +1366,8 @@ model WorksiteImportDraft {
   proposedContactPhone String?
   proposedStartDate    DateTime?
   proposedEndDate      DateTime?
+  /// Date métier d’émission / datation de la consultation client (≠ receivedAt, ≠ dates chantier).
+  clientConsultationDate DateTime?
   proposedDescription  String?
   extractedData        Json?
   confidenceData       Json?

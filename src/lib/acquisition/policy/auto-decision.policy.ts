@@ -4,6 +4,7 @@
  */
 
 import { getAcquisitionAutoMinConfidence } from "@/lib/acquisition/policy/auto-decision-feature-flag"
+import { classifyWorkPeriod } from "@/lib/acquisition/policy/work-period-classification"
 
 export type AutoDecisionCode =
   | "AUTO_APPROVE_CONVERT"
@@ -35,6 +36,8 @@ export type AutoDecisionInput = {
   consultationCancelled?: boolean
   /** Client déterministe déjà résolu (Partner / proposed). */
   hasResolvedClient?: boolean
+  /** Instant de référence pour classification temporelle (tests). */
+  referenceInstant?: Date
 }
 
 export type AutoDecisionResult = {
@@ -84,6 +87,19 @@ export function evaluateAutoDecisionRules(
     return {
       code: "AUTO_REJECT_CANCELLED",
       reasons: ["CONSULTATION_CANCELLED"],
+      scores,
+    }
+  }
+
+  const workPeriod = classifyWorkPeriod(
+    input.startDate,
+    input.endDate,
+    input.referenceInstant
+  )
+  if (workPeriod === "OBSOLETE") {
+    return {
+      code: "HUMAN_REVIEW_REQUIRED",
+      reasons: ["WORK_PERIOD_OBSOLETE"],
       scores,
     }
   }

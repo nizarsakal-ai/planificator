@@ -10,8 +10,8 @@ import { evaluateAutoDecision } from "@/lib/acquisition/policy/auto-decision.pol
 describe("evaluateAutoDecision Lot F / registre", () => {
   const okBase = {
     worksiteName: "Site",
-    startDate: new Date("2026-08-01"),
-    endDate: new Date("2026-08-02"),
+    startDate: new Date("2027-08-01"),
+    endDate: new Date("2027-08-02"),
     address: "1 rue A",
     city: "Lyon",
     clientName: "Client",
@@ -182,5 +182,19 @@ describe("evaluateAutoDecision Lot F / registre", () => {
     })
     assert.equal(r.code, "AUTO_APPROVE_CONVERT")
     assert.deepEqual(r.reasons, ["THRESHOLDS_OK"])
+  })
+
+  it("TEMPORAL — période OBSOLETE → jamais auto-approve", () => {
+    const r = evaluateAutoDecision({
+      ...okBase,
+      startDate: new Date("2026-08-01"),
+      endDate: new Date("2026-08-02"),
+      referenceInstant: new Date("2026-09-06T12:00:00.000Z"),
+      autoApproveEnabled: true,
+      autoConvertEnabled: true,
+      minConfidence: 0.7,
+    })
+    assert.equal(r.code, "HUMAN_REVIEW_REQUIRED")
+    assert.ok(r.reasons.includes("WORK_PERIOD_OBSOLETE"))
   })
 })

@@ -5,6 +5,7 @@
 import type { Prisma, PrismaClient, Role, WorksiteImportDraftStatus } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
+import { classifyWorkPeriod } from "@/lib/acquisition/policy/work-period-classification"
 import type { TransactionalOwnershipFence } from "@/lib/acquisition/conversion/conversion-ownership-fence.port"
 import {
   approveImportDraftSchema,
@@ -354,6 +355,20 @@ export class ImportDraftReviewService {
         outcome: "VALIDATION_ERROR",
         code: "DATE_RANGE_INVALID",
         message: "La date de fin doit être postérieure ou égale au début",
+      }
+    }
+    if (
+      classifyWorkPeriod(
+        draft.proposedStartDate,
+        draft.proposedEndDate,
+        this.now()
+      ) === "OBSOLETE"
+    ) {
+      return {
+        ok: false,
+        outcome: "VALIDATION_ERROR",
+        code: "WORK_PERIOD_OBSOLETE",
+        message: "La période de prestation est terminée — consultation obsolète",
       }
     }
     if (hasBlockingWarnings(draft.warningData)) {

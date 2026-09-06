@@ -99,6 +99,8 @@ export type AutoDecisionServiceDeps = {
     db?: PrismaClient
   }) => Promise<ClientMatchResult>
   log?: (event: string, payload?: Record<string, unknown>) => void
+  /** Instant de référence pour classifyWorkPeriod (tests déterministes). */
+  referenceInstant?: Date
 }
 
 function defaultLog(event: string, payload?: Record<string, unknown>): void {
@@ -332,6 +334,7 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
     requiredDocumentUnreadable: hasRequiredDocUnreadable(draft.warningData),
     consultationCancelled,
     hasResolvedClient: Boolean(clientMatch.clientId),
+    referenceInstant: input.deps?.referenceInstant,
   })
 
   const systemActor = await resolveSystemActor(input.companyId, db)

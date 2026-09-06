@@ -265,7 +265,7 @@ describe("extraction.service R1", () => {
         extractionAttemptCount: 1,
         extractionStartedAt: new Date(),
         contentHashAtExtraction: "hash-abc",
-        extractionSchemaVersion: "2",
+        extractionSchemaVersion: "3",
       },
     })
     const result = await runDraftExtraction(
@@ -486,7 +486,7 @@ describe("extraction.service R1", () => {
   it("dates inversées → FAILED DATE_RANGE_INVALID", async () => {
     const repo = createFakeRepo({
       content: { normalizedText: "Chantier : Beta", contentHash: "hash-dates" },
-      message: { id: "msg1", subject: "x" },
+      message: { id: "msg1", subject: "x", receivedAt: new Date("2026-01-15T12:00:00.000Z") },
     })
     const provider: ExtractionProviderPort = {
       async extract() {

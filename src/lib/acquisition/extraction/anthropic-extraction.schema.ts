@@ -58,6 +58,7 @@ export const anthropicExtractionRawSchema = z
         city: optionalField,
         requestedStartDate: optionalField,
         requestedEndDate: optionalField,
+        clientConsultationDate: optionalField,
         consultationReference: optionalField,
         description: optionalField,
         attachmentClassifications: optionalField,
@@ -115,6 +116,7 @@ export const EXTRACTION_TOOL_INPUT_JSON_SCHEMA: {
           "city",
           "requestedStartDate",
           "requestedEndDate",
+          "clientConsultationDate",
           "consultationReference",
           "description",
           "attachmentClassifications",
@@ -141,7 +143,12 @@ export const EXTRACTION_TOOL_INPUT_JSON_SCHEMA: {
                     description:
                       "Année explicitement et fiablement associée à requestedWeekNumber. Ne jamais l'inférer depuis la date du message ou le contexte.",
                   }
-                : {}),
+                : k === "clientConsultationDate"
+                  ? {
+                      description:
+                        "Date d'émission / datation de la consultation client (document ou corps). ISO YYYY-MM-DD. Distincte de requestedStartDate/requestedEndDate (prestation) et distincte de la date de réception Gmail. Si ambiguë ou confondue avec la réception, omettre.",
+                    }
+                  : {}),
             required: ["value", "confidence"],
             properties: {
               value: {},

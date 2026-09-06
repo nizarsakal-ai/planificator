@@ -24,6 +24,15 @@ function fmt(d: Date | string) {
   }).format(new Date(d))
 }
 
+function fmtDay(d: Date | string) {
+  return new Intl.DateTimeFormat("fr-FR", {
+    timeZone: "UTC",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  }).format(new Date(d))
+}
+
 function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n < 0) return "—"
   if (n < 1024) return `${n} o`
@@ -84,6 +93,10 @@ export function ConsultationDetail({
           </div>
           <div>
             <span className="text-muted-foreground">Date :</span> {fmt(message.receivedAt)}
+          </div>
+          <div>
+            <span className="text-muted-foreground">Date consultation client :</span>{" "}
+            {draft.clientConsultationDate ? fmtDay(draft.clientConsultationDate) : "Non renseignée"}
           </div>
           <div className="pt-2">
             <div className="mb-1 text-muted-foreground">Contenu normalisé</div>

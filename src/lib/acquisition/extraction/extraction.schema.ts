@@ -98,6 +98,7 @@ export const extractionProviderFieldsSchema = z
     city: optionalField,
     requestedStartDate: optionalField,
     requestedEndDate: optionalField,
+    clientConsultationDate: optionalField,
     consultationReference: optionalField,
     description: optionalField,
     attachmentClassifications: optionalField,
@@ -214,6 +215,8 @@ export const extractionCanonicalFieldsSchema = z.object({
   city: optionalTrimmed(100),
   requestedStartDate: optionalIsoDate,
   requestedEndDate: optionalIsoDate,
+  /** Date d’émission / datation consultation — jamais dates de prestation. */
+  clientConsultationDate: optionalIsoDate,
   consultationReference: z
     .string()
     .nullish()

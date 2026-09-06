@@ -16,6 +16,7 @@ export const CONSULTATION_STATUS_LABELS: Record<WorksiteImportDraftStatus, strin
   APPROVED: "Approuvé",
   REJECTED: "Rejeté",
   CONVERTED: "Converti",
+  OBSOLETE: "Obsolète",
 }
 
 export const CONSULTATION_STATUS_BADGE_CLASS: Record<WorksiteImportDraftStatus, string> = {
@@ -26,6 +27,7 @@ export const CONSULTATION_STATUS_BADGE_CLASS: Record<WorksiteImportDraftStatus, 
   APPROVED: "bg-green-100 text-green-800",
   REJECTED: "bg-rose-100 text-rose-900",
   CONVERTED: "bg-violet-100 text-violet-800",
+  OBSOLETE: "bg-stone-200 text-stone-800",
 }
 
 export type ConsultationUiActions = {
@@ -95,6 +97,7 @@ export function getConsultationUiActions(
     case "APPROVED":
     case "REJECTED":
     case "CONVERTED":
+    case "OBSOLETE":
     default:
       return {
         canEdit: false,
