@@ -45,6 +45,7 @@ function partner(over: Partial<AcquisitionPartnerRecord> = {}): AcquisitionPartn
     autoConvertEnabled: true,
     allowCreateClient: false,
     minConfidence: 0.75,
+    clientId: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...over,

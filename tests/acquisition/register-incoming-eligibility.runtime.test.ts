@@ -33,6 +33,7 @@ function partner(
     autoApproveEnabled: false,
     autoConvertEnabled: false,
     minConfidence: null,
+    clientId: null,
     createdAt: now,
     updatedAt: now,
     ...partial,

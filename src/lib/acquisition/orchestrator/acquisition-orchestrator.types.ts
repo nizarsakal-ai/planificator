@@ -8,6 +8,9 @@ export const ORCHESTRATOR_STEP_KEYS = [
   "attachmentDownload",
   "contentFetch",
   "extraction",
+  "validation",
+  "autoDecision",
+  "worksiteCreation",
 ] as const
 
 export type OrchestratorStepKey = (typeof ORCHESTRATOR_STEP_KEYS)[number]
@@ -34,6 +37,8 @@ export type OrchestratorStepSkipReason =
   | "BUDGET_EXHAUSTED"
   | "LEASE_STOLEN"
   | "WORKERS_NOT_WIRED"
+  | "DISABLED"
+  | "NOT_IMPLEMENTED"
   | string
 
 export interface OrchestratorPublicError {
@@ -82,6 +87,9 @@ export interface AcquisitionOrchestratorStepRunners {
   attachmentDownload: OrchestratorStepRunner
   contentFetch: OrchestratorStepRunner
   extraction: OrchestratorStepRunner
+  validation: OrchestratorStepRunner
+  autoDecision: OrchestratorStepRunner
+  worksiteCreation: OrchestratorStepRunner
 }
 
 export type LeaseAcquireOutcome =

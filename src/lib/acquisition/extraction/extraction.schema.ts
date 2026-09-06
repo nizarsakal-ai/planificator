@@ -17,6 +17,7 @@ export const REQUEST_CLASSIFICATIONS = [
   "CONSULTATION",
   "INTERVENTION",
   "TRAVAUX",
+  "CANCELLED_CONSULTATION",
 ] as const
 
 export const EXTRACTION_WARNING_CODES = [
@@ -41,6 +42,7 @@ export const EXTRACTION_WARNING_CODES = [
   "PDF_PARSE_FAILED",
   "PDF_TEXT_TRUNCATED",
   "REQUIRED_DOCUMENT_UNREADABLE",
+  "CONSULTATION_CANCELLED",
 ] as const
 
 export const EXTRACTION_WARNING_SEVERITIES = ["INFO", "WARNING", "ERROR"] as const
@@ -105,6 +107,7 @@ export const extractionProviderFieldsSchema = z
     clientReference: optionalField,
     requestClassification: optionalField,
     estimatedDurationHours: optionalField,
+    endClientName: optionalField,
     requestedWeekNumber: optionalField,
     requestedWeekYear: optionalField,
   })
@@ -235,17 +238,7 @@ export const extractionCanonicalFieldsSchema = z.object({
   interventionNature: optionalTrimmed(200),
   constraints: optionalTrimmed(2000),
   clientReference: optionalTrimmed(64),
-  requestClassification: z
-    .enum(REQUEST_CLASSIFICATIONS)
-    .nullish()
-    .transform((v) => v ?? null),
-  estimatedDurationHours: z
-    .number()
-    .finite()
-    .min(0)
-    .max(1000)
-    .nullish()
-    .transform((v) => (v == null || Number.isNaN(v) ? null : Math.round(v * 10) / 10)),
+  endClientName: optionalTrimmed(200),
   requestedWeekNumber: z
     .number()
     .finite()
@@ -262,6 +255,17 @@ export const extractionCanonicalFieldsSchema = z.object({
     .max(2100)
     .nullish()
     .transform((v) => (v == null || Number.isNaN(v) ? null : v)),
+  requestClassification: z
+    .enum(REQUEST_CLASSIFICATIONS)
+    .nullish()
+    .transform((v) => v ?? null),
+  estimatedDurationHours: z
+    .number()
+    .finite()
+    .min(0)
+    .max(1000)
+    .nullish()
+    .transform((v) => (v == null || Number.isNaN(v) ? null : Math.round(v * 10) / 10)),
 })
 
 export const extractionConfidenceMapSchema = z.record(
@@ -390,6 +394,11 @@ export const EXTRACTION_WARNING_CATALOG: Record<
     severity: "WARNING",
     blocking: true,
     message: "Pièce indispensable non lisible",
+  },
+  CONSULTATION_CANCELLED: {
+    severity: "ERROR",
+    blocking: true,
+    message: "Consultation annulée — aucune conversion automatique",
   },
 }
 

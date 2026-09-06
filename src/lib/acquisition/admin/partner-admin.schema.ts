@@ -120,9 +120,22 @@ export const updatePartnerPolicySchema = z
     { message: "au moins un champ policy requis" }
   )
 
+/**
+ * PLAN-ACQ-CONSULTATIONS-FIX-005 — lien / déliaison Partner → Client.
+ * Distinct de updatePartnerPolicy (pas de champ policy ici).
+ */
+export const setPartnerClientSchema = z
+  .object({
+    companyId: companyIdSchema,
+    partnerId: z.string().min(1),
+    clientId: z.string().min(1).nullable(),
+  })
+  .strict()
+
 export type CreatePartnerParsed = z.infer<typeof createPartnerSchema>
 export type AddDomainParsed = z.infer<typeof addDomainSchema>
 export type PartnerRefParsed = z.infer<typeof partnerRefSchema>
 export type DomainRefParsed = z.infer<typeof domainRefSchema>
 export type RenamePartnerParsed = z.infer<typeof renamePartnerSchema>
 export type UpdatePartnerPolicyParsed = z.infer<typeof updatePartnerPolicySchema>
+export type SetPartnerClientParsed = z.infer<typeof setPartnerClientSchema>

@@ -1,11 +1,20 @@
 /**
  * PLAN-ACQ-V2 Lot F R2 — Exécution auto-approve / auto-convert + journal.
  * Kill-switch env ∩ policy partenaire. SYSTEM actor validé. Pas de client NEW par défaut.
+ *
+ * PLAN-ACQ-AGENTS-LOT-3E — La conversion reste UNIQUEMENT dans ce chemin legacy
+ * (maybeRunAutoDecisionAfterExtraction). Le worker steps n’importe jamais ce module
+ * de conversion : voir acquisition-auto-decision.worker.ts.
+ *
+ * LOT-3G-R1 — Sous ORCHESTRATOR_AUTO (fence fourni) : journal / approve / reject /
+ * cancellation / convert dans des TX avec SELECT … FOR UPDATE sur la lease.
+ * Sans fence : comportement historique non-orchestrateur (tests / appels manuels).
  */
 
 import type { PrismaClient } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { ImportDraftConversionService } from "@/lib/acquisition/conversion/conversion.service"
+import type { TransactionalOwnershipFence } from "@/lib/acquisition/conversion/conversion-ownership-fence.port"
 import { ImportDraftReviewService } from "@/lib/acquisition/review/import-draft-review.service"
 import {
   getAcquisitionAutoMinConfidence,
@@ -14,8 +23,10 @@ import {
 } from "@/lib/acquisition/policy/auto-decision-feature-flag"
 import { evaluateAutoDecision } from "@/lib/acquisition/policy/auto-decision.policy"
 import {
+  AcquisitionDecisionJournalRepository,
   acquisitionDecisionJournalRepository,
-  type AcquisitionDecisionJournalRepository,
+  type DecisionJournalEntry,
+  type FrozenValidationCycle,
 } from "@/lib/acquisition/policy/decision-journal.repository"
 import {
   resolveValidatedSystemActor,
@@ -32,8 +43,36 @@ import {
   PartnerRegistryRepository,
   type PartnerRegistryRepositoryPort,
 } from "@/lib/acquisition/persistence/partner-registry.repository"
+import {
+  applyCancellationFollowUp,
+  applyCancellationFollowUpTransactionally,
+  CancellationLeaseNotOwnedError,
+} from "@/lib/acquisition/policy/cancellation-followup"
 
 const LOG_PREFIX = "[acquisition-auto-decision]"
+
+export class AutoDecisionLeaseNotOwnedError extends Error {
+  readonly code = "LEASE_NOT_OWNED" as const
+  constructor(message = "LEASE_NOT_OWNED") {
+    super(message)
+    this.name = "AutoDecisionLeaseNotOwnedError"
+  }
+}
+
+export function isAutoDecisionLeaseLoss(err: unknown): boolean {
+  if (err instanceof AutoDecisionLeaseNotOwnedError) return true
+  if (err instanceof CancellationLeaseNotOwnedError) return true
+  if (err && typeof err === "object") {
+    const code = (err as { code?: unknown }).code
+    if (code === "LEASE_NOT_OWNED" || code === "LEASE_STOLEN") return true
+  }
+  if (err instanceof Error) {
+    return (
+      err.message === "LEASE_NOT_OWNED" || err.message === "LEASE_STOLEN"
+    )
+  }
+  return false
+}
 
 export type AutoDecisionServiceDeps = {
   db?: PrismaClient
@@ -56,6 +95,7 @@ export type AutoDecisionServiceDeps = {
     clientName: string | null
     clientEmail: string | null
     proposedClientId: string | null
+    partnerLinkedClientId?: string | null
     db?: PrismaClient
   }) => Promise<ClientMatchResult>
   log?: (event: string, payload?: Record<string, unknown>) => void
@@ -89,10 +129,73 @@ function hasRequiredDocUnreadable(warningData: unknown): boolean {
   )
 }
 
+function readExtractedClientEmail(extractedData: unknown): string | null {
+  if (!extractedData || typeof extractedData !== "object" || Array.isArray(extractedData)) {
+    return null
+  }
+  const v = (extractedData as Record<string, unknown>).clientEmail
+  return typeof v === "string" && v.trim() ? v.trim() : null
+}
+
+function readRequestClassification(extractedData: unknown): string | null {
+  if (!extractedData || typeof extractedData !== "object" || Array.isArray(extractedData)) {
+    return null
+  }
+  const v = (extractedData as Record<string, unknown>).requestClassification
+  return typeof v === "string" ? v : null
+}
+
+function hasConsultationCancelledWarning(warningData: unknown): boolean {
+  if (!Array.isArray(warningData)) return false
+  return warningData.some(
+    (w) =>
+      w &&
+      typeof w === "object" &&
+      (w as { code?: string }).code === "CONSULTATION_CANCELLED"
+  )
+}
+
+function frozenCycleFromDraft(draft: {
+  contentHashAtExtraction: string | null
+  extractionSchemaVersion: string | null
+  version: number
+}): FrozenValidationCycle | null {
+  const contentHash = draft.contentHashAtExtraction?.trim()
+  if (!contentHash) return null
+  return {
+    contentHash,
+    extractionSchemaVersion: draft.extractionSchemaVersion,
+    validatedDraftVersion: draft.version,
+  }
+}
+
+async function appendJournalLegacyOrFenced(input: {
+  db: PrismaClient
+  journal: AcquisitionDecisionJournalRepository
+  fence: TransactionalOwnershipFence | undefined
+  entry: DecisionJournalEntry
+}): Promise<void> {
+  if (!input.fence) {
+    await input.journal.append(input.entry)
+    return
+  }
+  await input.db.$transaction(async (tx) => {
+    const owned = await input.fence!.assertOwnedAndLock(tx)
+    if (owned !== "OWNED") throw new AutoDecisionLeaseNotOwnedError()
+    await new AcquisitionDecisionJournalRepository(tx).append(input.entry)
+  })
+}
+
 export async function maybeRunAutoDecisionAfterExtraction(input: {
   companyId: string
   draftId: string
   deps?: AutoDecisionServiceDeps
+  /**
+   * LOT-3G-R1 — fence authentique résolu depuis la capability WeakMap.
+   * Présent ⇒ chemin ORCHESTRATOR_AUTO : fail-closed si perdu ; toute écriture fenced.
+   * Absent ⇒ contrat historique non-orchestrateur (pas d’exigence de fence).
+   */
+  transactionalOwnershipFence?: TransactionalOwnershipFence
 }): Promise<void> {
   const db = input.deps?.db ?? prisma
   const journal = input.deps?.journal ?? acquisitionDecisionJournalRepository
@@ -106,6 +209,7 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
   const findDuplicate = input.deps?.findDuplicate ?? findDuplicateWorksite
   const matchClient = input.deps?.matchClient ?? matchClientForDraft
   const log = input.deps?.log ?? defaultLog
+  const fence = input.transactionalOwnershipFence
 
   if (!isAcquisitionAutoApproveEnabled()) return
 
@@ -127,8 +231,14 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
       confidenceData: true,
       warningData: true,
       extractedData: true,
+      contentHashAtExtraction: true,
+      extractionSchemaVersion: true,
       acquisitionMessage: {
-        select: { resolvedPartnerId: true, senderDomain: true },
+        select: {
+          resolvedPartnerId: true,
+          senderDomain: true,
+          threadId: true,
+        },
       },
     },
   })
@@ -141,6 +251,7 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
   let minConfidence = getAcquisitionAutoMinConfidence()
   let partnerId: string | null = draft.acquisitionMessage?.resolvedPartnerId ?? null
   let partnerCode: string | null = null
+  let partnerLinkedClientId: string | null = null
 
   if (partnerId) {
     const partner = await registry.findPartnerById(input.companyId, partnerId)
@@ -150,6 +261,7 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
       allowCreateClient = partner.allowCreateClient === true
       if (partner.minConfidence != null) minConfidence = partner.minConfidence
       partnerCode = partner.code
+      partnerLinkedClientId = partner.clientId ?? null
     }
   } else if (draft.acquisitionMessage?.senderDomain) {
     // Fallback domaine uniquement si le partenaire n’exige pas l’email exact
@@ -166,6 +278,7 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
       allowCreateClient = byDomain.allowCreateClient === true
       if (byDomain.minConfidence != null) minConfidence = byDomain.minConfidence
       partnerCode = byDomain.code
+      partnerLinkedClientId = byDomain.clientId ?? null
     }
   }
 
@@ -186,13 +299,19 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
     db,
   })
 
+  const extractedClientEmail = readExtractedClientEmail(draft.extractedData)
   const clientMatch = await matchClient({
     companyId: input.companyId,
     clientName: draft.proposedClientName,
-    clientEmail: draft.proposedContactEmail,
+    clientEmail: extractedClientEmail,
     proposedClientId: draft.proposedClientId,
+    partnerLinkedClientId,
     db,
   })
+
+  const consultationCancelled =
+    readRequestClassification(draft.extractedData) === "CANCELLED_CONSULTATION" ||
+    hasConsultationCancelledWarning(draft.warningData)
 
   const decision = evaluateAutoDecision({
     worksiteName: draft.proposedWorksiteName,
@@ -202,7 +321,7 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
     postalCode: draft.proposedPostalCode,
     city: draft.proposedCity,
     clientName: draft.proposedClientName,
-    clientEmail: draft.proposedContactEmail,
+    clientEmail: extractedClientEmail,
     confidenceData: asConfidenceMap(draft.confidenceData),
     warningData: draft.warningData,
     autoApproveEnabled,
@@ -211,28 +330,37 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
     potentialDuplicate: Boolean(dup.worksiteId),
     clientAmbiguous: Boolean(clientMatch.ambiguous),
     requiredDocumentUnreadable: hasRequiredDocUnreadable(draft.warningData),
+    consultationCancelled,
+    hasResolvedClient: Boolean(clientMatch.clientId),
   })
 
   const systemActor = await resolveSystemActor(input.companyId, db)
 
-  await journal.append({
-    companyId: input.companyId,
-    draftId: draft.id,
-    decisionCode: decision.code,
-    reasons: decision.reasons,
-    scores: decision.scores,
-    actorUserId: systemActor.ok ? systemActor.userId : null,
-    metadata: {
-      statusBefore: draft.status,
-      version: draft.version,
-      partnerId,
-      partnerCode,
-      minConfidence,
-      allowCreateClient,
-      systemActorOk: systemActor.ok,
-      ...(!systemActor.ok
-        ? { systemActorCode: systemActor.code, systemActorReason: systemActor.reason }
-        : {}),
+  await appendJournalLegacyOrFenced({
+    db,
+    journal,
+    fence,
+    entry: {
+      companyId: input.companyId,
+      draftId: draft.id,
+      decisionCode: decision.code,
+      reasons: decision.reasons,
+      scores: decision.scores,
+      actorUserId: systemActor.ok ? systemActor.userId : null,
+      metadata: {
+        statusBefore: draft.status,
+        version: draft.version,
+        partnerId,
+        partnerCode,
+        partnerLinkedClientId,
+        clientMatchKind: clientMatch.matchKind,
+        minConfidence,
+        allowCreateClient,
+        systemActorOk: systemActor.ok,
+        ...(!systemActor.ok
+          ? { systemActorCode: systemActor.code, systemActorReason: systemActor.reason }
+          : {}),
+      },
     },
   })
 
@@ -244,17 +372,96 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
     partnerCode,
   })
 
+  if (decision.code === "AUTO_REJECT_CANCELLED") {
+    if (systemActor.ok) {
+      const rejectOpts = fence
+        ? { transactionalOwnershipFence: fence }
+        : undefined
+      const rejected = await review.rejectImportDraft(
+        {
+          actorUserId: systemActor.userId,
+          actorRole: "SYSTEM",
+          companyId: input.companyId,
+        },
+        {
+          draftId: draft.id,
+          expectedVersion: draft.version,
+          rejectionReason: "CANCELLED_INITIAL",
+        },
+        rejectOpts
+      )
+      if (!rejected.ok) {
+        if (fence && rejected.code === "LEASE_NOT_OWNED") {
+          throw new AutoDecisionLeaseNotOwnedError()
+        }
+        log("AUTO_REJECT_FAILED", { draftId: draft.id, code: rejected.code })
+        return
+      }
+
+      if (fence) {
+        const frozen = frozenCycleFromDraft(draft)
+        if (!frozen) {
+          log("AUTO_CANCEL_FOLLOWUP_SKIPPED_NO_FROZEN", { draftId: draft.id })
+          return
+        }
+        try {
+          await applyCancellationFollowUpTransactionally({
+            companyId: input.companyId,
+            sourceDraftId: draft.id,
+            threadId: draft.acquisitionMessage?.threadId ?? null,
+            frozen,
+            actorUserId: systemActor.userId,
+            db,
+            reasons: decision.reasons,
+            transactionalOwnershipFence: fence,
+          })
+        } catch (err) {
+          if (err instanceof CancellationLeaseNotOwnedError) {
+            throw new AutoDecisionLeaseNotOwnedError()
+          }
+          throw err
+        }
+      } else {
+        const follow = await applyCancellationFollowUp({
+          companyId: input.companyId,
+          sourceDraftId: draft.id,
+          threadId: draft.acquisitionMessage?.threadId ?? null,
+          db,
+        })
+        await journal.append({
+          companyId: input.companyId,
+          draftId: draft.id,
+          decisionCode: follow.journalCode,
+          reasons: decision.reasons,
+          scores: decision.scores,
+          actorUserId: systemActor.userId,
+          metadata: {
+            linkedDraftIdsRejected: follow.linkedDraftIdsRejected,
+            convertedWorksiteIdsUntouched: follow.convertedWorksiteIdsUntouched,
+            ambiguous: follow.ambiguous,
+          },
+        })
+      }
+    }
+    return
+  }
+
   if (decision.code === "HUMAN_REVIEW_REQUIRED") return
 
   if (!systemActor.ok) {
-    await journal.append({
-      companyId: input.companyId,
-      draftId: draft.id,
-      decisionCode: "SYSTEM_ACTOR_INVALID",
-      reasons: [systemActor.code, systemActor.reason],
-      scores: decision.scores,
-      actorUserId: null,
-      metadata: { partnerId, partnerCode },
+    await appendJournalLegacyOrFenced({
+      db,
+      journal,
+      fence,
+      entry: {
+        companyId: input.companyId,
+        draftId: draft.id,
+        decisionCode: "SYSTEM_ACTOR_INVALID",
+        reasons: [systemActor.code, systemActor.reason],
+        scores: decision.scores,
+        actorUserId: null,
+        metadata: { partnerId, partnerCode },
+      },
     })
     log("SYSTEM_ACTOR_INVALID", {
       draftId: draft.id,
@@ -270,11 +477,21 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
     companyId: input.companyId,
   }
 
-  const approve = await review.approveImportDraft(actor, {
-    draftId: draft.id,
-    expectedVersion: draft.version,
-  })
+  const approveOpts = fence
+    ? { transactionalOwnershipFence: fence }
+    : undefined
+  const approve = await review.approveImportDraft(
+    actor,
+    {
+      draftId: draft.id,
+      expectedVersion: draft.version,
+    },
+    approveOpts
+  )
   if (!approve.ok) {
+    if (fence && approve.code === "LEASE_NOT_OWNED") {
+      throw new AutoDecisionLeaseNotOwnedError()
+    }
     log("AUTO_APPROVE_FAILED", { draftId: draft.id, code: approve.code })
     return
   }
@@ -282,11 +499,12 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
   if (decision.code !== "AUTO_APPROVE_CONVERT") return
 
   // R2-MAJOR-002 : pas de NEW sauf allowCreateClient + identité claire + pas d’ambiguïté
+  // endClientName n’est jamais une identité Client.
   if (clientMatch.clientId == null) {
     if (
       !allowCreateClient ||
       clientMatch.ambiguous ||
-      !(draft.proposedClientName?.trim() || draft.proposedContactEmail?.trim())
+      !(draft.proposedClientName?.trim() || extractedClientEmail)
     ) {
       log("AUTO_CONVERT_SKIPPED_NO_CLIENT", {
         draftId: draft.id,
@@ -312,7 +530,7 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
           clientMode: "NEW" as const,
           newClient: {
             name: (draft.proposedClientName ?? "").trim().slice(0, 100),
-            email: draft.proposedContactEmail,
+            email: extractedClientEmail,
             phone: null,
             address: [draft.proposedAddress, draft.proposedPostalCode, draft.proposedCity]
               .filter(Boolean)
@@ -336,7 +554,17 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
     return
   }
 
-  const converted = await conversion.convertImportDraft(actor, convertInput)
+  const convertOpts = fence
+    ? { transactionalOwnershipFence: fence }
+    : undefined
+  const converted = await conversion.convertImportDraft(
+    actor,
+    convertInput,
+    convertOpts
+  )
+  if (!converted.ok && fence && converted.code === "LEASE_NOT_OWNED") {
+    throw new AutoDecisionLeaseNotOwnedError()
+  }
   log("AUTO_CONVERT_RESULT", {
     draftId: draft.id,
     ok: converted.ok,

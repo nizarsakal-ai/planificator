@@ -600,6 +600,11 @@ describe("ImportDraftConversionService", () => {
         clientMode: "EXISTING",
         existingClientId: "c1",
         acknowledgeDuplicateWorksite: true,
+      },
+      {
+        transactionalOwnershipFence: {
+          assertOwnedAndLock: async () => "OWNED",
+        },
       }
     )
     assert.equal(r.ok, false)

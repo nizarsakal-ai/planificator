@@ -13,6 +13,8 @@ import type {
   ExtractionCanonicalFields,
   ExtractionWarning,
 } from "@/lib/acquisition/extraction/extraction.types"
+import { corroborateCancellationText } from "@/lib/acquisition/extraction/cancellation-corroboration"
+import { evidenceQuoteInHaystack } from "@/lib/acquisition/extraction/anthropic-extraction.prompt"
 import {
   isoWeekToDateRange,
   resolveIsoWeekYearFromReferenceDate,
@@ -39,6 +41,7 @@ const CANONICAL_KEYS = [
   "clientReference",
   "requestClassification",
   "estimatedDurationHours",
+  "endClientName",
   "requestedWeekNumber",
   "requestedWeekYear",
 ] as const
@@ -103,6 +106,12 @@ export function normalizeProviderResult(raw: unknown): NormalizedExtraction {
   }
 
   for (const w of result.warnings) {
+    // CONSULTATION_CANCELLED = autorité SERVICE uniquement (triple garde-fou post-enrichment).
+    // Un provider ne peut jamais injecter ce warning blocking.
+    if (w.code === "CONSULTATION_CANCELLED") {
+      warnings.push(catalogWarning("PROVIDER_PARTIAL_RESULT", { source: "PROVIDER" }))
+      continue
+    }
     // Message provider libre TOUJOURS ignoré.
     if (isWarningCode(w.code)) {
       warnings.push(
@@ -186,7 +195,7 @@ function dedupeWarnings(warnings: ExtractionWarning[]): ExtractionWarning[] {
   return out.slice(0, 50)
 }
 
-/** Gate §5 R1 : signal fort + pas d'ERROR blocking. Description seule ≠ OK. */
+/** Gate §5 R1 : signal fort + pas d'ERROR blocking (hors cancel métier). Description seule ≠ OK. */
 export function evaluateExtractionGate(
   fields: ExtractionCanonicalFields,
   warnings: ExtractionWarning[]
@@ -214,7 +223,11 @@ export function evaluateExtractionGate(
   }
 
   const strong = hasStrongBusinessSignal(fields)
-  const blocking = next.some((w) => w.blocking && w.severity === "ERROR")
+  // CONSULTATION_CANCELLED = blocking conversion métier, pas échec technique d’extraction.
+  // Conserve le warning pour AUTO_REJECT_CANCELLED sans forcer gate FAILED.
+  const isGateFailingBlocking = (w: ExtractionWarning) =>
+    Boolean(w.blocking && w.severity === "ERROR" && w.code !== "CONSULTATION_CANCELLED")
+  const blocking = next.some(isGateFailingBlocking)
 
   if (!strong) {
     next.push(catalogWarning("CONTENT_INSUFFICIENT", { source: "SERVICE" }))
@@ -222,7 +235,7 @@ export function evaluateExtractionGate(
   }
 
   if (blocking) {
-    const first = next.find((w) => w.blocking && w.severity === "ERROR")
+    const first = next.find(isGateFailingBlocking)
     const code =
       first?.code === "DATE_RANGE_INVALID"
         ? "DATE_RANGE_INVALID"
@@ -245,19 +258,37 @@ export function buildExtractedDataPayload(
     postalCode: fields.postalCode,
     city: fields.city,
     consultationReference: fields.consultationReference,
+    clientEmail: fields.clientEmail,
+    clientPhone: fields.clientPhone,
     contactEmail: fields.contactEmail,
     contactPhone: fields.contactPhone,
+    endClientName: fields.endClientName,
+    requestedWeekNumber: fields.requestedWeekNumber,
+    requestedWeekYear: fields.requestedWeekYear,
     attachmentClassifications: fields.attachmentClassifications,
     interventionNature: fields.interventionNature,
     constraints: fields.constraints,
     clientReference: fields.clientReference,
     requestClassification: fields.requestClassification,
     estimatedDurationHours: fields.estimatedDurationHours,
-    requestedWeekNumber: fields.requestedWeekNumber,
-    requestedWeekYear: fields.requestedWeekYear,
     evidence: evidenceData,
     contentHashAtExtraction,
   }
+}
+
+/**
+ * Evidence littérale requestClassification présente dans subject/body
+ * (même haystack métier que le provider). Non dupliquée ailleurs :
+ * requestClassification n’est pas un STRONG_FIELD Anthropic.
+ */
+function hasValidCancelEvidence(
+  evidenceData: Record<string, { source: string; quote?: string }>,
+  ctx: { subject: string | null; body: string }
+): boolean {
+  const quote = evidenceData.requestClassification?.quote
+  if (!quote?.trim()) return false
+  const haystack = `${ctx.subject ?? ""}\n${ctx.body}`
+  return evidenceQuoteInHaystack(haystack, quote)
 }
 
 function extractExplicitCalendarWeek(
@@ -293,8 +324,10 @@ export type DeterministicPostEnrichmentContext = {
 /**
  * Enrichissement déterministe post-provider :
  * - ISO week → dates si année+semaine valides et dates encore vides
- * - semaine sans année + receivedAt → résolution année ISO (FIX-002B) puis plage
+ * - semaine sans année + receivedAt → résolution année ISO (FIX-002) puis plage
  * - semaine sans année sans résolution → DATE_AMBIGUOUS
+ * - annulation blocking = classification CANCELLED + evidence valide + corroboration
+ *   (aucun des trois signaux seul ne suffit)
  */
 export function applyDeterministicPostEnrichment(
   normalized: NormalizedExtraction,
@@ -322,13 +355,14 @@ export function applyDeterministicPostEnrichment(
   const hasStart = Boolean(fields.requestedStartDate)
   const hasEnd = Boolean(fields.requestedEndDate)
 
-  // FIX-002B : résoudre l’année ISO avant la branche DATE_AMBIGUOUS.
+  // FIX-002 : résoudre l’année ISO avant la branche DATE_AMBIGUOUS.
   // Ne jamais écraser une année explicite (R1).
   if (week != null && year == null && receivedAt != null) {
     const resolved = resolveIsoWeekYearFromReferenceDate(week, receivedAt)
     if (resolved != null) {
       year = resolved
       fields.requestedWeekYear = resolved
+      // Provenance temporelle — pas de fausse quote email.
       evidenceData.requestedWeekYear = { source: "HEURISTIC" }
     }
   }
@@ -350,7 +384,7 @@ export function applyDeterministicPostEnrichment(
         0.7
       )
       confidenceData.requestedEndDate = confidenceData.requestedStartDate
-      // FIX-002B — dates dérivées : HEURISTIC sans pseudo-citation.
+      // FIX-002B — dates dérivées : HEURISTIC sans pseudo-citation (année absente du mail).
       evidenceData.requestedStartDate = { source: "HEURISTIC" }
       evidenceData.requestedEndDate = { source: "HEURISTIC" }
     } else {
@@ -359,6 +393,24 @@ export function applyDeterministicPostEnrichment(
       )
     }
   }
+
+  const classifiedCancelled = fields.requestClassification === "CANCELLED_CONSULTATION"
+  const corroborated = corroborateCancellationText(ctx.subject, ctx.body)
+  const evidenceValid = hasValidCancelEvidence(evidenceData, ctx)
+
+  if (classifiedCancelled && corroborated && evidenceValid) {
+    warnings.push(catalogWarning("CONSULTATION_CANCELLED", { source: "SERVICE" }))
+  } else if (classifiedCancelled) {
+    // Classification sans corroboration et/ou sans evidence littérale → déclasser
+    fields.requestClassification = "CONSULTATION"
+    warnings.push(
+      catalogWarning("PROVIDER_PARTIAL_RESULT", {
+        field: "requestClassification",
+        source: "SERVICE",
+      })
+    )
+  }
+  // corroboration seule (classification ≠ CANCELLED) : jamais autorité → no-op
 
   return {
     ...normalized,

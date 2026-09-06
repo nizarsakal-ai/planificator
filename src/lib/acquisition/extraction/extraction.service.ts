@@ -43,9 +43,16 @@ import type {
   ExtractionErrorCode,
   RunDraftExtractionInput,
 } from "@/lib/acquisition/extraction/extraction.types"
-import { maybeRunAutoDecisionAfterExtraction } from "@/lib/acquisition/policy/auto-decision.service"
+import {
+  isAutoDecisionLeaseLoss,
+  maybeRunAutoDecisionAfterExtraction,
+} from "@/lib/acquisition/policy/auto-decision.service"
+import type { TransactionalOwnershipFence } from "@/lib/acquisition/conversion/conversion-ownership-fence.port"
 import type { OrchestratorAutoCapability } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
-import { resolveOrchestratorAutoOwnership } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
+import {
+  resolveOrchestratorAutoOwnership,
+  resolveOrchestratorAutoTransactionalFence,
+} from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
 
 const LOG_PREFIX = "[acquisition-extraction]"
 const ALLOWED_ROLES = new Set<Role>(["ADMIN", "SUPER_ADMIN"])
@@ -60,11 +67,19 @@ export interface ExtractionServiceDeps {
   log?: (event: string, payload?: Record<string, unknown>) => void
   /**
    * Hook post-persist. Ignoré hors ORCHESTRATOR_AUTO + ownership valide.
+   * LOT-3G-R1 — reçoit le fence authentique résolu depuis la capability WeakMap.
    */
   runAutoDecisionAfterExtraction?: (input: {
     companyId: string
     draftId: string
+    transactionalOwnershipFence?: TransactionalOwnershipFence
   }) => Promise<unknown>
+  /**
+   * PLAN-ACQ-AGENTS-LOT-3C — snapshot run orchestrateur.
+   * true ⇒ interdit le hook legacy (XOR avec steps post-extraction).
+   * Default false = comportement historique.
+   */
+  postExtractionStepsEnabled?: boolean
 }
 
 function defaultLog(event: string, payload?: Record<string, unknown>): void {
@@ -161,6 +176,53 @@ function failLeaseStolen(
     draftId,
     ...extra,
   })
+}
+
+/**
+ * LOT-3G-R1 — Invocation du hook AUTO legacy après persist extraction.
+ * Fence absent ⇒ LEASE_STOLEN. Perte de lease dans le hook ⇒ LEASE_STOLEN.
+ * Autres erreurs hook ⇒ log + COMPLETED (contrat historique).
+ */
+export async function executeLegacyAutoDecisionAfterExtractionPersist(input: {
+  companyId: string
+  draftId: string
+  transactionalOwnershipFence: TransactionalOwnershipFence | undefined
+  runAutoDecisionAfterExtraction?: (input: {
+    companyId: string
+    draftId: string
+    transactionalOwnershipFence?: TransactionalOwnershipFence
+  }) => Promise<unknown>
+  log?: (event: string, payload?: Record<string, unknown>) => void
+}): Promise<"COMPLETED" | "LEASE_STOLEN"> {
+  const log = input.log ?? defaultLog
+  const fence = input.transactionalOwnershipFence
+  if (!fence) {
+    log("AUTO_DECISION_SKIPPED_LEASE_STOLEN", {
+      draftId: input.draftId,
+      reason: "NO_TRANSACTIONAL_FENCE",
+    })
+    return "LEASE_STOLEN"
+  }
+  try {
+    const runAuto =
+      input.runAutoDecisionAfterExtraction ?? maybeRunAutoDecisionAfterExtraction
+    await runAuto({
+      companyId: input.companyId,
+      draftId: input.draftId,
+      transactionalOwnershipFence: fence,
+    })
+    return "COMPLETED"
+  } catch (autoErr) {
+    if (isAutoDecisionLeaseLoss(autoErr)) {
+      log("AUTO_DECISION_LEASE_STOLEN", { draftId: input.draftId })
+      return "LEASE_STOLEN"
+    }
+    log("AUTO_DECISION_HOOK_FAILED", {
+      draftId: input.draftId,
+      message: autoErr instanceof Error ? autoErr.message : "unknown",
+    })
+    return "COMPLETED"
+  }
 }
 
 /**
@@ -524,20 +586,25 @@ async function runDraftExtractionCore(
 
     // AUTO : uniquement ORCHESTRATOR_AUTO + ownership encore valide.
     // Perte de lease après persist : mutation conservée, run ≠ SUCCESS.
+    // LOT-3C XOR : postExtractionStepsEnabled=true ⇒ hook legacy interdit.
     if (isOrchestratorAutoContext(executionContext)) {
       if (await ensureOrchestratorOwned(executionContext)) {
-        try {
-          const runAuto =
-            deps.runAutoDecisionAfterExtraction ?? maybeRunAutoDecisionAfterExtraction
-          await runAuto({
+        const postSteps = Boolean(deps.postExtractionStepsEnabled)
+        if (!postSteps) {
+          // LOT-3G-R1 — fence authentique WeakMap uniquement (jamais reconstruit).
+          const fence = resolveOrchestratorAutoTransactionalFence(
+            executionContext.capability
+          )
+          const hookOutcome = await executeLegacyAutoDecisionAfterExtractionPersist({
             companyId,
             draftId: draft.id,
+            transactionalOwnershipFence: fence,
+            runAutoDecisionAfterExtraction: deps.runAutoDecisionAfterExtraction,
+            log,
           })
-        } catch (autoErr) {
-          log("AUTO_DECISION_HOOK_FAILED", {
-            draftId: draft.id,
-            message: autoErr instanceof Error ? autoErr.message : "unknown",
-          })
+          if (hookOutcome === "LEASE_STOLEN") {
+            return failLeaseStolen(draft.id, { status: "PENDING_REVIEW" })
+          }
         }
         return extractedResult
       }

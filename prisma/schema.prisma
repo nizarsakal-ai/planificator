@@ -658,14 +658,18 @@ model Client {
   updatedAt DateTime @updatedAt
 
   // Relations
-  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  worksites     Worksite[]
-  clientProfile ClientProfile?
-  quotes        Quote[]
-  invoices      Invoice[]
-  importDrafts  WorksiteImportDraft[]
+  company             Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  worksites           Worksite[]
+  clientProfile       ClientProfile?
+  quotes              Quote[]
+  invoices            Invoice[]
+  importDrafts        WorksiteImportDraft[]
+  /// PLAN-ACQ-CONSULTATIONS-FIX-001 — partenaires liés (FK composite tenant-safe)
+  acquisitionPartners AcquisitionPartner[]
 
   @@index([companyId])
+  // Cible FK composite AcquisitionPartner.(clientId, companyId)
+  @@unique([id, companyId])
   @@map("clients")
 }
 
@@ -1399,15 +1403,17 @@ model WorksiteImportDraft {
 
 /// PLAN-ACQ-V2 Lot F — Journal des décisions auto-approve / auto-convert / human.
 model AcquisitionDecisionJournal {
-  id           String   @id @default(cuid())
-  companyId    String
-  draftId      String
-  decisionCode String
-  reasons      Json
-  scores       Json
-  actorUserId  String?
-  metadata     Json?
-  createdAt    DateTime @default(now())
+  id             String   @id @default(cuid())
+  companyId      String
+  draftId        String
+  decisionCode   String
+  reasons        Json
+  scores         Json
+  actorUserId    String?
+  metadata       Json?
+  /// PLAN-ACQ-AGENTS-LOT-3D/3E-CORRECTION-4A — clé d’idempotence atomique (nullable = legacy).
+  idempotencyKey String?  @unique
+  createdAt      DateTime @default(now())
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
@@ -1529,10 +1535,16 @@ model AcquisitionPartner {
   allowCreateClient  Boolean   @default(false)
   /// Seuil confiance [0..1] ; null = fallback env global
   minConfidence      Float?
+  /// PLAN-ACQ-CONSULTATIONS-FIX-001 — Client Planificator déterministe (nullable)
+  clientId           String?
   createdAt  DateTime          @default(now())
   updatedAt  DateTime          @updatedAt
 
   company  Company                     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// FK composite tenant-safe. onDelete Restrict : companyId est NOT NULL —
+  /// une politique SetNull sur FK composite est incompatible ; un Client
+  /// référencé ne peut pas être supprimé tant qu’un Partner le pointe.
+  client   Client?                     @relation(fields: [clientId, companyId], references: [id, companyId], onDelete: Restrict)
   domains  AcquisitionPartnerDomain[]
   emails   AcquisitionPartnerEmail[]
   messages AcquisitionMessage[]
@@ -1542,6 +1554,7 @@ model AcquisitionPartner {
   @@unique([id, companyId])
   @@index([companyId, active])
   @@index([companyId, priority])
+  @@index([companyId, clientId])
   @@map("acquisition_partners")
 }
 

@@ -18,10 +18,12 @@ import {
 } from "@/lib/acquisition/conversion/conversion.schema"
 import {
   ConversionClaimConflictError,
+  ConversionLeaseNotOwnedError,
   type ConversionActorContext,
   type ConvertImportDraftFailure,
   type ConvertImportDraftResult,
 } from "@/lib/acquisition/conversion/conversion.types"
+import type { ConvertImportDraftOptions } from "@/lib/acquisition/conversion/conversion-ownership-fence.port"
 import { defaultGeocodePort, type GeocodePort } from "@/lib/geo/geocode.port"
 import {
   findDuplicateWorksite,
@@ -126,7 +128,8 @@ export class ImportDraftConversionService {
 
   async convertImportDraft(
     ctx: ConversionActorContext,
-    raw: unknown
+    raw: unknown,
+    options?: ConvertImportDraftOptions
   ): Promise<ConvertImportDraftResult> {
     const authz = authorize(ctx)
     if (!authz.ok) return authz
@@ -139,6 +142,22 @@ export class ImportDraftConversionService {
       return fail("VALIDATION_ERROR", "VALIDATION_ERROR", "Données de conversion invalides")
     }
     const input: ConvertImportDraftInput = parsed.data
+    const fence = options?.transactionalOwnershipFence
+
+    // LOT-3F-CORRECTION-1-R1 — SYSTEM sans fence : fail-closed avant tout accès DB.
+    if (ctx.actorRole === "SYSTEM" && !fence) {
+      this.log("CONVERT_LEASE_NOT_OWNED", {
+        companyId: ctx.companyId,
+        draftId: input.draftId,
+        actorUserId: ctx.actorUserId,
+        code: "LEASE_NOT_OWNED",
+      })
+      return fail(
+        "LEASE_NOT_OWNED",
+        "LEASE_NOT_OWNED",
+        "Ownership orchestrateur perdu"
+      )
+    }
 
     // Idempotence rapide hors tx
     const early = await this.db.worksiteImportDraft.findFirst({
@@ -176,6 +195,14 @@ export class ImportDraftConversionService {
 
     try {
       const result = await this.db.$transaction(async (tx) => {
+        // LOT-3F — fence ownership AVANT toute mutation métier (même TX).
+        if (fence) {
+          const owned = await fence.assertOwnedAndLock(tx)
+          if (owned !== "OWNED") {
+            throw new ConversionLeaseNotOwnedError()
+          }
+        }
+
         const draft = await tx.worksiteImportDraft.findFirst({
           where: { id: input.draftId, companyId: ctx.companyId },
           select: {
@@ -376,6 +403,19 @@ export class ImportDraftConversionService {
 
       return result
     } catch (err) {
+      if (err instanceof ConversionLeaseNotOwnedError) {
+        this.log("CONVERT_LEASE_NOT_OWNED", {
+          companyId: ctx.companyId,
+          draftId: input.draftId,
+          actorUserId: ctx.actorUserId,
+          code: "LEASE_NOT_OWNED",
+        })
+        return fail(
+          "LEASE_NOT_OWNED",
+          "LEASE_NOT_OWNED",
+          "Ownership orchestrateur perdu"
+        )
+      }
       if (err instanceof ConversionClaimConflictError) {
         const remapped = await resolveAlreadyConverted(this.db, ctx.companyId, input.draftId)
         this.log("CONVERT_CONFLICT", {

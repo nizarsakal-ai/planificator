@@ -27,6 +27,7 @@ function partner(
     autoApproveEnabled: false,
     autoConvertEnabled: false,
     minConfidence: null,
+    clientId: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

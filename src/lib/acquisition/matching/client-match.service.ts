@@ -1,6 +1,8 @@
 /**
- * PLAN-ACQ-V2 Lot G R2 — Matching client + anti-doublon chantier.
- * Normalisation identique draft / chantier (casse, accents, ponctuation).
+ * PLAN-ACQ-V2 Lot G R2 / PLAN-ACQ-CONSULTATIONS-FIX-001 —
+ * Matching client + anti-doublon chantier.
+ * Priorité : PROPOSED_ID → PARTNER_LINK → EMAIL → NAME → NONE.
+ * EMAIL = clientEmail extrait — jamais contact email.
  */
 
 import type { PrismaClient } from "@prisma/client"
@@ -8,7 +10,7 @@ import { prisma } from "@/lib/prisma"
 
 export type ClientMatchResult = {
   clientId: string | null
-  matchKind: "PROPOSED_ID" | "EMAIL" | "NAME" | "NONE"
+  matchKind: "PROPOSED_ID" | "PARTNER_LINK" | "EMAIL" | "NAME" | "NONE"
   /** true si plusieurs clients actifs matchent le même critère (ambigu). */
   ambiguous?: boolean
 }
@@ -16,8 +18,11 @@ export type ClientMatchResult = {
 export async function matchClientForDraft(input: {
   companyId: string
   clientName: string | null
+  /** Email société extrait — pas contactEmail. */
   clientEmail: string | null
   proposedClientId?: string | null
+  /** Client lié au Partner (tenant déjà garanti côté appelant / FK). */
+  partnerLinkedClientId?: string | null
   db?: PrismaClient
 }): Promise<ClientMatchResult> {
   const db = input.db ?? prisma
@@ -32,6 +37,18 @@ export async function matchClientForDraft(input: {
       select: { id: true },
     })
     if (byId) return { clientId: byId.id, matchKind: "PROPOSED_ID" }
+  }
+
+  if (input.partnerLinkedClientId) {
+    const byPartner = await db.client.findFirst({
+      where: {
+        id: input.partnerLinkedClientId,
+        companyId: input.companyId,
+        active: true,
+      },
+      select: { id: true },
+    })
+    if (byPartner) return { clientId: byPartner.id, matchKind: "PARTNER_LINK" }
   }
 
   const email = input.clientEmail?.trim().toLowerCase() ?? ""

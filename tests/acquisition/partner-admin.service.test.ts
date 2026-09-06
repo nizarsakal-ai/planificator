@@ -17,9 +17,13 @@ import {
   InvalidPartnerNameError,
   PartnerAdminPersistenceError,
   PartnerAlreadyExistsError,
+  PartnerClientNotFoundError,
   PartnerNotFoundError,
 } from "@/lib/acquisition/admin/partner-admin.errors"
-import { domainInputSchema } from "@/lib/acquisition/admin/partner-admin.schema"
+import {
+  domainInputSchema,
+  setPartnerClientSchema,
+} from "@/lib/acquisition/admin/partner-admin.schema"
 import type {
   PartnerAdminDomain,
   PartnerAdminPartner,
@@ -28,6 +32,7 @@ import type {
 type Store = {
   partners: PartnerAdminPartner[]
   domains: PartnerAdminDomain[]
+  clients: Array<{ id: string; companyId: string; active: boolean }>
   deletes: number
 }
 
@@ -35,6 +40,7 @@ function cloneStore(s: Store): Store {
   return {
     partners: s.partners.map((p) => ({ ...p })),
     domains: s.domains.map((d) => ({ ...d })),
+    clients: s.clients.map((c) => ({ ...c })),
     deletes: s.deletes,
   }
 }
@@ -57,6 +63,7 @@ function createFakeDb(
   const store: Store = {
     partners: seed.partners ? seed.partners.map((p) => ({ ...p })) : [],
     domains: seed.domains ? seed.domains.map((d) => ({ ...d })) : [],
+    clients: seed.clients ? seed.clients.map((c) => ({ ...c })) : [],
     deletes: 0,
   }
 
@@ -116,6 +123,7 @@ function createFakeDb(
             autoConvertEnabled: false,
             allowCreateClient: false,
             minConfidence: null,
+            clientId: null,
             createdAt: now,
             updatedAt: now,
           }
@@ -224,11 +232,28 @@ function createFakeDb(
           return { count }
         },
       },
+      client: {
+        findFirst: async (args: unknown) => {
+          const where = (
+            args as {
+              where: { id?: string; companyId?: string; active?: boolean }
+            }
+          ).where
+          const hit = active.clients.find(
+            (c) =>
+              (where.id === undefined || c.id === where.id) &&
+              (where.companyId === undefined || c.companyId === where.companyId) &&
+              (where.active === undefined || c.active === where.active)
+          )
+          return hit ? { id: hit.id } : null
+        },
+      },
       $transaction: async <T>(fn: (tx: PartnerAdminDb) => Promise<T>): Promise<T> => {
         const snapshot = cloneStore(active)
         const txStore: Store = {
           partners: active.partners,
           domains: active.domains,
+          clients: active.clients,
           deletes: active.deletes,
         }
         // Bind tx to same arrays; on failure restore snapshot (rollback).
@@ -239,6 +264,7 @@ function createFakeDb(
         } catch (e) {
           active.partners.splice(0, active.partners.length, ...snapshot.partners)
           active.domains.splice(0, active.domains.length, ...snapshot.domains)
+          active.clients.splice(0, active.clients.length, ...snapshot.clients)
           active.deletes = snapshot.deletes
           throw e
         }
@@ -293,6 +319,7 @@ describe("AcquisitionPartnerAdminService", () => {
           autoConvertEnabled: false,
           allowCreateClient: false,
           minConfidence: null,
+          clientId: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -326,6 +353,7 @@ describe("AcquisitionPartnerAdminService", () => {
           autoConvertEnabled: false,
           allowCreateClient: false,
           minConfidence: null,
+          clientId: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -355,6 +383,7 @@ describe("AcquisitionPartnerAdminService", () => {
           autoConvertEnabled: false,
           allowCreateClient: false,
           minConfidence: null,
+          clientId: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -405,6 +434,7 @@ describe("AcquisitionPartnerAdminService", () => {
           autoConvertEnabled: false,
           allowCreateClient: false,
           minConfidence: null,
+          clientId: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -434,6 +464,7 @@ describe("AcquisitionPartnerAdminService", () => {
           autoConvertEnabled: false,
           allowCreateClient: false,
           minConfidence: null,
+          clientId: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -474,6 +505,7 @@ describe("AcquisitionPartnerAdminService", () => {
           autoConvertEnabled: false,
           allowCreateClient: false,
           minConfidence: null,
+          clientId: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -537,6 +569,7 @@ describe("AcquisitionPartnerAdminService", () => {
           autoConvertEnabled: false,
           allowCreateClient: false,
           minConfidence: null,
+          clientId: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -574,6 +607,7 @@ describe("AcquisitionPartnerAdminService", () => {
             autoConvertEnabled: false,
             allowCreateClient: false,
             minConfidence: null,
+            clientId: null,
             createdAt: new Date(),
             updatedAt: new Date(),
           },
@@ -608,6 +642,7 @@ describe("AcquisitionPartnerAdminService", () => {
             autoConvertEnabled: false,
             allowCreateClient: false,
             minConfidence: null,
+            clientId: null,
             createdAt: new Date(),
             updatedAt: new Date(),
           },
@@ -642,6 +677,7 @@ describe("AcquisitionPartnerAdminService", () => {
             autoConvertEnabled: false,
             allowCreateClient: false,
             minConfidence: null,
+            clientId: null,
             createdAt: new Date(),
             updatedAt: new Date(),
           },
@@ -680,6 +716,7 @@ describe("AcquisitionPartnerAdminService", () => {
           autoConvertEnabled: false,
           allowCreateClient: false,
           minConfidence: null,
+          clientId: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -697,6 +734,7 @@ describe("AcquisitionPartnerAdminService", () => {
           autoConvertEnabled: false,
           allowCreateClient: false,
           minConfidence: null,
+          clientId: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -752,6 +790,7 @@ describe("AcquisitionPartnerAdminService", () => {
           autoConvertEnabled: false,
           allowCreateClient: false,
           minConfidence: null,
+          clientId: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -840,6 +879,7 @@ describe("AcquisitionPartnerAdminService", () => {
           autoConvertEnabled: false,
           allowCreateClient: false,
           minConfidence: null,
+          clientId: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -927,6 +967,7 @@ describe("AcquisitionPartnerAdminService", () => {
           autoConvertEnabled: false,
           allowCreateClient: false,
           minConfidence: null,
+          clientId: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -961,6 +1002,7 @@ describe("AcquisitionPartnerAdminService", () => {
           autoConvertEnabled: false,
           allowCreateClient: false,
           minConfidence: null,
+          clientId: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -974,5 +1016,169 @@ describe("AcquisitionPartnerAdminService", () => {
         minConfidence: 1.5,
       })
     )
+  })
+
+  describe("FIX-005 — setPartnerClient", () => {
+    const basePartner = (over: Partial<PartnerAdminPartner> = {}): PartnerAdminPartner => ({
+      id: "p1",
+      companyId: "co_a",
+      name: "A",
+      code: "a",
+      connector: "GMAIL",
+      pipeline: "consultations",
+      active: true,
+      priority: 100,
+      requireExactEmail: false,
+      autoApproveEnabled: false,
+      autoConvertEnabled: false,
+      allowCreateClient: false,
+      minConfidence: null,
+      clientId: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...over,
+    })
+
+    it("1 — liaison valide même tenant actif", async () => {
+      const { db, store } = createFakeDb({
+        partners: [basePartner()],
+        clients: [{ id: "cli_a", companyId: "co_a", active: true }],
+      })
+      const svc = new AcquisitionPartnerAdminService({ db })
+      const row = await svc.setPartnerClient({
+        companyId: "co_a",
+        partnerId: "p1",
+        clientId: "cli_a",
+      })
+      assert.equal(row.clientId, "cli_a")
+      assert.equal(store.partners[0]?.clientId, "cli_a")
+    })
+
+    it("2 — Client inexistant → refus", async () => {
+      const { db } = createFakeDb({
+        partners: [basePartner()],
+        clients: [],
+      })
+      const svc = new AcquisitionPartnerAdminService({ db })
+      await assert.rejects(
+        () =>
+          svc.setPartnerClient({
+            companyId: "co_a",
+            partnerId: "p1",
+            clientId: "missing",
+          }),
+        PartnerClientNotFoundError
+      )
+    })
+
+    it("3 — Client autre tenant → refus", async () => {
+      const { db, store } = createFakeDb({
+        partners: [basePartner()],
+        clients: [{ id: "cli_b", companyId: "co_b", active: true }],
+      })
+      const svc = new AcquisitionPartnerAdminService({ db })
+      await assert.rejects(
+        () =>
+          svc.setPartnerClient({
+            companyId: "co_a",
+            partnerId: "p1",
+            clientId: "cli_b",
+          }),
+        PartnerClientNotFoundError
+      )
+      assert.equal(store.partners[0]?.clientId, null)
+    })
+
+    it("4 — Client inactif → refus", async () => {
+      const { db } = createFakeDb({
+        partners: [basePartner()],
+        clients: [{ id: "cli_a", companyId: "co_a", active: false }],
+      })
+      const svc = new AcquisitionPartnerAdminService({ db })
+      await assert.rejects(
+        () =>
+          svc.setPartnerClient({
+            companyId: "co_a",
+            partnerId: "p1",
+            clientId: "cli_a",
+          }),
+        PartnerClientNotFoundError
+      )
+    })
+
+    it("5 — Partner autre tenant → PartnerNotFound", async () => {
+      const { db } = createFakeDb({
+        partners: [basePartner()],
+        clients: [{ id: "cli_a", companyId: "co_a", active: true }],
+      })
+      const svc = new AcquisitionPartnerAdminService({ db })
+      await assert.rejects(
+        () =>
+          svc.setPartnerClient({
+            companyId: "co_other",
+            partnerId: "p1",
+            clientId: "cli_a",
+          }),
+        PartnerNotFoundError
+      )
+    })
+
+    it("6 — déliaison explicite clientId → null", async () => {
+      const { db, store } = createFakeDb({
+        partners: [basePartner({ clientId: "cli_a" })],
+        clients: [{ id: "cli_a", companyId: "co_a", active: true }],
+      })
+      const svc = new AcquisitionPartnerAdminService({ db })
+      const row = await svc.setPartnerClient({
+        companyId: "co_a",
+        partnerId: "p1",
+        clientId: null,
+      })
+      assert.equal(row.clientId, null)
+      assert.equal(store.partners[0]?.clientId, null)
+    })
+
+    it("7 — setPartnerClient ne modifie aucune policy", async () => {
+      const { db, store } = createFakeDb({
+        partners: [
+          basePartner({
+            autoApproveEnabled: true,
+            autoConvertEnabled: true,
+            allowCreateClient: true,
+            minConfidence: 0.85,
+            requireExactEmail: true,
+            priority: 42,
+            active: true,
+          }),
+        ],
+        clients: [{ id: "cli_a", companyId: "co_a", active: true }],
+      })
+      const before = { ...store.partners[0]! }
+      const svc = new AcquisitionPartnerAdminService({ db })
+      await svc.setPartnerClient({
+        companyId: "co_a",
+        partnerId: "p1",
+        clientId: "cli_a",
+      })
+      const after = store.partners[0]!
+      assert.equal(after.autoApproveEnabled, before.autoApproveEnabled)
+      assert.equal(after.autoConvertEnabled, before.autoConvertEnabled)
+      assert.equal(after.allowCreateClient, before.allowCreateClient)
+      assert.equal(after.minConfidence, before.minConfidence)
+      assert.equal(after.requireExactEmail, before.requireExactEmail)
+      assert.equal(after.priority, before.priority)
+      assert.equal(after.active, before.active)
+      assert.equal(after.clientId, "cli_a")
+    })
+
+    it("8 — schema strict refuse champ supplémentaire", () => {
+      const r = setPartnerClientSchema.safeParse({
+        companyId: "co_a",
+        partnerId: "p1",
+        clientId: "cli_a",
+        autoApproveEnabled: true,
+      })
+      assert.equal(r.success, false)
+    })
   })
 })

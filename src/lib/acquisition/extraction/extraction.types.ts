@@ -77,6 +77,7 @@ export type ExtractionWarningCode =
   | "PROVIDER_UNAVAILABLE"
   | "STALE_CONTENT"
   | "INPUT_TRUNCATED_FOR_PROVIDER"
+  | "CONSULTATION_CANCELLED"
 
 export type ExtractionWarning = z.infer<typeof extractionWarningSchema>
 export type ExtractionCanonicalFields = z.infer<typeof extractionCanonicalFieldsSchema>

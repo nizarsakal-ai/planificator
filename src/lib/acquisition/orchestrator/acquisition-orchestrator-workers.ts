@@ -1,6 +1,8 @@
 /**
- * PLAN-ACQ-V2-001 Lot B / PLAN-ACQ-012-4 — Wiring des 5 workers réels.
- * Capability AUTO créée uniquement ici. Pas de factory publique.
+ * PLAN-ACQ-V2-001 Lot B / PLAN-ACQ-012-4 / LOT-3C — Wiring workers.
+ * 5 workers métier + validation/autoDecision/worksiteCreation réels (flag ON).
+ * Flag OFF → steps post-extraction DISABLED.
+ * Capability AUTO créée uniquement ici. Pas de factory publique métier.
  * Budgets enfants bornés par remainingMs. Gmail : clamp + heartbeat lease.
  */
 
@@ -28,6 +30,7 @@ import { gmailConnectionListingAdapter } from "@/lib/acquisition/persistence/gma
 import {
   ACQUISITION_ORCHESTRATOR_LEASE_KEY,
   getAcquisitionOrchestratorConfig,
+  isAcquisitionOrchestratorPostExtractionStepsEnabled,
 } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-feature-flag"
 import { acquisitionOrchestratorLeaseRepository } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-lease.repository"
 import { runAcquisitionOrchestrator } from "@/lib/acquisition/orchestrator/acquisition-orchestrator.service"
@@ -35,6 +38,7 @@ import type {
   AcquisitionOrchestratorLeaseRepositoryPort,
   AcquisitionOrchestratorRunResult,
   AcquisitionOrchestratorStepRunners,
+  OrchestratorStepRunner,
   OrchestratorStepRunnerResult,
 } from "@/lib/acquisition/orchestrator/acquisition-orchestrator.types"
 import {
@@ -42,6 +46,11 @@ import {
   type OrchestratorItemOwnershipCheck,
   type OrchestratorOwnershipState,
 } from "@/lib/acquisition/orchestrator/orchestrator-ownership"
+import { runAcquisitionValidationWorker } from "@/lib/acquisition/orchestrator/acquisition-validation.worker"
+import { runAcquisitionAutoDecisionWorker } from "@/lib/acquisition/orchestrator/acquisition-auto-decision.worker"
+import { runAcquisitionWorksiteCreationWorker } from "@/lib/acquisition/orchestrator/acquisition-worksite-creation.worker"
+import { createOrchestratorLeaseTransactionalFence } from "@/lib/acquisition/orchestrator/orchestrator-lease-tx-fence"
+import type { ConversionTransactionalOwnershipFence } from "@/lib/acquisition/conversion/conversion-ownership-fence.port"
 
 const ORCHESTRATOR_AUTO_BRAND: unique symbol = Symbol(
   "ORCHESTRATOR_AUTO_CAPABILITY"
@@ -57,6 +66,7 @@ export type OrchestratorAutoCapability = {
 
 type OrchestratorAutoInternals = {
   heartbeat: () => Promise<OrchestratorOwnershipState>
+  transactionalOwnershipFence: ConversionTransactionalOwnershipFence
 }
 
 const autoCapabilityInternals = new WeakMap<
@@ -65,7 +75,8 @@ const autoCapabilityInternals = new WeakMap<
 >()
 
 /**
- * Factory AUTO interne au wiring orchestrateur. Non exportée.
+ * Factory AUTO interne au wiring orchestrateur. Non exportée sous ce nom
+ * (garde fencing provenance).
  */
 function createOrchestratorAutoCapability(input: {
   leaseRepository: AcquisitionOrchestratorLeaseRepositoryPort
@@ -80,6 +91,10 @@ function createOrchestratorAutoCapability(input: {
         leaseRepository: input.leaseRepository,
         ownerRunId: input.ownerRunId,
       }),
+    transactionalOwnershipFence: createOrchestratorLeaseTransactionalFence({
+      leaseKey: ACQUISITION_ORCHESTRATOR_LEASE_KEY,
+      ownerRunId: input.ownerRunId,
+    }),
   })
   return capability
 }
@@ -98,6 +113,16 @@ export async function resolveOrchestratorAutoOwnership(
   } catch {
     return "NOT_OWNED"
   }
+}
+
+/**
+ * Fence transactionnel authentique (WeakMap). Absent / forge → undefined.
+ * Ne expose pas ownerRunId / lease key au caller.
+ */
+export function resolveOrchestratorAutoTransactionalFence(
+  capability: OrchestratorAutoCapability
+): ConversionTransactionalOwnershipFence | undefined {
+  return autoCapabilityInternals.get(capability)?.transactionalOwnershipFence
 }
 
 function ownershipCheckFrom(
@@ -242,12 +267,30 @@ async function runGmailSync(input: {
 }
 
 /**
+ * PLAN-ACQ-AGENTS-LOT-3C — Placeholders post-extraction.
+ * Flag OFF → DISABLED ; Flag ON (ce lot) → NOT_IMPLEMENTED (aucun métier).
+ */
+export function createPostExtractionPlaceholderRunner(
+  postExtractionStepsEnabled: boolean
+): OrchestratorStepRunner {
+  return async () => ({
+    status: "SKIPPED",
+    skipReason: postExtractionStepsEnabled ? "NOT_IMPLEMENTED" : "DISABLED",
+  })
+}
+
+/**
  * Workers AUTO internes. leaseRepository imposé par l’appelant unique
- * `runProductionAcquisitionOrchestrator` — jamais exporté.
+ * `runProductionAcquisitionOrchestrator` — non exporté (fencing provenance).
+ * `postExtractionStepsEnabled` = snapshot run (jamais re-lu depuis env ici).
  */
 function createProductionStepRunners(
-  leaseRepository: AcquisitionOrchestratorLeaseRepositoryPort
+  leaseRepository: AcquisitionOrchestratorLeaseRepositoryPort,
+  options: { postExtractionStepsEnabled: boolean }
 ): AcquisitionOrchestratorStepRunners {
+  const postExtractionStepsEnabled = options.postExtractionStepsEnabled
+  const disabledPlaceholder = createPostExtractionPlaceholderRunner(false)
+
   return {
     gmailSync: async ({ runId, remainingMs }) =>
       runGmailSync({ runId, remainingMs, leaseRepository }),
@@ -315,7 +358,9 @@ function createProductionStepRunners(
       const result = await runAcquisitionExtractionCronOrchestrator({
         repository: acquisitionExtractionCronSelectionRepository,
         extractDraft: ({ companyId, draftId, now }) =>
-          runDraftExtractionOrchestrated({ companyId, draftId, now }, capability),
+          runDraftExtractionOrchestrated({ companyId, draftId, now }, capability, {
+            postExtractionStepsEnabled,
+          }),
         createRunId: () => `${runId}:extraction`,
         config: {
           ...base,
@@ -325,23 +370,82 @@ function createProductionStepRunners(
       })
       return mapChildWorkerResult(result)
     },
+
+    validation: async ({ runId, remainingMs }) => {
+      if (!postExtractionStepsEnabled) {
+        return disabledPlaceholder({ runId, remainingMs })
+      }
+      const capability = createOrchestratorAutoCapability({
+        leaseRepository,
+        ownerRunId: runId,
+      })
+      const result = await runAcquisitionValidationWorker({
+        ensureOwnership: ownershipCheckFrom(capability),
+        transactionalOwnershipFence:
+          resolveOrchestratorAutoTransactionalFence(capability),
+        maxDurationMs: clampChildBudget(remainingMs, remainingMs),
+      })
+      return mapChildWorkerResult(result)
+    },
+
+    autoDecision: async ({ runId, remainingMs }) => {
+      if (!postExtractionStepsEnabled) {
+        return disabledPlaceholder({ runId, remainingMs })
+      }
+      const capability = createOrchestratorAutoCapability({
+        leaseRepository,
+        ownerRunId: runId,
+      })
+      const result = await runAcquisitionAutoDecisionWorker({
+        ensureOwnership: ownershipCheckFrom(capability),
+        transactionalOwnershipFence:
+          resolveOrchestratorAutoTransactionalFence(capability),
+        maxDurationMs: clampChildBudget(remainingMs, remainingMs),
+      })
+      return mapChildWorkerResult(result)
+    },
+
+    worksiteCreation: async ({ runId, remainingMs }) => {
+      if (!postExtractionStepsEnabled) {
+        return disabledPlaceholder({ runId, remainingMs })
+      }
+      const capability = createOrchestratorAutoCapability({
+        leaseRepository,
+        ownerRunId: runId,
+      })
+      const result = await runAcquisitionWorksiteCreationWorker({
+        ensureOwnership: ownershipCheckFrom(capability),
+        transactionalOwnershipFence:
+          resolveOrchestratorAutoTransactionalFence(capability),
+        maxDurationMs: clampChildBudget(remainingMs, remainingMs),
+      })
+      return mapChildWorkerResult(result)
+    },
   }
 }
 
 /**
  * Unique entrée production AUTO.
- * Une seule autorité : `acquisitionOrchestratorLeaseRepository` pour
- * acquire / assertOwned / renew / release / capability workers.
- * Aucun paramètre leaseRepository ou steps.
+ * Snapshot du flag post-extraction UNE FOIS par run, puis propagation.
  */
 export async function runProductionAcquisitionOrchestrator(input: {
   runId: string
+  /**
+   * Tests uniquement — sinon résolu une fois via
+   * isAcquisitionOrchestratorPostExtractionStepsEnabled().
+   */
+  postExtractionStepsEnabled?: boolean
 }): Promise<AcquisitionOrchestratorRunResult> {
   const leaseRepository = acquisitionOrchestratorLeaseRepository
+  const postExtractionStepsEnabled =
+    input.postExtractionStepsEnabled ??
+    isAcquisitionOrchestratorPostExtractionStepsEnabled()
   return runAcquisitionOrchestrator({
     runId: input.runId,
     leaseRepository,
-    steps: createProductionStepRunners(leaseRepository),
+    steps: createProductionStepRunners(leaseRepository, {
+      postExtractionStepsEnabled,
+    }),
     config: getAcquisitionOrchestratorConfig(),
   })
 }

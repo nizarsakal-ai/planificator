@@ -8,6 +8,7 @@ export type PartnerAdminErrorCode =
   | "DOMAIN_ALREADY_EXISTS"
   | "PARTNER_NOT_FOUND"
   | "DOMAIN_NOT_FOUND"
+  | "PARTNER_CLIENT_NOT_FOUND"
   | "INVALID_DOMAIN"
   | "INVALID_PARTNER_CODE"
   | "INVALID_PARTNER_NAME"
@@ -41,6 +42,15 @@ export class PartnerNotFoundError extends PartnerAdminError {
   constructor(message = "Partenaire introuvable pour ce tenant") {
     super("PARTNER_NOT_FOUND", message)
     this.name = "PartnerNotFoundError"
+  }
+}
+
+export class PartnerClientNotFoundError extends PartnerAdminError {
+  constructor(
+    message = "Client introuvable, inactif ou hors tenant pour ce partenaire"
+  ) {
+    super("PARTNER_CLIENT_NOT_FOUND", message)
+    this.name = "PartnerClientNotFoundError"
   }
 }
 

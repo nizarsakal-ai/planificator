@@ -2,9 +2,10 @@
  * PLAN-ACQ-005C-MVP — Autorité save / approve / reject (pas d’extraction).
  */
 
-import type { PrismaClient, Role, WorksiteImportDraftStatus } from "@prisma/client"
+import type { Prisma, PrismaClient, Role, WorksiteImportDraftStatus } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
+import type { TransactionalOwnershipFence } from "@/lib/acquisition/conversion/conversion-ownership-fence.port"
 import {
   approveImportDraftSchema,
   rejectImportDraftSchema,
@@ -24,6 +25,19 @@ import { hasBlockingWarnings } from "@/lib/acquisition/review/consultation-ui"
 const LOG_PREFIX = "[acquisition-review]"
 const ALLOWED_ROLES = new Set<Role>(["ADMIN", "SUPER_ADMIN"])
 const EDITABLE_STATUSES: WorksiteImportDraftStatus[] = ["PENDING_REVIEW", "FAILED"]
+
+export type ReviewMutationOptions = {
+  transactionalOwnershipFence?: TransactionalOwnershipFence
+}
+
+class ReviewLeaseNotOwnedError extends Error {
+  readonly code = "LEASE_NOT_OWNED"
+  constructor() {
+    super("LEASE_NOT_OWNED")
+  }
+}
+
+type ReviewDb = PrismaClient | Prisma.TransactionClient
 
 function defaultLog(event: string, payload?: Record<string, unknown>): void {
   if (payload) console.log(`${LOG_PREFIX} ${event}`, payload)
@@ -77,7 +91,7 @@ function disabled(): SaveCorrectionsOutcome & ApproveOutcome & RejectOutcome {
 }
 
 async function resolveUpdateMiss(
-  db: PrismaClient,
+  db: ReviewDb,
   companyId: string,
   draftId: string,
   expectedVersion: number,
@@ -91,6 +105,24 @@ async function resolveUpdateMiss(
   if (!allowedStatuses.includes(row.status)) return "INVALID_STATE"
   if (row.version !== expectedVersion) return "STATE_CHANGED"
   return "STATE_CHANGED"
+}
+
+function leaseNotOwnedApprove(): ApproveOutcome {
+  return {
+    ok: false,
+    outcome: "LEASE_NOT_OWNED",
+    code: "LEASE_NOT_OWNED",
+    message: "Ownership orchestrateur perdu",
+  }
+}
+
+function leaseNotOwnedReject(): RejectOutcome {
+  return {
+    ok: false,
+    outcome: "LEASE_NOT_OWNED",
+    code: "LEASE_NOT_OWNED",
+    message: "Ownership orchestrateur perdu",
+  }
 }
 
 export class ImportDraftReviewService {
@@ -196,7 +228,8 @@ export class ImportDraftReviewService {
 
   async approveImportDraft(
     ctx: ReviewActorContext,
-    raw: unknown
+    raw: unknown,
+    options?: ReviewMutationOptions
   ): Promise<ApproveOutcome> {
     const authz = authorize(ctx)
     if (!authz.ok) return authz
@@ -212,8 +245,49 @@ export class ImportDraftReviewService {
       }
     }
     const input: ApproveImportDraftInput = parsed.data
+    const fence = options?.transactionalOwnershipFence
 
-    const draft = await this.db.worksiteImportDraft.findFirst({
+    // LOT-3G — SYSTEM sans fence : fail-closed avant tout accès DB.
+    if (ctx.actorRole === "SYSTEM" && !fence) {
+      this.log("APPROVE_LEASE_NOT_OWNED", {
+        companyId: ctx.companyId,
+        draftId: input.draftId,
+        actorUserId: ctx.actorUserId,
+        code: "LEASE_NOT_OWNED",
+      })
+      return leaseNotOwnedApprove()
+    }
+
+    if (fence) {
+      try {
+        return await this.db.$transaction(async (tx) => {
+          const owned = await fence.assertOwnedAndLock(tx)
+          if (owned !== "OWNED") throw new ReviewLeaseNotOwnedError()
+          return this.executeApprove(tx, ctx, input)
+        })
+      } catch (err) {
+        if (err instanceof ReviewLeaseNotOwnedError) {
+          this.log("APPROVE_LEASE_NOT_OWNED", {
+            companyId: ctx.companyId,
+            draftId: input.draftId,
+            actorUserId: ctx.actorUserId,
+            code: "LEASE_NOT_OWNED",
+          })
+          return leaseNotOwnedApprove()
+        }
+        throw err
+      }
+    }
+
+    return this.executeApprove(this.db, ctx, input)
+  }
+
+  private async executeApprove(
+    db: ReviewDb,
+    ctx: ReviewActorContext,
+    input: ApproveImportDraftInput
+  ): Promise<ApproveOutcome> {
+    const draft = await db.worksiteImportDraft.findFirst({
       where: { id: input.draftId, companyId: ctx.companyId },
       select: {
         status: true,
@@ -285,7 +359,7 @@ export class ImportDraftReviewService {
     }
 
     const now = this.now()
-    const updated = await this.db.worksiteImportDraft.updateMany({
+    const updated = await db.worksiteImportDraft.updateMany({
       where: {
         id: input.draftId,
         companyId: ctx.companyId,
@@ -303,7 +377,7 @@ export class ImportDraftReviewService {
 
     if (updated.count === 0) {
       const miss = await resolveUpdateMiss(
-        this.db,
+        db,
         ctx.companyId,
         input.draftId,
         input.expectedVersion,
@@ -317,13 +391,18 @@ export class ImportDraftReviewService {
       })
       return {
         ok: false,
-        outcome: miss === "NOT_FOUND" ? "NOT_FOUND" : miss === "INVALID_STATE" ? "INVALID_STATE" : "STATE_CHANGED",
+        outcome:
+          miss === "NOT_FOUND"
+            ? "NOT_FOUND"
+            : miss === "INVALID_STATE"
+              ? "INVALID_STATE"
+              : "STATE_CHANGED",
         code: miss,
         message: "Approbation concurrente échouée",
       }
     }
 
-    const row = await this.db.worksiteImportDraft.findFirst({
+    const row = await db.worksiteImportDraft.findFirst({
       where: { id: input.draftId, companyId: ctx.companyId },
       select: { version: true },
     })
@@ -345,7 +424,8 @@ export class ImportDraftReviewService {
 
   async rejectImportDraft(
     ctx: ReviewActorContext,
-    raw: unknown
+    raw: unknown,
+    options?: ReviewMutationOptions
   ): Promise<RejectOutcome> {
     const authz = authorize(ctx)
     if (!authz.ok) return authz
@@ -361,8 +441,48 @@ export class ImportDraftReviewService {
       }
     }
     const input: RejectImportDraftInput = parsed.data
+    const fence = options?.transactionalOwnershipFence
 
-    const draft = await this.db.worksiteImportDraft.findFirst({
+    if (ctx.actorRole === "SYSTEM" && !fence) {
+      this.log("REJECT_LEASE_NOT_OWNED", {
+        companyId: ctx.companyId,
+        draftId: input.draftId,
+        actorUserId: ctx.actorUserId,
+        code: "LEASE_NOT_OWNED",
+      })
+      return leaseNotOwnedReject()
+    }
+
+    if (fence) {
+      try {
+        return await this.db.$transaction(async (tx) => {
+          const owned = await fence.assertOwnedAndLock(tx)
+          if (owned !== "OWNED") throw new ReviewLeaseNotOwnedError()
+          return this.executeReject(tx, ctx, input)
+        })
+      } catch (err) {
+        if (err instanceof ReviewLeaseNotOwnedError) {
+          this.log("REJECT_LEASE_NOT_OWNED", {
+            companyId: ctx.companyId,
+            draftId: input.draftId,
+            actorUserId: ctx.actorUserId,
+            code: "LEASE_NOT_OWNED",
+          })
+          return leaseNotOwnedReject()
+        }
+        throw err
+      }
+    }
+
+    return this.executeReject(this.db, ctx, input)
+  }
+
+  private async executeReject(
+    db: ReviewDb,
+    ctx: ReviewActorContext,
+    input: RejectImportDraftInput
+  ): Promise<RejectOutcome> {
+    const draft = await db.worksiteImportDraft.findFirst({
       where: { id: input.draftId, companyId: ctx.companyId },
       select: { status: true, version: true },
     })
@@ -392,7 +512,7 @@ export class ImportDraftReviewService {
     }
 
     const now = this.now()
-    const updated = await this.db.worksiteImportDraft.updateMany({
+    const updated = await db.worksiteImportDraft.updateMany({
       where: {
         id: input.draftId,
         companyId: ctx.companyId,
@@ -410,7 +530,7 @@ export class ImportDraftReviewService {
 
     if (updated.count === 0) {
       const miss = await resolveUpdateMiss(
-        this.db,
+        db,
         ctx.companyId,
         input.draftId,
         input.expectedVersion,
@@ -424,13 +544,18 @@ export class ImportDraftReviewService {
       })
       return {
         ok: false,
-        outcome: miss === "NOT_FOUND" ? "NOT_FOUND" : miss === "INVALID_STATE" ? "INVALID_STATE" : "STATE_CHANGED",
+        outcome:
+          miss === "NOT_FOUND"
+            ? "NOT_FOUND"
+            : miss === "INVALID_STATE"
+              ? "INVALID_STATE"
+              : "STATE_CHANGED",
         code: miss,
         message: "Rejet concurrent échoué",
       }
     }
 
-    const row = await this.db.worksiteImportDraft.findFirst({
+    const row = await db.worksiteImportDraft.findFirst({
       where: { id: input.draftId, companyId: ctx.companyId },
       select: { version: true },
     })

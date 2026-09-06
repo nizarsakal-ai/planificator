@@ -2,6 +2,7 @@ process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import {
   getConsultationUiActions,
   getReExtractPolicy,
@@ -11,6 +12,12 @@ import {
 } from "@/lib/acquisition/review/consultation-ui"
 import { toConsultationProposedFormDto } from "@/lib/acquisition/review/consultation-proposed-form.dto"
 import type { ImportDraftReviewBundle } from "@/lib/acquisition/review/import-draft-review.types"
+
+const PathLike = {
+  readText(path: string) {
+    return readFileSync(path, "utf8")
+  },
+}
 
 describe("consultation-ui helpers", () => {
   it("matrice actions PENDING_REVIEW", () => {
@@ -73,6 +80,32 @@ describe("consultation-ui helpers", () => {
     assert.equal(hasBlockingWarnings("x"), false)
     assert.equal(hasBlockingWarnings(null), false)
     assert.equal(hasBlockingWarnings([null, "x", [true], { code: "Z" }]), false)
+  })
+
+  it("FIX-009 remonte le formulaire quand la version du draft change", () => {
+    const source = PathLike.readText("src/components/consultations/ConsultationDetail.tsx")
+    assert.match(
+      source,
+      /<ConsultationProposedForm\s+key=\{`\$\{draft\.id\}:\$\{draft\.version\}`\}/
+    )
+  })
+
+  it("FIX-010 signale explicitement les dates non renseignées", () => {
+    const source = PathLike.readText("src/components/consultations/ConsultationProposedForm.tsx")
+
+    const startDateField = source.match(
+      /<Field\s+label="Date de début"[\s\S]*?\/>/
+    )?.[0]
+    const endDateField = source.match(
+      /<Field\s+label="Date de fin"[\s\S]*?\/>/
+    )?.[0]
+
+    assert.ok(startDateField)
+    assert.ok(endDateField)
+    assert.match(startDateField, /showEmptyValueHint/)
+    assert.match(endDateField, /showEmptyValueHint/)
+    assert.match(source, /showEmptyValueHint && !value/)
+    assert.match(source, />Non renseignée<\//)
   })
 
   it("DTO formulaire exclut confidence/warnings/rejection", () => {
