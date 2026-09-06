@@ -12,7 +12,7 @@ import { updateChantierStatus, prolongerChantier, decalerChantier } from "@/lib/
 interface Props {
   worksiteId: string
   currentStatus: string
-  endDate: Date
+  endDate: Date | null
 }
 
 export function ChantierStatusActions({ worksiteId, currentStatus, endDate }: Props) {
@@ -72,9 +72,13 @@ export function ChantierStatusActions({ worksiteId, currentStatus, endDate }: Pr
     }
   }
 
-  const minDate = new Date(endDate)
-  minDate.setDate(minDate.getDate() + 1)
-  const minDateStr = minDate.toISOString().split("T")[0]
+  const minDateStr = endDate
+    ? (() => {
+        const minDate = new Date(endDate)
+        minDate.setDate(minDate.getDate() + 1)
+        return minDate.toISOString().split("T")[0]
+      })()
+    : undefined
 
   return (
     <Card>

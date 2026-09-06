@@ -23,7 +23,14 @@ type Draft = {
 
 type FakeDb = {
   draft: Draft
-  worksites: Array<{ id: string; clientId: string; companyId: string }>
+  worksites: Array<{
+    id: string
+    clientId: string
+    companyId: string
+    startDate: Date | null
+    endDate: Date | null
+    status: string
+  }>
   documents: Array<{
     id: string
     worksiteId: string
@@ -32,6 +39,7 @@ type FakeDb = {
   }>
   teams: number
   assignments: number
+  lastWorksiteCreateData: Record<string, unknown> | null
   worksiteImportDraft: {
     findFirst: (args: {
       where: Record<string, unknown>
@@ -57,7 +65,7 @@ type FakeDb = {
       take?: number
     }) => Promise<unknown[]>
     create: (args: {
-      data: { clientId: string; companyId: string; name: string }
+      data: Record<string, unknown>
       select?: { id: boolean }
     }) => Promise<{ id: string }>
   }
@@ -109,7 +117,14 @@ function createFakeDb(seed: {
   const clients = [...(seed.clients ?? [])]
   const attachments = [...(seed.attachments ?? [])]
   const existingWorksites = [...(seed.existingWorksites ?? [])]
-  const worksites: Array<{ id: string; clientId: string; companyId: string }> = []
+  const worksites: Array<{
+    id: string
+    clientId: string
+    companyId: string
+    startDate: Date | null
+    endDate: Date | null
+    status: string
+  }> = []
   const documents: Array<{
     id: string
     worksiteId: string
@@ -118,6 +133,7 @@ function createFakeDb(seed: {
   }> = []
   let teams = 0
   let assignments = 0
+  let lastWorksiteCreateData: Record<string, unknown> | null = null
   const forceClaimFail = seed.forceClaimFail ?? false
 
   const api: FakeDb = {
@@ -135,6 +151,12 @@ function createFakeDb(seed: {
     },
     get assignments() {
       return assignments
+    },
+    get lastWorksiteCreateData() {
+      return lastWorksiteCreateData
+    },
+    set lastWorksiteCreateData(v: Record<string, unknown> | null) {
+      lastWorksiteCreateData = v
     },
     worksiteImportDraft: {
       async findFirst(args: { where: Record<string, unknown>; select?: Record<string, unknown> }) {
@@ -204,14 +226,18 @@ function createFakeDb(seed: {
         }))
       },
       async create(args: {
-        data: { clientId: string; companyId: string; name: string }
+        data: Record<string, unknown>
         select?: { id: boolean }
       }) {
+        lastWorksiteCreateData = { ...args.data }
         const id = `ws-${worksites.length + 1}`
         worksites.push({
           id,
-          clientId: args.data.clientId,
-          companyId: args.data.companyId,
+          clientId: args.data.clientId as string,
+          companyId: args.data.companyId as string,
+          startDate: (args.data.startDate as Date | null | undefined) ?? null,
+          endDate: (args.data.endDate as Date | null | undefined) ?? null,
+          status: (args.data.status as string) ?? "PLANNED",
         })
         return { id }
       },
@@ -418,7 +444,14 @@ describe("ImportDraftConversionService", () => {
       draft: baseDraft({ status: "CONVERTED", createdWorksiteId: "ws-1", version: 9 }),
       clients: [{ id: "c1", companyId: "co1" }],
     })
-    db.worksites.push({ id: "ws-1", clientId: "c1", companyId: "co1" })
+    db.worksites.push({
+      id: "ws-1",
+      clientId: "c1",
+      companyId: "co1",
+      startDate: null,
+      endDate: null,
+      status: "PLANNED",
+    })
     const svc = new ImportDraftConversionService({ db: db as never })
     const r = await svc.convertImportDraft(admin, {
       draftId: "d1",
@@ -609,6 +642,77 @@ describe("ImportDraftConversionService", () => {
     )
     assert.equal(r.ok, false)
     if (!r.ok) assert.equal(r.outcome, "DUPLICATE_REQUIRES_ACK")
+    assert.equal(db.worksites.length, 0)
+  })
+
+  it("PROVIDENCE-DATES — NULL/NULL → Worksite PLANNED sans dates ni Assignment", async () => {
+    const before = Date.now()
+    const db = createFakeDb({
+      draft: baseDraft({
+        proposedStartDate: null,
+        proposedEndDate: null,
+      }),
+      clients: [{ id: "c1", companyId: "co1" }],
+    })
+    const svc = new ImportDraftConversionService({ db: db as never })
+    const r = await svc.convertImportDraft(admin, {
+      draftId: "d1",
+      expectedVersion: 2,
+      clientMode: "EXISTING",
+      existingClientId: "c1",
+    })
+    assert.equal(r.ok, true)
+    assert.equal(db.worksites.length, 1)
+    assert.equal(db.worksites[0]!.startDate, null)
+    assert.equal(db.worksites[0]!.endDate, null)
+    assert.equal(db.worksites[0]!.status, "PLANNED")
+    assert.equal(db.assignments, 0)
+    assert.equal(db.lastWorksiteCreateData?.startDate, null)
+    assert.equal(db.lastWorksiteCreateData?.endDate, null)
+    // aucune date « maintenant » / receivedAt injectée dans le payload create
+    const payload = db.lastWorksiteCreateData ?? {}
+    assert.equal("receivedAt" in payload && payload.receivedAt != null, false)
+    assert.equal(payload.startDate === null && payload.endDate === null, true)
+    assert.ok(Date.now() - before < 60_000)
+  })
+
+  it("PROVIDENCE-DATES — date partielle refusée", async () => {
+    const db = createFakeDb({
+      draft: baseDraft({
+        proposedStartDate: new Date("2026-10-01T00:00:00.000Z"),
+        proposedEndDate: null,
+      }),
+      clients: [{ id: "c1", companyId: "co1" }],
+    })
+    const svc = new ImportDraftConversionService({ db: db as never })
+    const r = await svc.convertImportDraft(admin, {
+      draftId: "d1",
+      expectedVersion: 2,
+      clientMode: "EXISTING",
+      existingClientId: "c1",
+    })
+    assert.equal(r.ok, false)
+    if (!r.ok) assert.equal(r.outcome, "VALIDATION_ERROR")
+    assert.equal(db.worksites.length, 0)
+  })
+
+  it("PROVIDENCE-DATES — dates inversées refusées", async () => {
+    const db = createFakeDb({
+      draft: baseDraft({
+        proposedStartDate: new Date("2026-10-15T00:00:00.000Z"),
+        proposedEndDate: new Date("2026-10-01T00:00:00.000Z"),
+      }),
+      clients: [{ id: "c1", companyId: "co1" }],
+    })
+    const svc = new ImportDraftConversionService({ db: db as never })
+    const r = await svc.convertImportDraft(admin, {
+      draftId: "d1",
+      expectedVersion: 2,
+      clientMode: "EXISTING",
+      existingClientId: "c1",
+    })
+    assert.equal(r.ok, false)
+    if (!r.ok) assert.equal(r.outcome, "VALIDATION_ERROR")
     assert.equal(db.worksites.length, 0)
   })
 })

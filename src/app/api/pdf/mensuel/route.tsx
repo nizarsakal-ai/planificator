@@ -73,7 +73,8 @@ const styles = StyleSheet.create({
 function fmt(date: Date) {
   return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long", year: "numeric" }).format(date)
 }
-function fmtShort(date: Date) {
+function fmtShort(date: Date | null) {
+  if (!date) return "À définir"
   return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short" }).format(date)
 }
 

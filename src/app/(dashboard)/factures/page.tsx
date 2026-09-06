@@ -69,8 +69,8 @@ export default async function FacturesPage() {
     id:         w.id,
     name:       w.name,
     clientName: w.client.name,
-    startDate:  dfmt.format(w.startDate),
-    endDate:    dfmt.format(w.endDate),
+    startDate:  w.startDate ? dfmt.format(w.startDate) : "À définir",
+    endDate:    w.endDate ? dfmt.format(w.endDate) : "À définir",
   }))
 
   const articles: ArticleOption[] = articlesRaw.map((a) => ({

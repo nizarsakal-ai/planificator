@@ -27,12 +27,19 @@ const statusLabels: Record<string, { label: string; variant: "default" | "second
   DELAYED:     { label: "Décalé",   variant: "destructive" },
 }
 
-function formatDate(date: Date) {
+function formatDate(date: Date | null) {
+  if (!date) return "Dates à définir"
   return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long", year: "numeric" }).format(date)
 }
 
-function formatDateShort(date: Date) {
+function formatDateShort(date: Date | null) {
+  if (!date) return "À définir"
   return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short" }).format(date)
+}
+
+function formatDateRange(start: Date | null, end: Date | null) {
+  if (!start && !end) return "Dates à définir"
+  return `${formatDate(start)} → ${formatDate(end)}`
 }
 
 export default async function ChantierDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -122,15 +129,19 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
       )
     : null
 
-  const nextRelayDate = lastCoveredDate && lastCoveredDate < chantier.endDate
-    ? new Date(lastCoveredDate.getTime() + 86400000).toISOString().split("T")[0]
-    : undefined
+  const nextRelayDate =
+    lastCoveredDate && chantier.endDate && lastCoveredDate < chantier.endDate
+      ? new Date(lastCoveredDate.getTime() + 86400000).toISOString().split("T")[0]
+      : undefined
 
   const lastCoveredDateStr = lastCoveredDate?.toISOString().split("T")[0]
 
-  // Timeline : largeur totale du chantier en jours
-  const totalMs   = chantier.endDate.getTime() - chantier.startDate.getTime() + 86400000
-  const totalDays = totalMs / 86400000
+  // Timeline : uniquement si dates chantier connues
+  const hasWorksiteDates = Boolean(chantier.startDate && chantier.endDate)
+  const totalMs = hasWorksiteDates
+    ? chantier.endDate!.getTime() - chantier.startDate!.getTime() + 86400000
+    : 0
+  const totalDays = totalMs > 0 ? totalMs / 86400000 : 0
 
   return (
     <div className="space-y-6">
@@ -178,8 +189,12 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
                       description: chantier.description ?? "",
                       address:     chantier.address     ?? "",
                       clientId:    chantier.clientId,
-                      startDate:   chantier.startDate.toISOString().split("T")[0],
-                      endDate:     chantier.endDate.toISOString().split("T")[0],
+                      startDate:   chantier.startDate
+                        ? chantier.startDate.toISOString().split("T")[0]
+                        : "",
+                      endDate:     chantier.endDate
+                        ? chantier.endDate.toISOString().split("T")[0]
+                        : "",
                       dailyHours:  chantier.dailyHours,
                     }}
                   />
@@ -195,9 +210,7 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
               )}
               <div className="flex items-center gap-2 text-sm text-slate-600">
                 <Calendar className="h-4 w-4 shrink-0 text-slate-400" />
-                <span>{formatDate(chantier.startDate)}</span>
-                <span className="text-slate-300">→</span>
-                <span>{formatDate(chantier.endDate)}</span>
+                <span>{formatDateRange(chantier.startDate, chantier.endDate)}</span>
               </div>
               <div className="flex items-center gap-2 text-sm text-slate-600">
                 <Clock className="h-4 w-4 shrink-0 text-slate-400" />
@@ -236,8 +249,16 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
                 <AffecterEquipeForm
                   worksiteId={chantier.id}
                   teams={teams}
-                  worksiteStartDate={chantier.startDate.toISOString().split("T")[0]}
-                  worksiteEndDate={chantier.endDate.toISOString().split("T")[0]}
+                  worksiteStartDate={
+                    chantier.startDate
+                      ? chantier.startDate.toISOString().split("T")[0]
+                      : ""
+                  }
+                  worksiteEndDate={
+                    chantier.endDate
+                      ? chantier.endDate.toISOString().split("T")[0]
+                      : ""
+                  }
                   nextRelayDate={nextRelayDate}
                   lastCoveredDate={lastCoveredDateStr}
                 />
@@ -254,8 +275,8 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Timeline visuelle */}
-              {assignmentBlocks.length > 0 && (
+              {/* Timeline visuelle — uniquement si plage chantier connue */}
+              {assignmentBlocks.length > 0 && hasWorksiteDates && (
                 <div className="space-y-1.5">
                   <div className="flex justify-between text-[10px] text-slate-400 px-0.5">
                     <span>{formatDateShort(chantier.startDate)}</span>
@@ -266,7 +287,7 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
                     {[...assignmentBlocks]
                       .sort((a, b) => a.startDate.getTime() - b.startDate.getTime())
                       .map((block, i) => {
-                        const left  = Math.max(0, (block.startDate.getTime() - chantier.startDate.getTime()) / (totalDays * 86400000) * 100)
+                        const left  = Math.max(0, (block.startDate.getTime() - chantier.startDate!.getTime()) / (totalDays * 86400000) * 100)
                         const width = Math.min(100 - left, (block.dayCount / totalDays) * 100)
                         return (
                           <div

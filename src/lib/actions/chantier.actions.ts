@@ -3,7 +3,12 @@
 import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
-import { createChantierSchema, updateChantierSchema, extendChantierSchema } from "@/lib/validations/chantier"
+import {
+  createChantierSchema,
+  updateChantierSchema,
+  extendChantierSchema,
+  updateDateFieldToDb,
+} from "@/lib/validations/chantier"
 import { sendAssignmentCreatedEmail, sendAssignmentConfirmedEmail, sendAssignmentRefusedEmail } from "@/lib/email"
 
 async function requireAdmin() {
@@ -117,8 +122,8 @@ export async function updateChantier(worksiteId: string, formData: FormData) {
       description: parsed.data.description || null,
       address:     parsed.data.address     || null,
       clientId:    parsed.data.clientId,
-      startDate:   new Date(parsed.data.startDate),
-      endDate:     new Date(parsed.data.endDate),
+      startDate:   updateDateFieldToDb(parsed.data.startDate),
+      endDate:     updateDateFieldToDb(parsed.data.endDate),
       dailyHours:  parsed.data.dailyHours,
       latitude,
       longitude,
@@ -171,6 +176,10 @@ export async function prolongerChantier(worksiteId: string, formData: FormData) 
     where: { id: worksiteId, companyId: user.companyId! },
   })
   if (!worksite) return { error: "Chantier introuvable." }
+
+  if (!worksite.endDate) {
+    return { error: "Impossible de prolonger : dates du chantier non définies." }
+  }
 
   const newEndDate = new Date(parsed.data.newEndDate)
   if (newEndDate <= worksite.endDate) {

@@ -14,8 +14,8 @@ interface GanttWorksite {
   id: string
   name: string
   status: string
-  startDate: Date
-  endDate: Date
+  startDate: Date | null
+  endDate: Date | null
   address: string | null
   client: { name: string }
   assignments: Assignment[]
@@ -129,6 +129,8 @@ export function GanttChart({ chantiers }: GanttChartProps) {
   }
 
   function getBarStyle(chantier: GanttWorksite) {
+    if (!chantier.startDate || !chantier.endDate) return null
+
     const start = new Date(chantier.startDate)
     start.setHours(0, 0, 0, 0)
     const end   = new Date(chantier.endDate)
@@ -352,9 +354,15 @@ export function GanttChart({ chantiers }: GanttChartProps) {
           ) : (
             <>
               <p className="text-slate-500 mt-1">
-                {new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short" }).format(tooltip.chantier.startDate)}
-                {" → "}
-                {new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short" }).format(tooltip.chantier.endDate)}
+                {!tooltip.chantier.startDate || !tooltip.chantier.endDate
+                  ? "Dates à définir"
+                  : (
+                    <>
+                      {new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short" }).format(tooltip.chantier.startDate)}
+                      {" → "}
+                      {new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short" }).format(tooltip.chantier.endDate)}
+                    </>
+                  )}
               </p>
               <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-white text-[10px] ${statusColors[tooltip.chantier.status]}`}>
                 {statusLabels[tooltip.chantier.status]}

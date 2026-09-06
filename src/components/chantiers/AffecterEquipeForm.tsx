@@ -146,8 +146,8 @@ export function AffecterEquipeForm({
           <Label className="text-xs text-slate-500">Date de début</Label>
           <Input
             type="date"
-            min={worksiteStartDate}
-            max={worksiteEndDate}
+            min={worksiteStartDate || undefined}
+            max={worksiteEndDate || undefined}
             value={dateFrom}
             onChange={(e) => {
               setDateFrom(e.target.value)
@@ -163,8 +163,8 @@ export function AffecterEquipeForm({
           </Label>
           <Input
             type="date"
-            min={dateFrom || worksiteStartDate}
-            max={worksiteEndDate}
+            min={dateFrom || worksiteStartDate || undefined}
+            max={worksiteEndDate || undefined}
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
             disabled={!dateFrom}

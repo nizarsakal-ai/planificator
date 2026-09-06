@@ -18,7 +18,8 @@ const STATUS_STYLE: Record<string, { label: string; variant: "default" | "second
   ARCHIVED:    { label: "Archivé",   variant: "secondary", color: "#374151" },
 }
 
-function formatDate(d: Date) {
+function formatDate(d: Date | null) {
+  if (!d) return "À définir"
   return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long", year: "numeric" }).format(d)
 }
 
@@ -26,7 +27,8 @@ function formatDay(d: Date) {
   return new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "2-digit", month: "long" }).format(d)
 }
 
-function progressPercent(start: Date, end: Date): number {
+function progressPercent(start: Date | null, end: Date | null): number | null {
+  if (!start || !end) return null
   const now   = Date.now()
   const s     = new Date(start).getTime()
   const e     = new Date(end).getTime()
@@ -100,7 +102,7 @@ export default async function ClientChantierDetailPage({ params }: { params: Pro
       </div>
 
       {/* Progression */}
-      {["IN_PROGRESS", "EXTENDED"].includes(chantier.status) && (
+      {["IN_PROGRESS", "EXTENDED"].includes(chantier.status) && progress != null && (
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-2">
@@ -130,9 +132,15 @@ export default async function ClientChantierDetailPage({ params }: { params: Pro
           <CardContent className="space-y-3">
             <div className="flex items-center gap-2 text-sm text-slate-600">
               <Calendar className="h-4 w-4 text-slate-400 shrink-0" />
-              <span>{formatDate(chantier.startDate)}</span>
-              <span className="text-slate-300">→</span>
-              <span>{formatDate(chantier.endDate)}</span>
+              {!chantier.startDate && !chantier.endDate ? (
+                <span>Dates à définir</span>
+              ) : (
+                <>
+                  <span>{formatDate(chantier.startDate)}</span>
+                  <span className="text-slate-300">→</span>
+                  <span>{formatDate(chantier.endDate)}</span>
+                </>
+              )}
             </div>
             <div className="flex items-center gap-2 text-sm text-slate-600">
               <Clock className="h-4 w-4 text-slate-400 shrink-0" />

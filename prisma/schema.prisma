@@ -699,8 +699,8 @@ model Worksite {
   latitude    Float?         // prévu pour une carte future
   longitude   Float?
   status      WorksiteStatus @default(PLANNED)
-  startDate   DateTime
-  endDate     DateTime
+  startDate   DateTime? // null = dates inconnues (Acquisition)
+  endDate     DateTime? // null = dates inconnues (Acquisition)
   dailyHours  Float          @default(10)   // heures de travail par journée
   clientId    String
   companyId   String
