@@ -22,8 +22,9 @@ import {
   type AcquisitionOrchestratorStepRunners,
 } from "@/lib/acquisition/orchestrator/acquisition-orchestrator.types"
 import {
-  createOrchestratorAutoCapabilityForTests,
   createPostExtractionPlaceholderRunner,
+  resolveOrchestratorAutoOwnership,
+  type OrchestratorAutoCapability,
 } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
 import { runDraftExtractionOrchestrated } from "@/lib/acquisition/extraction/extraction.service"
 import type {
@@ -162,22 +163,14 @@ describe("PLAN-ACQ-AGENTS-LOT-3C post-extraction foundations", () => {
     assert.equal(ORCHESTRATOR_STEP_KEYS.length, 8)
   })
 
-  it("4. flag OFF → hook legacy invoqué (ORCHESTRATOR_AUTO + owned)", async () => {
-    const lease = new InMemoryAcquisitionOrchestratorLeaseRepository()
-    await lease.acquire({
-      key: "acquisition-orchestrator",
-      ownerRunId: "run-hook-off",
-      leaseTtlMs: 60_000,
-    })
-    const capability = createOrchestratorAutoCapabilityForTests({
-      leaseRepository: lease,
-      ownerRunId: "run-hook-off",
-    })
+  it("4. capability forge → ownership NOT_OWNED → hook legacy jamais invoqué", async () => {
+    const forged = { not: "capability" } as unknown as OrchestratorAutoCapability
+    assert.equal(await resolveOrchestratorAutoOwnership(forged), "NOT_OWNED")
     const repo = createFakeRepo()
     let autoCalls = 0
     const result = await runDraftExtractionOrchestrated(
       { companyId: "co1", draftId: "draft1" },
-      capability,
+      forged,
       {
         repository: repo as never,
         postExtractionStepsEnabled: false,
@@ -186,27 +179,20 @@ describe("PLAN-ACQ-AGENTS-LOT-3C post-extraction foundations", () => {
         },
       }
     )
-    assert.equal(result.ok, true)
-    assert.equal(autoCalls, 1)
-    assert.equal(repo.persists.length, 1)
+    // Persist OK mais run ≠ SUCCESS (lease stolen après persist)
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.code, "LEASE_STOLEN")
+    assert.equal(autoCalls, 0)
+    assert.equal(repo.persists.length, 0)
   })
 
-  it("5. flag ON → hook legacy jamais invoqué", async () => {
-    const lease = new InMemoryAcquisitionOrchestratorLeaseRepository()
-    await lease.acquire({
-      key: "acquisition-orchestrator",
-      ownerRunId: "run-hook-on",
-      leaseTtlMs: 60_000,
-    })
-    const capability = createOrchestratorAutoCapabilityForTests({
-      leaseRepository: lease,
-      ownerRunId: "run-hook-on",
-    })
+  it("5. flag ON → hook legacy jamais invoqué (même capability forge)", async () => {
+    const forged = { not: "capability" } as unknown as OrchestratorAutoCapability
     const repo = createFakeRepo()
     let autoCalls = 0
     const result = await runDraftExtractionOrchestrated(
       { companyId: "co1", draftId: "draft1" },
-      capability,
+      forged,
       {
         repository: repo as never,
         postExtractionStepsEnabled: true,
@@ -215,9 +201,10 @@ describe("PLAN-ACQ-AGENTS-LOT-3C post-extraction foundations", () => {
         },
       }
     )
-    assert.equal(result.ok, true)
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.code, "LEASE_STOLEN")
     assert.equal(autoCalls, 0)
-    assert.equal(repo.persists.length, 1)
+    assert.equal(repo.persists.length, 0)
   })
 
   it("6. flag OFF → post steps SKIPPED/DISABLED", async () => {

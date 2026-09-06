@@ -19,6 +19,7 @@ import {
   isOrchestratorOwnershipValid,
   type OrchestratorItemOwnershipCheck,
 } from "@/lib/acquisition/orchestrator/orchestrator-ownership"
+import type { TransactionalOwnershipFence } from "@/lib/acquisition/conversion/conversion-ownership-fence.port"
 import {
   isAcquisitionAutoApproveEnabled,
   isAcquisitionAutoConvertEnabled,
@@ -27,8 +28,12 @@ import {
   evaluateAutoDecision,
   type AutoDecisionResult,
 } from "@/lib/acquisition/policy/auto-decision.policy"
-import { applyCancellationFollowUpTransactionally } from "@/lib/acquisition/policy/cancellation-followup"
 import {
+  applyCancellationFollowUpTransactionally,
+  CancellationLeaseNotOwnedError,
+} from "@/lib/acquisition/policy/cancellation-followup"
+import {
+  AcquisitionDecisionJournalRepository,
   acquisitionDecisionJournalRepository,
   buildAutoIntentIdempotencyKey,
   buildSystemActorInvalidIdempotencyKey,
@@ -36,7 +41,6 @@ import {
   parseFrozenValidationCycle,
   toFrozenValidationCycle,
   AUTO_DECISION_INTENT_CODES,
-  type AcquisitionDecisionJournalRepository,
   type AutoDecisionIntentCode,
   type FrozenValidationCycle,
   type JournalRow,
@@ -121,6 +125,8 @@ export type AutoDecisionWorkerDeps = {
     db?: PrismaClient
   ) => Promise<SystemActorResolution>
   ensureOwnership?: OrchestratorItemOwnershipCheck
+  /** LOT-3G — fence TX authentique. Obligatoire chemin AUTO. */
+  transactionalOwnershipFence?: TransactionalOwnershipFence
   now?: () => Date
   maxCandidates?: number
   maxScan?: number
@@ -587,6 +593,19 @@ export async function runAcquisitionAutoDecisionWorker(
     }
   }
 
+  if (input.ensureOwnership && !input.transactionalOwnershipFence) {
+    stats.leaseStolen++
+    return {
+      status: "FAILED",
+      skipReason: "LEASE_STOLEN",
+      error: {
+        code: "LEASE_STOLEN",
+        message: "Fence transactionnel absent",
+      },
+      stats,
+    }
+  }
+
   if (!isApproveOn()) {
     return {
       status: "SKIPPED",
@@ -629,6 +648,7 @@ export async function runAcquisitionAutoDecisionWorker(
         resolveSystemActor,
         evaluationDeps: input.evaluationDeps,
         ensureOwnership: input.ensureOwnership,
+        transactionalOwnershipFence: input.transactionalOwnershipFence,
         isConvertOn: isConvertOn(),
         isApproveOn: isApproveOn(),
         stats,
@@ -687,12 +707,14 @@ async function processCandidate(input: {
   ) => Promise<SystemActorResolution>
   evaluationDeps?: ConsultationEvaluationContextDeps
   ensureOwnership?: OrchestratorItemOwnershipCheck
+  transactionalOwnershipFence?: TransactionalOwnershipFence
   isConvertOn: boolean
   isApproveOn: boolean
   stats: AutoDecisionWorkerRunStats
   log: (event: string, payload?: Record<string, unknown>) => void
 }): Promise<{ leaseStolen?: boolean } | void> {
   const { candidate, journal, review, db, stats, log } = input
+  const fence = input.transactionalOwnershipFence
 
   if (!(await isOrchestratorOwnershipValid(input.ensureOwnership))) {
     return { leaseStolen: true }
@@ -902,8 +924,11 @@ async function processCandidate(input: {
     if (existingIntent) {
       intent = existingIntent
     } else {
-      // FINAL OWNERSHIP FENCE — aucune lecture DB entre fence et appendOnce
+      // FINAL OWNERSHIP — fence TX autour de appendOnceInTransaction (AUTO)
       if (!(await isOrchestratorOwnershipValid(input.ensureOwnership))) {
+        return { leaseStolen: true }
+      }
+      if (input.ensureOwnership && !fence) {
         return { leaseStolen: true }
       }
       const idempotencyKey = buildAutoIntentIdempotencyKey({
@@ -911,7 +936,7 @@ async function processCandidate(input: {
         draftId: candidate.draftId,
         frozen: frozenForWork,
       })
-      const appendResult = await journal.appendOnce({
+      const entry = {
         companyId: candidate.companyId,
         draftId: candidate.draftId,
         decisionCode: decision.code,
@@ -920,7 +945,34 @@ async function processCandidate(input: {
         actorUserId: systemActor.ok ? systemActor.userId : null,
         idempotencyKey,
         metadata: intentPayload,
-      })
+      }
+      let appendResult
+      if (fence) {
+        try {
+          appendResult = await db.$transaction(async (tx) => {
+            const owned = await fence.assertOwnedAndLock(tx)
+            if (owned !== "OWNED") {
+              throw Object.assign(new Error("LEASE_NOT_OWNED"), {
+                code: "LEASE_NOT_OWNED",
+              })
+            }
+            return new AcquisitionDecisionJournalRepository(
+              tx
+            ).appendOnceInTransaction(entry)
+          })
+        } catch (err) {
+          if (
+            err instanceof Error &&
+            ((err as { code?: string }).code === "LEASE_NOT_OWNED" ||
+              err.message === "LEASE_NOT_OWNED")
+          ) {
+            return { leaseStolen: true }
+          }
+          throw err
+        }
+      } else {
+        appendResult = await journal.appendOnce(entry)
+      }
       if (appendResult.outcome === "APPENDED") {
         stats.intentAppended++
       }
@@ -983,13 +1035,14 @@ async function processCandidate(input: {
           stats.leaseStolen++
           return { leaseStolen: true }
         }
-        await journal.appendOnce({
+        if (input.ensureOwnership && !fence) return { leaseStolen: true }
+        const saEntry = {
           companyId: candidate.companyId,
           draftId: candidate.draftId,
           decisionCode: "SYSTEM_ACTOR_INVALID",
           reasons: [systemActor.code, systemActor.reason],
           scores: {},
-          actorUserId: null,
+          actorUserId: null as string | null,
           idempotencyKey: buildSystemActorInvalidIdempotencyKey({
             companyId: candidate.companyId,
             draftId: candidate.draftId,
@@ -1001,7 +1054,33 @@ async function processCandidate(input: {
             systemActorCode: systemActor.code,
             systemActorReason: systemActor.reason,
           },
-        })
+        }
+        if (fence) {
+          try {
+            await db.$transaction(async (tx) => {
+              const owned = await fence.assertOwnedAndLock(tx)
+              if (owned !== "OWNED") {
+                throw Object.assign(new Error("LEASE_NOT_OWNED"), {
+                  code: "LEASE_NOT_OWNED",
+                })
+              }
+              await new AcquisitionDecisionJournalRepository(
+                tx
+              ).appendOnceInTransaction(saEntry)
+            })
+          } catch (err) {
+            if (
+              err instanceof Error &&
+              ((err as { code?: string }).code === "LEASE_NOT_OWNED" ||
+                err.message === "LEASE_NOT_OWNED")
+            ) {
+              return { leaseStolen: true }
+            }
+            throw err
+          }
+        } else {
+          await journal.appendOnce(saEntry)
+        }
       }
     }
     return
@@ -1043,11 +1122,20 @@ async function processCandidate(input: {
       stats.leaseStolen++
       return { leaseStolen: true }
     }
+    if (input.ensureOwnership && !fence) return { leaseStolen: true }
 
-    const approve = await review.approveImportDraft(actor, {
-      draftId: candidate.draftId,
-      expectedVersion: frozenForWork.validatedDraftVersion,
-    })
+    const approve = await review.approveImportDraft(
+      actor,
+      {
+        draftId: candidate.draftId,
+        expectedVersion: frozenForWork.validatedDraftVersion,
+      },
+      fence ? { transactionalOwnershipFence: fence } : undefined
+    )
+    if (!approve.ok && approve.code === "LEASE_NOT_OWNED") {
+      stats.leaseStolen++
+      return { leaseStolen: true }
+    }
     if (approve.ok) {
       stats.approved++
       log("AUTO_APPROVE_OK", {
@@ -1093,12 +1181,21 @@ async function processCandidate(input: {
       stats.leaseStolen++
       return { leaseStolen: true }
     }
+    if (input.ensureOwnership && !fence) return { leaseStolen: true }
 
-    const reject = await review.rejectImportDraft(actor, {
-      draftId: candidate.draftId,
-      expectedVersion: frozenForWork.validatedDraftVersion,
-      rejectionReason: "CANCELLED_INITIAL",
-    })
+    const reject = await review.rejectImportDraft(
+      actor,
+      {
+        draftId: candidate.draftId,
+        expectedVersion: frozenForWork.validatedDraftVersion,
+        rejectionReason: "CANCELLED_INITIAL",
+      },
+      fence ? { transactionalOwnershipFence: fence } : undefined
+    )
+    if (!reject.ok && reject.code === "LEASE_NOT_OWNED") {
+      stats.leaseStolen++
+      return { leaseStolen: true }
+    }
     if (reject.ok) {
       stats.rejected++
     } else {
@@ -1124,24 +1221,34 @@ async function processCandidate(input: {
       stats.skipped++
       return
     }
-    // Ownership fence AVANT la TX 4B uniquement — pas de lease check intra-TX après mutation.
+    // Ownership early-exit ; preuve commit = fence dans la TX 4B.
     if (!(await isOrchestratorOwnershipValid(input.ensureOwnership))) {
       stats.leaseStolen++
       return { leaseStolen: true }
     }
+    if (input.ensureOwnership && !fence) return { leaseStolen: true }
 
     const threadId = ctx?.draft.acquisitionMessage?.threadId ?? null
-    const follow = await applyCancellationFollowUpTransactionally({
-      companyId: candidate.companyId,
-      sourceDraftId: candidate.draftId,
-      threadId,
-      frozen: frozenForWork,
-      actorUserId: actor?.actorUserId ?? null,
-      db,
-      reasons: ["CONSULTATION_CANCELLED"],
-    })
-    if (follow.outcome === "APPENDED") {
-      stats.followUpApplied++
+    try {
+      const follow = await applyCancellationFollowUpTransactionally({
+        companyId: candidate.companyId,
+        sourceDraftId: candidate.draftId,
+        threadId,
+        frozen: frozenForWork,
+        actorUserId: actor?.actorUserId ?? null,
+        db,
+        reasons: ["CONSULTATION_CANCELLED"],
+        ...(fence ? { transactionalOwnershipFence: fence } : {}),
+      })
+      if (follow.outcome === "APPENDED") {
+        stats.followUpApplied++
+      }
+    } catch (err) {
+      if (err instanceof CancellationLeaseNotOwnedError) {
+        stats.leaseStolen++
+        return { leaseStolen: true }
+      }
+      throw err
     }
   }
 }

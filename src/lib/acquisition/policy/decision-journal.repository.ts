@@ -431,6 +431,54 @@ export class AcquisitionDecisionJournalRepository {
     }
   }
 
+  /**
+   * LOT-3G — append sûr dans une interactive TX déjà ouverte.
+   * Pré-lecture par clé puis create (pas de catch P2002 : abort TX sinon).
+   * Collision unique concurrente inattendue → laisse remonter.
+   */
+  async appendOnceInTransaction(
+    entry: DecisionJournalEntry
+  ): Promise<AppendOnceResult> {
+    const key = entry.idempotencyKey?.trim()
+    if (!key) {
+      throw new Error("IDEMPOTENCY_KEY_REQUIRED")
+    }
+
+    const existing = await this.findByIdempotencyKey(key)
+    if (existing) {
+      assertAppendOnceWinnerScope(entry, existing)
+      return { outcome: "ALREADY_EXISTS", row: existing }
+    }
+
+    const row = await this.db.acquisitionDecisionJournal.create({
+      data: {
+        companyId: entry.companyId,
+        draftId: entry.draftId,
+        decisionCode: entry.decisionCode,
+        reasons: entry.reasons as Prisma.InputJsonValue,
+        scores: entry.scores as Prisma.InputJsonValue,
+        actorUserId: entry.actorUserId,
+        metadata: (entry.metadata ?? undefined) as
+          | Prisma.InputJsonValue
+          | undefined,
+        idempotencyKey: key,
+      },
+      select: {
+        id: true,
+        companyId: true,
+        draftId: true,
+        decisionCode: true,
+        reasons: true,
+        scores: true,
+        actorUserId: true,
+        metadata: true,
+        createdAt: true,
+        idempotencyKey: true,
+      },
+    })
+    return { outcome: "APPENDED", row }
+  }
+
   async findByIdempotencyKey(idempotencyKey: string): Promise<JournalRow | null> {
     const row = await this.db.acquisitionDecisionJournal.findUnique({
       where: { idempotencyKey },

@@ -1046,6 +1046,9 @@ describe("PLAN-ACQ-AGENTS-LOT-3D validation worker", () => {
         ownedChecks++
         return ownedChecks < 5 ? "OWNED" : "NOT_OWNED"
       },
+      transactionalOwnershipFence: {
+        assertOwnedAndLock: async () => "OWNED",
+      },
       selection: makeEligibleSelection(
         [candidateFromDraft(draft, new Date("2026-01-01T00:00:00.000Z"))],
         journal

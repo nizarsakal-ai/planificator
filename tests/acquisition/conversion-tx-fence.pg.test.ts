@@ -12,7 +12,7 @@ import { PrismaClient } from "@prisma/client"
 import { registerIncomingMessage } from "@/lib/acquisition/acquisition.service"
 import { seedLauraluPartnerForCompany } from "./helpers/seed-lauralu-partner"
 import { ImportDraftConversionService } from "@/lib/acquisition/conversion/conversion.service"
-import { createOrchestratorLeaseTransactionalFenceForTests } from "@/lib/acquisition/orchestrator/orchestrator-lease-tx-fence"
+import { createTestOrchestratorLeaseTransactionalFence } from "./helpers/orchestrator-lease-tx-fence"
 import { PrismaAcquisitionOrchestratorLeaseRepository } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-lease.repository"
 import { ACQUISITION_ORCHESTRATOR_LEASE_KEY } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-feature-flag"
 
@@ -150,7 +150,7 @@ describe("LOT-3F — PostgreSQL conversion transactional lease fence", RUN, () =
     })
     assert.equal(acq.outcome, "ACQUIRED")
 
-    const fence = createOrchestratorLeaseTransactionalFenceForTests({
+    const fence = createTestOrchestratorLeaseTransactionalFence({
       leaseKey,
       ownerRunId: "run-a",
     })
@@ -185,7 +185,7 @@ describe("LOT-3F — PostgreSQL conversion transactional lease fence", RUN, () =
       leaseTtlMs: 60_000,
     })
 
-    const fence = createOrchestratorLeaseTransactionalFenceForTests({
+    const fence = createTestOrchestratorLeaseTransactionalFence({
       leaseKey,
       ownerRunId: "run-stale-a",
     })
@@ -229,7 +229,7 @@ describe("LOT-3F — PostgreSQL conversion transactional lease fence", RUN, () =
       releaseA = resolve
     })
 
-    const fence = createOrchestratorLeaseTransactionalFenceForTests({
+    const fence = createTestOrchestratorLeaseTransactionalFence({
       leaseKey,
       ownerRunId: "run-hold-a",
     })
@@ -316,7 +316,7 @@ describe("LOT-3F — PostgreSQL conversion transactional lease fence", RUN, () =
       SET "ownerRunId" = NULL, "leaseExpiresAt" = NULL, "acquiredAt" = NULL
       WHERE "key" = ${leaseKey}
     `
-    const fence = createOrchestratorLeaseTransactionalFenceForTests({
+    const fence = createTestOrchestratorLeaseTransactionalFence({
       leaseKey,
       ownerRunId: "run-d",
     })
@@ -347,7 +347,7 @@ describe("LOT-3F — PostgreSQL conversion transactional lease fence", RUN, () =
       leaseTtlMs: 60_000,
     })
     assert.equal(acq.outcome, "ACQUIRED")
-    const ownedFence = createOrchestratorLeaseTransactionalFenceForTests({
+    const ownedFence = createTestOrchestratorLeaseTransactionalFence({
       leaseKey,
       ownerRunId: "run-d-owned",
     })

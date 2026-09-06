@@ -100,17 +100,6 @@ function createOrchestratorAutoCapability(input: {
 }
 
 /**
- * PLAN-ACQ-AGENTS-LOT-3C — capability authentique pour tests XOR uniquement.
- * Ne pas utiliser en production (passer par runProductionAcquisitionOrchestrator).
- */
-export function createOrchestratorAutoCapabilityForTests(input: {
-  leaseRepository: AcquisitionOrchestratorLeaseRepositoryPort
-  ownerRunId: string
-}): OrchestratorAutoCapability {
-  return createOrchestratorAutoCapability(input)
-}
-
-/**
  * Autorité privée : heartbeat WeakMap uniquement.
  * Un objet { ensureOwned } n’est jamais OWNED.
  */
@@ -392,6 +381,8 @@ function createProductionStepRunners(
       })
       const result = await runAcquisitionValidationWorker({
         ensureOwnership: ownershipCheckFrom(capability),
+        transactionalOwnershipFence:
+          resolveOrchestratorAutoTransactionalFence(capability),
         maxDurationMs: clampChildBudget(remainingMs, remainingMs),
       })
       return mapChildWorkerResult(result)
@@ -407,6 +398,8 @@ function createProductionStepRunners(
       })
       const result = await runAcquisitionAutoDecisionWorker({
         ensureOwnership: ownershipCheckFrom(capability),
+        transactionalOwnershipFence:
+          resolveOrchestratorAutoTransactionalFence(capability),
         maxDurationMs: clampChildBudget(remainingMs, remainingMs),
       })
       return mapChildWorkerResult(result)

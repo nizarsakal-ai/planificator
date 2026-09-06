@@ -25,13 +25,14 @@ import {
   isOrchestratorOwnershipValid,
   type OrchestratorItemOwnershipCheck,
 } from "@/lib/acquisition/orchestrator/orchestrator-ownership"
+import type { TransactionalOwnershipFence } from "@/lib/acquisition/conversion/conversion-ownership-fence.port"
 import {
+  AcquisitionDecisionJournalRepository,
   acquisitionDecisionJournalRepository,
   buildValidationDecisionIdempotencyKey,
   parseValidationCycleIdentity,
   resolveValidationAttemptNumber,
   validationCyclesMatch,
-  type AcquisitionDecisionJournalRepository,
   type ValidationCycleIdentity,
   type ValidationDecisionCode,
   type ValidationJournalRow,
@@ -109,6 +110,8 @@ export type ValidationWorkerDeps = {
   selection?: ValidationWorkerSelectionPort
   evaluationDeps?: ConsultationEvaluationContextDeps
   ensureOwnership?: OrchestratorItemOwnershipCheck
+  /** LOT-3G — fence TX authentique (WeakMap orchestrateur). Obligatoire chemin AUTO. */
+  transactionalOwnershipFence?: TransactionalOwnershipFence
   now?: () => Date
   maxCandidates?: number
   maxScan?: number
@@ -480,6 +483,22 @@ export async function runAcquisitionValidationWorker(
     }
   }
 
+  // LOT-3G — chemin AUTO (ensureOwnership) exige fence TX.
+  if (input.ensureOwnership && !input.transactionalOwnershipFence) {
+    stats.leaseStolen++
+    return {
+      status: "FAILED",
+      skipReason: "LEASE_STOLEN",
+      error: {
+        code: "LEASE_STOLEN",
+        message: "Fence transactionnel absent",
+      },
+      stats,
+    }
+  }
+
+  const fence = input.transactionalOwnershipFence
+
   const collected = await collectEligibleValidationCandidates({
     selection,
     journal,
@@ -652,13 +671,13 @@ export async function runAcquisitionValidationWorker(
         validationAttempt,
       })
 
-      const appendResult = await journal.appendOnce({
+      const entry = {
         companyId: candidate.companyId,
         draftId: candidate.draftId,
         decisionCode,
         reasons: decision.reasons,
         scores: ctx.snapshot.confidenceData,
-        actorUserId: null,
+        actorUserId: null as string | null,
         idempotencyKey,
         metadata: {
           pipeline: "POST_EXTRACTION_STEPS",
@@ -679,7 +698,25 @@ export async function runAcquisitionValidationWorker(
               }
             : {}),
         },
-      })
+      }
+
+      let appendResult
+      if (fence) {
+        appendResult = await db.$transaction(async (tx) => {
+          const owned = await fence.assertOwnedAndLock(tx)
+          if (owned !== "OWNED") {
+            throw Object.assign(new Error("LEASE_NOT_OWNED"), {
+              code: "LEASE_NOT_OWNED",
+            })
+          }
+          return new AcquisitionDecisionJournalRepository(
+            tx
+          ).appendOnceInTransaction(entry)
+        })
+      } else {
+        appendResult = await journal.appendOnce(entry)
+      }
+
       if (appendResult.outcome === "APPENDED") {
         stats.journalAppended++
         stats.validated++
@@ -697,7 +734,24 @@ export async function runAcquisitionValidationWorker(
           decisionCode: appendResult.row.decisionCode,
           validationAttempt,
         })
-      }    } catch (err) {
+      }
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        ((err as { code?: string }).code === "LEASE_NOT_OWNED" ||
+          err.message === "LEASE_NOT_OWNED")
+      ) {
+        stats.leaseStolen++
+        return {
+          status: "PARTIAL",
+          skipReason: "LEASE_STOLEN",
+          error: {
+            code: "LEASE_STOLEN",
+            message: "Lease perdu pendant journal TX",
+          },
+          stats,
+        }
+      }
       stats.errors++
       log("VALIDATION_CANDIDATE_ERROR", {
         draftId: candidate.draftId,

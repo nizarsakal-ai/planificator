@@ -138,6 +138,7 @@ export type ApproveOutcome =
         | "NOT_FOUND"
         | "FORBIDDEN"
         | "DISABLED"
+        | "LEASE_NOT_OWNED"
       code: string
       message: string
     }
@@ -153,6 +154,7 @@ export type RejectOutcome =
         | "NOT_FOUND"
         | "FORBIDDEN"
         | "DISABLED"
+        | "LEASE_NOT_OWNED"
       code: string
       message: string
     }

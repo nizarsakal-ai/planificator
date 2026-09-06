@@ -833,6 +833,9 @@ describe("PLAN-ACQ-AGENTS-LOT-3E worker integration (mocked)", () => {
         // Fail on last fence before approve (after context)
         return ownershipChecks < 4 ? "OWNED" : "NOT_OWNED"
       },
+      transactionalOwnershipFence: {
+        assertOwnedAndLock: async () => "OWNED",
+      },
       resolveSystemActor: async () => ({
         ok: true,
         userId: "sys1",
@@ -879,11 +882,17 @@ describe("PLAN-ACQ-AGENTS-LOT-3E worker integration (mocked)", () => {
     assert.equal(result.skipReason, "LEASE_STOLEN")
   })
 
-  it("worker source: zero conversion imports", () => {
+  it("worker source: zero conversion imports métier", () => {
     const src = readFileSync(WORKER_SRC, "utf8")
-    assert.equal(/from ["']@\/lib\/acquisition\/conversion\//.test(src), false)
     assert.equal(/ImportDraftConversionService/.test(src), false)
     assert.equal(/convertImportDraft/.test(src), false)
+    // Port fence générique autorisé ; pas le service conversion.
+    assert.equal(
+      /from ["']@\/lib\/acquisition\/conversion\/(?!conversion-ownership-fence\.port)/.test(
+        src
+      ),
+      false
+    )
     assert.equal(/approveImportDraft/.test(src), true)
     assert.equal(/rejectImportDraft/.test(src), true)
     assert.equal(/applyCancellationFollowUpTransactionally/.test(src), true)
@@ -1493,6 +1502,9 @@ describe("PLAN-ACQ-AGENTS-LOT-3E CORRECTION-1", () => {
         ownership++
         // Fail on fence immediately before append (6e check typique)
         return ownership < 6 ? "OWNED" : "NOT_OWNED"
+      },
+      transactionalOwnershipFence: {
+        assertOwnedAndLock: async () => "OWNED",
       },
       resolveSystemActor: async () => ({
         ok: true,

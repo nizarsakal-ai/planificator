@@ -925,8 +925,12 @@ describe("PLAN-ACQ-012-4 fencing", () => {
         "function"
       )
       assert.equal(
-        typeof orchestratorWorkers.createOrchestratorAutoCapabilityForTests,
-        "function"
+        "createOrchestratorAutoCapabilityForTests" in orchestratorWorkers,
+        false
+      )
+      assert.equal(
+        "createOrchestratorLeaseTransactionalFenceForTests" in orchestratorWorkers,
+        false
       )
     })
 

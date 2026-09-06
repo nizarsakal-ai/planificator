@@ -14,6 +14,7 @@ import {
   type PrismaClient,
   type WorksiteImportDraftStatus,
 } from "@prisma/client"
+import type { TransactionalOwnershipFence } from "@/lib/acquisition/conversion/conversion-ownership-fence.port"
 import {
   AcquisitionDecisionJournalRepository,
   buildCancellationFollowUpIdempotencyKey,
@@ -21,6 +22,13 @@ import {
   type FrozenValidationCycle,
   type JournalRow,
 } from "@/lib/acquisition/policy/decision-journal.repository"
+
+export class CancellationLeaseNotOwnedError extends Error {
+  readonly code = "LEASE_NOT_OWNED"
+  constructor() {
+    super("LEASE_NOT_OWNED")
+  }
+}
 
 const REJECTABLE: WorksiteImportDraftStatus[] = [
   "PENDING_EXTRACTION",
@@ -337,6 +345,8 @@ async function appendCancellationJournalOnce(input: {
   actorUserId: string | null
   reasons: string[]
   follow: CancellationFollowUpResult
+  /** LOT-3G — append sans catch P2002 (TX interactive). */
+  inTransaction?: boolean
 }): Promise<CancellationFollowUpTransactionalResult> {
   const journal = new AcquisitionDecisionJournalRepository(input.db)
   const idempotencyKey = buildCancellationFollowUpIdempotencyKey({
@@ -344,7 +354,7 @@ async function appendCancellationJournalOnce(input: {
     sourceDraftId: input.sourceDraftId,
     frozen: input.frozen,
   })
-  const append = await journal.appendOnce({
+  const entry = {
     companyId: input.companyId,
     draftId: input.sourceDraftId,
     decisionCode: input.follow.journalCode,
@@ -353,7 +363,10 @@ async function appendCancellationJournalOnce(input: {
     actorUserId: input.actorUserId,
     idempotencyKey,
     metadata: journalMetadata(input.frozen, input.follow),
-  })
+  }
+  const append = input.inTransaction
+    ? await journal.appendOnceInTransaction(entry)
+    : await journal.appendOnce(entry)
   const code = append.row.decisionCode as CancellationFollowUpJournalCode
   const fromWinner =
     append.outcome === "ALREADY_EXISTS"
@@ -370,10 +383,8 @@ async function appendCancellationJournalOnce(input: {
 }
 
 /**
- * CORRECTION-4B — follow-up transactionnel :
- * advisory xact lock(companyId, threadId) → relecture → mutation → journal.
- * Mutation + journal CANCELLATION_* dans la même TX (sauf NO_LINK sans thread :
- * appendOnce atomique hors lock).
+ * CORRECTION-4B / LOT-3G — follow-up transactionnel :
+ * [fence lease FOR UPDATE?] → advisory xact lock → relecture → mutation → journal.
  */
 export async function applyCancellationFollowUpTransactionally(input: {
   companyId: string
@@ -383,11 +394,40 @@ export async function applyCancellationFollowUpTransactionally(input: {
   actorUserId: string | null
   db: PrismaClient
   reasons?: string[]
+  /** LOT-3G — fence orchestrateur (AUTO). Absent = chemin manuel / legacy. */
+  transactionalOwnershipFence?: TransactionalOwnershipFence
 }): Promise<CancellationFollowUpTransactionalResult> {
   const reasons = input.reasons ?? ["CONSULTATION_CANCELLED"]
   const threadId = input.threadId?.trim() || null
+  const fence = input.transactionalOwnershipFence
 
   if (!threadId) {
+    if (fence) {
+      try {
+        return await input.db.$transaction(async (tx) => {
+          const owned = await fence.assertOwnedAndLock(tx)
+          if (owned !== "OWNED") throw new CancellationLeaseNotOwnedError()
+          return appendCancellationJournalOnce({
+            db: tx,
+            companyId: input.companyId,
+            sourceDraftId: input.sourceDraftId,
+            frozen: input.frozen,
+            actorUserId: input.actorUserId,
+            reasons,
+            follow: {
+              linkedDraftIdsRejected: [],
+              convertedWorksiteIdsUntouched: [],
+              ambiguous: false,
+              journalCode: "CANCELLATION_NO_LINK",
+            },
+            inTransaction: true,
+          })
+        })
+      } catch (error) {
+        if (error instanceof CancellationLeaseNotOwnedError) throw error
+        throw error
+      }
+    }
     return appendCancellationJournalOnce({
       db: input.db,
       companyId: input.companyId,
@@ -408,6 +448,12 @@ export async function applyCancellationFollowUpTransactionally(input: {
 
   try {
     return await input.db.$transaction(async (tx) => {
+      // LOT-3G — ordre : lease FOR UPDATE → advisory thread → mutations.
+      if (fence) {
+        const owned = await fence.assertOwnedAndLock(tx)
+        if (owned !== "OWNED") throw new CancellationLeaseNotOwnedError()
+      }
+
       await acquireCancellationThreadAdvisoryXactLock(
         tx,
         input.companyId,
@@ -516,6 +562,7 @@ export async function applyCancellationFollowUpTransactionally(input: {
       }
     })
   } catch (error) {
+    if (error instanceof CancellationLeaseNotOwnedError) throw error
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"

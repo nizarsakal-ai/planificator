@@ -31,11 +31,3 @@ export function createOrchestratorLeaseTransactionalFence(input: {
     },
   }
 }
-
-/** Tests uniquement — même implémentation, nom explicite. */
-export function createOrchestratorLeaseTransactionalFenceForTests(input: {
-  leaseKey: string
-  ownerRunId: string
-}): ConversionTransactionalOwnershipFence {
-  return createOrchestratorLeaseTransactionalFence(input)
-}
