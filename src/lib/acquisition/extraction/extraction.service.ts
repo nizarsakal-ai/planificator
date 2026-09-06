@@ -19,6 +19,7 @@ import {
 import { isExtractionProviderError } from "@/lib/acquisition/extraction/extraction-provider.errors"
 import type { ExtractionProviderPort } from "@/lib/acquisition/extraction/extraction-provider.port"
 import { resolveExtractionProvider } from "@/lib/acquisition/extraction/extraction-provider.factory"
+import { classifyWorkPeriod } from "@/lib/acquisition/policy/work-period-classification"
 import {
   DraftExtractionRepository,
   draftExtractionRepository,
@@ -543,12 +544,21 @@ async function runDraftExtractionCore(
       )
     }
 
+    const postExtractStart = normalized.fields.requestedStartDate
+      ? new Date(`${normalized.fields.requestedStartDate}T00:00:00.000Z`)
+      : null
+    const postExtractEnd = normalized.fields.requestedEndDate
+      ? new Date(`${normalized.fields.requestedEndDate}T00:00:00.000Z`)
+      : null
+    const workPeriod = classifyWorkPeriod(postExtractStart, postExtractEnd, completedAt)
+    const successStatus = workPeriod === "OBSOLETE" ? ("OBSOLETE" as const) : ("PENDING_REVIEW" as const)
+
     const persistOutcome = await repository.persistExtraction({
       companyId,
       draftId: draft.id,
       expectedVersion: claimVersion,
       expectedContentHash: contentHashAtClaim,
-      status: "PENDING_REVIEW",
+      status: successStatus,
       fields: normalized.fields,
       confidenceData: normalized.confidenceData,
       warningData: gate.warnings,
@@ -573,21 +583,24 @@ async function runDraftExtractionCore(
       draftId: draft.id,
       hashPrefix: contentHashPrefix(contentHashAtClaim),
       warningCount: gate.warnings.length,
+      workPeriod,
+      status: successStatus,
     })
 
     const extractedResult: ExtractDraftResult = {
       ok: true,
       outcome: "EXTRACTED",
       draftId: draft.id,
-      status: "PENDING_REVIEW",
+      status: successStatus,
       contentHashAtExtraction: contentHashAtClaim,
       warningCount: gate.warnings.length,
     }
 
     // AUTO : uniquement ORCHESTRATOR_AUTO + ownership encore valide.
+    // OBSOLETE : jamais d’auto-decision (pas d’auto-approve / conversion).
     // Perte de lease après persist : mutation conservée, run ≠ SUCCESS.
     // LOT-3C XOR : postExtractionStepsEnabled=true ⇒ hook legacy interdit.
-    if (isOrchestratorAutoContext(executionContext)) {
+    if (successStatus === "PENDING_REVIEW" && isOrchestratorAutoContext(executionContext)) {
       if (await ensureOrchestratorOwned(executionContext)) {
         const postSteps = Boolean(deps.postExtractionStepsEnabled)
         if (!postSteps) {
@@ -603,13 +616,13 @@ async function runDraftExtractionCore(
             log,
           })
           if (hookOutcome === "LEASE_STOLEN") {
-            return failLeaseStolen(draft.id, { status: "PENDING_REVIEW" })
+            return failLeaseStolen(draft.id, { status: successStatus })
           }
         }
         return extractedResult
       }
       log("AUTO_DECISION_SKIPPED_LEASE_STOLEN", { draftId: draft.id })
-      return failLeaseStolen(draft.id, { status: "PENDING_REVIEW" })
+      return failLeaseStolen(draft.id, { status: successStatus })
     }
 
     return extractedResult

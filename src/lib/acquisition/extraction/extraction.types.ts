@@ -87,7 +87,7 @@ export type ExtractionSuccessResult = {
   ok: true
   outcome: "EXTRACTED" | "ALREADY_EXTRACTED"
   draftId: string
-  status: "PENDING_REVIEW"
+  status: "PENDING_REVIEW" | "OBSOLETE"
   contentHashAtExtraction: string
   warningCount: number
 }

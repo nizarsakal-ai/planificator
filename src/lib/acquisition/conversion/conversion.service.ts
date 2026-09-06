@@ -29,6 +29,7 @@ import {
   findDuplicateWorksite,
   normalizeAddressKey,
 } from "@/lib/acquisition/matching/client-match.service"
+import { classifyWorkPeriod } from "@/lib/acquisition/policy/work-period-classification"
 
 const LOG_PREFIX = "[acquisition-conversion]"
 const ALLOWED_ROLES = new Set<Role>(["ADMIN", "SUPER_ADMIN"])
@@ -42,6 +43,7 @@ export type ImportDraftConversionServiceDeps = {
   db?: PrismaClient
   log?: (event: string, payload?: Record<string, unknown>) => void
   geocode?: GeocodePort
+  now?: () => Date
 }
 
 function authorize(
@@ -119,11 +121,13 @@ export class ImportDraftConversionService {
   private readonly db: PrismaClient
   private readonly log: (event: string, payload?: Record<string, unknown>) => void
   private readonly geocode: GeocodePort
+  private readonly now: () => Date
 
   constructor(deps: ImportDraftConversionServiceDeps = {}) {
     this.db = deps.db ?? prisma
     this.log = deps.log ?? defaultLog
     this.geocode = deps.geocode ?? defaultGeocodePort
+    this.now = deps.now ?? (() => new Date())
   }
 
   async convertImportDraft(
@@ -253,6 +257,22 @@ export class ImportDraftConversionService {
           draft.proposedStartDate! > draft.proposedEndDate!
         ) {
           throw Object.assign(new Error("DATE_RANGE_INVALID"), { code: "VALIDATION_ERROR" })
+        }
+        // Verrou final : recalcul depuis dates persistées (résiste à APPROVED devenu obsolète).
+        const workPeriod = classifyWorkPeriod(
+          draft.proposedStartDate,
+          draft.proposedEndDate,
+          this.now()
+        )
+        if (workPeriod === "OBSOLETE") {
+          throw Object.assign(new Error("WORK_PERIOD_OBSOLETE"), {
+            code: "WORK_PERIOD_OBSOLETE",
+          })
+        }
+        if (workPeriod === "INVALID") {
+          throw Object.assign(new Error("DATE_RANGE_INVALID"), {
+            code: "DATE_RANGE_INVALID",
+          })
         }
 
         const addressKey = normalizeAddressKey({
@@ -464,7 +484,7 @@ export class ImportDraftConversionService {
           ...(existingWorksiteId ? { existingWorksiteId } : {}),
         }
       }
-      if (code === "VALIDATION_ERROR" || code === "MISSING_WORKSITE_NAME" || code === "MISSING_DATES" || code === "DATE_RANGE_INVALID") {
+      if (code === "VALIDATION_ERROR" || code === "MISSING_WORKSITE_NAME" || code === "MISSING_DATES" || code === "DATE_RANGE_INVALID" || code === "WORK_PERIOD_OBSOLETE") {
         return fail("VALIDATION_ERROR", code || "VALIDATION_ERROR", "Données de conversion invalides")
       }
 

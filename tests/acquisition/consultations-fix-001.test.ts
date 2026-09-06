@@ -41,6 +41,7 @@ function fields(over: Partial<ExtractionCanonicalFields> = {}): ExtractionCanoni
     city: null,
     requestedStartDate: null,
     requestedEndDate: null,
+        clientConsultationDate: null,
     consultationReference: null,
     description: null,
     attachmentClassifications: [],
@@ -1221,6 +1222,7 @@ describe("FIX-002B — résolution année ISO fail-closed depuis receivedAt", ()
         requestedWeekNumber: 36,
         requestedStartDate: "2026-08-25",
         requestedEndDate: null,
+        clientConsultationDate: null,
       }),
       { subject: "S36", body: "S36", receivedAt }
     )

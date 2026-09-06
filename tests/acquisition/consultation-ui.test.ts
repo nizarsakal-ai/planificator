@@ -4,6 +4,7 @@ import { describe, it } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import {
+  CONSULTATION_STATUS_LABELS,
   getConsultationUiActions,
   getReExtractPolicy,
   mapWarningDataToPublicView,
@@ -41,6 +42,17 @@ describe("consultation-ui helpers", () => {
     assert.equal(a.canEdit, false)
     assert.equal(a.canSave, false)
     assert.equal(a.canReExtract, false)
+  })
+
+  it("matrice OBSOLETE — aucun CTA approve/re-extract ; label Obsolète", () => {
+    const a = getConsultationUiActions("OBSOLETE")
+    assert.equal(a.canEdit, false)
+    assert.equal(a.canSave, false)
+    assert.equal(a.canApprove, false)
+    assert.equal(a.canReject, false)
+    assert.equal(a.canReExtract, false)
+    assert.equal(getReExtractPolicy("OBSOLETE").allowed, false)
+    assert.equal(CONSULTATION_STATUS_LABELS.OBSOLETE, "Obsolète")
   })
 
   it("re-extract disabled si flag extraction OFF", () => {
@@ -120,6 +132,7 @@ describe("consultation-ui helpers", () => {
       proposedCity: "Lyon",
       proposedStartDate: new Date("2026-10-01T00:00:00.000Z"),
       proposedEndDate: new Date("2026-10-05T00:00:00.000Z"),
+      clientConsultationDate: null,
       proposedDescription: null,
       proposedContactName: "Bob",
       proposedContactEmail: null,

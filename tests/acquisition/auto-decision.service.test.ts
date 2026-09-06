@@ -115,6 +115,8 @@ function emptyRegistry(
 
 describe("maybeRunAutoDecisionAfterExtraction R3", () => {
   const env = { ...process.env }
+  /** Avant les dates fixture août 2026 → FUTURE (tests indépendants du mur). */
+  const REFERENCE_INSTANT = new Date("2026-07-15T12:00:00.000Z")
   let journalEntries: DecisionJournalEntry[]
   let approveCalls: number
   let convertCalls: number
@@ -142,6 +144,8 @@ describe("maybeRunAutoDecisionAfterExtraction R3", () => {
     duplicate?: boolean
     clientAmbiguous?: boolean
     systemOk?: boolean
+    /** Override clock (défaut : avant plage fixture). */
+    referenceInstant?: Date
   }) {
     const p = opts.partner === undefined ? partner() : opts.partner
     return {
@@ -185,6 +189,7 @@ describe("maybeRunAutoDecisionAfterExtraction R3", () => {
           ? { clientId: null, matchKind: "NAME" as const, ambiguous: true }
           : { clientId: "c1", matchKind: "PROPOSED_ID" as const, ambiguous: false },
       log: () => {},
+      referenceInstant: opts.referenceInstant ?? REFERENCE_INSTANT,
     }
   }
 
@@ -357,5 +362,35 @@ describe("maybeRunAutoDecisionAfterExtraction R3", () => {
     assert.equal(convertCalls, 1)
     assert.equal(draft.status, "CONVERTED")
     assert.ok(journalEntries.some((j) => j.decisionCode === "AUTO_APPROVE_CONVERT"))
+  })
+
+  it("TEMPORAL — période OBSOLETE (clock injectée) → HUMAN_REVIEW, aucune mutation", async () => {
+    await maybeRunAutoDecisionAfterExtraction({
+      companyId: "co1",
+      draftId: "d1",
+      deps: deps({
+        // Après endDate fixture 2026-08-05 → OBSOLETE
+        referenceInstant: new Date("2026-09-06T12:00:00.000Z"),
+      }),
+    })
+    assert.equal(approveCalls, 0)
+    assert.equal(convertCalls, 0)
+    assert.equal(draft.status, "PENDING_REVIEW")
+    assert.ok(journalEntries.some((j) => j.decisionCode === "HUMAN_REVIEW_REQUIRED"))
+    assert.ok(
+      journalEntries.some((j) => j.reasons.includes("WORK_PERIOD_OBSOLETE"))
+    )
+  })
+
+  it("TEMPORAL — status OBSOLETE → early return, aucun journal ni approve", async () => {
+    draft = baseDraft({ status: "OBSOLETE" })
+    await maybeRunAutoDecisionAfterExtraction({
+      companyId: "co1",
+      draftId: "d1",
+      deps: deps({}),
+    })
+    assert.equal(approveCalls, 0)
+    assert.equal(convertCalls, 0)
+    assert.equal(journalEntries.length, 0)
   })
 })

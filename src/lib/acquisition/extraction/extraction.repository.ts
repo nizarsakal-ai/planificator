@@ -59,7 +59,7 @@ export type PersistExtractionInput = {
   expectedVersion: number
   /** Hash figé au claim — vérifié atomiquement dans la TX. */
   expectedContentHash: string
-  status: "PENDING_REVIEW" | "FAILED"
+  status: "PENDING_REVIEW" | "FAILED" | "OBSOLETE"
   fields: ExtractionCanonicalFields
   confidenceData: Record<string, number>
   warningData: ExtractionWarning[]
@@ -196,6 +196,9 @@ export class DraftExtractionRepository {
     const endDate = fields.requestedEndDate
       ? new Date(`${fields.requestedEndDate}T00:00:00.000Z`)
       : null
+    const clientConsultationDate = fields.clientConsultationDate
+      ? new Date(`${fields.clientConsultationDate}T00:00:00.000Z`)
+      : null
 
     return this.db.$transaction(async (tx) => {
       const draftLite = await tx.worksiteImportDraft.findFirst({
@@ -252,6 +255,7 @@ export class DraftExtractionRepository {
           proposedContactPhone: fields.contactPhone,
           proposedStartDate: startDate,
           proposedEndDate: endDate,
+          clientConsultationDate,
           proposedDescription: fields.description,
           extractedData: input.extractedData as Prisma.InputJsonValue,
           confidenceData: input.confidenceData as Prisma.InputJsonValue,

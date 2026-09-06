@@ -151,6 +151,7 @@ function toCanonicalFields(
     city: snap.city,
     requestedStartDate: snap.requestedStartDate,
     requestedEndDate: snap.requestedEndDate,
+    clientConsultationDate: null,
     consultationReference: snap.consultationReference ?? null,
     description: null,
     attachmentClassifications: [],

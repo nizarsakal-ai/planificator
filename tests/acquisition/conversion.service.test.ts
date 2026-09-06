@@ -715,4 +715,54 @@ describe("ImportDraftConversionService", () => {
     if (!r.ok) assert.equal(r.outcome, "VALIDATION_ERROR")
     assert.equal(db.worksites.length, 0)
   })
+
+  it("TEMPORAL — draft OBSOLETE (dates passées) → aucun Worksite", async () => {
+    const db = createFakeDb({
+      draft: baseDraft({
+        status: "APPROVED",
+        proposedStartDate: new Date("2026-08-01T00:00:00.000Z"),
+        proposedEndDate: new Date("2026-08-10T00:00:00.000Z"),
+      }),
+      clients: [{ id: "c1", companyId: "co1" }],
+    })
+    const svc = new ImportDraftConversionService({
+      db: db as never,
+      now: () => new Date("2026-09-06T12:00:00.000Z"),
+    })
+    const r = await svc.convertImportDraft(admin, {
+      draftId: "d1",
+      expectedVersion: 2,
+      clientMode: "EXISTING",
+      existingClientId: "c1",
+    })
+    assert.equal(r.ok, false)
+    if (!r.ok) {
+      assert.equal(r.outcome, "VALIDATION_ERROR")
+      assert.equal(r.code, "WORK_PERIOD_OBSOLETE")
+    }
+    assert.equal(db.worksites.length, 0)
+  })
+
+  it("TEMPORAL — APPROVED devenu temporellement obsolète → aucun Worksite", async () => {
+    const db = createFakeDb({
+      draft: baseDraft({
+        proposedStartDate: new Date("2026-09-01T00:00:00.000Z"),
+        proposedEndDate: new Date("2026-09-05T00:00:00.000Z"),
+      }),
+      clients: [{ id: "c1", companyId: "co1" }],
+    })
+    const svc = new ImportDraftConversionService({
+      db: db as never,
+      now: () => new Date("2026-09-06T12:00:00.000Z"),
+    })
+    const r = await svc.convertImportDraft(admin, {
+      draftId: "d1",
+      expectedVersion: 2,
+      clientMode: "EXISTING",
+      existingClientId: "c1",
+    })
+    assert.equal(r.ok, false)
+    if (!r.ok) assert.equal(r.code, "WORK_PERIOD_OBSOLETE")
+    assert.equal(db.worksites.length, 0)
+  })
 })

@@ -33,6 +33,7 @@ const CANONICAL_KEYS = [
   "city",
   "requestedStartDate",
   "requestedEndDate",
+  "clientConsultationDate",
   "consultationReference",
   "description",
   "attachmentClassifications",

@@ -416,4 +416,40 @@ describe("ImportDraftReviewService", () => {
     assert.equal(r.ok, false)
     if (!r.ok) assert.equal(r.outcome, "DISABLED")
   })
+
+  it("TEMPORAL — période OBSOLETE refusée", async () => {
+    const db = createFakeDb(
+      baseDraft({
+        proposedStartDate: new Date("2026-08-01T00:00:00.000Z"),
+        proposedEndDate: new Date("2026-08-15T00:00:00.000Z"),
+      })
+    )
+    const svc = new ImportDraftReviewService({
+      db: db as never,
+      now: () => new Date("2026-09-06T12:00:00.000Z"),
+    })
+    const r = await svc.approveImportDraft(admin, { draftId: "d1", expectedVersion: 1 })
+    assert.equal(r.ok, false)
+    if (!r.ok) assert.equal(r.code, "WORK_PERIOD_OBSOLETE")
+  })
+
+  it("TEMPORAL — UNKNOWN_DATES autorisé si autres règles OK", async () => {
+    const db = createFakeDb(
+      baseDraft({ proposedStartDate: null, proposedEndDate: null })
+    )
+    const svc = new ImportDraftReviewService({
+      db: db as never,
+      now: () => new Date("2026-09-06T12:00:00.000Z"),
+    })
+    const r = await svc.approveImportDraft(admin, { draftId: "d1", expectedVersion: 1 })
+    assert.equal(r.ok, true)
+  })
+
+  it("TEMPORAL — status OBSOLETE → INVALID_STATE", async () => {
+    const db = createFakeDb(baseDraft({ status: "OBSOLETE" }))
+    const svc = new ImportDraftReviewService({ db: db as never })
+    const r = await svc.approveImportDraft(admin, { draftId: "d1", expectedVersion: 1 })
+    assert.equal(r.ok, false)
+    if (!r.ok) assert.equal(r.outcome, "INVALID_STATE")
+  })
 })
