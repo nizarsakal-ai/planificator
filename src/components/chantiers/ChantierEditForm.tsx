@@ -88,15 +88,15 @@ export function ChantierEditForm({ worksiteId, defaultValues, clients }: Props) 
         <Input name="address" defaultValue={defaultValues.address} placeholder="Adresse du chantier" className="h-8 text-sm" />
       </div>
 
-      {/* Dates */}
+      {/* Dates — optionnelles (NULL/NULL = dates inconnues ; paire partielle refusée côté serveur) */}
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1">
-          <Label className="text-xs text-slate-600">Début *</Label>
-          <Input name="startDate" type="date" defaultValue={defaultValues.startDate} required className="h-8 text-sm" />
+          <Label className="text-xs text-slate-600">Début</Label>
+          <Input name="startDate" type="date" defaultValue={defaultValues.startDate} className="h-8 text-sm" />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs text-slate-600">Fin *</Label>
-          <Input name="endDate" type="date" defaultValue={defaultValues.endDate} required className="h-8 text-sm" />
+          <Label className="text-xs text-slate-600">Fin</Label>
+          <Input name="endDate" type="date" defaultValue={defaultValues.endDate} className="h-8 text-sm" />
         </div>
       </div>
 

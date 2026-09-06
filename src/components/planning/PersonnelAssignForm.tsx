@@ -12,8 +12,8 @@ import { affecterEquipe } from "@/lib/actions/chantier.actions"
 interface WorksiteOption {
   id: string
   name: string
-  startDate: string
-  endDate: string
+  startDate: string | null
+  endDate: string | null
 }
 
 interface Props {
@@ -101,10 +101,15 @@ export function PersonnelAssignForm({ teamId, teamName, worksites, defaultDate }
             setWorksiteId(e.target.value)
             const ws = worksites.find((w) => w.id === e.target.value)
             if (ws) {
-              setDateFrom(defaultDate >= ws.startDate && defaultDate <= ws.endDate
-                ? defaultDate
-                : ws.startDate
-              )
+              if (ws.startDate && ws.endDate) {
+                setDateFrom(
+                  defaultDate >= ws.startDate && defaultDate <= ws.endDate
+                    ? defaultDate
+                    : ws.startDate
+                )
+              } else {
+                setDateFrom(defaultDate)
+              }
               setDateTo("")
             }
           }}
@@ -125,8 +130,8 @@ export function PersonnelAssignForm({ teamId, teamName, worksites, defaultDate }
           <Input
             type="date"
             value={dateFrom}
-            min={selectedWorksite?.startDate}
-            max={selectedWorksite?.endDate}
+            min={selectedWorksite?.startDate ?? undefined}
+            max={selectedWorksite?.endDate ?? undefined}
             onChange={(e) => {
               setDateFrom(e.target.value)
               if (dateTo && e.target.value > dateTo) setDateTo("")
@@ -140,8 +145,8 @@ export function PersonnelAssignForm({ teamId, teamName, worksites, defaultDate }
           <Input
             type="date"
             value={dateTo}
-            min={dateFrom || selectedWorksite?.startDate}
-            max={selectedWorksite?.endDate}
+            min={dateFrom || selectedWorksite?.startDate || undefined}
+            max={selectedWorksite?.endDate ?? undefined}
             onChange={(e) => setDateTo(e.target.value)}
             disabled={!dateFrom}
             className="h-8 text-xs"

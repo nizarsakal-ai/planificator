@@ -22,8 +22,8 @@ export const metadata: Metadata = { title: "Personnel disponible" }
 interface WorksiteOption {
   id: string
   name: string
-  startDate: string
-  endDate: string
+  startDate: string | null
+  endDate: string | null
 }
 
 interface TeamMemberData {
@@ -300,8 +300,8 @@ export default async function PersonnelDisponiblePage({
   const worksites: WorksiteOption[] = rawWorksites.map((w) => ({
     id: w.id,
     name: w.name,
-    startDate: w.startDate.toISOString().split("T")[0],
-    endDate: w.endDate.toISOString().split("T")[0],
+    startDate: w.startDate ? w.startDate.toISOString().split("T")[0] : null,
+    endDate: w.endDate ? w.endDate.toISOString().split("T")[0] : null,
   }))
 
   const available = teams.filter((t) => t.assignments.length === 0)

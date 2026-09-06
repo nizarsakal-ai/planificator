@@ -91,9 +91,12 @@ export function evaluateAutoDecisionRules(
   const name = input.worksiteName?.trim() ?? ""
   if (!name) reasons.push("MISSING_WORKSITE_NAME")
 
-  if (!input.startDate || !input.endDate) {
+  // PROVIDENCE-DATES-002 — UNKNOWN (null/null) ≠ INVALID (partielle ou inversée).
+  const hasStart = input.startDate != null
+  const hasEnd = input.endDate != null
+  if (hasStart !== hasEnd) {
     reasons.push("INVALID_DATES")
-  } else if (input.startDate > input.endDate) {
+  } else if (hasStart && hasEnd && input.startDate! > input.endDate!) {
     reasons.push("INVALID_DATES")
   }
 
@@ -143,11 +146,10 @@ export function evaluateAutoDecisionRules(
     reasons.push("BLOCKING_WARNINGS")
   }
 
-  const requiredConfKeys = [
-    "worksiteName",
-    "requestedStartDate",
-    "requestedEndDate",
-  ] as const
+  const requiredConfKeys =
+    hasStart && hasEnd
+      ? (["worksiteName", "requestedStartDate", "requestedEndDate"] as const)
+      : (["worksiteName"] as const)
   for (const key of requiredConfKeys) {
     const c = input.confidenceData[key]
     if (c == null || c < min) {

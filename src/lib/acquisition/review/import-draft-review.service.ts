@@ -333,15 +333,22 @@ export class ImportDraftReviewService {
         message: "Le nom du chantier est obligatoire",
       }
     }
-    if (!draft.proposedStartDate || !draft.proposedEndDate) {
+    // PROVIDENCE-DATES-002 — null/null admissible ; partielle / inversée refusée.
+    const hasStart = draft.proposedStartDate != null
+    const hasEnd = draft.proposedEndDate != null
+    if (hasStart !== hasEnd) {
       return {
         ok: false,
         outcome: "VALIDATION_ERROR",
         code: "MISSING_DATES",
-        message: "Les dates de début et de fin sont obligatoires",
+        message: "Les dates de début et de fin doivent être toutes deux renseignées ou toutes deux absentes",
       }
     }
-    if (toYmd(draft.proposedStartDate) > toYmd(draft.proposedEndDate)) {
+    if (
+      hasStart &&
+      hasEnd &&
+      toYmd(draft.proposedStartDate!) > toYmd(draft.proposedEndDate!)
+    ) {
       return {
         ok: false,
         outcome: "VALIDATION_ERROR",

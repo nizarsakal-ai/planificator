@@ -241,10 +241,17 @@ export class ImportDraftConversionService {
             code: "VALIDATION_ERROR",
           })
         }
-        if (!draft.proposedStartDate || !draft.proposedEndDate) {
+        // PROVIDENCE-DATES-002 — null/null → Worksite sans dates ; partielle/inversée refusée.
+        const hasStart = draft.proposedStartDate != null
+        const hasEnd = draft.proposedEndDate != null
+        if (hasStart !== hasEnd) {
           throw Object.assign(new Error("MISSING_DATES"), { code: "VALIDATION_ERROR" })
         }
-        if (draft.proposedStartDate > draft.proposedEndDate) {
+        if (
+          hasStart &&
+          hasEnd &&
+          draft.proposedStartDate! > draft.proposedEndDate!
+        ) {
           throw Object.assign(new Error("DATE_RANGE_INVALID"), { code: "VALIDATION_ERROR" })
         }
 

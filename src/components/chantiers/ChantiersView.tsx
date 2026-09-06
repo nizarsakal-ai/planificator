@@ -26,8 +26,8 @@ interface Chantier {
   status: string
   latitude: number | null
   longitude: number | null
-  startDate: Date
-  endDate: Date
+  startDate: Date | null
+  endDate: Date | null
   client: { name: string }
   _count: { assignments: number }
   assignments: { teamId: string; team: TeamInfo }[]
@@ -100,8 +100,14 @@ const statusLabels: Record<string, { label: string; variant: "default" | "second
   DELAYED:     { label: "Décalé",        variant: "destructive" },
 }
 
-function formatDate(date: Date) {
+function formatDate(date: Date | null) {
+  if (!date) return "À définir"
   return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", year: "numeric" }).format(date)
+}
+
+function formatDateRange(start: Date | null, end: Date | null) {
+  if (!start && !end) return "Dates à définir"
+  return `${formatDate(start)} → ${formatDate(end)}`
 }
 
 export function ChantiersView({ chantiers }: ChantiersViewProps) {
@@ -218,7 +224,7 @@ export function ChantiersView({ chantiers }: ChantiersViewProps) {
                     {/* Date */}
                     <div className="flex items-center gap-1.5 text-xs text-slate-500">
                       <Calendar className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                      <span className="truncate">{formatDate(chantier.startDate)} → {formatDate(chantier.endDate)}</span>
+                      <span className="truncate">{formatDateRange(chantier.startDate, chantier.endDate)}</span>
                     </div>
                     {/* Client */}
                     <p className="text-sm text-slate-600 truncate">{chantier.client.name}</p>
@@ -311,7 +317,7 @@ export function ChantiersView({ chantiers }: ChantiersViewProps) {
                       )}
                       <div className="flex items-center gap-2 text-xs text-slate-500">
                         <Calendar className="h-3.5 w-3.5 shrink-0" />
-                        {formatDate(chantier.startDate)} → {formatDate(chantier.endDate)}
+                        {formatDateRange(chantier.startDate, chantier.endDate)}
                       </div>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 text-xs text-slate-500">

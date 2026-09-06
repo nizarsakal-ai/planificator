@@ -17,7 +17,8 @@ const STATUS_STYLE: Record<string, { label: string; variant: "default" | "second
   ARCHIVED:    { label: "Archivé",   variant: "secondary" },
 }
 
-function formatDate(d: Date) {
+function formatDate(d: Date | null) {
+  if (!d) return "À définir"
   return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long", year: "numeric" }).format(d)
 }
 
