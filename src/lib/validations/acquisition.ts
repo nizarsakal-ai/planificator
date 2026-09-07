@@ -49,6 +49,11 @@ export const registerIncomingMessageSchema = z.object({
   companyId: z.string().min(1, "companyId requis"),
   source: z.enum(["GMAIL"]),
   externalMessageId: z.string().min(1, "Identifiant externe requis").max(255),
+  /**
+   * Identité boîte stable (AcquisitionGmailConnection.id).
+   * Défaut "" = legacy mono-boîte.
+   */
+  sourceMailboxKey: z.string().max(64).default(""),
   /** Gmail thread id (Lot H) — optionnel. */
   threadId: z.string().min(1).max(255).nullish(),
   /**

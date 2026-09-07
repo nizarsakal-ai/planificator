@@ -2,7 +2,10 @@ import type { PrismaClient } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 
 export interface GmailConnectionListingPort {
-  /** Tenants possédant une ligne gmail_connections (V1 — pas de filtre tokenExpiry). */
+  /**
+   * @deprecated PLAN-ACQ-MULTI-GMAIL-001 — Acquisition lit acquisition_gmail_connections.
+   * Conservé pour tests legacy / audit ; ne pas brancher le pipeline Acquisition.
+   */
   listCompanyIdsWithGmailConnection(): Promise<string[]>
 }
 

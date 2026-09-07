@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import type { PrismaClient } from "@prisma/client"
 import { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
 import type { AcquisitionAttachmentRepositoryPort } from "@/lib/acquisition/attachments/acquisition-attachment.repository"
 import { acquisitionAttachmentRepository } from "@/lib/acquisition/attachments/acquisition-attachment.repository"
@@ -16,6 +17,8 @@ import { gmailAttachmentSource } from "@/lib/acquisition/attachments/gmail-attac
 import { getAttachmentRecoveryCronConfig } from "@/lib/acquisition/attachments/attachment-recovery-cron-feature-flag"
 import { isRetryableAttachmentErrorCode } from "@/lib/acquisition/attachments/attachment-retry.policy"
 import { computeRetrySchedule } from "@/lib/acquisition/attachments/attachment-retry-schedule"
+import { resolveAcquisitionMailboxForMessage } from "@/lib/acquisition/connector/resolve-acquisition-mailbox"
+import { prisma } from "@/lib/prisma"
 import type {
   AttachmentDownloadErrorCode,
   AttachmentDownloadResult,
@@ -35,6 +38,7 @@ export interface DownloadAcquisitionAttachmentInput {
 }
 
 export interface AttachmentDownloadServiceDeps {
+  db?: PrismaClient
   repository?: AcquisitionAttachmentRepositoryPort
   gmailSource?: GmailAttachmentSourcePort
   storage?: AttachmentStoragePort
@@ -196,6 +200,7 @@ export async function downloadAcquisitionAttachment(
   input: DownloadAcquisitionAttachmentInput,
   deps: AttachmentDownloadServiceDeps = {}
 ): Promise<AttachmentDownloadResult> {
+  const db = deps.db ?? prisma
   const repository = deps.repository ?? acquisitionAttachmentRepository
   const gmailSource = deps.gmailSource ?? gmailAttachmentSource
   const storage = deps.storage ?? cloudinaryAttachmentStorage
@@ -277,12 +282,26 @@ export async function downloadAcquisitionAttachment(
     return failureResult(input.attachmentId, "GMAIL_ATTACHMENT_NOT_FOUND")
   }
 
+  const mailbox = await resolveAcquisitionMailboxForMessage(
+    {
+      companyId: input.companyId,
+      sourceMailboxKey: scoped.message.sourceMailboxKey,
+    },
+    db
+  )
+  if (!mailbox.ok) {
+    await markFail("FAILED", mailbox.code)
+    log("DOWNLOAD_FAILED", { attachmentId: input.attachmentId, errorCode: mailbox.code })
+    return failureResult(input.attachmentId, mailbox.code)
+  }
+
   let binary: Buffer
   try {
     const fetched = await gmailSource.fetchAttachment({
       companyId: input.companyId,
       externalMessageId: scoped.message.externalMessageId,
       externalAttachmentId: claimed.externalAttachmentId,
+      connectionId: mailbox.connectionId,
     })
     binary = fetched.data
   } catch (error) {
@@ -388,6 +407,7 @@ function safeErrorCode(error: unknown, fallback: AttachmentDownloadErrorCode): A
     const allowed: AttachmentDownloadErrorCode[] = [
       "GMAIL_ATTACHMENT_NOT_FOUND",
       "GMAIL_NOT_CONNECTED",
+      "LEGACY_MAILBOX_AMBIGUOUS",
       "ATTACHMENT_DECODE_FAILED",
     ]
     if (allowed.includes(code)) return code
@@ -402,6 +422,7 @@ function safePersistedErrorCode(code: string | null): AttachmentDownloadErrorCod
     "ATTACHMENT_STORAGE_COLLISION",
     "GMAIL_ATTACHMENT_NOT_FOUND",
     "GMAIL_NOT_CONNECTED",
+    "LEGACY_MAILBOX_AMBIGUOUS",
     "ATTACHMENT_DECODE_FAILED",
   ]
   if (code && allowed.includes(code as AttachmentDownloadErrorCode)) {

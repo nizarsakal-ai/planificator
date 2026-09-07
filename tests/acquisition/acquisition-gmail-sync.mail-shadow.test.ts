@@ -43,6 +43,7 @@ describe("acquisition-gmail-sync mail-shadow non-régression", () => {
 
     const result = await syncAcquisitionMailForCompany({
       companyId: "co1",
+      connectionId: "conn1",
       mailShadow: shadow,
       provider: {
         source: "GMAIL",
@@ -92,6 +93,7 @@ describe("acquisition-gmail-sync mail-shadow non-régression", () => {
 
     const result = await syncAcquisitionMailForCompany({
       companyId: "co1",
+      connectionId: "conn1",
       mailShadow: shadow,
       provider: {
         source: "GMAIL",
@@ -138,6 +140,7 @@ describe("acquisition-gmail-sync mail-shadow non-régression", () => {
 
     await syncAcquisitionMailForCompany({
       companyId: "co1",
+      connectionId: "conn1",
       mailShadow: shadow,
       provider: {
         source: "GMAIL",
@@ -171,6 +174,7 @@ describe("acquisition-gmail-sync mail-shadow non-régression", () => {
     let projectCalls = 0
     await syncAcquisitionMailForCompany({
       companyId: "co1",
+      connectionId: "conn1",
       mailShadow: false,
       provider: {
         source: "GMAIL",
@@ -221,6 +225,7 @@ describe("acquisition-gmail-sync mail-shadow non-régression", () => {
 
     await syncAcquisitionMailForCompany({
       companyId: "co1",
+      connectionId: "conn1",
       mailShadow: false,
       provider: baseProvider as never,
       ingestion: {
@@ -242,6 +247,7 @@ describe("acquisition-gmail-sync mail-shadow non-régression", () => {
 
     await syncAcquisitionMailForCompany({
       companyId: "co1",
+      connectionId: "conn1",
       mailShadow: shadow,
       provider: baseProvider as never,
       ingestion: {
@@ -274,6 +280,7 @@ describe("acquisition-gmail-sync mail-shadow non-régression", () => {
 
     const result = await syncAcquisitionMailForCompany({
       companyId: "co1",
+      connectionId: "conn1",
       mailShadow: shadow,
       provider: {
         source: "GMAIL",

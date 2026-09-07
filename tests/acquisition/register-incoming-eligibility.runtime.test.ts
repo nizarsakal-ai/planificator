@@ -103,6 +103,7 @@ function trackingDb() {
   const db = {
     acquisitionMessage: {
       findUnique: async () => null,
+      findFirst: async () => null,
       create: async ({ data }: { data: CreatedMessage }) => {
         messageCreateCalls += 1
         created.push({
@@ -119,6 +120,7 @@ function trackingDb() {
     worksiteImportDraft: {
       create: async () => ({ id: "draft1" }),
     },
+    $executeRaw: async () => 0,
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
       transactionCalls += 1
       return fn(db)
@@ -221,9 +223,10 @@ describe("registerIncomingMessage × éligibilité (R2)", () => {
       acquisitionMessage: {
         findUnique: async () => {
           findCalls += 1
-          // 1er appel : absent ; après create simulé, les rappels voient l’existant
-          return findCalls === 1 ? null : existing
+          // Absent tant qu’aucune création ; puis idempotence sur les relectures.
+          return createCalls === 0 ? null : existing
         },
+        findFirst: async () => null,
         create: async ({
           data,
         }: {
@@ -233,6 +236,7 @@ describe("registerIncomingMessage × éligibilité (R2)", () => {
           return { id: existing.id, status: data.status }
         },
       },
+      $executeRaw: async () => 0,
       $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
         transactionCalls += 1
         return fn(db)
@@ -316,6 +320,7 @@ describe("registerIncomingMessage × éligibilité (R2)", () => {
     const db = {
       acquisitionMessage: {
         findUnique: async () => storedMessage,
+        findFirst: async () => null,
         create: async ({ data }: { data: { status: string; lastErrorCode: string | null } }) => {
           messageCreateCalls += 1
           storedMessage = {
@@ -340,6 +345,7 @@ describe("registerIncomingMessage × éligibilité (R2)", () => {
           return { id: "draft_long" }
         },
       },
+      $executeRaw: async () => 0,
       $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
         transactionCalls += 1
         return fn(db)

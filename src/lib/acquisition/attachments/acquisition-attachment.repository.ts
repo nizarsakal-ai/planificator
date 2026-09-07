@@ -114,7 +114,7 @@ export class AcquisitionAttachmentRepository implements AcquisitionAttachmentRep
       where: { id: attachmentId, companyId },
       include: {
         acquisitionMessage: {
-          select: { id: true, companyId: true, externalMessageId: true },
+          select: { id: true, companyId: true, externalMessageId: true, sourceMailboxKey: true },
         },
       },
     })

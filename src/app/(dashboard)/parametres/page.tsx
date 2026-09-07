@@ -7,13 +7,14 @@ import { Building2, SlidersHorizontal, Users, HardHat, CalendarDays } from "luci
 import { CompanyForm } from "@/components/parametres/CompanyForm"
 import { SettingsForm } from "@/components/parametres/SettingsForm"
 import { GmailConnectionCard } from "@/components/parametres/GmailConnectionCard"
+import { AcquisitionGmailConnectionsCard } from "@/components/parametres/AcquisitionGmailConnectionsCard"
 
 export const metadata: Metadata = { title: "Paramètres" }
 
 export default async function ParametresPage({
   searchParams,
 }: {
-  searchParams: Promise<{ gmail?: string }>
+  searchParams: Promise<{ gmail?: string; acquisition_gmail?: string }>
 }) {
   const session = await auth()
   if (!session?.user) redirect("/login")
@@ -26,18 +27,26 @@ export default async function ParametresPage({
 
   if (!company) redirect("/dashboard")
 
-  const { gmail: gmailParam } = await searchParams
+  const { gmail: gmailParam, acquisition_gmail: acquisitionGmailParam } = await searchParams
 
-  // Statistiques rapides + connexion Gmail
-  const [nbEmployes, nbEquipes, nbChantiers, gmailConnection] = await Promise.all([
-    prisma.employee.count({ where: { companyId: company.id, active: true } }),
-    prisma.team.count({ where: { companyId: company.id, active: true } }),
-    prisma.worksite.count({ where: { companyId: company.id, status: { in: ["PLANNED", "IN_PROGRESS"] } } }),
-    prisma.gmailConnection.findUnique({
-      where:  { companyId: company.id },
-      select: { gmailAddress: true, connectedAt: true },
-    }),
-  ])
+  // Statistiques rapides + connexions Gmail (Booking vs Acquisition)
+  const [nbEmployes, nbEquipes, nbChantiers, gmailConnection, acquisitionGmailConnections] =
+    await Promise.all([
+      prisma.employee.count({ where: { companyId: company.id, active: true } }),
+      prisma.team.count({ where: { companyId: company.id, active: true } }),
+      prisma.worksite.count({
+        where: { companyId: company.id, status: { in: ["PLANNED", "IN_PROGRESS"] } },
+      }),
+      prisma.gmailConnection.findUnique({
+        where: { companyId: company.id },
+        select: { gmailAddress: true, connectedAt: true },
+      }),
+      prisma.acquisitionGmailConnection.findMany({
+        where: { companyId: company.id },
+        select: { id: true, gmailAddress: true, tokenExpiry: true, active: true },
+        orderBy: { gmailAddress: "asc" },
+      }),
+    ])
 
   return (
     <div className="space-y-6">
@@ -108,8 +117,14 @@ export default async function ParametresPage({
           </CardContent>
         </Card>
 
-        {/* Connexion Gmail */}
+        {/* Connexion Gmail Booking (inchangé) */}
         <GmailConnectionCard connection={gmailConnection} gmailParam={gmailParam} />
+
+        {/* Connexions Gmail Acquisition multi-compte */}
+        <AcquisitionGmailConnectionsCard
+          connections={acquisitionGmailConnections}
+          acquisitionGmailParam={acquisitionGmailParam}
+        />
       </div>
     </div>
   )

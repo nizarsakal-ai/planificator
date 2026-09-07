@@ -43,6 +43,8 @@ function clampPageSize(pageSize: number): number {
 
 export interface SyncAcquisitionMailForCompanyInput {
   companyId: string
+  /** Identifiant AcquisitionGmailConnection — tokens + curseur + idempotence. */
+  connectionId: string
   provider: MailProviderPort
   ingestion: AcquisitionIngestionPort
   cursorRepository: AcquisitionScanCursorRepositoryPort
@@ -71,12 +73,15 @@ export interface SyncAcquisitionMailForCompanyInput {
 export async function syncAcquisitionMailForCompany(
   input: SyncAcquisitionMailForCompanyInput
 ): Promise<MailSyncResult> {
-  const { companyId, provider, ingestion, cursorRepository } = input
+  const { companyId, connectionId, provider, ingestion, cursorRepository } = input
   const pageSize = clampPageSize(input.pageSize ?? DEFAULT_GMAIL_PAGE_SIZE)
   const maxPagesPerRun = input.maxPagesPerRun ?? DEFAULT_MAX_PAGES_PER_RUN
   const now = input.now ?? (() => new Date())
+  const mailboxKey = connectionId
+  // F5 — jamais écrire sur le curseur legacy "" ; mailboxKey = connectionId uniquement.
 
   if (!companyId) throw new Error("companyId requis")
+  if (!connectionId) throw new Error("connectionId requis")
 
   const base = {
     companyId,
@@ -95,10 +100,16 @@ export async function syncAcquisitionMailForCompany(
 
   let cursorRecord
   try {
-    cursorRecord = await cursorRepository.getOrCreate(companyId, provider.source)
+    cursorRecord = await cursorRepository.getOrCreate(companyId, provider.source, mailboxKey)
   } catch (e) {
     const message = e instanceof Error ? e.message : "CURSOR_LOAD_FAILED"
-    await cursorRepository.recordFailure(companyId, provider.source, "CURSOR_LOAD_FAILED", now())
+    await cursorRepository.recordFailure(
+      companyId,
+      provider.source,
+      "CURSOR_LOAD_FAILED",
+      now(),
+      mailboxKey
+    )
     return {
       ...base,
       status: "FAILED",
@@ -165,6 +176,7 @@ export async function syncAcquisitionMailForCompany(
     try {
       page = await provider.listMessagesPage({
         companyId,
+        connectionId,
         cursor: cursorRecord.lastHistoryId,
         pageToken,
         pageSize,
@@ -188,7 +200,13 @@ export async function syncAcquisitionMailForCompany(
         }
       }
       const message = e instanceof Error ? e.message : "PROVIDER_LIST_FAILED"
-      await cursorRepository.recordFailure(companyId, provider.source, "PROVIDER_LIST_FAILED", now())
+      await cursorRepository.recordFailure(
+        companyId,
+        provider.source,
+        "PROVIDER_LIST_FAILED",
+        now(),
+        mailboxKey
+      )
       return withShadow({
         ...base,
         status: "FAILED",
@@ -208,7 +226,11 @@ export async function syncAcquisitionMailForCompany(
 
     for (const message of page.messages) {
       try {
-        const registerInput = mapGmailMessageToAcquisitionInput(message, companyId)
+        const registerInput = mapGmailMessageToAcquisitionInput(
+          message,
+          companyId,
+          mailboxKey
+        )
         const result = await ingestion.registerIncomingMessage(registerInput)
 
         if (result.outcome === "DRAFT_CREATED") {
@@ -246,7 +268,8 @@ export async function syncAcquisitionMailForCompany(
           companyId,
           provider.source,
           finalHistoryId,
-          now()
+          now(),
+          mailboxKey
         )
       }
       return withShadow({ ...base, status: "SUCCESS" }, mailShadowCtx)

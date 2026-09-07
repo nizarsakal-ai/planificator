@@ -34,15 +34,25 @@ describe("AcquisitionScanCursorRepository — intégration", RUN, () => {
     await db.$disconnect()
   })
 
-  it("getOrCreate crée un curseur par [companyId, source]", async () => {
+  it("getOrCreate crée un curseur par [companyId, source, mailboxKey]", async () => {
     const repo = new AcquisitionScanCursorRepository(db)
     const c1 = await repo.getOrCreate(companyA, "GMAIL")
     assert.equal(c1.companyId, companyA)
     assert.equal(c1.source, "GMAIL")
+    assert.equal(c1.mailboxKey, "")
     assert.equal(c1.consecutiveFailures, 0)
 
     const c2 = await repo.getOrCreate(companyA, "GMAIL")
     assert.equal(c2.id, c1.id)
+  })
+
+  it("deux mailboxKey du même tenant ont des curseurs distincts", async () => {
+    const repo = new AcquisitionScanCursorRepository(db)
+    const a = await repo.saveSuccessfulPage(companyA, "GMAIL", "hist-box-a", new Date(), "conn-a")
+    const b = await repo.saveSuccessfulPage(companyA, "GMAIL", "hist-box-b", new Date(), "conn-b")
+    assert.notEqual(a.id, b.id)
+    assert.equal(a.lastHistoryId, "hist-box-a")
+    assert.equal(b.lastHistoryId, "hist-box-b")
   })
 
   it("deux tenants peuvent posséder le même lastHistoryId provider", async () => {
@@ -78,9 +88,9 @@ describe("AcquisitionScanCursorRepository — intégration", RUN, () => {
     assert.equal(after.lastErrorCode, "PROVIDER_DOWN")
   })
 
-  it("unicité [companyId, source] en base", async () => {
+  it("unicité [companyId, source, mailboxKey] en base", async () => {
     const count = await db.acquisitionScanCursor.count({
-      where: { companyId: companyA, source: "GMAIL" },
+      where: { companyId: companyA, source: "GMAIL", mailboxKey: "" },
     })
     assert.equal(count, 1)
   })

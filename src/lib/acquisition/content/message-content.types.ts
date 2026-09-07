@@ -12,6 +12,8 @@ export interface CanonicalMessageBodyParts {
 export interface FetchMessageContentSourceInput {
   companyId: string
   externalMessageId: string
+  /** AcquisitionGmailConnection.id — tokens dédiés multi-boîte. */
+  connectionId?: string
 }
 
 export interface AcquisitionMessageContentSourcePort {
@@ -67,6 +69,7 @@ export type MessageContentErrorCode =
   | "ACQUISITION_CONTENT_TOO_LARGE"
   | "CONTENT_PERSIST_FAILED"
   | "GMAIL_NOT_CONNECTED"
+  | "LEGACY_MAILBOX_AMBIGUOUS"
   | "GMAIL_TOKEN_REFRESH_FAILED"
   | "GMAIL_UNAUTHORIZED"
   | "GMAIL_RATE_LIMITED"

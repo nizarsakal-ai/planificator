@@ -1,8 +1,10 @@
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
+process.env.GMAIL_TOKEN_ENCRYPTION_KEY ??= "test-encryption-key-32chars-min!!"
 
 import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { PrismaClient, type Role } from "@prisma/client"
+import { encrypt } from "@/lib/encryption"
 import { registerIncomingMessage } from "@/lib/acquisition/acquisition.service"
 import { seedLauraluPartnerForCompany } from "./helpers/seed-lauralu-partner"
 import { AcquisitionAttachmentRepository } from "@/lib/acquisition/attachments/acquisition-attachment.repository"
@@ -40,6 +42,18 @@ describe("attachment download orchestrator — intégration PostgreSQL", RUN, ()
     companyB = b.id
     await seedLauraluPartnerForCompany(db, companyA)
     await seedLauraluPartnerForCompany(db, companyB)
+
+    await db.acquisitionGmailConnection.create({
+      data: {
+        companyId: companyA,
+        gmailAddress: `orch-a-${Date.now()}@example.com`,
+        accessToken: encrypt("access-a"),
+        refreshToken: encrypt("refresh-a"),
+        tokenExpiry: new Date(Date.now() + 3600_000),
+        connectedById: "test-user-orch",
+        active: true,
+      },
+    })
 
     await db.user.create({
       data: {
@@ -190,6 +204,7 @@ describe("attachment download orchestrator — intégration PostgreSQL", RUN, ()
     const download = (input: { companyId: string; attachmentId: string }) => {
       downloadedIds.push(input.attachmentId)
       return downloadAcquisitionAttachment(input, {
+        db,
         repository: repo,
         gmailSource: {
           fetchAttachment: async () => {

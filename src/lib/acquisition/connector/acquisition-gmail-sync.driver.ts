@@ -1,4 +1,5 @@
 import type { MailSyncResult, MailSyncStats } from "@/lib/acquisition/connector/connector.types"
+import type { AcquisitionGmailConnectionRef } from "@/lib/acquisition/persistence/acquisition-gmail-connection.listing.adapter"
 import {
   logAcquisitionFlagSkip,
   resolveAcquisitionGmailCronGate,
@@ -17,6 +18,8 @@ export type AcquisitionGmailCronRunStatus = "SKIPPED" | "SUCCESS" | "PARTIAL" | 
 
 export interface AcquisitionGmailCronCompanyResult {
   companyId: string
+  connectionId: string
+  gmailAddress: string
   status: MailSyncResult["status"]
   durationMs: number
   stats: MailSyncStats
@@ -43,8 +46,8 @@ export interface AcquisitionGmailCronRunResult {
 }
 
 export interface RunAcquisitionGmailSyncDriverInput {
-  listCompanyIds: () => Promise<string[]>
-  runSyncForCompany: (companyId: string) => Promise<MailSyncResult>
+  listConnections: () => Promise<AcquisitionGmailConnectionRef[]>
+  runSyncForConnection: (connection: AcquisitionGmailConnectionRef) => Promise<MailSyncResult>
   now?: () => Date
   log?: (event: string, payload?: Record<string, unknown>) => void
 }
@@ -128,8 +131,8 @@ function buildListingFailedResult(
 }
 
 /**
- * Driver cron Acquisition Gmail — chargement, boucle, journalisation, appel sync.
- * Aucune logique métier.
+ * Driver cron Acquisition Gmail — listing multi-connexion, boucle, journalisation.
+ * Aucune logique métier. Sync par connexion Gmail, pas uniquement par companyId.
  */
 export async function runAcquisitionGmailSyncDriver(
   input: RunAcquisitionGmailSyncDriverInput
@@ -171,9 +174,9 @@ export async function runAcquisitionGmailSyncDriver(
     }
   }
 
-  let companyIds: string[]
+  let connections: AcquisitionGmailConnectionRef[]
   try {
-    companyIds = await input.listCompanyIds()
+    connections = await input.listConnections()
   } catch (error) {
     const finishedAt = now()
     return buildListingFailedResult(
@@ -191,13 +194,14 @@ export async function runAcquisitionGmailSyncDriver(
   let companiesPartial = 0
   let companiesSkipped = 0
 
-  for (const companyId of companyIds) {
+  for (const connection of connections) {
     const companyStart = now()
-    log("SYNC_COMPANY_START", { companyId })
+    const { companyId, connectionId, gmailAddress } = connection
+    log("SYNC_COMPANY_START", { companyId, connectionId, gmailAddress })
 
     let result: MailSyncResult
     try {
-      result = await input.runSyncForCompany(companyId)
+      result = await input.runSyncForConnection(connection)
     } catch (error) {
       const companyEnd = now()
       const durationMs = companyEnd.getTime() - companyStart.getTime()
@@ -205,12 +209,16 @@ export async function runAcquisitionGmailSyncDriver(
       const publicError = toPublicCronError("COMPANY_SYNC_FAILED")
       log("SYNC_COMPANY_FAILED", {
         companyId,
+        connectionId,
+        gmailAddress,
         durationMs,
         code: publicError.code,
         internalCode: safeInternalErrorCode(error),
       })
       companies.push({
         companyId,
+        connectionId,
+        gmailAddress,
         status: "FAILED",
         durationMs,
         stats: emptyStats(),
@@ -227,6 +235,8 @@ export async function runAcquisitionGmailSyncDriver(
 
     companies.push({
       companyId,
+      connectionId,
+      gmailAddress,
       status: result.status,
       durationMs,
       stats: result.stats,
@@ -237,6 +247,8 @@ export async function runAcquisitionGmailSyncDriver(
 
     log(companyLogEvent(result.status), {
       companyId,
+      connectionId,
+      gmailAddress,
       durationMs,
       status: result.status,
       ...(result.status === "SUCCESS" || result.status === "PARTIAL" ? { stats: result.stats } : {}),
@@ -253,7 +265,7 @@ export async function runAcquisitionGmailSyncDriver(
   const finishedAt = now()
   const durationMs = finishedAt.getTime() - startedAt.getTime()
   const runStatus = computeGlobalStatus(
-    companyIds.length,
+    connections.length,
     companiesSucceeded,
     companiesFailed,
     companiesPartial,
@@ -263,7 +275,7 @@ export async function runAcquisitionGmailSyncDriver(
   log("SYNC_FINISHED", {
     status: runStatus,
     durationMs,
-    companiesTotal: companyIds.length,
+    companiesTotal: connections.length,
     companiesSucceeded,
     companiesFailed,
     companiesPartial,
@@ -276,7 +288,7 @@ export async function runAcquisitionGmailSyncDriver(
     startedAt: startedAt.toISOString(),
     finishedAt: finishedAt.toISOString(),
     durationMs,
-    companiesTotal: companyIds.length,
+    companiesTotal: connections.length,
     companiesSucceeded,
     companiesFailed,
     companiesPartial,

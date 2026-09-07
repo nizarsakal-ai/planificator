@@ -15,6 +15,7 @@ export type AttachmentDownloadErrorCode =
   | "ATTACHMENT_COMPENSATION_FAILED"
   | "ATTACHMENT_ALREADY_IN_PROGRESS"
   | "GMAIL_NOT_CONNECTED"
+  | "LEGACY_MAILBOX_AMBIGUOUS"
   | "TENANT_MISMATCH"
 
 export type AttachmentDownloadOutcome =
@@ -57,12 +58,14 @@ export interface AttachmentMessageContext {
   id: string
   companyId: string
   externalMessageId: string
+  sourceMailboxKey: string
 }
 
 export interface GmailAttachmentFetchInput {
   companyId: string
   externalMessageId: string
   externalAttachmentId: string
+  connectionId?: string
 }
 
 export interface GmailAttachmentFetchResult {

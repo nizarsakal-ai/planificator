@@ -85,8 +85,10 @@ describe("message-content.handler routes", () => {
   })
 
   it("POST succès sans normalizedText + headers", async () => {
+    let resolvedConnectionId: string | undefined
     const source: AcquisitionMessageContentSourcePort = {
-      async fetchMessageBody() {
+      async fetchMessageBody(input) {
+        resolvedConnectionId = input.connectionId
         return {
           textPlain: "Texte OK",
           textHtml: null,
@@ -107,7 +109,11 @@ describe("message-content.handler routes", () => {
             id: "msg1",
             externalMessageId: "g1",
             companyId: "co-route",
+            sourceMailboxKey: "",
           }),
+        },
+        acquisitionGmailConnection: {
+          findMany: async () => [{ id: "acq-gmail-1" }],
         },
       } as never,
       repository: {
@@ -127,6 +133,7 @@ describe("message-content.handler routes", () => {
     assert.equal(body.normalizedText, undefined)
     assert.equal(body.content, undefined)
     assert.equal(body.textHtml, undefined)
+    assert.equal(resolvedConnectionId, "acq-gmail-1")
     assert.ok(!JSON.stringify(body).includes("secret-should-not-leak-in-post"))
     assert.ok(!JSON.stringify(body).includes(sampleContent.contentHash))
   })

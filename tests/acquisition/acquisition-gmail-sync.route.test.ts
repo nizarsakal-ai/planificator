@@ -47,10 +47,10 @@ describe("handleAcquisitionGmailSyncCron", () => {
     const res = await handleAcquisitionGmailSyncCron(request(`Bearer ${CRON_SECRET}`), {
       runDriver: () =>
         runAcquisitionGmailSyncDriver({
-          listCompanyIds: async () => {
+          listConnections: async () => {
             throw new Error("should not list")
           },
-          runSyncForCompany: async () => {
+          runSyncForConnection: async () => {
             throw new Error("should not sync")
           },
         }),
@@ -68,10 +68,10 @@ describe("handleAcquisitionGmailSyncCron", () => {
     const res = await handleAcquisitionGmailSyncCron(request(`Bearer ${CRON_SECRET}`), {
       runDriver: () =>
         runAcquisitionGmailSyncDriver({
-          listCompanyIds: async () => {
+          listConnections: async () => {
             throw new Error("should not list")
           },
-          runSyncForCompany: async () => {
+          runSyncForConnection: async () => {
             throw new Error("should not sync")
           },
         }),
@@ -115,10 +115,10 @@ describe("handleAcquisitionGmailSyncCron", () => {
     const res = await handleAcquisitionGmailSyncCron(request(`Bearer ${CRON_SECRET}`), {
       runDriver: () =>
         runAcquisitionGmailSyncDriver({
-          listCompanyIds: async () => {
+          listConnections: async () => {
             throw new Error("postgresql://user:password@host/db")
           },
-          runSyncForCompany: async () => {
+          runSyncForConnection: async () => {
             throw new Error("should not sync")
           },
         }),
@@ -142,9 +142,9 @@ describe("handleAcquisitionGmailSyncCron", () => {
     const res = await handleAcquisitionGmailSyncCron(request(`Bearer ${CRON_SECRET}`), {
       runDriver: () =>
         runAcquisitionGmailSyncDriver({
-          listCompanyIds: async () => ["c1", "c2"],
-          runSyncForCompany: async (companyId) =>
-            companyId === "c1"
+          listConnections: async () => [{ connectionId: "conn-c1", companyId: "c1", gmailAddress: "c1@ex.com" }, { connectionId: "conn-c2", companyId: "c2", gmailAddress: "c2@ex.com" }],
+          runSyncForConnection: async (c) =>
+            c.companyId === "c1"
               ? {
                   companyId: "c1",
                   source: "GMAIL",
@@ -177,8 +177,8 @@ describe("handleAcquisitionGmailSyncCron", () => {
     const res = await handleAcquisitionGmailSyncCron(request(`Bearer ${CRON_SECRET}`), {
       runDriver: () =>
         runAcquisitionGmailSyncDriver({
-          listCompanyIds: async () => ["c1"],
-          runSyncForCompany: async () => {
+          listConnections: async () => [{ connectionId: "conn-c1", companyId: "c1", gmailAddress: "c1@ex.com" }],
+          runSyncForConnection: async () => {
             throw new Error("Bearer refresh_token=leaked")
           },
         }),

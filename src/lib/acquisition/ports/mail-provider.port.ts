@@ -3,6 +3,8 @@ import type { MailPage, MailPaginationMode } from "@/lib/acquisition/connector/c
 
 export interface ListMessagesPageInput {
   companyId: string
+  /** Identifiant connexion Acquisition (tokens + curseur). */
+  connectionId: string
   /** Watermark provider (Gmail historyId) — null pour premier scan. */
   cursor: string | null
   /** Curseur technique temporaire de pagination Gmail — jamais persisté. */

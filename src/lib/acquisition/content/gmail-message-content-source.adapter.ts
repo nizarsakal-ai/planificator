@@ -1,7 +1,7 @@
 import type { GmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
 import { FetchGmailApiClient, isGmailProviderError } from "@/lib/acquisition/connector/gmail-api.client"
-import type { GmailConnectionClient } from "@/lib/acquisition/connector/gmail-connection.client"
-import { PrismaGmailConnectionClient } from "@/lib/acquisition/connector/gmail-connection.client"
+import type { AcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
+import { PrismaAcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
 import { GmailProviderError } from "@/lib/acquisition/connector/gmail.errors"
 import { extractTextPartsFromPayload } from "@/lib/acquisition/content/message-content-mime"
 import type {
@@ -16,7 +16,7 @@ import type {
  */
 export class GmailMessageContentSourceAdapter implements AcquisitionMessageContentSourcePort {
   constructor(
-    private readonly connection: GmailConnectionClient = new PrismaGmailConnectionClient(),
+    private readonly connection: AcquisitionGmailConnectionClient = new PrismaAcquisitionGmailConnectionClient(),
     private readonly gmail: GmailApiClient = new FetchGmailApiClient()
   ) {}
 
@@ -29,12 +29,22 @@ export class GmailMessageContentSourceAdapter implements AcquisitionMessageConte
         global: false,
       })
     }
+    if (!input.connectionId?.trim()) {
+      throw new GmailProviderError({
+        code: "GMAIL_NOT_CONNECTED",
+        message: "Connexion Gmail Acquisition manquante pour ce message",
+        retryable: false,
+        global: false,
+      })
+    }
 
-    const accessToken = await this.connection.getValidAccessToken(input.companyId)
+    const accessToken = await this.connection.getValidAccessToken({
+      companyId: input.companyId,
+      connectionId: input.connectionId,
+    })
     const resource = await this.gmail.getMessage(accessToken, input.externalMessageId)
     const extracted = extractTextPartsFromPayload(resource.payload)
 
-    // Retour volontairement minimal — texte décodé uniquement (pas body.data).
     return {
       textPlain: extracted.textPlain,
       textHtml: extracted.textHtml,

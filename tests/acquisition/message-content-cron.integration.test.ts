@@ -1,8 +1,10 @@
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
+process.env.GMAIL_TOKEN_ENCRYPTION_KEY ??= "test-encryption-key-32chars-min!!"
 
 import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { PrismaClient } from "@prisma/client"
+import { encrypt } from "@/lib/encryption"
 import { registerIncomingMessage } from "@/lib/acquisition/acquisition.service"
 import { seedLauraluPartnerForCompany } from "./helpers/seed-lauralu-partner"
 import { AcquisitionContentFetchStateRepository } from "@/lib/acquisition/content/message-content-fetch-state.repository"
@@ -40,6 +42,19 @@ describe("OPS-003 content fetch state — intégration PostgreSQL", RUN, () => {
     companyB = b.id
     await seedLauraluPartnerForCompany(db, companyA)
     await seedLauraluPartnerForCompany(db, companyB)
+
+    // Fetch concurrent sur companyB (legacy "") → 1 connexion active.
+    await db.acquisitionGmailConnection.create({
+      data: {
+        companyId: companyB,
+        gmailAddress: `content-cron-b-${Date.now()}@example.com`,
+        accessToken: encrypt("access-b"),
+        refreshToken: encrypt("refresh-b"),
+        tokenExpiry: new Date(Date.now() + 3600_000),
+        connectedById: "test-user-content-cron",
+        active: true,
+      },
+    })
 
     const regA = await registerIncomingMessage(
       {
@@ -84,6 +99,9 @@ describe("OPS-003 content fetch state — intégration PostgreSQL", RUN, () => {
       where: { companyId: { in: [companyA, companyB] } },
     })
     await db.acquisitionMessage.deleteMany({
+      where: { companyId: { in: [companyA, companyB] } },
+    })
+    await db.acquisitionGmailConnection.deleteMany({
       where: { companyId: { in: [companyA, companyB] } },
     })
     await db.company.deleteMany({ where: { id: { in: [companyA, companyB] } } })

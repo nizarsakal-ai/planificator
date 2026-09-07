@@ -28,6 +28,7 @@ describe("evaluateAutoDecision", () => {
     autoApproveEnabled: true,
     autoConvertEnabled: true,
     minConfidence: 0.75,
+    referenceInstant: new Date("2026-08-02T12:00:00Z"),
   }
 
   it("seuils OK + convert → AUTO_APPROVE_CONVERT", () => {

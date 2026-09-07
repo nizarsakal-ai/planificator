@@ -19,6 +19,7 @@ import { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag
 import { PartnerEligibilityResolver } from "@/lib/acquisition/partner-eligibility.resolver"
 import type { PartnerEligibilityResolverPort } from "@/lib/acquisition/partner-eligibility.resolver"
 import { PartnerRegistryRepository } from "@/lib/acquisition/persistence/partner-registry.repository"
+import { acquireAcquisitionMessageIdentityAdvisoryXactLock } from "@/lib/acquisition/acquisition-message-identity-lock"
 
 export { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
 
@@ -89,8 +90,13 @@ export type RegisterIncomingMessageResult =
  *
  * Garanties :
  * - contexte tenant obligatoire (companyId validé, jamais déduit) ;
- * - unicité (companyId, source, externalMessageId) : un rappel avec le même
- *   message ne crée aucun doublon (message, brouillon ou pièce jointe) ;
+ * - unicité (companyId, source, sourceMailboxKey, externalMessageId) : un rappel
+ *   avec le même message ne crée aucun doublon (message, brouillon ou PJ) ;
+ * - PLAN-ACQ-MULTI-GMAIL-002/003 : scan Gmail avec mailboxKey non vide réutilise
+ *   d’abord la ligne legacy (sourceMailboxKey="") au même externalMessageId
+ *   (anti-doublon Providence) — sans promotion destructive du mailboxKey ;
+ *   sous pg_advisory_xact_lock(companyId, source, externalMessageId) avant
+ *   relecture/création (race concurrente legacy↔moderne sérialisée) ;
  * - écritures liées exécutées dans une transaction (rollback complet en cas
  *   d'échec de la création du brouillon) ;
  * - message non admissible : enregistré en REJECTED (traçabilité +
@@ -105,19 +111,40 @@ export async function registerIncomingMessage(
 ): Promise<RegisterIncomingMessageResult> {
   const data = registerIncomingMessageSchema.parse(input)
 
-  // Idempotence : si le message existe déjà pour CE tenant, ne rien réécrire.
+  const includeDraft = { draft: { select: { id: true } } } as const
+
+  // Idempotence exacte : tenant + boîte + id externe.
   const existing = await db.acquisitionMessage.findUnique({
     where: {
-      companyId_source_externalMessageId: {
+      companyId_source_sourceMailboxKey_externalMessageId: {
         companyId: data.companyId,
         source: data.source,
+        sourceMailboxKey: data.sourceMailboxKey,
         externalMessageId: data.externalMessageId,
       },
     },
-    include: { draft: { select: { id: true } } },
+    include: includeDraft,
   })
   if (existing)
     return toResult(existing.id, existing.draft?.id ?? null, existing.status, false, existing.lastErrorCode)
+
+  // Anti-doublon legacy↔moderne hors TX (chemin chaud) — TX revalide sous verrou.
+  if (data.source === "GMAIL") {
+    const collapsed = await findCollapsedGmailIdentity(
+      db,
+      data.companyId,
+      data.externalMessageId,
+      data.sourceMailboxKey
+    )
+    if (collapsed)
+      return toResult(
+        collapsed.id,
+        collapsed.draft?.id ?? null,
+        collapsed.status,
+        false,
+        collapsed.lastErrorCode
+      )
+  }
 
   const eligibilityResolver =
     deps.eligibilityResolver ??
@@ -140,11 +167,59 @@ export async function registerIncomingMessage(
 
   try {
     const result = await db.$transaction(async (tx) => {
+      // F1-003 : sérialise legacy "" vs moderne avant relectures / create.
+      if (data.source === "GMAIL") {
+        await acquireAcquisitionMessageIdentityAdvisoryXactLock(tx, {
+          companyId: data.companyId,
+          source: data.source,
+          externalMessageId: data.externalMessageId,
+        })
+      }
+
+      const racedExact = await tx.acquisitionMessage.findUnique({
+        where: {
+          companyId_source_sourceMailboxKey_externalMessageId: {
+            companyId: data.companyId,
+            source: data.source,
+            sourceMailboxKey: data.sourceMailboxKey,
+            externalMessageId: data.externalMessageId,
+          },
+        },
+        include: includeDraft,
+      })
+      if (racedExact) {
+        return {
+          messageId: racedExact.id,
+          draftId: racedExact.draft?.id ?? null,
+          status: racedExact.status,
+          created: false,
+          lastErrorCode: racedExact.lastErrorCode,
+        }
+      }
+      if (data.source === "GMAIL") {
+        const collapsed = await findCollapsedGmailIdentity(
+          tx,
+          data.companyId,
+          data.externalMessageId,
+          data.sourceMailboxKey
+        )
+        if (collapsed) {
+          return {
+            messageId: collapsed.id,
+            draftId: collapsed.draft?.id ?? null,
+            status: collapsed.status,
+            created: false,
+            lastErrorCode: collapsed.lastErrorCode,
+          }
+        }
+      }
+
       const message = await tx.acquisitionMessage.create({
         data: {
           companyId: data.companyId,
           source: data.source,
           externalMessageId: data.externalMessageId,
+          sourceMailboxKey: data.sourceMailboxKey,
           threadId: data.threadId ?? null,
           resolvedPartnerId: eligible ? resolvedPartnerId : null,
           senderEmail: normalized?.email ?? data.senderEmail.trim().toLowerCase().slice(0, 320),
@@ -191,29 +266,117 @@ export async function registerIncomingMessage(
         draftId = draft.id
       }
 
-      return { messageId: message.id, draftId, status: message.status }
+      return {
+        messageId: message.id,
+        draftId,
+        status: message.status,
+        created: true,
+        lastErrorCode: errorCode,
+      }
     })
 
-    return toResult(result.messageId, result.draftId, result.status, true, errorCode)
+    return toResult(
+      result.messageId,
+      result.draftId,
+      result.status,
+      result.created,
+      result.lastErrorCode
+    )
   } catch (e) {
     // Course concurrente : un autre appel a inséré le même message entre le
     // findUnique et la transaction → relire et répondre de façon idempotente.
     if (isUniqueConstraintError(e)) {
       const raced = await db.acquisitionMessage.findUnique({
         where: {
-          companyId_source_externalMessageId: {
+          companyId_source_sourceMailboxKey_externalMessageId: {
             companyId: data.companyId,
             source: data.source,
+            sourceMailboxKey: data.sourceMailboxKey,
             externalMessageId: data.externalMessageId,
           },
         },
-        include: { draft: { select: { id: true } } },
+        include: includeDraft,
       })
       if (raced)
         return toResult(raced.id, raced.draft?.id ?? null, raced.status, false, raced.lastErrorCode)
+
+      if (data.source === "GMAIL") {
+        const collapsed = await findCollapsedGmailIdentity(
+          db,
+          data.companyId,
+          data.externalMessageId,
+          data.sourceMailboxKey
+        )
+        if (collapsed)
+          return toResult(
+            collapsed.id,
+            collapsed.draft?.id ?? null,
+            collapsed.status,
+            false,
+            collapsed.lastErrorCode
+          )
+      }
     }
     throw e
   }
+}
+
+type LegacyMessageRow = {
+  id: string
+  status: string
+  lastErrorCode: string | null
+  draft: { id: string } | null
+}
+
+/**
+ * Collapse logique legacy "" ↔ moderne connectionId (même externalMessageId).
+ * Moderne A vs moderne B : ne collapse pas (identités distinctes).
+ */
+async function findCollapsedGmailIdentity(
+  db: PrismaClient | Prisma.TransactionClient,
+  companyId: string,
+  externalMessageId: string,
+  sourceMailboxKey: string
+): Promise<LegacyMessageRow | null> {
+  if (sourceMailboxKey !== "") {
+    return findLegacyGmailMessage(db, companyId, externalMessageId)
+  }
+  return findOldestModernGmailMessage(db, companyId, externalMessageId)
+}
+
+async function findLegacyGmailMessage(
+  db: PrismaClient | Prisma.TransactionClient,
+  companyId: string,
+  externalMessageId: string
+): Promise<LegacyMessageRow | null> {
+  return db.acquisitionMessage.findUnique({
+    where: {
+      companyId_source_sourceMailboxKey_externalMessageId: {
+        companyId,
+        source: "GMAIL",
+        sourceMailboxKey: "",
+        externalMessageId,
+      },
+    },
+    include: { draft: { select: { id: true } } },
+  })
+}
+
+async function findOldestModernGmailMessage(
+  db: PrismaClient | Prisma.TransactionClient,
+  companyId: string,
+  externalMessageId: string
+): Promise<LegacyMessageRow | null> {
+  return db.acquisitionMessage.findFirst({
+    where: {
+      companyId,
+      source: "GMAIL",
+      externalMessageId,
+      NOT: { sourceMailboxKey: "" },
+    },
+    orderBy: { createdAt: "asc" },
+    include: { draft: { select: { id: true } } },
+  })
 }
 
 // ─── Lectures strictement tenant-scopées ─────────────────────────────────────

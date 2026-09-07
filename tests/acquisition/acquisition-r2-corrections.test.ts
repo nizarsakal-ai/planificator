@@ -136,6 +136,8 @@ describe("R2 anti-doublon normalisation", () => {
 })
 
 describe("R2 policy gardes", () => {
+  /** Instant fixe : dates fixture août 2026 restent FUTURE/ACTIVE (pas Date.now()). */
+  const REFERENCE_INSTANT = new Date("2026-07-15T12:00:00.000Z")
   const base = {
     worksiteName: "Site",
     startDate: new Date("2026-08-01"),
@@ -154,6 +156,7 @@ describe("R2 policy gardes", () => {
     autoApproveEnabled: true,
     autoConvertEnabled: true,
     minConfidence: 0.75,
+    referenceInstant: REFERENCE_INSTANT,
   }
 
   it("doublon → POTENTIAL_DUPLICATE", () => {
@@ -357,6 +360,7 @@ describe("R2 Gmail fail-closed + emails", () => {
     await assert.rejects(
       () =>
         adapter.listMessagesPage({
+          connectionId: "conn-1",
           companyId: "co",
           cursor: null,
           pageSize: 10,
