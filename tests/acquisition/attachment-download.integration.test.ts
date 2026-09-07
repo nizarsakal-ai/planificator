@@ -1,9 +1,11 @@
 // Tests d'intégration — téléchargement/stockage pièces jointes Acquisition.
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
+process.env.GMAIL_TOKEN_ENCRYPTION_KEY ??= "test-encryption-key-32chars-min!!"
 
 import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { PrismaClient } from "@prisma/client"
+import { encrypt } from "@/lib/encryption"
 import { registerIncomingMessage } from "@/lib/acquisition/acquisition.service"
 import { seedLauraluPartnerForCompany } from "./helpers/seed-lauralu-partner"
 import { downloadAcquisitionAttachment } from "@/lib/acquisition/attachments/attachment-download.service"
@@ -42,6 +44,19 @@ describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
     await seedLauraluPartnerForCompany(db, companyA)
     await seedLauraluPartnerForCompany(db, companyB)
 
+    // Legacy sourceMailboxKey="" → exactement 1 connexion active (contrat Multi-Gmail).
+    await db.acquisitionGmailConnection.create({
+      data: {
+        companyId: companyA,
+        gmailAddress: `attach-a-${Date.now()}@example.com`,
+        accessToken: encrypt("access-a"),
+        refreshToken: encrypt("refresh-a"),
+        tokenExpiry: new Date(Date.now() + 3600_000),
+        connectedById: "test-user-attach",
+        active: true,
+      },
+    })
+
     const reg = await registerIncomingMessage(
       {
         companyId: companyA,
@@ -77,7 +92,7 @@ describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
     const repository = new AcquisitionAttachmentRepository(db)
     const r = await downloadAcquisitionAttachment(
       { companyId: companyA, attachmentId: attachmentA },
-      { repository, gmailSource: mockGmailSource(), storage: mockStorage(), log: () => {} }
+      { db, repository, gmailSource: mockGmailSource(), storage: mockStorage(), log: () => {} }
     )
     assert.equal(r.outcome, "STORED")
     const row = await db.acquisitionAttachment.findFirstOrThrow({ where: { id: attachmentA } })
@@ -89,6 +104,7 @@ describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
     const r = await downloadAcquisitionAttachment(
       { companyId: companyA, attachmentId: attachmentA },
       {
+        db,
         repository: new AcquisitionAttachmentRepository(db),
         gmailSource: mockGmailSource(),
         storage: mockStorage(),
@@ -198,6 +214,7 @@ describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
     const r = await downloadAcquisitionAttachment(
       { companyId: companyB, attachmentId: attachmentA },
       {
+        db,
         repository: new AcquisitionAttachmentRepository(db),
         gmailSource: mockGmailSource(),
         storage: mockStorage(),

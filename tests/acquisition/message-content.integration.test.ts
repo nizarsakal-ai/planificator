@@ -1,8 +1,10 @@
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
+process.env.GMAIL_TOKEN_ENCRYPTION_KEY ??= "test-encryption-key-32chars-min!!"
 
 import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { PrismaClient } from "@prisma/client"
+import { encrypt } from "@/lib/encryption"
 import { registerIncomingMessage } from "@/lib/acquisition/acquisition.service"
 import { seedLauraluPartnerForCompany } from "./helpers/seed-lauralu-partner"
 import { AcquisitionMessageContentRepository } from "@/lib/acquisition/content/message-content.repository"
@@ -39,6 +41,19 @@ describe("acquisition message content — intégration PostgreSQL", RUN, () => {
     await seedLauraluPartnerForCompany(db, companyA)
     await seedLauraluPartnerForCompany(db, companyB)
 
+    // Legacy "" + 1 connexion active → legacy_single (fetch Gmail legacy).
+    await db.acquisitionGmailConnection.create({
+      data: {
+        companyId: companyA,
+        gmailAddress: `content-a-${Date.now()}@example.com`,
+        accessToken: encrypt("access-a"),
+        refreshToken: encrypt("refresh-a"),
+        tokenExpiry: new Date(Date.now() + 3600_000),
+        connectedById: "test-user-content",
+        active: true,
+      },
+    })
+
     const reg = await registerIncomingMessage(
       {
         companyId: companyA,
@@ -64,6 +79,9 @@ describe("acquisition message content — intégration PostgreSQL", RUN, () => {
       where: { companyId: { in: [companyA, companyB] } },
     })
     await db.acquisitionMessage.deleteMany({
+      where: { companyId: { in: [companyA, companyB] } },
+    })
+    await db.acquisitionGmailConnection.deleteMany({
       where: { companyId: { in: [companyA, companyB] } },
     })
     await db.company.deleteMany({ where: { id: { in: [companyA, companyB] } } })
