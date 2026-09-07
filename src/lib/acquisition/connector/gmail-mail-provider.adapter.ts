@@ -6,8 +6,8 @@ import { AcquisitionSource } from "@prisma/client"
 import type { CanonicalMailMessage, MailPage } from "@/lib/acquisition/connector/connector.types"
 import type { GmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
 import { FetchGmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
-import type { GmailConnectionClient } from "@/lib/acquisition/connector/gmail-connection.client"
-import { PrismaGmailConnectionClient } from "@/lib/acquisition/connector/gmail-connection.client"
+import type { AcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
+import { PrismaAcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
 import { GmailProviderError } from "@/lib/acquisition/connector/gmail.errors"
 import {
   buildAllowedProviderMetadata,
@@ -30,7 +30,7 @@ import {
 const DEFAULT_LOOKBACK_DAYS = 30
 
 export interface GmailMailProviderAdapterDeps {
-  connectionClient?: GmailConnectionClient
+  connectionClient?: AcquisitionGmailConnectionClient
   apiClient?: GmailApiClient
   lookbackDays?: number
   domainListing?: ActivePartnerIdentityListingPort
@@ -142,13 +142,14 @@ const emptyIdentityListing: ActivePartnerIdentityListingPort = {
 export class GmailMailProviderAdapter implements MailProviderPort {
   readonly source = AcquisitionSource.GMAIL
 
-  private readonly connectionClient: GmailConnectionClient
+  private readonly connectionClient: AcquisitionGmailConnectionClient
   private readonly apiClient: GmailApiClient
   private readonly lookbackDays: number
   private readonly domainListing: ActivePartnerIdentityListingPort
 
   constructor(deps: GmailMailProviderAdapterDeps = {}) {
-    this.connectionClient = deps.connectionClient ?? new PrismaGmailConnectionClient()
+    this.connectionClient =
+      deps.connectionClient ?? new PrismaAcquisitionGmailConnectionClient()
     this.apiClient = deps.apiClient ?? new FetchGmailApiClient()
     this.lookbackDays =
       deps.lookbackDays ??
@@ -171,8 +172,19 @@ export class GmailMailProviderAdapter implements MailProviderPort {
   }
 
   async listMessagesPage(input: ListMessagesPageInput): Promise<MailPage> {
-    const { companyId, cursor, pageSize, pageToken, paginationMode } = input
-    const accessToken = await this.connectionClient.getValidAccessToken(companyId)
+    const { companyId, connectionId, cursor, pageSize, pageToken, paginationMode } = input
+    if (!connectionId) {
+      throw new GmailProviderError({
+        code: "GMAIL_NOT_CONNECTED",
+        message: "connectionId requis pour le scan Gmail Acquisition",
+        retryable: false,
+        global: true,
+      })
+    }
+    const accessToken = await this.connectionClient.getValidAccessToken({
+      companyId,
+      connectionId,
+    })
 
     if (paginationMode === "lookback" || !cursor) {
       return this.listViaQuery(

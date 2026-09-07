@@ -28,11 +28,13 @@ function sanitizeProviderMetadata(
  */
 export function mapGmailMessageToAcquisitionInput(
   message: CanonicalMailMessage,
-  companyId: string
+  companyId: string,
+  sourceMailboxKey = ""
 ): RegisterIncomingMessageInput {
   const rawMetadata: Record<string, unknown> = {
     threadId: message.threadId,
     labels: message.labels,
+    ...(sourceMailboxKey ? { acquisitionGmailConnectionId: sourceMailboxKey } : {}),
     ...(message.snippet ? { snippet: message.snippet.slice(0, 500) } : {}),
     ...sanitizeProviderMetadata(message.providerMetadata),
   }
@@ -41,6 +43,7 @@ export function mapGmailMessageToAcquisitionInput(
     companyId,
     source: "GMAIL",
     externalMessageId: message.externalMessageId,
+    sourceMailboxKey,
     threadId: message.threadId,
     senderEmail: message.fromHeader,
     subject: message.subject,

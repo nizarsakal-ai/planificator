@@ -4,8 +4,8 @@
 
 import type { GmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
 import { FetchGmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
-import type { GmailConnectionClient } from "@/lib/acquisition/connector/gmail-connection.client"
-import { PrismaGmailConnectionClient } from "@/lib/acquisition/connector/gmail-connection.client"
+import type { AcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
+import { PrismaAcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
 
 export type GmailThreadMessageSummary = {
   id: string
@@ -17,12 +17,17 @@ export type GmailThreadMessageSummary = {
 export async function listGmailThreadMessages(input: {
   companyId: string
   threadId: string
-  connectionClient?: GmailConnectionClient
+  connectionId: string
+  connectionClient?: AcquisitionGmailConnectionClient
   apiClient?: GmailApiClient
 }): Promise<GmailThreadMessageSummary[]> {
-  const connection = input.connectionClient ?? new PrismaGmailConnectionClient()
+  if (!input.connectionId) throw new Error("connectionId requis")
+  const connection = input.connectionClient ?? new PrismaAcquisitionGmailConnectionClient()
   const api = input.apiClient ?? new FetchGmailApiClient()
-  const token = await connection.getValidAccessToken(input.companyId)
+  const token = await connection.getValidAccessToken({
+    companyId: input.companyId,
+    connectionId: input.connectionId,
+  })
 
   // Query Gmail : messages du même thread.
   const list = await api.listMessages(

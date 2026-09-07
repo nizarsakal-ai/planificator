@@ -50,6 +50,7 @@ function makeCursor(overrides: Partial<AcquisitionScanCursorRecord> = {}): Acqui
     id: "cursor-1",
     companyId: COMPANY,
     source: "GMAIL",
+    mailboxKey: "conn-1",
     lastHistoryId: "hist-0",
     lastSyncedAt: null,
     consecutiveFailures: 0,
@@ -190,6 +191,7 @@ describe("syncAcquisitionMailForCompany", () => {
 
     const result = await syncAcquisitionMailForCompany({
       companyId: COMPANY,
+      connectionId: "conn-1",
       provider,
       ingestion,
       cursorRepository: repo,
@@ -208,6 +210,7 @@ describe("syncAcquisitionMailForCompany", () => {
 
     const result = await syncAcquisitionMailForCompany({
       companyId: COMPANY,
+      connectionId: "conn-1",
       provider,
       ingestion,
       cursorRepository: repo,
@@ -229,6 +232,7 @@ describe("syncAcquisitionMailForCompany", () => {
 
     const result = await syncAcquisitionMailForCompany({
       companyId: COMPANY,
+      connectionId: "conn-1",
       provider,
       ingestion,
       cursorRepository: repo,
@@ -263,6 +267,7 @@ describe("syncAcquisitionMailForCompany", () => {
 
     const first = await syncAcquisitionMailForCompany({
       companyId: COMPANY,
+      connectionId: "conn-1",
       provider,
       ingestion,
       cursorRepository: repo,
@@ -277,6 +282,7 @@ describe("syncAcquisitionMailForCompany", () => {
     const { provider: provider2, calls: calls2 } = buildPagedProvider(100, 50, "hist-dedup-2")
     const second = await syncAcquisitionMailForCompany({
       companyId: COMPANY,
+      connectionId: "conn-1",
       provider: provider2,
       ingestion,
       cursorRepository: repo,
@@ -313,6 +319,7 @@ describe("syncAcquisitionMailForCompany", () => {
 
     const result = await syncAcquisitionMailForCompany({
       companyId: COMPANY,
+      connectionId: "conn-1",
       provider,
       ingestion,
       cursorRepository: repo,
@@ -333,6 +340,7 @@ describe("syncAcquisitionMailForCompany", () => {
 
     const result = await syncAcquisitionMailForCompany({
       companyId: COMPANY,
+      connectionId: "conn-1",
       provider,
       ingestion,
       cursorRepository: repo,
@@ -369,6 +377,7 @@ describe("syncAcquisitionMailForCompany", () => {
 
     const result = await syncAcquisitionMailForCompany({
       companyId: COMPANY,
+      connectionId: "conn-1",
       provider,
       ingestion,
       cursorRepository: repo,
@@ -409,6 +418,7 @@ describe("syncAcquisitionMailForCompany", () => {
 
     const result = await syncAcquisitionMailForCompany({
       companyId: COMPANY,
+      connectionId: "conn-1",
       provider,
       ingestion,
       cursorRepository: repo,
@@ -441,6 +451,7 @@ describe("syncAcquisitionMailForCompany", () => {
 
     const result = await syncAcquisitionMailForCompany({
       companyId: COMPANY,
+      connectionId: "conn-1",
       provider,
       ingestion,
       cursorRepository: repo,
@@ -481,6 +492,7 @@ describe("syncAcquisitionMailForCompany", () => {
 
     const result = await syncAcquisitionMailForCompany({
       companyId: COMPANY,
+      connectionId: "conn-1",
       provider,
       ingestion,
       cursorRepository: repo,
@@ -516,6 +528,7 @@ describe("syncAcquisitionMailForCompany", () => {
 
     const result = await syncAcquisitionMailForCompany({
       companyId: COMPANY,
+      connectionId: "conn-1",
       provider,
       ingestion,
       cursorRepository: repo,
@@ -537,6 +550,7 @@ describe("syncAcquisitionMailForCompany", () => {
 
     await syncAcquisitionMailForCompany({
       companyId: COMPANY,
+      connectionId: "conn-1",
       provider,
       ingestion,
       cursorRepository: repo,
@@ -562,6 +576,7 @@ describe("syncAcquisitionMailForCompany", () => {
 
     const result = await syncAcquisitionMailForCompany({
       companyId: COMPANY,
+      connectionId: "conn-1",
       provider,
       ingestion,
       cursorRepository: repo,
@@ -596,6 +611,7 @@ describe("syncAcquisitionMailForCompany — isolation tenant curseur", () => {
 
     await syncAcquisitionMailForCompany({
       companyId: "tenant-a",
+      connectionId: "conn-tenant-a",
       provider: providerFor("tenant-a"),
       ingestion,
       cursorRepository: repoA.repo,
@@ -603,6 +619,7 @@ describe("syncAcquisitionMailForCompany — isolation tenant curseur", () => {
     })
     await syncAcquisitionMailForCompany({
       companyId: "tenant-b",
+      connectionId: "conn-tenant-b",
       provider: providerFor("tenant-b"),
       ingestion,
       cursorRepository: repoB.repo,

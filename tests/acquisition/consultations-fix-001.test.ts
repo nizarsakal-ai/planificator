@@ -821,6 +821,7 @@ describe("FIX-001 — client match P1–P6", () => {
       autoApproveEnabled: true,
       autoConvertEnabled: true,
       hasResolvedClient: true,
+      referenceInstant: new Date("2026-09-02T12:00:00Z"),
     })
     assert.equal(r.code, "AUTO_APPROVE_CONVERT")
     assert.ok(!r.reasons.includes("MISSING_CLIENT_IDENTITY"))

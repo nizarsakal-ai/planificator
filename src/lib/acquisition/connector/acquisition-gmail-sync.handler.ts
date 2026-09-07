@@ -8,7 +8,7 @@ import {
 import { createGmailMailProviderAdapter } from "@/lib/acquisition/connector/gmail-mail-provider.adapter"
 import { acquisitionIngestionAdapter } from "@/lib/acquisition/ports/acquisition-ingestion.adapter"
 import { acquisitionScanCursorRepository } from "@/lib/acquisition/persistence/acquisition-scan-cursor.repository"
-import { gmailConnectionListingAdapter } from "@/lib/acquisition/persistence/gmail-connection-listing.adapter"
+import { acquisitionGmailConnectionListingAdapter } from "@/lib/acquisition/persistence/acquisition-gmail-connection.listing.adapter"
 
 export interface AcquisitionGmailSyncRouteDeps {
   runDriver?: () => Promise<AcquisitionGmailCronRunResult>
@@ -16,10 +16,12 @@ export interface AcquisitionGmailSyncRouteDeps {
 
 async function defaultRunDriver(): Promise<AcquisitionGmailCronRunResult> {
   return runAcquisitionGmailSyncDriver({
-    listCompanyIds: () => gmailConnectionListingAdapter.listCompanyIdsWithGmailConnection(),
-    runSyncForCompany: (companyId) =>
+    listConnections: () =>
+      acquisitionGmailConnectionListingAdapter.listActiveAcquisitionGmailConnections(),
+    runSyncForConnection: (connection) =>
       syncAcquisitionMailForCompany({
-        companyId,
+        companyId: connection.companyId,
+        connectionId: connection.connectionId,
         provider: createGmailMailProviderAdapter(),
         ingestion: acquisitionIngestionAdapter,
         cursorRepository: acquisitionScanCursorRepository,

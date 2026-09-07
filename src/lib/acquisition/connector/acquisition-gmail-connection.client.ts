@@ -7,26 +7,28 @@ import { GmailProviderError } from "@/lib/acquisition/connector/gmail.errors"
 const TOKEN_REFRESH_URL = "https://oauth2.googleapis.com/token"
 const EXPIRY_MARGIN_MS = 5 * 60 * 1000
 
-export interface GmailConnectionClient {
-  getValidAccessToken(companyId: string): Promise<string>
+/** Lookup toujours tenant-scopé — connectionId + companyId uniquement. */
+export type AcquisitionGmailTokenLookup = { companyId: string; connectionId: string }
+
+export interface AcquisitionGmailConnectionClient {
+  getValidAccessToken(lookup: AcquisitionGmailTokenLookup): Promise<string>
 }
 
 /**
- * @deprecated PLAN-ACQ-MULTI-GMAIL-001 — Acquisition utilise
- * PrismaAcquisitionGmailConnectionClient (acquisition_gmail_connections).
- * Conservé pour tests unitaires du chemin historique gmail_connections.
+ * Accès OAuth Gmail Acquisition — table acquisition_gmail_connections uniquement.
+ * Ne lit / n’écrit jamais gmail_connections (Booking).
  */
-export class PrismaGmailConnectionClient implements GmailConnectionClient {
+export class PrismaAcquisitionGmailConnectionClient
+  implements AcquisitionGmailConnectionClient
+{
   constructor(private readonly db: PrismaClient = prisma) {}
 
-  async getValidAccessToken(companyId: string): Promise<string> {
-    if (!companyId) throw new Error("companyId requis")
-
-    const conn = await this.db.gmailConnection.findUnique({ where: { companyId } })
-    if (!conn) {
+  async getValidAccessToken(lookup: AcquisitionGmailTokenLookup): Promise<string> {
+    const conn = await this.findConnection(lookup)
+    if (!conn || !conn.active) {
       throw new GmailProviderError({
         code: "GMAIL_NOT_CONNECTED",
-        message: "Aucune connexion Gmail active pour cette entreprise",
+        message: "Aucune connexion Gmail Acquisition active",
         retryable: false,
         global: true,
       })
@@ -82,8 +84,8 @@ export class PrismaGmailConnectionClient implements GmailConnectionClient {
     }
 
     accessToken = refreshData.access_token
-    await this.db.gmailConnection.update({
-      where: { companyId },
+    await this.db.acquisitionGmailConnection.update({
+      where: { id: conn.id },
       data: {
         accessToken: encrypt(refreshData.access_token),
         tokenExpiry: new Date(Date.now() + (refreshData.expires_in ?? 3600) * 1000),
@@ -91,5 +93,17 @@ export class PrismaGmailConnectionClient implements GmailConnectionClient {
     })
 
     return accessToken
+  }
+
+  private async findConnection(lookup: AcquisitionGmailTokenLookup) {
+    if (!lookup.companyId?.trim()) throw new Error("companyId requis")
+    if (!lookup.connectionId?.trim()) throw new Error("connectionId requis")
+    return this.db.acquisitionGmailConnection.findFirst({
+      where: {
+        id: lookup.connectionId,
+        companyId: lookup.companyId,
+        active: true,
+      },
+    })
   }
 }

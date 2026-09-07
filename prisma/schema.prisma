@@ -328,6 +328,7 @@ model Company {
   worksiteImportDrafts    WorksiteImportDraft[]
   acquisitionAttachments  AcquisitionAttachment[]
   acquisitionScanCursors  AcquisitionScanCursor[]
+  acquisitionGmailConnections AcquisitionGmailConnection[]
   acquisitionAttachmentAccessLogs AcquisitionAttachmentAccessLog[]
   acquisitionMessageContents AcquisitionMessageContent[]
   acquisitionContentFetchStates AcquisitionContentFetchState[]
@@ -1144,6 +1145,27 @@ model GmailConnection {
   @@map("gmail_connections")
 }
 
+// PLAN-ACQ-MULTI-GMAIL-001 — Connexions Gmail multi-compte dédiées Acquisition.
+// Isolé de gmail_connections (Booking) : aucun upsert partagé.
+model AcquisitionGmailConnection {
+  id            String   @id @default(cuid())
+  companyId     String
+  gmailAddress  String
+  accessToken   String // chiffré AES-256-GCM
+  refreshToken  String // chiffré AES-256-GCM
+  tokenExpiry   DateTime
+  connectedById String
+  connectedAt   DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  active        Boolean  @default(true)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, gmailAddress])
+  @@index([companyId, active])
+  @@map("acquisition_gmail_connections")
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // PROCESSED GMAIL MESSAGE — Suivi cycle de vie emails Booking (pas Acquisition)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1259,6 +1281,8 @@ model AcquisitionMessage {
   companyId          String
   source             AcquisitionSource
   externalMessageId  String
+  /// Identité boîte stable (connectionId Acquisition) — "" = legacy mono-boîte.
+  sourceMailboxKey   String                   @default("")
   /// Gmail thread id (Lot H) — indexé pour regroupement / observabilité.
   threadId           String?
   /// Partenaire résolu à l’ingestion (Lot I) — null si REJECTED.
@@ -1282,9 +1306,9 @@ model AcquisitionMessage {
   content          AcquisitionMessageContent?
   contentFetchState AcquisitionContentFetchState?
 
-  // Idempotence par tenant : le même id Gmail peut exister chez deux
-  // entreprises, jamais deux fois pour la même entreprise et la même source.
-  @@unique([companyId, source, externalMessageId])
+  // Idempotence par tenant + boîte : le même id Gmail peut exister sur deux
+  // boîtes du même tenant sans collision.
+  @@unique([companyId, source, sourceMailboxKey, externalMessageId])
   // Cible des FK composites (draft, attachments) : garantit EN BASE que
   // l'enfant porte le même companyId que son message (anti inter-tenant).
   @@unique([id, companyId])
@@ -1292,6 +1316,7 @@ model AcquisitionMessage {
   @@index([companyId, receivedAt])
   @@index([companyId, threadId])
   @@index([companyId, resolvedPartnerId])
+  @@index([companyId, sourceMailboxKey])
   @@map("acquisition_messages")
 }
 
@@ -1491,12 +1516,14 @@ model AcquisitionAttachmentAccessLog {
   @@map("acquisition_attachment_access_logs")
 }
 
-// Curseur de synchronisation mail par tenant et source (Gmail, futur Outlook/IMAP).
+// Curseur de synchronisation mail par tenant, source et boîte (connectionId).
 // Aucun token OAuth — uniquement watermark de reprise.
+// mailboxKey = "" : legacy mono-boîte ; sinon = AcquisitionGmailConnection.id.
 model AcquisitionScanCursor {
   id                  String            @id @default(cuid())
   companyId           String
   source              AcquisitionSource
+  mailboxKey          String            @default("")
   lastHistoryId       String?
   lastSyncedAt        DateTime?
   consecutiveFailures Int               @default(0)
@@ -1507,7 +1534,8 @@ model AcquisitionScanCursor {
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  @@unique([companyId, source])
+  @@unique([companyId, source, mailboxKey])
+  @@index([companyId, source])
   @@map("acquisition_scan_cursors")
 }
 

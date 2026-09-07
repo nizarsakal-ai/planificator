@@ -1,7 +1,7 @@
 import type { GmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
 import { FetchGmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
-import type { GmailConnectionClient } from "@/lib/acquisition/connector/gmail-connection.client"
-import { PrismaGmailConnectionClient } from "@/lib/acquisition/connector/gmail-connection.client"
+import type { AcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
+import { PrismaAcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
 import { isGmailProviderError } from "@/lib/acquisition/connector/gmail-api.client"
 import {
   decodeBase64Url,
@@ -17,7 +17,7 @@ export interface GmailAttachmentSourcePort {
 
 export class GmailAttachmentSourceAdapter implements GmailAttachmentSourcePort {
   constructor(
-    private readonly connection: GmailConnectionClient = new PrismaGmailConnectionClient(),
+    private readonly connection: AcquisitionGmailConnectionClient = new PrismaAcquisitionGmailConnectionClient(),
     private readonly gmail: GmailApiClient = new FetchGmailApiClient()
   ) {}
 
@@ -25,10 +25,16 @@ export class GmailAttachmentSourceAdapter implements GmailAttachmentSourcePort {
     if (!input.companyId || !input.externalMessageId || !input.externalAttachmentId) {
       throw new Error("GMAIL_ATTACHMENT_NOT_FOUND")
     }
+    if (!input.connectionId) {
+      throw new Error("GMAIL_NOT_CONNECTED")
+    }
 
     let accessToken: string
     try {
-      accessToken = await this.connection.getValidAccessToken(input.companyId)
+      accessToken = await this.connection.getValidAccessToken({
+        companyId: input.companyId,
+        connectionId: input.connectionId,
+      })
     } catch (error) {
       if (isGmailProviderError(error) && error.code === "GMAIL_NOT_CONNECTED") {
         throw new Error("GMAIL_NOT_CONNECTED")

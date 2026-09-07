@@ -26,7 +26,7 @@ import { acquisitionExtractionCronSelectionRepository } from "@/lib/acquisition/
 import { runDraftExtractionOrchestrated } from "@/lib/acquisition/extraction/extraction.service"
 import { acquisitionIngestionAdapter } from "@/lib/acquisition/ports/acquisition-ingestion.adapter"
 import { acquisitionScanCursorRepository } from "@/lib/acquisition/persistence/acquisition-scan-cursor.repository"
-import { gmailConnectionListingAdapter } from "@/lib/acquisition/persistence/gmail-connection-listing.adapter"
+import { acquisitionGmailConnectionListingAdapter } from "@/lib/acquisition/persistence/acquisition-gmail-connection.listing.adapter"
 import {
   ACQUISITION_ORCHESTRATOR_LEASE_KEY,
   getAcquisitionOrchestratorConfig,
@@ -219,11 +219,12 @@ async function runGmailSync(input: {
   }
 
   const result: AcquisitionGmailCronRunResult = await runAcquisitionGmailSyncDriver({
-    listCompanyIds: () =>
-      gmailConnectionListingAdapter.listCompanyIdsWithGmailConnection(),
-    runSyncForCompany: (companyId) =>
+    listConnections: () =>
+      acquisitionGmailConnectionListingAdapter.listActiveAcquisitionGmailConnections(),
+    runSyncForConnection: (connection) =>
       syncAcquisitionMailForCompany({
-        companyId,
+        companyId: connection.companyId,
+        connectionId: connection.connectionId,
         provider: createGmailMailProviderAdapter(),
         ingestion: acquisitionIngestionAdapter,
         cursorRepository: acquisitionScanCursorRepository,

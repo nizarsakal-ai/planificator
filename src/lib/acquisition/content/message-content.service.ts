@@ -18,6 +18,7 @@ import type {
   MessageContentRecord,
 } from "@/lib/acquisition/content/message-content.types"
 import { isGmailProviderError } from "@/lib/acquisition/connector/gmail-api.client"
+import { resolveAcquisitionMailboxForMessage } from "@/lib/acquisition/connector/resolve-acquisition-mailbox"
 
 const ALLOWED_ROLES = new Set<Role>(["ADMIN", "SUPER_ADMIN"])
 
@@ -44,6 +45,7 @@ function fail(
 function mapGmailCode(code: string): MessageContentErrorCode {
   switch (code) {
     case "GMAIL_NOT_CONNECTED":
+    case "LEGACY_MAILBOX_AMBIGUOUS":
     case "GMAIL_TOKEN_REFRESH_FAILED":
     case "GMAIL_UNAUTHORIZED":
     case "GMAIL_RATE_LIMITED":
@@ -74,6 +76,8 @@ function publicMessage(code: MessageContentErrorCode): string {
       return "Échec de persistance du contenu"
     case "GMAIL_NOT_CONNECTED":
       return "Boîte Gmail non connectée"
+    case "LEGACY_MAILBOX_AMBIGUOUS":
+      return "Plusieurs boîtes Gmail actives — mailbox historique ambiguë"
     case "GMAIL_TOKEN_REFRESH_FAILED":
     case "GMAIL_UNAUTHORIZED":
       return "Connexion Gmail invalide"
@@ -130,11 +134,19 @@ export async function fetchAndStoreMessageContentCore(
 
   const message = await db.acquisitionMessage.findFirst({
     where: { id: input.acquisitionMessageId, companyId },
-    select: { id: true, externalMessageId: true, companyId: true },
+    select: { id: true, externalMessageId: true, companyId: true, sourceMailboxKey: true },
   })
 
   if (!message) {
     return fail("NOT_FOUND", "CONTENT_NOT_FOUND", publicMessage("CONTENT_NOT_FOUND"))
+  }
+
+  const mailbox = await resolveAcquisitionMailboxForMessage(
+    { companyId, sourceMailboxKey: message.sourceMailboxKey },
+    db
+  )
+  if (!mailbox.ok) {
+    return fail("FAILED", mailbox.code, publicMessage(mailbox.code))
   }
 
   let parts
@@ -142,6 +154,7 @@ export async function fetchAndStoreMessageContentCore(
     parts = await source.fetchMessageBody({
       companyId,
       externalMessageId: message.externalMessageId,
+      connectionId: mailbox.connectionId,
     })
   } catch (error) {
     if (isGmailProviderError(error)) {

@@ -39,7 +39,7 @@ import { checkOrchestratorLeaseHeartbeat } from "@/lib/acquisition/orchestrator/
 import * as orchestratorWorkers from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
 import { runProductionAcquisitionOrchestrator } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
 import * as orchestratorHandler from "@/lib/acquisition/orchestrator/acquisition-orchestrator.handler"
-import { gmailConnectionListingAdapter } from "@/lib/acquisition/persistence/gmail-connection-listing.adapter"
+import { acquisitionGmailConnectionListingAdapter } from "@/lib/acquisition/persistence/acquisition-gmail-connection.listing.adapter"
 import { acquisitionAttachmentRepository } from "@/lib/acquisition/attachments/acquisition-attachment.repository"
 import { acquisitionContentFetchStateRepository } from "@/lib/acquisition/content/message-content-fetch-state.repository"
 import { acquisitionExtractionCronSelectionRepository } from "@/lib/acquisition/extraction/extraction-cron.selection.repository"
@@ -207,7 +207,7 @@ function installProductionLeaseAuthority(input?: {
 
 function installEmptySiblingWorkers() {
   return [
-    patchMethod(gmailConnectionListingAdapter, "listCompanyIdsWithGmailConnection", async () => []),
+    patchMethod(acquisitionGmailConnectionListingAdapter, "listActiveAcquisitionGmailConnections", async () => []),
     patchMethod(acquisitionAttachmentRepository, "listCompanyIdsWithReclaimCandidates", async () => []),
     patchMethod(acquisitionAttachmentRepository, "listCompanyIdsWithRetryCandidates", async () => []),
     patchMethod(acquisitionAttachmentRepository, "listCompanyIdsWithDiscoveredAttachments", async () => []),
@@ -938,7 +938,7 @@ describe("PLAN-ACQ-012-4 fencing", () => {
       enableOrchestratorProductionFlags()
       const lease = installProductionLeaseAuthority({ stealAfterAsserts: 4 })
       const restoreListings = [
-        patchMethod(gmailConnectionListingAdapter, "listCompanyIdsWithGmailConnection", async () => []),
+        patchMethod(acquisitionGmailConnectionListingAdapter, "listActiveAcquisitionGmailConnections", async () => []),
         patchMethod(acquisitionAttachmentRepository, "listCompanyIdsWithDiscoveredAttachments", async () => []),
         patchMethod(
           acquisitionContentFetchStateRepository,

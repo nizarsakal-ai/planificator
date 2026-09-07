@@ -106,6 +106,7 @@ describe("parité éligibilité historique ↔ registre (lauralu.fr seul)", () =
     const db = {
       acquisitionMessage: {
         findUnique: async () => null,
+        findFirst: async () => null,
         create: async ({ data }: { data: { status: string; lastErrorCode: string | null } }) => {
           created.push(data)
           return { id: "msg1", status: data.status }
@@ -117,6 +118,7 @@ describe("parité éligibilité historique ↔ registre (lauralu.fr seul)", () =
       worksiteImportDraft: {
         create: async () => ({ id: "draft1" }),
       },
+      $executeRaw: async () => 0,
       $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(db),
     }
 
@@ -141,11 +143,13 @@ describe("parité éligibilité historique ↔ registre (lauralu.fr seul)", () =
     const db = {
       acquisitionMessage: {
         findUnique: async () => null,
+        findFirst: async () => null,
         create: async ({ data }: { data: { status: string; lastErrorCode: string | null } }) => ({
           id: "msg2",
           status: data.status,
         }),
       },
+      $executeRaw: async () => 0,
       $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(db),
     }
 

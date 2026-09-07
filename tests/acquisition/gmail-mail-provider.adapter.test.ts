@@ -7,7 +7,7 @@ import {
   buildAcquisitionGmailLookbackQuery,
 } from "@/lib/acquisition/connector/gmail-mail-provider.adapter"
 import type { GmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
-import type { GmailConnectionClient } from "@/lib/acquisition/connector/gmail-connection.client"
+import type { AcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
 import { GmailProviderError } from "@/lib/acquisition/connector/gmail.errors"
 import type {
   GmailHistoryListResponse,
@@ -16,6 +16,7 @@ import type {
   GmailProfileResponse,
 } from "@/lib/acquisition/connector/gmail-api.types"
 
+const CONNECTION = "conn-1"
 const COMPANY = "company-gmail-adapter"
 
 function sampleMessage(id: string, overrides: Partial<GmailMessageResource> = {}): GmailMessageResource {
@@ -53,7 +54,7 @@ function sampleMessage(id: string, overrides: Partial<GmailMessageResource> = {}
 }
 
 describe("GmailMailProviderAdapter", () => {
-  let connectionClient: GmailConnectionClient
+  let connectionClient: AcquisitionGmailConnectionClient
   let apiClient: GmailApiClient
   let listMessagesCalls: { query: string; pageToken?: string; pageSize: number }[]
   let listHistoryCalls: { startHistoryId: string; pageToken?: string; pageSize: number }[]
@@ -63,8 +64,9 @@ describe("GmailMailProviderAdapter", () => {
     listHistoryCalls = []
 
     connectionClient = {
-      getValidAccessToken: async (companyId: string) => {
-        assert.equal(companyId, COMPANY)
+      getValidAccessToken: async (lookup) => {
+        assert.equal("companyId" in lookup && lookup.companyId, COMPANY)
+        assert.equal("connectionId" in lookup && lookup.connectionId, CONNECTION)
         return "valid-token"
       },
     }
@@ -107,7 +109,7 @@ describe("GmailMailProviderAdapter", () => {
     })
 
     await assert.rejects(
-      () => adapter.listMessagesPage({ companyId: COMPANY, cursor: null, pageSize: 10 }),
+      () => adapter.listMessagesPage({ companyId: COMPANY, connectionId: CONNECTION, cursor: null, pageSize: 10 }),
       (err: unknown) => {
         assert.ok(err instanceof GmailProviderError)
         assert.equal(err.code, "GMAIL_NOT_CONNECTED")
@@ -129,7 +131,7 @@ describe("GmailMailProviderAdapter", () => {
 
     await assert.rejects(
       () =>
-        adapter.listMessagesPage({ companyId: COMPANY, cursor: null, pageSize: 5 }),
+        adapter.listMessagesPage({ companyId: COMPANY, connectionId: CONNECTION, cursor: null, pageSize: 5 }),
       (err: unknown) => {
         assert.ok(err instanceof GmailProviderError)
         assert.equal(err.code, "NO_ACTIVE_PARTNER_IDENTITIES")
@@ -153,9 +155,7 @@ describe("GmailMailProviderAdapter", () => {
       },
     })
 
-    const page = await adapter.listMessagesPage({
-      companyId: COMPANY,
-      cursor: null,
+    const page = await adapter.listMessagesPage({ companyId: COMPANY, connectionId: CONNECTION, cursor: null,
       pageSize: 5,
     })
 
@@ -179,10 +179,8 @@ describe("GmailMailProviderAdapter", () => {
         listActiveDomains: async () => ["lauralu.fr"],
       } })
 
-    const page1 = await adapter.listMessagesPage({ companyId: COMPANY, cursor: null, pageSize: 5 })
-    const page2 = await adapter.listMessagesPage({
-      companyId: COMPANY,
-      cursor: null,
+    const page1 = await adapter.listMessagesPage({ companyId: COMPANY, connectionId: CONNECTION, cursor: null, pageSize: 5 })
+    const page2 = await adapter.listMessagesPage({ companyId: COMPANY, connectionId: CONNECTION, cursor: null,
       pageToken: page1.nextPageToken,
       paginationMode: "lookback",
       pageSize: 5,
@@ -199,7 +197,7 @@ describe("GmailMailProviderAdapter", () => {
         listActiveIdentities: async () => ({ domains: ["lauralu.fr"], emails: [] }),
         listActiveDomains: async () => ["lauralu.fr"],
       } })
-    const page = await adapter.listMessagesPage({ companyId: COMPANY, cursor: null, pageSize: 10 })
+    const page = await adapter.listMessagesPage({ companyId: COMPANY, connectionId: CONNECTION, cursor: null, pageSize: 10 })
     const msg = page.messages[0]
 
     assert.equal(msg.fromHeader, "contact@lauralu.fr")
@@ -215,7 +213,7 @@ describe("GmailMailProviderAdapter", () => {
         listActiveIdentities: async () => ({ domains: ["lauralu.fr"], emails: [] }),
         listActiveDomains: async () => ["lauralu.fr"],
       } })
-    const page = await adapter.listMessagesPage({ companyId: COMPANY, cursor: null, pageSize: 10 })
+    const page = await adapter.listMessagesPage({ companyId: COMPANY, connectionId: CONNECTION, cursor: null, pageSize: 10 })
     const msg = page.messages[0]
     const serialized = JSON.stringify(msg)
 
@@ -239,7 +237,7 @@ describe("GmailMailProviderAdapter", () => {
         listActiveIdentities: async () => ({ domains: ["lauralu.fr"], emails: [] }),
         listActiveDomains: async () => ["lauralu.fr"],
       } })
-    const page = await adapter.listMessagesPage({ companyId: COMPANY, cursor: null, pageSize: 5 })
+    const page = await adapter.listMessagesPage({ companyId: COMPANY, connectionId: CONNECTION, cursor: null, pageSize: 5 })
 
     assert.equal(page.messages[0].fromHeader, "attacker@gmail.com")
   })
@@ -263,9 +261,7 @@ describe("GmailMailProviderAdapter", () => {
         listActiveDomains: async () => ["lauralu.fr"],
       },
     })
-    const page = await adapter.listMessagesPage({
-      companyId: COMPANY,
-      cursor: "stale-history",
+    const page = await adapter.listMessagesPage({ companyId: COMPANY, connectionId: CONNECTION, cursor: "stale-history",
       pageSize: 10,
     })
 
@@ -315,14 +311,10 @@ describe("GmailMailProviderAdapter", () => {
         listActiveDomains: async () => ["lauralu.fr"],
       } })
 
-    const page1 = await adapter.listMessagesPage({
-      companyId: COMPANY,
-      cursor: "hist-start",
+    const page1 = await adapter.listMessagesPage({ companyId: COMPANY, connectionId: CONNECTION, cursor: "hist-start",
       pageSize: 10,
     })
-    const page2 = await adapter.listMessagesPage({
-      companyId: COMPANY,
-      cursor: "hist-start",
+    const page2 = await adapter.listMessagesPage({ companyId: COMPANY, connectionId: CONNECTION, cursor: "hist-start",
       pageToken: page1.nextPageToken,
       paginationMode: "history",
       pageSize: 10,
@@ -350,7 +342,7 @@ describe("GmailMailProviderAdapter", () => {
         listActiveIdentities: async () => ({ domains: ["lauralu.fr"], emails: [] }),
         listActiveDomains: async () => ["lauralu.fr"],
       } })
-    const page = await adapter.listMessagesPage({ companyId: COMPANY, cursor: null, pageSize: 10 })
+    const page = await adapter.listMessagesPage({ companyId: COMPANY, connectionId: CONNECTION, cursor: null, pageSize: 10 })
 
     assert.equal(page.messages.length, 1)
     assert.equal(page.messages[0].externalMessageId, "good-msg")
@@ -371,7 +363,7 @@ describe("GmailMailProviderAdapter", () => {
         listActiveDomains: async () => ["lauralu.fr"],
       } })
     await assert.rejects(
-      () => adapter.listMessagesPage({ companyId: COMPANY, cursor: null, pageSize: 5 }),
+      () => adapter.listMessagesPage({ companyId: COMPANY, connectionId: CONNECTION, cursor: null, pageSize: 5 }),
       (err: unknown) => {
         assert.ok(err instanceof GmailProviderError)
         assert.equal(err.code, "GMAIL_RATE_LIMITED")
@@ -397,7 +389,7 @@ describe("GmailMailProviderAdapter", () => {
     })
 
     await assert.rejects(
-      () => adapter.listMessagesPage({ companyId: COMPANY, cursor: null, pageSize: 5 }),
+      () => adapter.listMessagesPage({ companyId: COMPANY, connectionId: CONNECTION, cursor: null, pageSize: 5 }),
       (err: unknown) => {
         assert.ok(err instanceof GmailProviderError)
         const serialized = JSON.stringify(err)
@@ -409,7 +401,7 @@ describe("GmailMailProviderAdapter", () => {
   })
 })
 
-describe("PrismaGmailConnectionClient (refresh token)", () => {
+describe("PrismaGmailConnectionClient (refresh token — legacy gmail_connections)", () => {
   it("refresh échoué → GMAIL_TOKEN_REFRESH_FAILED", async () => {
     const previousGoogleClientId = process.env.GOOGLE_CLIENT_ID
     const previousGoogleClientSecret = process.env.GOOGLE_CLIENT_SECRET

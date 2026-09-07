@@ -8,6 +8,7 @@ export type GmailErrorCode =
   | "GMAIL_MESSAGE_NOT_FOUND"
   | "GMAIL_MESSAGE_PARSE_ERROR"
   | "NO_ACTIVE_PARTNER_IDENTITIES"
+  | "LEGACY_MAILBOX_AMBIGUOUS"
 
 export class GmailProviderError extends Error {
   readonly code: GmailErrorCode

@@ -41,7 +41,12 @@ function baseAttachment(overrides: Partial<AttachmentRecord> = {}): AttachmentRe
 }
 
 function baseMessage(): AttachmentMessageContext {
-  return { id: "msg-1", companyId: "co-1", externalMessageId: "ext-msg-1" }
+  return {
+    id: "msg-1",
+    companyId: "co-1",
+    externalMessageId: "ext-msg-1",
+    sourceMailboxKey: "conn-1",
+  }
 }
 
 function claimedRepo(overrides: Partial<AcquisitionAttachmentRepositoryPort> = {}): AcquisitionAttachmentRepositoryPort {

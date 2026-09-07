@@ -4,8 +4,17 @@ import { describe, it, beforeEach } from "node:test"
 import assert from "node:assert/strict"
 import { runAcquisitionGmailSyncDriver } from "@/lib/acquisition/connector/acquisition-gmail-sync.driver"
 import type { MailSyncResult } from "@/lib/acquisition/connector/connector.types"
+import type { AcquisitionGmailConnectionRef } from "@/lib/acquisition/persistence/acquisition-gmail-connection.listing.adapter"
 
 const NOW = new Date("2026-07-18T14:00:00.000Z")
+
+function conn(companyId: string): AcquisitionGmailConnectionRef {
+  return {
+    connectionId: `conn-${companyId}`,
+    companyId,
+    gmailAddress: `${companyId}@example.com`,
+  }
+}
 
 function syncResult(overrides: Partial<MailSyncResult> = {}): MailSyncResult {
   return {
@@ -35,11 +44,11 @@ describe("runAcquisitionGmailSyncDriver", () => {
     let listCalled = false
 
     const result = await runAcquisitionGmailSyncDriver({
-      listCompanyIds: async () => {
+      listConnections: async () => {
         listCalled = true
-        return ["c1"]
-      },
-      runSyncForCompany: async () => syncResult(),
+        return [conn("c1")]
+        },
+      runSyncForConnection: async () => syncResult(),
       now: () => NOW,
       log: (event) => events.push(event),
     })
@@ -55,11 +64,11 @@ describe("runAcquisitionGmailSyncDriver", () => {
     delete process.env.PLANIFICATOR_ACQUISITION_ENABLED
     let listCalled = false
     const result = await runAcquisitionGmailSyncDriver({
-      listCompanyIds: async () => {
+      listConnections: async () => {
         listCalled = true
-        return ["c1"]
-      },
-      runSyncForCompany: async () => syncResult(),
+        return [conn("c1")]
+        },
+      runSyncForConnection: async () => syncResult(),
       now: () => NOW,
     })
     assert.equal(result.status, "SKIPPED")
@@ -73,10 +82,10 @@ describe("runAcquisitionGmailSyncDriver", () => {
     const events: string[] = []
 
     const result = await runAcquisitionGmailSyncDriver({
-      listCompanyIds: async () => {
+      listConnections: async () => {
         throw new Error("PrismaClientInitializationError: secret connection string")
       },
-      runSyncForCompany: async () => syncResult(),
+      runSyncForConnection: async () => syncResult(),
       now: () => NOW,
       log: (event) => events.push(event),
     })
@@ -103,8 +112,8 @@ describe("runAcquisitionGmailSyncDriver", () => {
     process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
 
     const result = await runAcquisitionGmailSyncDriver({
-      listCompanyIds: async () => [],
-      runSyncForCompany: async () => syncResult(),
+      listConnections: async () => [],
+      runSyncForConnection: async () => syncResult(),
       now: () => NOW,
       log: () => {},
     })
@@ -119,8 +128,8 @@ describe("runAcquisitionGmailSyncDriver", () => {
     const events: string[] = []
 
     const result = await runAcquisitionGmailSyncDriver({
-      listCompanyIds: async () => ["c1", "c2"],
-      runSyncForCompany: async (companyId) => syncResult({ companyId }),
+      listConnections: async () => [conn("c1"), conn("c2")],
+      runSyncForConnection: async (c) => syncResult({ companyId: c.companyId }),
       now: () => NOW,
       log: (event) => events.push(event),
     })
@@ -136,8 +145,8 @@ describe("runAcquisitionGmailSyncDriver", () => {
     const events: string[] = []
 
     const result = await runAcquisitionGmailSyncDriver({
-      listCompanyIds: async () => ["c1"],
-      runSyncForCompany: async () =>
+      listConnections: async () => [conn("c1")],
+      runSyncForConnection: async () =>
         syncResult({ status: "SKIPPED", skipReason: "FEATURE_DISABLED" }),
       now: () => NOW,
       log: (event) => events.push(event),
@@ -154,8 +163,8 @@ describe("runAcquisitionGmailSyncDriver", () => {
     process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
 
     const result = await runAcquisitionGmailSyncDriver({
-      listCompanyIds: async () => ["c1", "c2"],
-      runSyncForCompany: async () =>
+      listConnections: async () => [conn("c1"), conn("c2")],
+      runSyncForConnection: async () =>
         syncResult({ status: "SKIPPED", skipReason: "FEATURE_DISABLED" }),
       now: () => NOW,
       log: () => {},
@@ -172,11 +181,11 @@ describe("runAcquisitionGmailSyncDriver", () => {
     const events: string[] = []
 
     const result = await runAcquisitionGmailSyncDriver({
-      listCompanyIds: async () => ["c1", "c2"],
-      runSyncForCompany: async (companyId) =>
-        companyId === "c1"
+      listConnections: async () => [conn("c1"), conn("c2")],
+      runSyncForConnection: async (c) =>
+        c.companyId === "c1"
           ? syncResult({
-              companyId,
+              companyId: c.companyId,
               status: "PARTIAL",
               partialReason: "MESSAGE_INGESTION_FAILED",
               error: {
@@ -185,7 +194,7 @@ describe("runAcquisitionGmailSyncDriver", () => {
                 retryable: true,
               },
             })
-          : syncResult({ companyId }),
+          : syncResult({ companyId: c.companyId }),
       now: () => NOW,
       log: (event) => events.push(event),
     })
@@ -205,18 +214,18 @@ describe("runAcquisitionGmailSyncDriver", () => {
     const events: string[] = []
 
     const result = await runAcquisitionGmailSyncDriver({
-      listCompanyIds: async () => ["c1", "c2", "c3"],
-      runSyncForCompany: async (companyId) => {
-        synced.push(companyId)
-        if (companyId === "c2") {
+      listConnections: async () => [conn("c1"), conn("c2"), conn("c3")],
+      runSyncForConnection: async (c) => {
+        synced.push(c.companyId)
+        if (c.companyId === "c2") {
           return syncResult({
-            companyId,
+            companyId: c.companyId,
             status: "FAILED",
             error: { code: "PROVIDER_LIST_FAILED", message: "Gmail secret token leak", retryable: true },
             stats: { fetched: 0, ingested: 0, skippedDuplicate: 0, rejected: 0, failed: 0 },
           })
         }
-        return syncResult({ companyId })
+        return syncResult({ companyId: c.companyId })
       },
       now: () => NOW,
       log: (event) => events.push(event),
@@ -235,8 +244,8 @@ describe("runAcquisitionGmailSyncDriver", () => {
     process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
 
     const result = await runAcquisitionGmailSyncDriver({
-      listCompanyIds: async () => ["c1"],
-      runSyncForCompany: async () => {
+      listConnections: async () => [conn("c1")],
+      runSyncForConnection: async () => {
         throw new Error("stack trace with Bearer sk-live-abc")
       },
       now: () => NOW,
@@ -254,10 +263,10 @@ describe("runAcquisitionGmailSyncDriver", () => {
     process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
 
     const result = await runAcquisitionGmailSyncDriver({
-      listCompanyIds: async () => ["c1", "c2"],
-      runSyncForCompany: async (companyId) =>
+      listConnections: async () => [conn("c1"), conn("c2")],
+      runSyncForConnection: async (c) =>
         syncResult({
-          companyId,
+          companyId: c.companyId,
           stats: { fetched: 10, ingested: 5, skippedDuplicate: 3, rejected: 1, failed: 1 },
         }),
       now: () => NOW,

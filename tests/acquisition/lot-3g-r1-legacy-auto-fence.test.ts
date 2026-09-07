@@ -39,7 +39,7 @@ import {
 import { ACQUISITION_ORCHESTRATOR_LEASE_KEY } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-feature-flag"
 import { draftExtractionRepository } from "@/lib/acquisition/extraction/extraction.repository"
 import { acquisitionExtractionCronSelectionRepository } from "@/lib/acquisition/extraction/extraction-cron.selection.repository"
-import { gmailConnectionListingAdapter } from "@/lib/acquisition/persistence/gmail-connection-listing.adapter"
+import { acquisitionGmailConnectionListingAdapter } from "@/lib/acquisition/persistence/acquisition-gmail-connection.listing.adapter"
 import { acquisitionAttachmentRepository } from "@/lib/acquisition/attachments/acquisition-attachment.repository"
 import { acquisitionContentFetchStateRepository } from "@/lib/acquisition/content/message-content-fetch-state.repository"
 import * as orchestratorWorkers from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
@@ -51,6 +51,9 @@ const ownedFence: TransactionalOwnershipFence = {
 const notOwnedFence: TransactionalOwnershipFence = {
   assertOwnedAndLock: async () => "NOT_OWNED",
 }
+
+/** Instant fixe : plage fixture août 2026 = FUTURE (indépendant du mur). */
+const REFERENCE_INSTANT = new Date("2026-07-15T12:00:00.000Z")
 
 function partner(over: Partial<AcquisitionPartnerRecord> = {}): AcquisitionPartnerRecord {
   return {
@@ -314,13 +317,14 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
   it("1 — fence OWNED + vrai review → AUTO_APPROVE OK (plus de LEASE_NOT_OWNED)", async () => {
     const draft = baseDraft()
     const db = makeTxDb(draft)
-    const review = new ImportDraftReviewService({ db: db as never })
+    const review = new ImportDraftReviewService({ db: db as never, now: () => REFERENCE_INSTANT })
     let convertCalled = false
     await maybeRunAutoDecisionAfterExtraction({
       companyId: "co1",
       draftId: "d1",
       transactionalOwnershipFence: ownedFence,
       deps: {
+        referenceInstant: REFERENCE_INSTANT,
         db: db as never,
         review,
         conversion: {
@@ -352,7 +356,7 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
   it("2 — fence NOT_OWNED avant approve → throw LEASE + zéro mutation", async () => {
     const draft = baseDraft()
     const db = makeTxDb(draft)
-    const review = new ImportDraftReviewService({ db: db as never })
+    const review = new ImportDraftReviewService({ db: db as never, now: () => REFERENCE_INSTANT })
     await assert.rejects(
       () =>
         maybeRunAutoDecisionAfterExtraction({
@@ -360,6 +364,7 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
           draftId: "d1",
           transactionalOwnershipFence: notOwnedFence,
           deps: {
+            referenceInstant: REFERENCE_INSTANT,
             db: db as never,
             review,
             conversion: {
@@ -397,7 +402,7 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
     }
     const draft = baseDraft()
     const db = makeTxDb(draft)
-    const review = new ImportDraftReviewService({ db: db as never })
+    const review = new ImportDraftReviewService({ db: db as never, now: () => REFERENCE_INSTANT })
     let convertCalls = 0
     await assert.rejects(
       () =>
@@ -406,6 +411,7 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
           draftId: "d1",
           transactionalOwnershipFence: fence,
           deps: {
+            referenceInstant: REFERENCE_INSTANT,
             db: db as never,
             review,
             conversion: {
@@ -437,13 +443,14 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
     const fence = ownedFence
     const draft = baseDraft()
     const db = makeTxDb(draft)
-    const review = new ImportDraftReviewService({ db: db as never })
+    const review = new ImportDraftReviewService({ db: db as never, now: () => REFERENCE_INSTANT })
     let seenFence: TransactionalOwnershipFence | undefined
     await maybeRunAutoDecisionAfterExtraction({
       companyId: "co1",
       draftId: "d1",
       transactionalOwnershipFence: fence,
       deps: {
+        referenceInstant: REFERENCE_INSTANT,
         db: db as never,
         review,
         conversion: {
@@ -508,6 +515,7 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
       draftId: "d1",
       transactionalOwnershipFence: ownedFence,
       deps: {
+        referenceInstant: REFERENCE_INSTANT,
         db: db as never,
         review: review as never,
         conversion: { convertImportDraft: async () => ({ ok: true }) } as never,
@@ -544,7 +552,7 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
       extractedData: { requestClassification: "CANCELLED_CONSULTATION" },
     })
     const db = makeTxDb(draft)
-    const review = new ImportDraftReviewService({ db: db as never })
+    const review = new ImportDraftReviewService({ db: db as never, now: () => REFERENCE_INSTANT })
     await assert.rejects(
       () =>
         maybeRunAutoDecisionAfterExtraction({
@@ -552,6 +560,7 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
           draftId: "d1",
           transactionalOwnershipFence: fence,
           deps: {
+            referenceInstant: REFERENCE_INSTANT,
             db: db as never,
             review,
             conversion: { convertImportDraft: async () => ({ ok: true }) } as never,
@@ -585,6 +594,7 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
       draftId: "d1",
       transactionalOwnershipFence: ownedFence,
       deps: {
+        referenceInstant: REFERENCE_INSTANT,
         db: dbOwned as never,
         review: {
           approveImportDraft: async () => {
@@ -620,6 +630,7 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
           draftId: "d1",
           transactionalOwnershipFence: notOwnedFence,
           deps: {
+            referenceInstant: REFERENCE_INSTANT,
             db: dbLost as never,
             review: {
               approveImportDraft: async () => {
@@ -658,6 +669,7 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
           draftId: "d1",
           transactionalOwnershipFence: notOwnedFence,
           deps: {
+            referenceInstant: REFERENCE_INSTANT,
             db: db as never,
             review: { approveImportDraft: async () => ({ ok: true }) } as never,
             conversion: { convertImportDraft: async () => ({ ok: true }) } as never,
@@ -802,8 +814,8 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
 
     const restoreSiblings = [
       patchMethod(
-        gmailConnectionListingAdapter,
-        "listCompanyIdsWithGmailConnection",
+        acquisitionGmailConnectionListingAdapter,
+        "listActiveAcquisitionGmailConnections",
         async () => []
       ),
       patchMethod(
