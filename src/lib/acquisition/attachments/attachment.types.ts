@@ -5,6 +5,14 @@ export type AttachmentDownloadErrorCode =
   | "ATTACHMENT_DOWNLOAD_DISABLED"
   | "ACQUISITION_DISABLED"
   | "GMAIL_ATTACHMENT_NOT_FOUND"
+  /** 401/403 — autorisation révoquée/insuffisante ; non retryable auto (L2). */
+  | "GMAIL_UNAUTHORIZED"
+  /** 429 — temporaire, retry borné. */
+  | "GMAIL_RATE_LIMITED"
+  /** 5xx / timeout / réseau — temporaire, retry borné. */
+  | "GMAIL_UNAVAILABLE"
+  /** Erreur Gmail connue non mappée, non retryable — terminal (pas un faux NOT_FOUND). */
+  | "GMAIL_PROVIDER_FAILED"
   | "ATTACHMENT_TOO_LARGE"
   | "ATTACHMENT_MIME_NOT_ALLOWED"
   | "ATTACHMENT_SIGNATURE_MISMATCH"

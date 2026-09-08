@@ -81,13 +81,105 @@ describe("attachment-policy", () => {
     assert.equal(r.errorCode, "ATTACHMENT_MIME_NOT_ALLOWED")
   })
 
-  it("rejette octet-stream hors DWG/DXF", () => {
+  it("rejette octet-stream hors DWG/DXF et hors image magic", () => {
     const r = validateAttachmentContent({
       filename: "file.bin",
       declaredMimeType: "application/octet-stream",
       buffer: Buffer.from("random"),
     })
     assert.equal(r.allowed, false)
+    assert.equal(r.errorCode, "ATTACHMENT_MIME_NOT_ALLOWED")
+  })
+
+  it("L2 : octet-stream + .jpeg + magic JPEG → accepté (MIME normalisé)", () => {
+    const r = validateAttachmentContent({
+      filename: "photo.jpeg",
+      declaredMimeType: "application/octet-stream",
+      buffer: JPEG_BUFFER,
+    })
+    assert.equal(r.allowed, true)
+    assert.equal(r.resolvedMimeType, "image/jpeg")
+  })
+
+  it("L2 : octet-stream + .jpg + magic JPEG → accepté", () => {
+    const r = validateAttachmentContent({
+      filename: "photo.jpg",
+      declaredMimeType: "application/octet-stream",
+      buffer: JPEG_BUFFER,
+    })
+    assert.equal(r.allowed, true)
+    assert.equal(r.resolvedMimeType, "image/jpeg")
+  })
+
+  it("L2 : octet-stream + .png + magic PNG → accepté", () => {
+    const r = validateAttachmentContent({
+      filename: "scan.png",
+      declaredMimeType: "application/octet-stream",
+      buffer: PNG_BUFFER,
+    })
+    assert.equal(r.allowed, true)
+    assert.equal(r.resolvedMimeType, "image/png")
+  })
+
+  it("L2 : octet-stream + .jpg + magic PNG → rejeté", () => {
+    const r = validateAttachmentContent({
+      filename: "photo.jpg",
+      declaredMimeType: "application/octet-stream",
+      buffer: PNG_BUFFER,
+    })
+    assert.equal(r.allowed, false)
+    assert.equal(r.errorCode, "ATTACHMENT_SIGNATURE_MISMATCH")
+  })
+
+  it("L2 : octet-stream + .png + magic JPEG → rejeté", () => {
+    const r = validateAttachmentContent({
+      filename: "scan.png",
+      declaredMimeType: "application/octet-stream",
+      buffer: JPEG_BUFFER,
+    })
+    assert.equal(r.allowed, false)
+    assert.equal(r.errorCode, "ATTACHMENT_SIGNATURE_MISMATCH")
+  })
+
+  it("L2 : octet-stream + .jpg + HTML actif → rejeté", () => {
+    const r = validateAttachmentContent({
+      filename: "photo.jpg",
+      declaredMimeType: "application/octet-stream",
+      buffer: Buffer.from("<!DOCTYPE html><html>"),
+    })
+    assert.equal(r.allowed, false)
+    assert.equal(r.errorCode, "ATTACHMENT_MIME_NOT_ALLOWED")
+  })
+
+  it("L2 : octet-stream sans extension image → rejeté", () => {
+    const r = validateAttachmentContent({
+      filename: "blob.dat",
+      declaredMimeType: "application/octet-stream",
+      buffer: JPEG_BUFFER,
+    })
+    assert.equal(r.allowed, false)
+    assert.equal(r.errorCode, "ATTACHMENT_MIME_NOT_ALLOWED")
+  })
+
+  it("PPTX MIME hors allowlist → rejeté (comportement conservé)", () => {
+    const r = validateAttachmentContent({
+      filename: "deck.pptx",
+      declaredMimeType:
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      buffer: Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]),
+    })
+    assert.equal(r.allowed, false)
+    assert.equal(r.errorCode, "ATTACHMENT_MIME_NOT_ALLOWED")
+  })
+
+  it("XLSX MIME correct + magic ZIP → accepté (pas d’extraction texte L2)", () => {
+    const r = validateAttachmentContent({
+      filename: "grid.xlsx",
+      declaredMimeType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      buffer: Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]),
+    })
+    assert.equal(r.allowed, true)
   })
 
   it("rejette extension trompeuse (.exe)", () => {

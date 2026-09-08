@@ -479,6 +479,216 @@ describe("attachment-download.service", () => {
     )
     assert.equal(r.errorCode, "ATTACHMENT_NOT_FOUND")
   })
+
+  it("L2 : dépassement taille → REJECTED ATTACHMENT_TOO_LARGE", async () => {
+    process.env.ACQUISITION_ATTACHMENT_MAX_BYTES = "16"
+    const big = Buffer.concat([
+      Buffer.from("%PDF-1.4 "),
+      Buffer.alloc(64, 0x41),
+    ])
+    const r = await downloadAcquisitionAttachment(
+      { companyId: "co-1", attachmentId: "att-1" },
+      {
+        repository: claimedRepo({
+          findAttachmentWithMessage: async () => ({
+            attachment: baseAttachment({ sizeBytes: big.length }),
+            message: baseMessage(),
+          }),
+          claimForDownload: async () => ({
+            status: "CLAIMED",
+            attachment: baseAttachment({ sizeBytes: big.length }),
+          }),
+        }),
+        gmailSource: mockGmail({
+          fetchAttachment: async () => ({ data: big, sizeBytes: big.length }),
+        }),
+        storage: mockStorage({
+          store: async () => {
+            throw new Error("store ne doit pas être appelé")
+          },
+        }),
+        log: () => {},
+      }
+    )
+    assert.equal(r.outcome, "REJECTED")
+    assert.equal(r.errorCode, "ATTACHMENT_TOO_LARGE")
+  })
+
+  it("L2 : Gmail 401 → GMAIL_UNAUTHORIZED terminal (pas de nextRetryAt)", async () => {
+    const failures: AttachmentFailureUpdate[] = []
+    const r = await downloadAcquisitionAttachment(
+      { companyId: "co-1", attachmentId: "att-1", random: () => 0.5 },
+      {
+        repository: claimedRepo({
+          markFailure: async (_c, _a, update) => {
+            failures.push(update)
+            return {
+              outcome: "MARKED_FAILED",
+              attachment: baseAttachment({
+                status: "FAILED",
+                lastErrorCode: update.errorCode,
+                downloadRetryCount: 1,
+                downloadNextRetryAt: update.nextRetryAt ?? null,
+              }),
+            }
+          },
+        }),
+        gmailSource: mockGmail({
+          fetchAttachment: async () => {
+            throw new Error("GMAIL_UNAUTHORIZED")
+          },
+        }),
+        storage: mockStorage({}),
+        log: () => {},
+      }
+    )
+    assert.equal(r.outcome, "FAILED")
+    assert.equal(r.errorCode, "GMAIL_UNAUTHORIZED")
+    assert.equal(failures[0]?.nextRetryAt, null)
+  })
+
+  it("L2 : Gmail 429 → GMAIL_RATE_LIMITED avec nextRetryAt", async () => {
+    const failures: AttachmentFailureUpdate[] = []
+    const r = await downloadAcquisitionAttachment(
+      { companyId: "co-1", attachmentId: "att-1", random: () => 0.5 },
+      {
+        repository: claimedRepo({
+          markFailure: async (_c, _a, update) => {
+            failures.push(update)
+            return {
+              outcome: "MARKED_FAILED",
+              attachment: baseAttachment({
+                status: "FAILED",
+                lastErrorCode: update.errorCode,
+                downloadRetryCount: 1,
+                downloadNextRetryAt: update.nextRetryAt ?? null,
+              }),
+            }
+          },
+        }),
+        gmailSource: mockGmail({
+          fetchAttachment: async () => {
+            throw new Error("GMAIL_RATE_LIMITED")
+          },
+        }),
+        storage: mockStorage({}),
+        log: () => {},
+      }
+    )
+    assert.equal(r.errorCode, "GMAIL_RATE_LIMITED")
+    assert.ok(failures[0]?.nextRetryAt instanceof Date)
+  })
+
+  it("L2 : Gmail 5xx → GMAIL_UNAVAILABLE retryable", async () => {
+    const failures: AttachmentFailureUpdate[] = []
+    const r = await downloadAcquisitionAttachment(
+      { companyId: "co-1", attachmentId: "att-1", random: () => 0.5 },
+      {
+        repository: claimedRepo({
+          markFailure: async (_c, _a, update) => {
+            failures.push(update)
+            return {
+              outcome: "MARKED_FAILED",
+              attachment: baseAttachment({
+                status: "FAILED",
+                lastErrorCode: update.errorCode,
+                downloadRetryCount: 1,
+                downloadNextRetryAt: update.nextRetryAt ?? null,
+              }),
+            }
+          },
+        }),
+        gmailSource: mockGmail({
+          fetchAttachment: async () => {
+            throw new Error("GMAIL_UNAVAILABLE")
+          },
+        }),
+        storage: mockStorage({}),
+        log: () => {},
+      }
+    )
+    assert.equal(r.errorCode, "GMAIL_UNAVAILABLE")
+    assert.ok(failures[0]?.nextRetryAt instanceof Date)
+  })
+
+  it("L2 : octet-stream JPEG stocké avec MIME normalisé image/jpeg", async () => {
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46])
+    let storedMime: string | null = null
+    let persistedMime: string | null = null
+    const r = await downloadAcquisitionAttachment(
+      { companyId: "co-1", attachmentId: "att-1" },
+      {
+        repository: claimedRepo({
+          findAttachmentWithMessage: async () => ({
+            attachment: baseAttachment({
+              filename: "photo.jpg",
+              mimeType: "application/octet-stream",
+              sizeBytes: jpeg.length,
+            }),
+            message: baseMessage(),
+          }),
+          claimForDownload: async () => ({
+            status: "CLAIMED",
+            attachment: baseAttachment({
+              filename: "photo.jpg",
+              mimeType: "application/octet-stream",
+              sizeBytes: jpeg.length,
+            }),
+          }),
+          markStored: async (_c, _a, update) => {
+            persistedMime = update.mimeType
+            return {
+              status: "STORED",
+              attachment: baseAttachment({
+                status: "STORED",
+                sha256: update.sha256,
+                storagePublicId: update.storagePublicId,
+                mimeType: update.mimeType,
+              }),
+            }
+          },
+        }),
+        gmailSource: mockGmail({
+          fetchAttachment: async () => ({ data: jpeg, sizeBytes: jpeg.length }),
+        }),
+        storage: mockStorage({
+          store: async (input) => {
+            storedMime = input.mimeType
+            return { storageUrl: "u", storagePublicId: "pid-img", created: true }
+          },
+        }),
+        log: () => {},
+      }
+    )
+    assert.equal(r.outcome, "STORED")
+    assert.equal(storedMime, "image/jpeg")
+    assert.equal(persistedMime, "image/jpeg")
+  })
+
+  it("L2 : logs sans storageUrl ni contenu", async () => {
+    const events: Array<{ e: string; p?: Record<string, unknown> }> = []
+    await downloadAcquisitionAttachment(
+      { companyId: "co-1", attachmentId: "att-1" },
+      {
+        repository: claimedRepo(),
+        gmailSource: mockGmail({
+          fetchAttachment: async () => ({ data: PDF_BUFFER, sizeBytes: PDF_BUFFER.length }),
+        }),
+        storage: mockStorage({
+          store: async () => ({
+            storageUrl: "https://secret.example/raw/xyz",
+            storagePublicId: "pid",
+            created: true,
+          }),
+        }),
+        log: (e, p) => events.push({ e, p }),
+      }
+    )
+    const blob = JSON.stringify(events)
+    assert.equal(blob.includes("https://secret.example"), false)
+    assert.equal(blob.includes("%PDF"), false)
+    assert.equal(blob.includes("gmail-att-1"), false)
+  })
 })
 
 function mockGmail(impl: Partial<GmailAttachmentSourcePort>): GmailAttachmentSourcePort {

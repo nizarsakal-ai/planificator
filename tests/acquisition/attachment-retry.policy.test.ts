@@ -13,16 +13,22 @@ describe("attachment-retry.policy", () => {
     assert.deepEqual([...RETRYABLE_ATTACHMENT_ERROR_CODES], [
       "GMAIL_NOT_CONNECTED",
       "ATTACHMENT_STORAGE_FAILED",
+      "GMAIL_RATE_LIMITED",
+      "GMAIL_UNAVAILABLE",
     ])
   })
 
   it("codes allowlist retryables", () => {
     assert.equal(isRetryableAttachmentErrorCode("GMAIL_NOT_CONNECTED"), true)
     assert.equal(isRetryableAttachmentErrorCode("ATTACHMENT_STORAGE_FAILED"), true)
+    assert.equal(isRetryableAttachmentErrorCode("GMAIL_RATE_LIMITED"), true)
+    assert.equal(isRetryableAttachmentErrorCode("GMAIL_UNAVAILABLE"), true)
   })
 
   it("codes connus non retryables + inconnu deny by default", () => {
     assert.equal(isRetryableAttachmentErrorCode("GMAIL_ATTACHMENT_NOT_FOUND"), false)
+    assert.equal(isRetryableAttachmentErrorCode("GMAIL_UNAUTHORIZED"), false)
+    assert.equal(isRetryableAttachmentErrorCode("GMAIL_PROVIDER_FAILED"), false)
     assert.equal(isRetryableAttachmentErrorCode("ATTACHMENT_DECODE_FAILED"), false)
     assert.equal(isRetryableAttachmentErrorCode("ATTACHMENT_STORAGE_COLLISION"), false)
     assert.equal(isRetryableAttachmentErrorCode("ATTACHMENT_PERSISTENCE_FAILED"), false)

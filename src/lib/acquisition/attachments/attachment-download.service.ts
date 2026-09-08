@@ -406,6 +406,10 @@ function safeErrorCode(error: unknown, fallback: AttachmentDownloadErrorCode): A
     const code = error.message as AttachmentDownloadErrorCode
     const allowed: AttachmentDownloadErrorCode[] = [
       "GMAIL_ATTACHMENT_NOT_FOUND",
+      "GMAIL_UNAUTHORIZED",
+      "GMAIL_RATE_LIMITED",
+      "GMAIL_UNAVAILABLE",
+      "GMAIL_PROVIDER_FAILED",
       "GMAIL_NOT_CONNECTED",
       "LEGACY_MAILBOX_AMBIGUOUS",
       "ATTACHMENT_DECODE_FAILED",
@@ -421,6 +425,10 @@ function safePersistedErrorCode(code: string | null): AttachmentDownloadErrorCod
     "ATTACHMENT_STORAGE_FAILED",
     "ATTACHMENT_STORAGE_COLLISION",
     "GMAIL_ATTACHMENT_NOT_FOUND",
+    "GMAIL_UNAUTHORIZED",
+    "GMAIL_RATE_LIMITED",
+    "GMAIL_UNAVAILABLE",
+    "GMAIL_PROVIDER_FAILED",
     "GMAIL_NOT_CONNECTED",
     "LEGACY_MAILBOX_AMBIGUOUS",
     "ATTACHMENT_DECODE_FAILED",

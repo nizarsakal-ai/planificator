@@ -154,6 +154,25 @@ export function validateAttachmentContent(
     if (isCadOctetStream(filename, input.buffer)) {
       return { allowed: true, resolvedMimeType: "application/octet-stream" }
     }
+    // PLAN-ACQ-ATTACHMENTS-002-L2 : JPEG/PNG mal typés Gmail (octet-stream)
+    // uniquement si extension reconnue + magic strictement concordant.
+    if (magic === "image/jpeg" && (ext === ".jpg" || ext === ".jpeg")) {
+      return { allowed: true, resolvedMimeType: "image/jpeg" }
+    }
+    if (magic === "image/png" && ext === ".png") {
+      return { allowed: true, resolvedMimeType: "image/png" }
+    }
+    if (
+      (ext === ".jpg" || ext === ".jpeg" || ext === ".png") &&
+      magic != null &&
+      magic.startsWith("image/")
+    ) {
+      return {
+        allowed: false,
+        resolvedMimeType: declared,
+        errorCode: "ATTACHMENT_SIGNATURE_MISMATCH",
+      }
+    }
     return { allowed: false, resolvedMimeType: declared, errorCode: "ATTACHMENT_MIME_NOT_ALLOWED" }
   }
 

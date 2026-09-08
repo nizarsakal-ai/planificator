@@ -6,6 +6,7 @@ import { isGmailProviderError } from "@/lib/acquisition/connector/gmail-api.clie
 import {
   decodeBase64Url,
 } from "@/lib/acquisition/attachments/attachment-policy"
+import { throwMappedGmailAttachmentError } from "@/lib/acquisition/attachments/gmail-attachment-error-map"
 import type {
   GmailAttachmentFetchInput,
   GmailAttachmentFetchResult,
@@ -39,7 +40,7 @@ export class GmailAttachmentSourceAdapter implements GmailAttachmentSourcePort {
       if (isGmailProviderError(error) && error.code === "GMAIL_NOT_CONNECTED") {
         throw new Error("GMAIL_NOT_CONNECTED")
       }
-      throw error
+      throwMappedGmailAttachmentError(error)
     }
 
     let resource
@@ -50,10 +51,7 @@ export class GmailAttachmentSourceAdapter implements GmailAttachmentSourcePort {
         input.externalAttachmentId
       )
     } catch (error) {
-      if (isGmailProviderError(error)) {
-        throw new Error("GMAIL_ATTACHMENT_NOT_FOUND")
-      }
-      throw error
+      throwMappedGmailAttachmentError(error)
     }
 
     if (!resource?.data) {

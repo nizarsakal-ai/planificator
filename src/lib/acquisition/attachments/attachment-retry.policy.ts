@@ -1,12 +1,15 @@
 import type { AttachmentDownloadErrorCode } from "@/lib/acquisition/attachments/attachment.types"
 
 /**
- * Allowlist exclusive des codes FAILED retryables (PLAN-ACQ-004D).
- * Deny by default — aucun retry sur error.message.
+ * Allowlist exclusive des codes FAILED retryables (PLAN-ACQ-004D / L2).
+ * GMAIL_UNAUTHORIZED / GMAIL_PROVIDER_FAILED exclus — pas de boucle sur auth/erreurs terminales ;
+ * reprise après reconnexion = prérequis ops (mécanisme applicatif futur, pas SQL).
  */
 export const RETRYABLE_ATTACHMENT_ERROR_CODES = [
   "GMAIL_NOT_CONNECTED",
   "ATTACHMENT_STORAGE_FAILED",
+  "GMAIL_RATE_LIMITED",
+  "GMAIL_UNAVAILABLE",
 ] as const satisfies readonly AttachmentDownloadErrorCode[]
 
 export type RetryableAttachmentErrorCode = (typeof RETRYABLE_ATTACHMENT_ERROR_CODES)[number]
