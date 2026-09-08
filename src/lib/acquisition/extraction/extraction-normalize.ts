@@ -19,6 +19,7 @@ import {
   isoWeekToDateRange,
   resolveIsoWeekYearFromReferenceDate,
 } from "@/lib/acquisition/extraction/iso-week"
+import { EXTRACTION_SCHEMA_VERSION } from "@/lib/acquisition/extraction/extraction-feature-flag"
 
 const CANONICAL_KEYS = [
   "worksiteName",
@@ -255,7 +256,8 @@ export function buildExtractedDataPayload(
   contentHashAtExtraction: string
 ): Record<string, unknown> {
   return {
-    schemaVersion: "2",
+    // Aligné sur EXTRACTION_SCHEMA_VERSION (colonne draft) — évite le drift 2/3.
+    schemaVersion: EXTRACTION_SCHEMA_VERSION,
     postalCode: fields.postalCode,
     city: fields.city,
     consultationReference: fields.consultationReference,

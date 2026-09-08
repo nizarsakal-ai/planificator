@@ -82,4 +82,4 @@ Un ADR **DOIT** contenir au minimum (ES-001-§21.2) :
 
 | ID | Titre | Statut |
 |----|-------|--------|
-| — | Aucun ADR pour l’instant | — |
+| [ADR-PLAN-001](./ADR-PLAN-001-intelligent-extraction-provider.md) | Extraction intelligente Acquisition (provider Anthropic) | Proposé |
