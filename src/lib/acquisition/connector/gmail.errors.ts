@@ -15,6 +15,8 @@ export class GmailProviderError extends Error {
   readonly retryable: boolean
   readonly global: boolean
   readonly messageId?: string
+  /** Statut HTTP Google d’origine, si l’erreur vient d’une réponse API. */
+  readonly httpStatus?: number
 
   constructor(options: {
     code: GmailErrorCode
@@ -22,6 +24,7 @@ export class GmailProviderError extends Error {
     retryable: boolean
     global: boolean
     messageId?: string
+    httpStatus?: number
   }) {
     super(options.message)
     this.name = "GmailProviderError"
@@ -29,6 +32,7 @@ export class GmailProviderError extends Error {
     this.retryable = options.retryable
     this.global = options.global
     this.messageId = options.messageId
+    this.httpStatus = options.httpStatus
   }
 }
 
@@ -44,6 +48,7 @@ export function mapHttpStatusToGmailError(
       retryable: false,
       global: false,
       messageId,
+      httpStatus: status,
     })
   }
   if (status === 401 || status === 403) {
@@ -52,6 +57,7 @@ export function mapHttpStatusToGmailError(
       message: `Gmail API unauthorized (${context})`,
       retryable: false,
       global: true,
+      httpStatus: status,
     })
   }
   if (status === 429) {
@@ -60,6 +66,7 @@ export function mapHttpStatusToGmailError(
       message: "Gmail API rate limit exceeded",
       retryable: true,
       global: true,
+      httpStatus: status,
     })
   }
   if (status === 404 && context === "history") {
@@ -68,6 +75,7 @@ export function mapHttpStatusToGmailError(
       message: "Gmail historyId expired or invalid",
       retryable: true,
       global: true,
+      httpStatus: status,
     })
   }
   if (status >= 500) {
@@ -76,6 +84,7 @@ export function mapHttpStatusToGmailError(
       message: `Gmail API unavailable (${status})`,
       retryable: true,
       global: true,
+      httpStatus: status,
     })
   }
   return new GmailProviderError({
@@ -83,5 +92,6 @@ export function mapHttpStatusToGmailError(
     message: `Gmail API error ${status} (${context})`,
     retryable: status >= 500,
     global: true,
+    httpStatus: status,
   })
 }
