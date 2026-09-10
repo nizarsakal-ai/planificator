@@ -1,5 +1,6 @@
 import { v2 as cloudinary } from "cloudinary"
 import type { UploadApiErrorResponse } from "cloudinary"
+import { buildAcquisitionAttachmentCloudinaryFolder } from "@/lib/acquisition/attachments/attachment-cloudinary-folder-prefix"
 import type {
   AttachmentStorageDestroyInput,
   AttachmentStorageInput,
@@ -16,12 +17,6 @@ export interface CloudinaryExistingUploadResponse {
   existing?: boolean
   public_id?: string
   secure_url?: string
-}
-
-function expectedPublicId(input: AttachmentStorageInput): string {
-  const folder = `planificator/${input.companyId}/acquisition/${input.acquisitionMessageId}/${input.attachmentId}`
-  const stem = input.generatedFilename.replace(/\.[^.]+$/, "")
-  return `${folder}/${stem}`
 }
 
 export function isCloudinaryUploadApiError(error: unknown): error is UploadApiErrorResponse {
@@ -52,17 +47,25 @@ function collisionResult(publicId: string): AttachmentStorageResult {
 
 /**
  * Stockage Cloudinary — dossier tenant isolé, accès authenticated (pas d'URL publique permanente).
- * Chemin logique : planificator/{companyId}/acquisition/{messageId}/{attachmentId}/{generatedName}
+ * Chemin logique : {folderPrefix}/{companyId}/acquisition/{messageId}/{attachmentId}/{generatedName}
+ * folderPrefix via ACQUISITION_ATTACHMENT_CLOUDINARY_FOLDER_PREFIX (défaut planificator).
  *
  * Objet préexistant : non réutilisé automatiquement (pas de preuve de contenu/hash).
  * Une future réconciliation pourra lire métadonnées Cloudinary, vérifier hash ou marqueur
  * serveur fiable, puis décider de rattacher ou supprimer l'objet.
+ *
+ * destroy() utilise le storagePublicId déjà enregistré — inchangé par le préfixe d'upload.
  */
 export class CloudinaryAttachmentStorageAdapter implements AttachmentStoragePort {
   async store(input: AttachmentStorageInput): Promise<AttachmentStorageResult> {
-    const folder = `planificator/${input.companyId}/acquisition/${input.acquisitionMessageId}/${input.attachmentId}`
+    // Une seule résolution/validation du préfixe pour folder + public_id attendu.
+    const folder = buildAcquisitionAttachmentCloudinaryFolder({
+      companyId: input.companyId,
+      acquisitionMessageId: input.acquisitionMessageId,
+      attachmentId: input.attachmentId,
+    })
     const publicIdStem = input.generatedFilename.replace(/\.[^.]+$/, "")
-    const deterministicPublicId = expectedPublicId(input)
+    const deterministicPublicId = `${folder}/${publicIdStem}`
 
     return new Promise<AttachmentStorageResult>((resolve, reject) => {
       cloudinary.uploader
