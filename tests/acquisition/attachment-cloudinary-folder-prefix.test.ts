@@ -32,10 +32,20 @@ describe("resolveAcquisitionAttachmentCloudinaryFolderPrefix", () => {
     assert.equal(resolveAcquisitionAttachmentCloudinaryFolderPrefix(undefined), "planificator")
   })
 
-  it("variable vide → planificator", () => {
+  it("variable vide ou espaces → ATTACHMENT_CLOUDINARY_FOLDER_PREFIX_INVALID", () => {
     process.env[ENV_KEY] = ""
-    assert.equal(resolveAcquisitionAttachmentCloudinaryFolderPrefix(), "planificator")
-    assert.equal(resolveAcquisitionAttachmentCloudinaryFolderPrefix("   "), "planificator")
+    assert.throws(
+      () => resolveAcquisitionAttachmentCloudinaryFolderPrefix(),
+      /ATTACHMENT_CLOUDINARY_FOLDER_PREFIX_INVALID/
+    )
+    assert.throws(
+      () => resolveAcquisitionAttachmentCloudinaryFolderPrefix(""),
+      /ATTACHMENT_CLOUDINARY_FOLDER_PREFIX_INVALID/
+    )
+    assert.throws(
+      () => resolveAcquisitionAttachmentCloudinaryFolderPrefix("   "),
+      /ATTACHMENT_CLOUDINARY_FOLDER_PREFIX_INVALID/
+    )
   })
 
   it("trim externe accepté", () => {

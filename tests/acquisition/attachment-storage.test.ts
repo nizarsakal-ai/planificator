@@ -170,6 +170,39 @@ describe("CloudinaryAttachmentStorageAdapter", () => {
     assert.equal(uploadCalled, false)
   })
 
+  it("préfixe vide rejette avant tout appel Cloudinary", async () => {
+    process.env[ENV_KEY] = ""
+    let uploadCalled = false
+    cloudinary.uploader.upload_stream = ((_opts, cb) => {
+      uploadCalled = true
+      const stream = {
+        end: () => {
+          if (!cb) return
+          cb(undefined, {
+            secure_url: "https://x",
+            public_id: "x",
+          } as Parameters<NonNullable<typeof cb>>[1])
+        },
+      }
+      return stream as ReturnType<typeof cloudinary.uploader.upload_stream>
+    }) as typeof cloudinary.uploader.upload_stream
+
+    const adapter = new CloudinaryAttachmentStorageAdapter()
+    await assert.rejects(
+      () =>
+        adapter.store({
+          companyId: "co",
+          acquisitionMessageId: "msg",
+          attachmentId: "att",
+          buffer: Buffer.from("%PDF"),
+          mimeType: "application/pdf",
+          generatedFilename: "att-abc.pdf",
+        }),
+      /ATTACHMENT_CLOUDINARY_FOLDER_PREFIX_INVALID/
+    )
+    assert.equal(uploadCalled, false)
+  })
+
   it("store retourne created:false si existing:true (overwrite:false)", async () => {
     cloudinary.uploader.upload_stream = ((_opts, cb) => {
       const stream = {
