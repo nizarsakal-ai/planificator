@@ -21,7 +21,7 @@ export function resolveAcquisitionAttachmentCloudinaryFolderPrefix(
 ): string {
   if (raw == null) return DEFAULT_ACQUISITION_ATTACHMENT_CLOUDINARY_FOLDER_PREFIX
   const trimmed = raw.trim()
-  if (!trimmed) return DEFAULT_ACQUISITION_ATTACHMENT_CLOUDINARY_FOLDER_PREFIX
+  if (!trimmed) throw new Error("ATTACHMENT_CLOUDINARY_FOLDER_PREFIX_INVALID")
 
   if (
     trimmed.includes("/") ||
