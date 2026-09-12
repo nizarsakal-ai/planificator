@@ -258,6 +258,41 @@ describe("CloudinaryAttachmentStorageAdapter", () => {
     assert.match(result.storagePublicId, /planificator\/co\/acquisition\/msg\/att\/att-abc$/)
   })
 
+  it("store retourne created:false si err Cloudinary direct http_code 409", async () => {
+    cloudinary.uploader.upload_stream = ((_opts, cb) => {
+      const stream = {
+        end: () => {
+          if (!cb) return
+          cb(
+            {
+              http_code: 409,
+              message: "Already exists",
+              name: "Error",
+            } as Parameters<typeof cb>[0],
+            undefined
+          )
+        },
+      }
+      return stream as ReturnType<typeof cloudinary.uploader.upload_stream>
+    }) as typeof cloudinary.uploader.upload_stream
+
+    const adapter = new CloudinaryAttachmentStorageAdapter()
+    const result = await adapter.store({
+      companyId: "co",
+      acquisitionMessageId: "msg",
+      attachmentId: "att",
+      buffer: Buffer.from("%PDF"),
+      mimeType: "application/pdf",
+      generatedFilename: "att-abc.pdf",
+    })
+
+    assert.equal(result.created, false)
+    assert.match(
+      result.storagePublicId,
+      /planificator\/co\/acquisition\/msg\/att\/att-abc$/
+    )
+  })
+
   it("erreur Cloudinary non structurée → ATTACHMENT_STORAGE_FAILED", async () => {
     cloudinary.uploader.upload_stream = ((_opts, cb) => {
       const stream = {

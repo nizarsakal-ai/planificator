@@ -80,30 +80,52 @@ export class CloudinaryAttachmentStorageAdapter implements AttachmentStoragePort
             use_filename: false,
           },
           (err, result) => {
-            const payload = result ?? err
-            if (!payload || typeof payload !== "object") {
+            if (err) {
+              if (isCloudinaryStorageCollisionError(err)) {
+                resolve(collisionResult(deterministicPublicId))
+                return
+              }
+
+              console.error("[acquisition][attachment-storage] Cloudinary upload failed", {
+                httpCode: isCloudinaryUploadApiError(err) ? err.http_code : null,
+              })
+              reject(new Error("ATTACHMENT_STORAGE_FAILED"))
+              return
+            }
+
+            if (!result || typeof result !== "object") {
               reject(new Error("ATTACHMENT_STORAGE_FAILED"))
               return
             }
 
             const apiError =
-              "error" in payload && payload.error ? (payload.error as UploadApiErrorResponse) : null
+              "error" in result && result.error
+                ? (result.error as UploadApiErrorResponse)
+                : null
             if (apiError) {
               if (isCloudinaryStorageCollisionError(apiError)) {
                 resolve(collisionResult(deterministicPublicId))
                 return
               }
+
+              console.error("[acquisition][attachment-storage] Cloudinary upload failed", {
+                httpCode: isCloudinaryUploadApiError(apiError) ? apiError.http_code : null,
+              })
               reject(new Error("ATTACHMENT_STORAGE_FAILED"))
               return
             }
 
-            if (isCloudinaryExistingAssetResponse(payload)) {
-              resolve(collisionResult(payload.public_id ?? deterministicPublicId))
+            if (isCloudinaryExistingAssetResponse(result)) {
+              resolve(collisionResult(result.public_id ?? deterministicPublicId))
               return
             }
 
-            const secureUrl = "secure_url" in payload ? String(payload.secure_url ?? "") : ""
-            const publicId = "public_id" in payload ? String(payload.public_id ?? "") : ""
+            const uploadResult = result as {
+              secure_url?: string
+              public_id?: string
+            }
+            const secureUrl = String(uploadResult.secure_url ?? "")
+            const publicId = String(uploadResult.public_id ?? "")
             if (!secureUrl || !publicId) {
               reject(new Error("ATTACHMENT_STORAGE_FAILED"))
               return
