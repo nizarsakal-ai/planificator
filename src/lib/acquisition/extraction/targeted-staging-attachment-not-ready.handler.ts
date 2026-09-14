@@ -20,7 +20,10 @@ import {
   type PersistExtractionInput,
   type PersistExtractionOutcome,
 } from "@/lib/acquisition/extraction/extraction.repository"
-import type { ExtractDraftResult } from "@/lib/acquisition/extraction/extraction.types"
+import type {
+  ExtractDraftResult,
+  ExtractionWarning,
+} from "@/lib/acquisition/extraction/extraction.types"
 
 export const TARGETED_ATTACHMENT_NOT_READY_CONFIRMATION =
   "RUN_TARGETED_ATTACHMENT_NOT_READY_TEST" as const
@@ -135,6 +138,66 @@ type ReadOnlyExtractionRepo = Pick<
 >
 
 /**
+ * Sous-classe réelle : lectures via `inner` ; claim → null ; mutations interdites.
+ * Évite tout cast structurel (membre privé `db` de DraftExtractionRepository).
+ */
+class HarnessFuseExtractionRepository extends DraftExtractionRepository {
+  constructor(
+    private readonly inner: ReadOnlyExtractionRepo,
+    private readonly fuseStats: HarnessFuseStats
+  ) {
+    super()
+  }
+
+  override findDraft(companyId: string, draftId: string): Promise<DraftExtractionRow | null> {
+    return this.inner.findDraft(companyId, draftId)
+  }
+
+  override findContent(
+    companyId: string,
+    acquisitionMessageId: string
+  ): Promise<MessageContentLite | null> {
+    return this.inner.findContent(companyId, acquisitionMessageId)
+  }
+
+  override findMessage(companyId: string, messageId: string): Promise<MessageLite | null> {
+    return this.inner.findMessage(companyId, messageId)
+  }
+
+  override listAttachmentMetadata(
+    companyId: string,
+    acquisitionMessageId: string
+  ): Promise<AttachmentMetaRow[]> {
+    return this.inner.listAttachmentMetadata(companyId, acquisitionMessageId)
+  }
+
+  override async claimExtracting(_input: ClaimDraftInput): Promise<DraftExtractionRow | null> {
+    this.fuseStats.claimCalls += 1
+    return null
+  }
+
+  override async persistExtraction(
+    _input: PersistExtractionInput
+  ): Promise<PersistExtractionOutcome> {
+    this.fuseStats.mutationAttempts += 1
+    throw new Error(HARNESS_MUTATION_FORBIDDEN)
+  }
+
+  override async markFailedWhileExtracting(_input: {
+    companyId: string
+    draftId: string
+    expectedVersion: number
+    errorCode: string
+    now: Date
+    warnings?: ExtractionWarning[]
+    extractionRetryable?: boolean
+  }): Promise<MarkFailedOutcome> {
+    this.fuseStats.mutationAttempts += 1
+    throw new Error(HARNESS_MUTATION_FORBIDDEN)
+  }
+}
+
+/**
  * Lectures déléguées ; claimExtracting → toujours null (aucune mutation).
  * persist / markFailed → throw si jamais atteints.
  */
@@ -142,36 +205,7 @@ export function createHarnessFuseRepository(
   inner: ReadOnlyExtractionRepo = draftExtractionRepository,
   stats: HarnessFuseStats = { claimCalls: 0, mutationAttempts: 0, providerCalls: 0 }
 ): DraftExtractionRepository {
-  const fuse = {
-    findDraft(companyId: string, draftId: string): Promise<DraftExtractionRow | null> {
-      return inner.findDraft(companyId, draftId)
-    },
-    findContent(companyId: string, acquisitionMessageId: string): Promise<MessageContentLite | null> {
-      return inner.findContent(companyId, acquisitionMessageId)
-    },
-    findMessage(companyId: string, messageId: string): Promise<MessageLite | null> {
-      return inner.findMessage(companyId, messageId)
-    },
-    listAttachmentMetadata(
-      companyId: string,
-      acquisitionMessageId: string
-    ): Promise<AttachmentMetaRow[]> {
-      return inner.listAttachmentMetadata(companyId, acquisitionMessageId)
-    },
-    async claimExtracting(_input: ClaimDraftInput): Promise<DraftExtractionRow | null> {
-      stats.claimCalls += 1
-      return null
-    },
-    async persistExtraction(_input: PersistExtractionInput): Promise<PersistExtractionOutcome> {
-      stats.mutationAttempts += 1
-      throw new Error(HARNESS_MUTATION_FORBIDDEN)
-    },
-    async markFailedWhileExtracting(): Promise<MarkFailedOutcome> {
-      stats.mutationAttempts += 1
-      throw new Error(HARNESS_MUTATION_FORBIDDEN)
-    },
-  }
-  return fuse as DraftExtractionRepository
+  return new HarnessFuseExtractionRepository(inner, stats)
 }
 
 export function createHarnessSecureExtractionDeps(stats?: HarnessFuseStats): {
