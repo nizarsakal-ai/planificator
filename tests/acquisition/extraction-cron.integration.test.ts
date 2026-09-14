@@ -159,6 +159,172 @@ describe("OPS-004 extraction cron — intégration PostgreSQL", RUN, () => {
     assert.ok(candidates.some((c) => c.draftId === newer.draftId))
   })
 
+
+  it("selector AUTO exclut PLAN PDF non prêt", async () => {
+    const seeded = await seedMessage(
+      companyA,
+      "Chantier : Pending Plan\nRéférence : REF-PLAN-PENDING",
+      "Pending plan"
+    )
+
+    await db.worksiteImportDraft.update({
+      where: { id: seeded.draftId },
+      data: {
+        detectionClassification: "CONSULTATION",
+        detectionContentHash: seeded.contentHash,
+      },
+    })
+
+    await db.acquisitionAttachment.create({
+      data: {
+        companyId: companyA,
+        acquisitionMessageId: seeded.messageId,
+        attachmentKey: `plan-pending-${Date.now()}`,
+        filename: "plan.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 10,
+        category: "PLAN",
+        status: "DISCOVERED",
+      },
+    })
+
+    const cfg = getExtractionCronConfig()
+    const candidates = await selection().listEligibleCandidatesForCompany({
+      companyId: companyA,
+      limit: 50,
+      now: new Date(),
+      maxAttempts: cfg.maxAttempts,
+      reclaimTtlMs: cfg.reclaimTtlMs,
+    })
+
+    assert.ok(!candidates.some((c) => c.draftId === seeded.draftId))
+  })
+
+
+  it("selector AUTO exclut PLAN PDF STORED sans storagePublicId", async () => {
+    const seeded = await seedMessage(
+      companyA,
+      "Chantier : Stored Plan Missing PublicId\nRéférence : REF-PLAN-STORED-NO-PUBLICID",
+      "Stored plan missing public id"
+    )
+
+    await db.worksiteImportDraft.update({
+      where: { id: seeded.draftId },
+      data: {
+        detectionClassification: "CONSULTATION",
+        detectionContentHash: seeded.contentHash,
+      },
+    })
+
+    await db.acquisitionAttachment.create({
+      data: {
+        companyId: companyA,
+        acquisitionMessageId: seeded.messageId,
+        attachmentKey: `plan-stored-no-publicid-${Date.now()}`,
+        filename: "plan.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 10,
+        category: "PLAN",
+        status: "STORED",
+        storagePublicId: null,
+      },
+    })
+
+    const cfg = getExtractionCronConfig()
+    const candidates = await selection().listEligibleCandidatesForCompany({
+      companyId: companyA,
+      limit: 50,
+      now: new Date(),
+      maxAttempts: cfg.maxAttempts,
+      reclaimTtlMs: cfg.reclaimTtlMs,
+    })
+
+    assert.ok(!candidates.some((c) => c.draftId === seeded.draftId))
+  })
+
+
+  it("selector AUTO inclut PLAN PDF STORED avec storagePublicId", async () => {
+    const seeded = await seedMessage(
+      companyA,
+      "Chantier : Stored Plan\nRéférence : REF-PLAN-STORED",
+      "Stored plan"
+    )
+
+    await db.worksiteImportDraft.update({
+      where: { id: seeded.draftId },
+      data: {
+        detectionClassification: "CONSULTATION",
+        detectionContentHash: seeded.contentHash,
+      },
+    })
+
+    await db.acquisitionAttachment.create({
+      data: {
+        companyId: companyA,
+        acquisitionMessageId: seeded.messageId,
+        attachmentKey: `plan-stored-${Date.now()}`,
+        filename: "plan.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 10,
+        category: "PLAN",
+        status: "STORED",
+        storagePublicId: "acquisition/test/plan-stored",
+      },
+    })
+
+    const cfg = getExtractionCronConfig()
+    const candidates = await selection().listEligibleCandidatesForCompany({
+      companyId: companyA,
+      limit: 50,
+      now: new Date(),
+      maxAttempts: cfg.maxAttempts,
+      reclaimTtlMs: cfg.reclaimTtlMs,
+    })
+
+    assert.ok(candidates.some((c) => c.draftId === seeded.draftId))
+  })
+
+
+  it("selector AUTO n'exclut pas PDF non-PLAN non prêt", async () => {
+    const seeded = await seedMessage(
+      companyA,
+      "Chantier : Other PDF\nRéférence : REF-OTHER-PDF",
+      "Other pdf"
+    )
+
+    await db.worksiteImportDraft.update({
+      where: { id: seeded.draftId },
+      data: {
+        detectionClassification: "CONSULTATION",
+        detectionContentHash: seeded.contentHash,
+      },
+    })
+
+    await db.acquisitionAttachment.create({
+      data: {
+        companyId: companyA,
+        acquisitionMessageId: seeded.messageId,
+        attachmentKey: `other-pdf-${Date.now()}`,
+        filename: "document.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 10,
+        category: "OTHER",
+        status: "DISCOVERED",
+      },
+    })
+
+    const cfg = getExtractionCronConfig()
+    const candidates = await selection().listEligibleCandidatesForCompany({
+      companyId: companyA,
+      limit: 50,
+      now: new Date(),
+      maxAttempts: cfg.maxAttempts,
+      reclaimTtlMs: cfg.reclaimTtlMs,
+    })
+
+    assert.ok(candidates.some((c) => c.draftId === seeded.draftId))
+  })
+
   it("FAILED backoff dû / non dû + maxAttempts exclu", async () => {
     const seeded = await seedMessage(
       companyA,

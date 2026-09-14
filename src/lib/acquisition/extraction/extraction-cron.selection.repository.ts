@@ -100,6 +100,22 @@ function eligibleWhereSql(input: {
     ${companyClause}
     AND c."normalizedText" <> ''
     AND ${DETECTION_PROOF_SQL}
+    AND NOT EXISTS (
+      SELECT 1
+      FROM "acquisition_attachments" a
+      WHERE a."companyId" = d."companyId"
+        AND a."acquisitionMessageId" = d."acquisitionMessageId"
+        AND a."category" = CAST('PLAN' AS "AcquisitionAttachmentCategory")
+        AND (
+          LOWER(a."mimeType") = 'application/pdf'
+          OR LOWER(a."filename") LIKE '%.pdf'
+        )
+        AND (
+          a."status" <> CAST('STORED' AS "AcquisitionAttachmentStatus")
+          OR a."storagePublicId" IS NULL
+          OR BTRIM(a."storagePublicId") = ''
+        )
+    )
     AND (
       d."status" = CAST('PENDING_EXTRACTION' AS "WorksiteImportDraftStatus")
       OR (

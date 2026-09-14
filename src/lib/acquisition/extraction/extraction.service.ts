@@ -428,6 +428,34 @@ async function runDraftExtractionCore(
     draft.acquisitionMessageId
   )
 
+  if (isAutoExtractionContext(executionContext)) {
+    const pendingRequiredPlan = attachments.find((att) => {
+      const isPdf =
+        (att.mimeType || "").toLowerCase() === "application/pdf" ||
+        att.filename.toLowerCase().endsWith(".pdf")
+
+      return (
+        att.category === "PLAN" &&
+        isPdf &&
+        (att.status !== "STORED" || !att.storagePublicId?.trim())
+      )
+    })
+
+    if (pendingRequiredPlan) {
+      log("EXTRACTION_BLOCKED_ATTACHMENT_NOT_READY", {
+        draftId: draft.id,
+        filename: pendingRequiredPlan.filename,
+        status: pendingRequiredPlan.status,
+      })
+      return fail(
+        "FAILED",
+        "ATTACHMENT_NOT_READY",
+        "Pièce PLAN requise non disponible pour extraction AUTO",
+        { draftId: draft.id }
+      )
+    }
+  }
+
   if (!(await ensureOrchestratorOwned(executionContext))) {
     log("EXTRACTION_LEASE_STOLEN_BEFORE_CLAIM", { draftId: draft.id })
     return failLeaseStolen(draft.id)

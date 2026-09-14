@@ -59,6 +59,7 @@ export type ExtractionErrorCode =
   | "INTERNAL_ERROR"
   | "DETECTION_REQUIRED"
   | "DETECTION_NOT_AUTHORIZED"
+  | "ATTACHMENT_NOT_READY"
 
 export type ExtractionWarningSeverity = "INFO" | "WARNING" | "ERROR"
 

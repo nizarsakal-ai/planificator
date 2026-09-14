@@ -3,7 +3,7 @@ process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 import { describe, it, beforeEach, afterEach } from "node:test"
 import assert from "node:assert/strict"
 import type { WorksiteImportDraftStatus } from "@prisma/client"
-import { runDraftExtraction } from "@/lib/acquisition/extraction/extraction.service"
+import { runDraftExtraction, runDraftExtractionSystem } from "@/lib/acquisition/extraction/extraction.service"
 import type {
   AttachmentMetaRow,
   DraftExtractionRow,
@@ -867,6 +867,270 @@ describe("extraction.service R1", () => {
     assert.equal(persisted.fields.requestedStartDate, "2026-08-31")
     assert.equal(persisted.fields.requestedEndDate, "2026-09-06")
     assert.ok(!persisted.warningData.some((w) => w.code === "DATE_AMBIGUOUS"))
+  })
+
+
+  it("AUTO : PLAN PDF non stocké → ATTACHMENT_NOT_READY avant claim/provider", async () => {
+    const repo = createFakeRepo({
+      attachments: [
+        {
+          filename: "plan.pdf",
+          mimeType: "application/pdf",
+          category: "PLAN",
+          sizeBytes: 1234,
+          status: "DISCOVERED",
+          storagePublicId: null,
+        },
+      ],
+    })
+
+    let providerCalls = 0
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        providerCalls += 1
+        return {
+          fields: {},
+          warnings: [],
+          providerMetadata: { providerId: "test" },
+        }
+      },
+    }
+
+    const result = await runDraftExtractionSystem(
+      { companyId: "co1", draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.outcome, "FAILED")
+      assert.equal(result.code, "ATTACHMENT_NOT_READY")
+    }
+
+    assert.equal(repo.claimCount, 0)
+    assert.equal(providerCalls, 0)
+    assert.equal(repo.draft?.status, "PENDING_EXTRACTION")
+    assert.equal(repo.draft?.extractionAttemptCount, 0)
+  })
+
+
+  it("AUTO : PLAN PDF STORED sans storagePublicId → ATTACHMENT_NOT_READY", async () => {
+    const repo = createFakeRepo({
+      attachments: [
+        {
+          filename: "plan.pdf",
+          mimeType: "application/pdf",
+          category: "PLAN",
+          sizeBytes: 1234,
+          status: "STORED",
+          storagePublicId: null,
+        },
+      ],
+    })
+
+    let providerCalls = 0
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        providerCalls += 1
+        return {
+          fields: {},
+          warnings: [],
+          providerMetadata: { providerId: "test" },
+        }
+      },
+    }
+
+    const result = await runDraftExtractionSystem(
+      { companyId: "co1", draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.code, "ATTACHMENT_NOT_READY")
+    assert.equal(repo.claimCount, 0)
+    assert.equal(providerCalls, 0)
+    assert.equal(repo.draft?.extractionAttemptCount, 0)
+  })
+
+
+  it("AUTO : PLAN PDF STORED avec storagePublicId espaces → ATTACHMENT_NOT_READY", async () => {
+    const repo = createFakeRepo({
+      attachments: [
+        {
+          filename: "plan.pdf",
+          mimeType: "application/pdf",
+          category: "PLAN",
+          sizeBytes: 1234,
+          status: "STORED",
+          storagePublicId: "   ",
+        },
+      ],
+    })
+
+    let providerCalls = 0
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        providerCalls += 1
+        return {
+          fields: {},
+          warnings: [],
+          providerMetadata: { providerId: "test" },
+        }
+      },
+    }
+
+    const result = await runDraftExtractionSystem(
+      { companyId: "co1", draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.code, "ATTACHMENT_NOT_READY")
+    assert.equal(repo.claimCount, 0)
+    assert.equal(providerCalls, 0)
+    assert.equal(repo.draft?.extractionAttemptCount, 0)
+  })
+
+
+  it("AUTO : PLAN PDF STORED avec storagePublicId → extraction autorisée", async () => {
+    const repo = createFakeRepo({
+      attachments: [
+        {
+          filename: "plan.pdf",
+          mimeType: "application/pdf",
+          category: "PLAN",
+          sizeBytes: 1234,
+          status: "STORED",
+          storagePublicId: "acquisition/test/plan",
+        },
+      ],
+    })
+
+    let providerCalls = 0
+    let loaderCalls = 0
+
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        providerCalls += 1
+        return {
+          fields: {
+            worksiteName: { value: "Chantier test", confidence: 0.9 },
+            clientReference: { value: "REF-TEST", confidence: 0.9 },
+          },
+          warnings: [],
+          providerMetadata: { providerId: "test" },
+        }
+      },
+    }
+
+    const result = await runDraftExtractionSystem(
+      { companyId: "co1", draftId: "draft1" },
+      {
+        repository: repo as never,
+        provider,
+        loadAttachmentBytes: async () => {
+          loaderCalls += 1
+          return Buffer.from("%PDF-1.4\n")
+        },
+      }
+    )
+
+    assert.notEqual(
+      result.ok === false ? result.code : null,
+      "ATTACHMENT_NOT_READY"
+    )
+    assert.equal(repo.claimCount, 1)
+    assert.equal(providerCalls, 1)
+    assert.equal(loaderCalls, 1)
+  })
+
+
+  it("AUTO : PDF non-PLAN non stocké → pas de blocage ATTACHMENT_NOT_READY", async () => {
+    const repo = createFakeRepo({
+      attachments: [
+        {
+          filename: "document.pdf",
+          mimeType: "application/pdf",
+          category: "OTHER",
+          sizeBytes: 1234,
+          status: "DISCOVERED",
+          storagePublicId: null,
+        },
+      ],
+    })
+
+    let providerCalls = 0
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        providerCalls += 1
+        return {
+          fields: {
+            worksiteName: { value: "Chantier test", confidence: 0.9 },
+            clientReference: { value: "REF-TEST", confidence: 0.9 },
+          },
+          warnings: [],
+          providerMetadata: { providerId: "test" },
+        }
+      },
+    }
+
+    const result = await runDraftExtractionSystem(
+      { companyId: "co1", draftId: "draft1" },
+      {
+        repository: repo as never,
+        provider,
+        loadAttachmentBytes: async () => null,
+      }
+    )
+
+    assert.notEqual(
+      result.ok === false ? result.code : null,
+      "ATTACHMENT_NOT_READY"
+    )
+    assert.equal(repo.claimCount, 1)
+    assert.equal(providerCalls, 1)
+  })
+
+
+  it("UI_MANUAL : PLAN PDF non prêt → comportement historique préservé", async () => {
+    const repo = createFakeRepo({
+      attachments: [
+        {
+          filename: "plan.pdf",
+          mimeType: "application/pdf",
+          category: "PLAN",
+          sizeBytes: 1234,
+          status: "DISCOVERED",
+          storagePublicId: null,
+        },
+      ],
+    })
+
+    let providerCalls = 0
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        providerCalls += 1
+        return {
+          fields: {},
+          warnings: [],
+        }
+      },
+    }
+
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      {
+        repository: repo as never,
+        provider,
+      }
+    )
+
+    assert.notEqual(
+      result.ok === false ? result.code : null,
+      "ATTACHMENT_NOT_READY"
+    )
+    assert.equal(repo.claimCount, 1)
+    assert.equal(providerCalls, 1)
   })
 
 })
