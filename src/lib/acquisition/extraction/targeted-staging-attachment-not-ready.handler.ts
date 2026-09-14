@@ -221,12 +221,45 @@ export function createHarnessSecureExtractionDeps(stats?: HarnessFuseStats): {
   }
 }
 
+/**
+ * Contournement HARNESS-ONLY des gates env lus en dur par le service
+ * (`isAcquisitionEnabled` / content / extraction).
+ * Ne modifie pas la config Vercel ; restore systématique dans `finally`.
+ * N’altère PAS ACQUISITION_EXTRACTION_PROVIDER (provider bomb injecté).
+ */
+const HARNESS_GATE_ENV_KEYS = [
+  "PLANIFICATOR_ACQUISITION_ENABLED",
+  "ACQUISITION_CONTENT_FETCH_ENABLED",
+  "ACQUISITION_EXTRACTION_ENABLED",
+] as const
+
+export async function withHarnessExtractionGatesEnabled<T>(
+  fn: () => Promise<T>
+): Promise<T> {
+  const backup: Partial<Record<(typeof HARNESS_GATE_ENV_KEYS)[number], string | undefined>> = {}
+  for (const key of HARNESS_GATE_ENV_KEYS) {
+    backup[key] = process.env[key]
+    process.env[key] = "true"
+  }
+  try {
+    return await fn()
+  } finally {
+    for (const key of HARNESS_GATE_ENV_KEYS) {
+      const prev = backup[key]
+      if (prev === undefined) delete process.env[key]
+      else process.env[key] = prev
+    }
+  }
+}
+
 async function defaultSecureRunExtraction(input: {
   companyId: string
   draftId: string
 }): Promise<ExtractDraftResult> {
-  const { repository, provider } = createHarnessSecureExtractionDeps()
-  return runDraftExtractionSystem(input, { repository, provider })
+  return withHarnessExtractionGatesEnabled(async () => {
+    const { repository, provider } = createHarnessSecureExtractionDeps()
+    return runDraftExtractionSystem(input, { repository, provider })
+  })
 }
 
 function toSnapshot(row: HarnessDraftRecord): HarnessDraftSnapshot {

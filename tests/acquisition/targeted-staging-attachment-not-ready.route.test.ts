@@ -11,6 +11,7 @@ import {
   handleTargetedStagingAttachmentNotReady,
   isCompleteAttachmentNotReadyProof,
   isHarnessSurfaceAllowed,
+  withHarnessExtractionGatesEnabled,
   type HarnessAttachmentRecord,
   type HarnessDraftRecord,
   type HarnessFuseStats,
@@ -128,10 +129,11 @@ describe("targeted-staging-attachment-not-ready harness", () => {
     process.env.TARGETED_STAGING_ATTACHMENT_NOT_READY_ENABLED = "true"
     process.env.TARGETED_STAGING_ATTACHMENT_NOT_READY_COMPANY_ID = COMPANY
     process.env.TARGETED_STAGING_ATTACHMENT_NOT_READY_DRAFT_ID = DRAFT
-    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
-    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
-    process.env.ACQUISITION_EXTRACTION_ENABLED = "true"
-    process.env.ACQUISITION_EXTRACTION_PROVIDER = "deterministic"
+    // Miroir Staging : Acquisition globale OFF (ne pas activer le flag projet).
+    delete process.env.PLANIFICATOR_ACQUISITION_ENABLED
+    delete process.env.ACQUISITION_CONTENT_FETCH_ENABLED
+    delete process.env.ACQUISITION_EXTRACTION_ENABLED
+    delete process.env.ACQUISITION_EXTRACTION_PROVIDER
   })
 
   afterEach(() => {
@@ -372,6 +374,84 @@ describe("targeted-staging-attachment-not-ready harness", () => {
     assert.equal(calls, 0)
   })
 
+  it("A — hors override harness : Acquisition OFF → ACQUISITION_DISABLED", async () => {
+    const draft = baseDraft()
+    const notReady = pendingPlanAtt()
+    const stats: HarnessFuseStats = { claimCalls: 0, mutationAttempts: 0, providerCalls: 0 }
+    const fuse = createHarnessFuseRepository(
+      {
+        findDraft: async () => draftRowFromHarness(draft),
+        findContent: async () => ({
+          normalizedText: "Chantier : Test\nRéférence : REF-1",
+          contentHash: HASH,
+        }),
+        findMessage: async () => ({
+          id: MSG,
+          subject: "Test",
+          receivedAt: new Date("2026-01-01"),
+        }),
+        listAttachmentMetadata: async () => [toMeta(notReady)],
+      },
+      stats
+    )
+    const bomb = createHarnessBombProvider(stats)
+
+    const result = await runDraftExtractionSystem(
+      { companyId: COMPANY, draftId: DRAFT },
+      { repository: fuse, provider: bomb }
+    )
+
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.outcome, "DISABLED")
+      assert.equal(result.code, "ACQUISITION_DISABLED")
+    }
+    assert.equal(stats.claimCalls, 0)
+    assert.equal(stats.providerCalls, 0)
+  })
+
+  it("B — override harness-only → vraie barrière ATTACHMENT_NOT_READY", async () => {
+    const draft = baseDraft()
+    const notReady = pendingPlanAtt({ status: "DISCOVERED", storagePublicId: null })
+    const stats: HarnessFuseStats = { claimCalls: 0, mutationAttempts: 0, providerCalls: 0 }
+    const fuse = createHarnessFuseRepository(
+      {
+        findDraft: async () => draftRowFromHarness(draft),
+        findContent: async () => ({
+          normalizedText: "Chantier : Test\nRéférence : REF-1",
+          contentHash: HASH,
+        }),
+        findMessage: async () => ({
+          id: MSG,
+          subject: "Test",
+          receivedAt: new Date("2026-01-01"),
+        }),
+        listAttachmentMetadata: async () => [toMeta(notReady)],
+      },
+      stats
+    )
+    const bomb = createHarnessBombProvider(stats)
+
+    assert.notEqual(process.env.PLANIFICATOR_ACQUISITION_ENABLED, "true")
+
+    const result = await withHarnessExtractionGatesEnabled(() =>
+      runDraftExtractionSystem(
+        { companyId: COMPANY, draftId: DRAFT },
+        { repository: fuse, provider: bomb }
+      )
+    )
+
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.code, "ATTACHMENT_NOT_READY")
+    }
+    assert.equal(stats.claimCalls, 0)
+    assert.equal(stats.providerCalls, 0)
+    assert.equal(stats.mutationAttempts, 0)
+    // Flag global non laissé activé après restore.
+    assert.notEqual(process.env.PLANIFICATOR_ACQUISITION_ENABLED, "true")
+  })
+
   it("PLAN non prêt stable → ATTACHMENT_NOT_READY ; claim/provider non atteints", async () => {
     const draft = baseDraft()
     const notReady = pendingPlanAtt({ storagePublicId: "   " })
@@ -406,7 +486,9 @@ describe("targeted-staging-attachment-not-ready harness", () => {
         loadDraft: async () => draft,
         listAttachments: async () => [notReady],
         runExtraction: async (input) =>
-          runDraftExtractionSystem(input, { repository: fuse, provider: bomb }),
+          withHarnessExtractionGatesEnabled(() =>
+            runDraftExtractionSystem(input, { repository: fuse, provider: bomb })
+          ),
       }
     )
 
@@ -417,11 +499,17 @@ describe("targeted-staging-attachment-not-ready harness", () => {
     assert.equal(body.proof.attachmentNotReady, true)
     assert.equal(body.proof.versionUnchanged, true)
     assert.equal(body.proof.attemptCountUnchanged, true)
+    assert.equal(body.proof.noCreatedWorksite, true)
+    assert.equal(body.after.status, "PENDING_EXTRACTION")
+    assert.equal(body.after.extractionAttemptCount, draft.extractionAttemptCount)
+    assert.equal(body.after.version, draft.version)
+    assert.equal(body.after.createdWorksiteId, null)
     assert.equal(stats.claimCalls, 0)
     assert.equal(stats.providerCalls, 0)
     assert.equal(stats.mutationAttempts, 0)
     assert.equal(body.before.planAttachment.hasStoragePublicId, false)
     assert.equal(body.before.planAttachment.storagePublicId, undefined)
+    assert.notEqual(process.env.PLANIFICATOR_ACQUISITION_ENABLED, "true")
   })
 
   it("course simulée → claim fuse null ; provider jamais ; HARNESS_PRECONDITION_RACE", async () => {
@@ -462,7 +550,9 @@ describe("targeted-staging-attachment-not-ready harness", () => {
         loadDraft: async () => draft,
         listAttachments: async () => [harnessNotReady],
         runExtraction: async (input) =>
-          runDraftExtractionSystem(input, { repository: fuse, provider: bomb }),
+          withHarnessExtractionGatesEnabled(() =>
+            runDraftExtractionSystem(input, { repository: fuse, provider: bomb })
+          ),
       }
     )
 
