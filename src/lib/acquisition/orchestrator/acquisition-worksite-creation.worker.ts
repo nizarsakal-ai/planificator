@@ -856,10 +856,22 @@ async function processCandidate(input: {
     actorUserId: actor.actorUserId,
   })
 
+  const requiredSourceContentHash = draft2.contentHashAtExtraction
+  if (!requiredSourceContentHash) {
+    stats.staleApproval++
+    log("CONVERT_SOURCE_CONTENT_STALE", {
+      draftId: draft2.id,
+      code: "SOURCE_CONTENT_STALE",
+      reason: "content_hash_at_extraction_missing",
+    })
+    return
+  }
+
   const result = await conversion.convertImportDraft(actor, convertInput, {
     ...(input.transactionalOwnershipFence
       ? { transactionalOwnershipFence: input.transactionalOwnershipFence }
       : {}),
+    requireSourceContentHash: requiredSourceContentHash,
   })
 
   if (!result.ok && result.code === "LEASE_NOT_OWNED") {
@@ -869,6 +881,17 @@ async function processCandidate(input: {
       code: result.code,
     })
     return { leaseStolen: true }
+  }
+
+  // R10 — contenu source obsolète : fail-closed, pas d’erreur générique.
+  if (!result.ok && result.code === "SOURCE_CONTENT_STALE") {
+    stats.staleApproval++
+    log("CONVERT_SOURCE_CONTENT_STALE", {
+      draftId: draft2.id,
+      code: result.code,
+      contentHashAtExtraction: draft2.contentHashAtExtraction,
+    })
+    return
   }
 
   const decision = mapConvertResultToWorksiteCreationDecision(result)

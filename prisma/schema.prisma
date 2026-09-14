@@ -188,6 +188,15 @@ enum WorksiteImportDraftStatus {
   OBSOLETE
 }
 
+/// PLAN-ACQ-DETECTION-001 — Classification Detection pré-extraction (fail-closed si NULL).
+enum AcquisitionConsultationClassification {
+  CONSULTATION
+  CONSULTATION_UPDATE
+  CANCELLATION
+  NON_CONSULTATION
+  AMBIGUOUS
+}
+
 enum AcquisitionAttachmentStatus {
   DISCOVERED
   PENDING_DOWNLOAD
@@ -1408,6 +1417,12 @@ model WorksiteImportDraft {
   extractionModel      String?
   lastExtractionErrorCode String?
   lastExtractionErrorAt   DateTime?
+  /// PLAN-ACQ-DETECTION-001 — preuve Detection liée au contentHash (NULL = historique inconnu / fail-closed).
+  detectionClassification AcquisitionConsultationClassification?
+  detectionContentHash    String?
+  detectionCompletedAt    DateTime?
+  /// PLAN-ACQ-DETECTION-001 — retry AUTO extraction (NULL = historique / fail-closed).
+  extractionRetryable     Boolean?
   reviewedByUserId     String?
   reviewedAt           DateTime?
   rejectionReason      String?

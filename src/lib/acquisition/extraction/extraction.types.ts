@@ -57,6 +57,8 @@ export type ExtractionErrorCode =
   | "PROVIDER_INPUT_TOO_LARGE"
   | "ZOD_VALIDATION_FAILED"
   | "INTERNAL_ERROR"
+  | "DETECTION_REQUIRED"
+  | "DETECTION_NOT_AUTHORIZED"
 
 export type ExtractionWarningSeverity = "INFO" | "WARNING" | "ERROR"
 

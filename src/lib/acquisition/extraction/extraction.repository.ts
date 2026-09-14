@@ -22,6 +22,9 @@ export type DraftExtractionRow = {
   extractionStartedAt: Date | null
   contentHashAtExtraction: string | null
   extractionSchemaVersion: string | null
+  detectionClassification: string | null
+  detectionContentHash: string | null
+  extractionRetryable: boolean | null
 }
 
 export type MessageContentLite = {
@@ -68,6 +71,8 @@ export type PersistExtractionInput = {
   model: string | null
   errorCode: string | null
   now: Date
+  /** PLAN-ACQ-DETECTION-001 — null = ne pas toucher (succès) ; sinon persisté. */
+  extractionRetryable?: boolean | null
 }
 
 export type PersistExtractionOutcome = "OK" | "STALE_CONTENT" | "STATE_CHANGED"
@@ -91,6 +96,9 @@ export class DraftExtractionRepository {
         extractionStartedAt: true,
         contentHashAtExtraction: true,
         extractionSchemaVersion: true,
+        detectionClassification: true,
+        detectionContentHash: true,
+        extractionRetryable: true,
       },
     })
     return row
@@ -174,6 +182,7 @@ export class DraftExtractionRepository {
         extractionCompletedAt: null,
         lastExtractionErrorCode: null,
         lastExtractionErrorAt: null,
+        extractionRetryable: null,
       },
     })
 
@@ -229,6 +238,7 @@ export class DraftExtractionRepository {
             extractionCompletedAt: input.now,
             lastExtractionErrorCode: "STALE_CONTENT",
             lastExtractionErrorAt: input.now,
+            extractionRetryable: true,
             warningData: [] as unknown as Prisma.InputJsonValue,
           },
         })
@@ -267,6 +277,14 @@ export class DraftExtractionRepository {
           extractionModel: input.model,
           lastExtractionErrorCode: input.errorCode,
           lastExtractionErrorAt: input.errorCode ? input.now : null,
+          ...(input.errorCode
+            ? {
+                extractionRetryable:
+                  input.extractionRetryable === undefined
+                    ? false
+                    : input.extractionRetryable,
+              }
+            : { extractionRetryable: null }),
         },
       })
 
@@ -281,6 +299,7 @@ export class DraftExtractionRepository {
     errorCode: string
     now: Date
     warnings?: ExtractionWarning[]
+    extractionRetryable?: boolean
   }): Promise<MarkFailedOutcome> {
     const updated = await this.db.worksiteImportDraft.updateMany({
       where: {
@@ -295,6 +314,7 @@ export class DraftExtractionRepository {
         extractionCompletedAt: input.now,
         lastExtractionErrorCode: input.errorCode,
         lastExtractionErrorAt: input.now,
+        extractionRetryable: input.extractionRetryable ?? false,
         warningData: (input.warnings ?? []) as unknown as Prisma.InputJsonValue,
       },
     })

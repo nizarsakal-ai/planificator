@@ -42,6 +42,98 @@ function frozen(over: Partial<FrozenValidationCycle> = {}): FrozenValidationCycl
   }
 }
 
+/** DB mock : freshness TX + append intent via journal (R8-C2). */
+function makeIntentDb(
+  draft: {
+    contentHashAtExtraction: string | null
+    [key: string]: unknown
+  },
+  journal: {
+    entries: DecisionJournalEntry[]
+    appendOnce: (e: DecisionJournalEntry) => Promise<{
+      outcome: "APPENDED" | "ALREADY_EXISTS"
+      row: {
+        id: string
+        companyId: string
+        draftId: string
+        decisionCode: string
+        reasons: string[]
+        scores: Record<string, number>
+        actorUserId: string | null
+        metadata: unknown
+        createdAt: Date
+      }
+    }>
+  }
+) {
+  const api = {
+    worksiteImportDraft: {
+      findFirst: async () => draft,
+    },
+    acquisitionMessageContent: {
+      findFirst: async () =>
+        draft.contentHashAtExtraction
+          ? { contentHash: draft.contentHashAtExtraction }
+          : null,
+    },
+    $queryRaw: async () =>
+      draft.contentHashAtExtraction
+        ? [{ contentHash: draft.contentHashAtExtraction }]
+        : [],
+    acquisitionDecisionJournal: {
+      findUnique: async (args: { where: { idempotencyKey: string } }) => {
+        const key = args.where.idempotencyKey
+        for (let i = journal.entries.length - 1; i >= 0; i--) {
+          const e = journal.entries[i]!
+          if (e.idempotencyKey === key) {
+            return {
+              id: `j${i}`,
+              companyId: e.companyId,
+              draftId: e.draftId,
+              decisionCode: e.decisionCode,
+              reasons: e.reasons,
+              scores: e.scores,
+              actorUserId: e.actorUserId,
+              metadata: e.metadata ?? null,
+              createdAt: new Date(),
+              idempotencyKey: key,
+            }
+          }
+        }
+        return null
+      },
+      create: async (args: {
+        data: {
+          companyId: string
+          draftId: string
+          decisionCode: string
+          reasons: unknown
+          scores: unknown
+          actorUserId: string | null
+          metadata?: unknown
+          idempotencyKey: string
+        }
+      }) => {
+        const r = await journal.appendOnce({
+          companyId: args.data.companyId,
+          draftId: args.data.draftId,
+          decisionCode: args.data.decisionCode,
+          reasons: args.data.reasons as string[],
+          scores: args.data.scores as Record<string, number>,
+          actorUserId: args.data.actorUserId,
+          metadata: args.data.metadata as DecisionJournalEntry["metadata"],
+          idempotencyKey: args.data.idempotencyKey,
+        })
+        return { ...r.row, idempotencyKey: args.data.idempotencyKey }
+      },
+    },
+    async $transaction<T>(fn: (tx: typeof api) => Promise<T>): Promise<T> {
+      return fn(api)
+    },
+  }
+  return api
+}
+
 function cycle(over: Partial<ValidationCycleIdentity> = {}): ValidationCycleIdentity {
   return {
     contentHash: "hash-1",
@@ -570,13 +662,16 @@ describe("PLAN-ACQ-AGENTS-LOT-3E worker integration (mocked)", () => {
       version,
       contentHashAtExtraction: "hash-1",
       extractionSchemaVersion: "2",
+      detectionClassification: "CONSULTATION",
+      detectionContentHash: "hash-1",
+      acquisitionMessageId: "msg1",
       proposedWorksiteName: "Chantier Galya Hall A",
       proposedClientName: "Client Expo",
       proposedAddress: "12 rue de la Foire",
       proposedPostalCode: "69002",
       proposedCity: "Lyon",
-      proposedStartDate: new Date("2026-09-10T00:00:00.000Z"),
-      proposedEndDate: new Date("2026-09-12T00:00:00.000Z"),
+      proposedStartDate: new Date("2026-10-10T00:00:00.000Z"),
+      proposedEndDate: new Date("2026-10-12T00:00:00.000Z"),
       proposedClientId: "cli1",
       confidenceData: {
         worksiteName: 0.95,
@@ -650,11 +745,7 @@ describe("PLAN-ACQ-AGENTS-LOT-3E worker integration (mocked)", () => {
         },
       } as never,
       evaluationDeps: {
-        db: {
-          worksiteImportDraft: {
-            findFirst: async () => draft,
-          },
-        } as never,
+        db: makeIntentDb(draft, journal) as never,
         findDuplicate: async () => ({ worksiteId: null, matchKind: "NONE" as const }),
         matchClient: async () => ({
           clientId: "cli1",
@@ -675,11 +766,7 @@ describe("PLAN-ACQ-AGENTS-LOT-3E worker integration (mocked)", () => {
           findPartnerByDomain: async () => null,
         } as never,
       },
-      db: {
-        worksiteImportDraft: {
-          findFirst: async () => draft,
-        },
-      } as never,
+      db: makeIntentDb(draft, journal) as never,
     })
 
     assert.equal(result.status, "SUCCESS")
@@ -744,9 +831,7 @@ describe("PLAN-ACQ-AGENTS-LOT-3E worker integration (mocked)", () => {
         },
       } as never,
       evaluationDeps: {
-        db: {
-          worksiteImportDraft: { findFirst: async () => draft },
-        } as never,
+        db: makeIntentDb(draft, journal) as never,
         findDuplicate: async () => ({ worksiteId: null, matchKind: "NONE" as const }),
         matchClient: async () => ({
           clientId: "cli1",
@@ -767,9 +852,7 @@ describe("PLAN-ACQ-AGENTS-LOT-3E worker integration (mocked)", () => {
           findPartnerByDomain: async () => null,
         } as never,
       },
-      db: {
-        worksiteImportDraft: { findFirst: async () => draft },
-      } as never,
+      db: makeIntentDb(draft, journal) as never,
     }
 
     await runAcquisitionAutoDecisionWorker(deps as never)
@@ -849,9 +932,7 @@ describe("PLAN-ACQ-AGENTS-LOT-3E worker integration (mocked)", () => {
         rejectImportDraft: async () => ({ ok: false }),
       } as never,
       evaluationDeps: {
-        db: {
-          worksiteImportDraft: { findFirst: async () => draft },
-        } as never,
+        db: makeIntentDb(draft, journal) as never,
         findDuplicate: async () => ({ worksiteId: null, matchKind: "NONE" as const }),
         matchClient: async () => ({
           clientId: "cli1",
@@ -872,9 +953,7 @@ describe("PLAN-ACQ-AGENTS-LOT-3E worker integration (mocked)", () => {
           findPartnerByDomain: async () => null,
         } as never,
       },
-      db: {
-        worksiteImportDraft: { findFirst: async () => draft },
-      } as never,
+      db: makeIntentDb(draft, journal) as never,
     })
 
     assert.equal(approveCalls, 0)
@@ -1154,13 +1233,16 @@ describe("PLAN-ACQ-AGENTS-LOT-3E CORRECTION-1", () => {
       version,
       contentHashAtExtraction: "hash-1",
       extractionSchemaVersion: "2",
+      detectionClassification: "CONSULTATION",
+      detectionContentHash: "hash-1",
+      acquisitionMessageId: "msg1",
       proposedWorksiteName: "Chantier Galya Hall A",
       proposedClientName: "Client Expo",
       proposedAddress: "12 rue de la Foire",
       proposedPostalCode: "69002",
       proposedCity: "Lyon",
-      proposedStartDate: new Date("2026-09-10T00:00:00.000Z"),
-      proposedEndDate: new Date("2026-09-12T00:00:00.000Z"),
+      proposedStartDate: new Date("2026-10-10T00:00:00.000Z"),
+      proposedEndDate: new Date("2026-10-12T00:00:00.000Z"),
       proposedClientId: "cli1",
       confidenceData: {
         worksiteName: 0.95,
@@ -1184,6 +1266,9 @@ describe("PLAN-ACQ-AGENTS-LOT-3E CORRECTION-1", () => {
     return {
       db: {
         worksiteImportDraft: { findFirst: async () => draft },
+        acquisitionMessageContent: {
+          findFirst: async () => ({ contentHash: draft.contentHashAtExtraction }),
+        },
       } as never,
       findDuplicate: async () => ({ worksiteId: null, matchKind: "NONE" as const }),
       matchClient: async () => ({
@@ -1258,9 +1343,7 @@ describe("PLAN-ACQ-AGENTS-LOT-3E CORRECTION-1", () => {
         rejectImportDraft: async () => ({ ok: false }),
       } as never,
       evaluationDeps: baseEval(draft),
-      db: {
-        worksiteImportDraft: { findFirst: async () => draft },
-      } as never,
+      db: makeIntentDb(draft, journal) as never,
     })
     assert.equal(result.stats.intentAppended, 1)
     assert.ok(journal.entries.some((e) => e.decisionCode === "AUTO_APPROVE_ONLY"))
@@ -1322,13 +1405,9 @@ describe("PLAN-ACQ-AGENTS-LOT-3E CORRECTION-1", () => {
       } as never,
       evaluationDeps: {
         ...baseEval(draft),
-        db: {
-          worksiteImportDraft: { findFirst: load },
-        } as never,
+        db: { ...makeIntentDb(draft, journal), worksiteImportDraft: { findFirst: load } } as never,
       },
-      db: {
-        worksiteImportDraft: { findFirst: load },
-      } as never,
+      db: { ...makeIntentDb(draft, journal), worksiteImportDraft: { findFirst: load } } as never,
     })
     assert.equal(result.stats.stale >= 1, true)
     assert.equal(
@@ -1390,9 +1469,9 @@ describe("PLAN-ACQ-AGENTS-LOT-3E CORRECTION-1", () => {
       } as never,
       evaluationDeps: {
         ...baseEval(draft),
-        db: { worksiteImportDraft: { findFirst: load } } as never,
+        db: { ...makeIntentDb(draft, journal), worksiteImportDraft: { findFirst: load } } as never,
       },
-      db: { worksiteImportDraft: { findFirst: load } } as never,
+      db: { ...makeIntentDb(draft, journal), worksiteImportDraft: { findFirst: load } } as never,
     })
     assert.equal(
       journal.entries.some((e) => String(e.decisionCode).startsWith("AUTO_")),
@@ -1452,9 +1531,9 @@ describe("PLAN-ACQ-AGENTS-LOT-3E CORRECTION-1", () => {
       } as never,
       evaluationDeps: {
         ...baseEval(draft),
-        db: { worksiteImportDraft: { findFirst: load } } as never,
+        db: { ...makeIntentDb(draft, journal), worksiteImportDraft: { findFirst: load } } as never,
       },
-      db: { worksiteImportDraft: { findFirst: load } } as never,
+      db: { ...makeIntentDb(draft, journal), worksiteImportDraft: { findFirst: load } } as never,
     })
     assert.equal(
       journal.entries.some((e) => String(e.decisionCode).startsWith("AUTO_")),
@@ -1516,9 +1595,7 @@ describe("PLAN-ACQ-AGENTS-LOT-3E CORRECTION-1", () => {
         rejectImportDraft: async () => ({ ok: false }),
       } as never,
       evaluationDeps: baseEval(draft),
-      db: {
-        worksiteImportDraft: { findFirst: async () => draft },
-      } as never,
+      db: makeIntentDb(draft, journal) as never,
     })
     assert.equal(
       journal.entries.some((e) => String(e.decisionCode).startsWith("AUTO_")),
@@ -1616,9 +1693,7 @@ describe("PLAN-ACQ-AGENTS-LOT-3E CORRECTION-1", () => {
         rejectImportDraft: async () => ({ ok: false }),
       } as never,
       evaluationDeps: baseEval(draft),
-      db: {
-        worksiteImportDraft: { findFirst: async () => draft },
-      } as never,
+      db: makeIntentDb(draft, journal) as never,
     })
 
     const intents = journal.entries.filter((e) =>
@@ -1724,9 +1799,7 @@ describe("PLAN-ACQ-AGENTS-LOT-3E CORRECTION-1", () => {
           findPartnerByDomain: async () => null,
         } as never,
       },
-      db: {
-        worksiteImportDraft: { findFirst: async () => draft },
-      } as never,
+      db: makeIntentDb(draft, journalLoser) as never,
     })
 
     assert.equal(result.stats.human, 0)
@@ -1827,9 +1900,7 @@ describe("PLAN-ACQ-AGENTS-LOT-3E CORRECTION-1", () => {
           findPartnerByDomain: async () => null,
         } as never,
       },
-      db: {
-        worksiteImportDraft: { findFirst: async () => draft },
-      } as never,
+      db: makeIntentDb(draft, journalLoser) as never,
     })
 
     assert.equal(result.stats.human, 1)

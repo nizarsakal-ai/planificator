@@ -24,6 +24,7 @@ import {
   type ConvertImportDraftResult,
 } from "@/lib/acquisition/conversion/conversion.types"
 import type { ConvertImportDraftOptions } from "@/lib/acquisition/conversion/conversion-ownership-fence.port"
+import { assertAutoDecisionSourceFreshInTransaction } from "@/lib/acquisition/policy/auto-decision-source-freshness"
 import { defaultGeocodePort, type GeocodePort } from "@/lib/geo/geocode.port"
 import {
   findDuplicateWorksite,
@@ -204,6 +205,18 @@ export class ImportDraftConversionService {
           const owned = await fence.assertOwnedAndLock(tx)
           if (owned !== "OWNED") {
             throw new ConversionLeaseNotOwnedError()
+          }
+        }
+        if (options?.requireSourceContentHash) {
+          const fresh = await assertAutoDecisionSourceFreshInTransaction(tx, {
+            companyId: ctx.companyId,
+            draftId: input.draftId,
+            expectedContentHash: options.requireSourceContentHash,
+          })
+          if (fresh !== "FRESH") {
+            throw Object.assign(new Error("SOURCE_CONTENT_STALE"), {
+              code: "SOURCE_CONTENT_STALE",
+            })
           }
         }
 
@@ -459,6 +472,18 @@ export class ImportDraftConversionService {
           : ""
       if (code === "NOT_FOUND") {
         return fail("NOT_FOUND", "NOT_FOUND", "Consultation introuvable")
+      }
+      if (code === "SOURCE_CONTENT_STALE") {
+        this.log("CONVERT_SOURCE_CONTENT_STALE", {
+          companyId: ctx.companyId,
+          draftId: input.draftId,
+          code: "SOURCE_CONTENT_STALE",
+        })
+        return fail(
+          "STATE_CHANGED",
+          "SOURCE_CONTENT_STALE",
+          "Contenu source modifié depuis l'extraction"
+        )
       }
       if (code === "INVALID_STATE") {
         return fail(

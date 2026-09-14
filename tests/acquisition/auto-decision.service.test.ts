@@ -27,7 +27,12 @@ type DraftRow = {
   confidenceData: Record<string, number>
   warningData: unknown[]
   extractedData: unknown
-  acquisitionMessage: { resolvedPartnerId: string | null; senderDomain: string | null }
+  contentHashAtExtraction: string | null
+  extractionSchemaVersion: string | null
+  detectionClassification: string | null
+  detectionContentHash: string | null
+  acquisitionMessageId: string
+  acquisitionMessage: { resolvedPartnerId: string | null; senderDomain: string | null; threadId?: string | null }
 }
 
 function partner(over: Partial<AcquisitionPartnerRecord> = {}): AcquisitionPartnerRecord {
@@ -74,7 +79,12 @@ function baseDraft(over: Partial<DraftRow> = {}): DraftRow {
     },
     warningData: [],
     extractedData: {},
-    acquisitionMessage: { resolvedPartnerId: "p1", senderDomain: "partner.fr" },
+    contentHashAtExtraction: "hash-auto",
+    extractionSchemaVersion: "3",
+    detectionClassification: "CONSULTATION",
+    detectionContentHash: "hash-auto",
+    acquisitionMessageId: "msg1",
+    acquisitionMessage: { resolvedPartnerId: "p1", senderDomain: "partner.fr", threadId: null },
     ...over,
   }
 }
@@ -121,6 +131,7 @@ describe("maybeRunAutoDecisionAfterExtraction R3", () => {
   let approveCalls: number
   let convertCalls: number
   let draft: DraftRow
+  let currentSourceHash: string | null
 
   beforeEach(() => {
     process.env = { ...env }
@@ -131,6 +142,7 @@ describe("maybeRunAutoDecisionAfterExtraction R3", () => {
     approveCalls = 0
     convertCalls = 0
     draft = baseDraft()
+    currentSourceHash = "hash-auto"
   })
 
   afterEach(() => {
@@ -148,12 +160,35 @@ describe("maybeRunAutoDecisionAfterExtraction R3", () => {
     referenceInstant?: Date
   }) {
     const p = opts.partner === undefined ? partner() : opts.partner
-    return {
-      db: {
-        worksiteImportDraft: {
-          findFirst: async () => draft,
+    const dbApi = {
+      worksiteImportDraft: {
+        findFirst: async () => draft,
+      },
+      acquisitionMessageContent: {
+        findFirst: async () =>
+          currentSourceHash
+            ? { contentHash: currentSourceHash }
+            : null,
+      },
+      $queryRaw: async () =>
+        currentSourceHash ? [{ contentHash: currentSourceHash }] : [],
+      acquisitionDecisionJournal: {
+        create: async (args: { data: DecisionJournalEntry }) => {
+          journalEntries.push(args.data)
+          return {
+            id: `j-${journalEntries.length}`,
+            ...args.data,
+            createdAt: new Date(),
+            idempotencyKey: args.data.idempotencyKey ?? null,
+          }
         },
-      } as never,
+      },
+      async $transaction<T>(fn: (tx: typeof dbApi) => Promise<T>): Promise<T> {
+        return fn(dbApi)
+      },
+    }
+    return {
+      db: dbApi as never,
       journal: {
         append: async (e: DecisionJournalEntry) => {
           journalEntries.push(e)
@@ -392,5 +427,51 @@ describe("maybeRunAutoDecisionAfterExtraction R3", () => {
     assert.equal(approveCalls, 0)
     assert.equal(convertCalls, 0)
     assert.equal(journalEntries.length, 0)
+  })
+
+  it("R8 — source hash stale (A/A/B) → HUMAN_REVIEW, aucune mutation", async () => {
+    currentSourceHash = "hash-B"
+    await maybeRunAutoDecisionAfterExtraction({
+      companyId: "co1",
+      draftId: "d1",
+      deps: deps({}),
+    })
+    assert.equal(approveCalls, 0)
+    assert.equal(convertCalls, 0)
+    assert.ok(journalEntries.some((j) => j.decisionCode === "HUMAN_REVIEW_REQUIRED"))
+    assert.ok(
+      journalEntries.some((j) => j.reasons.includes("SOURCE_CONTENT_STALE"))
+    )
+  })
+
+  it("R8 — source content absent → HUMAN_REVIEW, aucune mutation", async () => {
+    currentSourceHash = null
+    await maybeRunAutoDecisionAfterExtraction({
+      companyId: "co1",
+      draftId: "d1",
+      deps: deps({}),
+    })
+    assert.equal(approveCalls, 0)
+    assert.equal(convertCalls, 0)
+    assert.ok(
+      journalEntries.some((j) => j.reasons.includes("SOURCE_CONTENT_STALE"))
+    )
+  })
+
+  it("R8 — detection/extraction mismatch (A/B/B) → HUMAN_REVIEW", async () => {
+    draft = baseDraft({
+      detectionContentHash: "hash-A",
+      contentHashAtExtraction: "hash-B",
+    })
+    currentSourceHash = "hash-B"
+    await maybeRunAutoDecisionAfterExtraction({
+      companyId: "co1",
+      draftId: "d1",
+      deps: deps({}),
+    })
+    assert.equal(approveCalls, 0)
+    assert.ok(
+      journalEntries.some((j) => j.reasons.includes("SOURCE_CONTENT_STALE"))
+    )
   })
 })

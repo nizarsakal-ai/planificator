@@ -28,10 +28,17 @@ import {
   evaluateAutoDecision,
   type AutoDecisionResult,
 } from "@/lib/acquisition/policy/auto-decision.policy"
+import { gateAutoDecisionByDetectionProof } from "@/lib/acquisition/capabilities/consultation-detection.policy"
+import type { ConsultationClassification } from "@/lib/acquisition/capabilities/consultation-capability.types"
 import {
   applyCancellationFollowUpTransactionally,
   CancellationLeaseNotOwnedError,
+  CancellationSourceContentStaleError,
 } from "@/lib/acquisition/policy/cancellation-followup"
+import {
+  assertAutoDecisionSourceFreshInTransaction,
+  loadCurrentAcquisitionContentHash,
+} from "@/lib/acquisition/policy/auto-decision-source-freshness"
 import {
   AcquisitionDecisionJournalRepository,
   acquisitionDecisionJournalRepository,
@@ -878,6 +885,32 @@ async function processCandidate(input: {
       )
     }
 
+    const proof = await db.worksiteImportDraft.findFirst({
+      where: { id: candidate.draftId, companyId: candidate.companyId },
+      select: {
+        detectionClassification: true,
+        detectionContentHash: true,
+        contentHashAtExtraction: true,
+        acquisitionMessageId: true,
+      },
+    })
+    const currentSourceContentHash = proof?.acquisitionMessageId
+      ? await loadCurrentAcquisitionContentHash(
+          db,
+          candidate.companyId,
+          proof.acquisitionMessageId
+        )
+      : null
+    decision = gateAutoDecisionByDetectionProof({
+      decision,
+      detectionClassification:
+        (proof?.detectionClassification as ConsultationClassification | null) ??
+        null,
+      detectionContentHash: proof?.detectionContentHash ?? null,
+      contentHashAtExtraction: proof?.contentHashAtExtraction ?? null,
+      currentSourceContentHash,
+    })
+
     // Payload préparé AVANT recheck/fence (pas de lecture DB ici)
     const intentPayload = intentMetadataBase({
       frozen: frozenForWork,
@@ -947,31 +980,48 @@ async function processCandidate(input: {
         metadata: intentPayload,
       }
       let appendResult
-      if (fence) {
-        try {
-          appendResult = await db.$transaction(async (tx) => {
+      try {
+        appendResult = await db.$transaction(async (tx) => {
+          // R8-C2 — fence puis fraîcheur source dans la même TX que l’intent.
+          if (fence) {
             const owned = await fence.assertOwnedAndLock(tx)
             if (owned !== "OWNED") {
               throw Object.assign(new Error("LEASE_NOT_OWNED"), {
                 code: "LEASE_NOT_OWNED",
               })
             }
-            return new AcquisitionDecisionJournalRepository(
-              tx
-            ).appendOnceInTransaction(entry)
-          })
-        } catch (err) {
-          if (
-            err instanceof Error &&
-            ((err as { code?: string }).code === "LEASE_NOT_OWNED" ||
-              err.message === "LEASE_NOT_OWNED")
-          ) {
-            return { leaseStolen: true }
           }
-          throw err
+          const fresh = await assertAutoDecisionSourceFreshInTransaction(tx, {
+            companyId: candidate.companyId,
+            draftId: candidate.draftId,
+            expectedContentHash: frozenForWork.contentHash,
+          })
+          if (fresh !== "FRESH") {
+            throw Object.assign(new Error("SOURCE_CONTENT_STALE"), {
+              code: "SOURCE_CONTENT_STALE",
+            })
+          }
+          return new AcquisitionDecisionJournalRepository(
+            tx
+          ).appendOnceInTransaction(entry)
+        })
+      } catch (err) {
+        if (
+          err instanceof Error &&
+          ((err as { code?: string }).code === "LEASE_NOT_OWNED" ||
+            err.message === "LEASE_NOT_OWNED")
+        ) {
+          return { leaseStolen: true }
         }
-      } else {
-        appendResult = await journal.appendOnce(entry)
+        if (
+          err instanceof Error &&
+          ((err as { code?: string }).code === "SOURCE_CONTENT_STALE" ||
+            err.message === "SOURCE_CONTENT_STALE")
+        ) {
+          stats.stale++
+          return
+        }
+        throw err
       }
       if (appendResult.outcome === "APPENDED") {
         stats.intentAppended++
@@ -1130,11 +1180,20 @@ async function processCandidate(input: {
         draftId: candidate.draftId,
         expectedVersion: frozenForWork.validatedDraftVersion,
       },
-      fence ? { transactionalOwnershipFence: fence } : undefined
+      fence
+        ? {
+            transactionalOwnershipFence: fence,
+            requireSourceContentHash: frozenForWork.contentHash,
+          }
+        : { requireSourceContentHash: frozenForWork.contentHash }
     )
     if (!approve.ok && approve.code === "LEASE_NOT_OWNED") {
       stats.leaseStolen++
       return { leaseStolen: true }
+    }
+    if (!approve.ok && approve.code === "SOURCE_CONTENT_STALE") {
+      stats.stale++
+      return
     }
     if (approve.ok) {
       stats.approved++
@@ -1190,11 +1249,20 @@ async function processCandidate(input: {
         expectedVersion: frozenForWork.validatedDraftVersion,
         rejectionReason: "CANCELLED_INITIAL",
       },
-      fence ? { transactionalOwnershipFence: fence } : undefined
+      fence
+        ? {
+            transactionalOwnershipFence: fence,
+            requireSourceContentHash: frozenForWork.contentHash,
+          }
+        : { requireSourceContentHash: frozenForWork.contentHash }
     )
     if (!reject.ok && reject.code === "LEASE_NOT_OWNED") {
       stats.leaseStolen++
       return { leaseStolen: true }
+    }
+    if (!reject.ok && reject.code === "SOURCE_CONTENT_STALE") {
+      stats.stale++
+      return
     }
     if (reject.ok) {
       stats.rejected++
@@ -1238,6 +1306,7 @@ async function processCandidate(input: {
         actorUserId: actor?.actorUserId ?? null,
         db,
         reasons: ["CONSULTATION_CANCELLED"],
+        requireSourceContentHash: frozenForWork.contentHash,
         ...(fence ? { transactionalOwnershipFence: fence } : {}),
       })
       if (follow.outcome === "APPENDED") {
@@ -1247,6 +1316,10 @@ async function processCandidate(input: {
       if (err instanceof CancellationLeaseNotOwnedError) {
         stats.leaseStolen++
         return { leaseStolen: true }
+      }
+      if (err instanceof CancellationSourceContentStaleError) {
+        stats.stale++
+        return
       }
       throw err
     }

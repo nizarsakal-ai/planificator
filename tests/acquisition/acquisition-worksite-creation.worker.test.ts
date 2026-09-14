@@ -850,6 +850,140 @@ describe("PLAN-ACQ-AGENTS-LOT-3F worker integration (mocked)", () => {
     assert.equal(result.stats.errors, 0)
   })
 
+  it("R10.1 APPROVED A + intent A + source A → conversion autorisée (hash transmis)", async () => {
+    let seenHash: string | undefined
+    const db = makeDb(() => reloadRow(), () => evaluationDraft())
+    const result = await runAcquisitionWorksiteCreationWorker({
+      selection: selectionOf([candidate()]),
+      ensureOwnership: async () => "OWNED",
+      resolveSystemActor: async () => okSystemActor(),
+      transactionalOwnershipFence: {
+        assertOwnedAndLock: async () => "OWNED",
+      },
+      journal: {
+        findLatestPostExtractionAutoIntentForExtractionIdentity: async () =>
+          intentRow("AUTO_APPROVE_CONVERT"),
+      } as never,
+      db,
+      evaluationDeps: {
+        db,
+        matchClient: async () => ({
+          clientId: "cli1",
+          matchKind: "EMAIL" as const,
+        }),
+        findDuplicate: async () => ({
+          worksiteId: null,
+          matchKind: "NONE" as const,
+        }),
+        registry: defaultRegistry as never,
+      },
+      conversion: {
+        convertImportDraft: async (_c, _raw, options) => {
+          seenHash = options?.requireSourceContentHash
+          return {
+            ok: true as const,
+            outcome: "CONVERTED" as const,
+            worksiteId: "ws1",
+            clientId: "cli1",
+            clientCreated: false,
+            documentCount: 0,
+            skippedAttachmentCount: 0,
+          }
+        },
+      },
+    })
+    assert.equal(seenHash, "hash-1")
+    assert.equal(result.stats.converted, 1)
+    assert.equal(result.stats.staleApproval, 0)
+  })
+
+  it("R10.2 source B → SOURCE_CONTENT_STALE → zéro Worksite ; staleApproval", async () => {
+    let worksiteCreated = false
+    const db = makeDb(() => reloadRow(), () => evaluationDraft())
+    const result = await runAcquisitionWorksiteCreationWorker({
+      selection: selectionOf([candidate()]),
+      ensureOwnership: async () => "OWNED",
+      resolveSystemActor: async () => okSystemActor(),
+      transactionalOwnershipFence: {
+        assertOwnedAndLock: async () => "OWNED",
+      },
+      journal: {
+        findLatestPostExtractionAutoIntentForExtractionIdentity: async () =>
+          intentRow("AUTO_APPROVE_CONVERT"),
+      } as never,
+      db,
+      evaluationDeps: {
+        db,
+        matchClient: async () => ({
+          clientId: "cli1",
+          matchKind: "EMAIL" as const,
+        }),
+        findDuplicate: async () => ({
+          worksiteId: null,
+          matchKind: "NONE" as const,
+        }),
+        registry: defaultRegistry as never,
+      },
+      conversion: {
+        convertImportDraft: async (_c, _raw, options) => {
+          assert.equal(options?.requireSourceContentHash, "hash-1")
+          // Simulate ImportDraftConversionService TX freshness fail-closed
+          worksiteCreated = false
+          return {
+            ok: false as const,
+            outcome: "STATE_CHANGED" as const,
+            code: "SOURCE_CONTENT_STALE",
+            message: "Contenu source modifié depuis l'extraction",
+          }
+        },
+      },
+    })
+    assert.equal(worksiteCreated, false)
+    assert.equal(result.stats.converted, 0)
+    assert.equal(result.stats.staleApproval, 1)
+    assert.equal(result.stats.stateChanged, 0)
+    assert.equal(result.stats.errors, 0)
+  })
+
+  it("R10.3 lease perdue → zéro Worksite", async () => {
+    const db = makeDb(() => reloadRow(), () => evaluationDraft())
+    const result = await runAcquisitionWorksiteCreationWorker({
+      selection: selectionOf([candidate()]),
+      ensureOwnership: async () => "OWNED",
+      resolveSystemActor: async () => okSystemActor(),
+      transactionalOwnershipFence: {
+        assertOwnedAndLock: async () => "OWNED",
+      },
+      journal: {
+        findLatestPostExtractionAutoIntentForExtractionIdentity: async () =>
+          intentRow("AUTO_APPROVE_CONVERT"),
+      } as never,
+      db,
+      evaluationDeps: {
+        db,
+        matchClient: async () => ({
+          clientId: "cli1",
+          matchKind: "EMAIL" as const,
+        }),
+        findDuplicate: async () => ({
+          worksiteId: null,
+          matchKind: "NONE" as const,
+        }),
+        registry: defaultRegistry as never,
+      },
+      conversion: {
+        convertImportDraft: async () => ({
+          ok: false as const,
+          outcome: "LEASE_NOT_OWNED" as const,
+          code: "LEASE_NOT_OWNED",
+          message: "Ownership orchestrateur perdu",
+        }),
+      },
+    })
+    assert.equal(result.stats.converted, 0)
+    assert.equal(result.stats.leaseStolen, 1)
+  })
+
   it("Correction-1: actor OK initial, invalide au final → 0 convert + BLOCKED_SYSTEM_ACTOR", async () => {
     let actorCalls = 0
     const convertCalls: unknown[] = []
@@ -1191,6 +1325,15 @@ describe("PLAN-ACQ-AGENTS-LOT-3F static guards + wiring", () => {
     assert.match(src, /transactionalOwnershipFence/)
     assert.match(src, /LEASE_NOT_OWNED/)
     assert.match(src, /stats\.leaseStolen\+\+/)
+  })
+
+  it("R10: requireSourceContentHash transmis ; SOURCE_CONTENT_STALE → staleApproval", () => {
+    const src = readFileSync(WORKER_SRC, "utf8")
+    assert.match(src, /requiredSourceContentHash/)
+    assert.match(src, /requireSourceContentHash:\s*requiredSourceContentHash/)
+    assert.equal(/\|\|\s*""/.test(src), false)
+    assert.match(src, /SOURCE_CONTENT_STALE/)
+    assert.match(src, /stats\.staleApproval\+\+/)
   })
 
   it("8–10. target PLANNED / 0 Assignment / À affecter — délégué conversion (assert source)", () => {

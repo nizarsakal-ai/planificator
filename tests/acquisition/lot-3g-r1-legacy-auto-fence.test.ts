@@ -42,6 +42,7 @@ import { acquisitionExtractionCronSelectionRepository } from "@/lib/acquisition/
 import { acquisitionGmailConnectionListingAdapter } from "@/lib/acquisition/persistence/acquisition-gmail-connection.listing.adapter"
 import { acquisitionAttachmentRepository } from "@/lib/acquisition/attachments/acquisition-attachment.repository"
 import { acquisitionContentFetchStateRepository } from "@/lib/acquisition/content/message-content-fetch-state.repository"
+import { acquisitionConsultationDetectionSelectionRepository } from "@/lib/acquisition/detection/consultation-detection.selection.repository"
 import * as orchestratorWorkers from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
 import { readdirSync, statSync } from "node:fs"
 
@@ -111,6 +112,9 @@ type DraftRow = {
   extractedData: unknown
   contentHashAtExtraction: string | null
   extractionSchemaVersion: string | null
+  detectionClassification: string | null
+  detectionContentHash: string | null
+  acquisitionMessageId: string
   acquisitionMessage: {
     resolvedPartnerId: string | null
     senderDomain: string | null
@@ -142,6 +146,9 @@ function baseDraft(over: Partial<DraftRow> = {}): DraftRow {
     extractedData: {},
     contentHashAtExtraction: "hash-abc",
     extractionSchemaVersion: "2",
+    detectionClassification: "CONSULTATION",
+    detectionContentHash: "hash-abc",
+    acquisitionMessageId: "msg1",
     acquisitionMessage: {
       resolvedPartnerId: "p1",
       senderDomain: "partner.fr",
@@ -185,6 +192,12 @@ function makeTxDb(draft: DraftRow) {
         return { count: 0 }
       },
     },
+    acquisitionMessageContent: {
+      findFirst: async () =>
+        draft.contentHashAtExtraction
+          ? { contentHash: draft.contentHashAtExtraction }
+          : null,
+    },
     acquisitionDecisionJournal: {
       create: async (args: { data: DecisionJournalEntry }) => {
         journalCreates.push(args.data)
@@ -202,7 +215,11 @@ function makeTxDb(draft: DraftRow) {
     acquisitionMessage: {
       findMany: async () => [],
     },
-    $queryRaw: async () => [],
+    // R12 — assert freshness TX lit le hash sous $queryRaw FOR UPDATE
+    $queryRaw: async () =>
+      draft.contentHashAtExtraction
+        ? [{ contentHash: draft.contentHashAtExtraction }]
+        : [],
     async $transaction<T>(fn: (tx: typeof api) => Promise<T>) {
       return fn(api)
     },
@@ -228,6 +245,8 @@ function createFakeRepo() {
     extractionStartedAt: null,
     contentHashAtExtraction: null,
     extractionSchemaVersion: null,
+    detectionClassification: "CONSULTATION",
+    detectionContentHash: "hash-abc",
   }
   const content: MessageContentLite = {
     normalizedText: "Chantier : Tour Alpha\nContact: alice@example.com\nRéférence : REF-99",
@@ -490,6 +509,7 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
   it("5 — AUTO_REJECT_CANCELLED : reject fail → zéro follow-up", async () => {
     const draft = baseDraft({
       extractedData: { requestClassification: "CANCELLED_CONSULTATION" },
+      detectionClassification: "CANCELLATION",
     })
     const db = makeTxDb(draft)
     const review = {
@@ -550,6 +570,7 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
     }
     const draft = baseDraft({
       extractedData: { requestClassification: "CANCELLED_CONSULTATION" },
+      detectionClassification: "CANCELLATION",
     })
     const db = makeTxDb(draft)
     const review = new ImportDraftReviewService({ db: db as never, now: () => REFERENCE_INSTANT })
@@ -836,6 +857,16 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
       patchMethod(
         acquisitionContentFetchStateRepository,
         "listCompanyIdsWithEligibleContentFetch",
+        async () => []
+      ),
+      patchMethod(
+        acquisitionConsultationDetectionSelectionRepository,
+        "listCompanyIdsNeedingDetection",
+        async () => []
+      ),
+      patchMethod(
+        acquisitionConsultationDetectionSelectionRepository,
+        "listCandidatesForCompany",
         async () => []
       ),
     ]

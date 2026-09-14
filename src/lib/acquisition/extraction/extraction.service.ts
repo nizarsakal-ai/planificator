@@ -54,6 +54,10 @@ import {
   resolveOrchestratorAutoOwnership,
   resolveOrchestratorAutoTransactionalFence,
 } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
+import {
+  isExtractionAuthorizedDetectionClassification,
+} from "@/lib/acquisition/capabilities/consultation-detection.policy"
+import type { ConsultationClassification } from "@/lib/acquisition/capabilities/consultation-capability.types"
 
 const LOG_PREFIX = "[acquisition-extraction]"
 const ALLOWED_ROLES = new Set<Role>(["ADMIN", "SUPER_ADMIN"])
@@ -156,6 +160,60 @@ function isOrchestratorAutoContext(
   ctx: ExtractionExecutionContext
 ): ctx is Extract<ExtractionExecutionContext, { kind: "ORCHESTRATOR_AUTO" }> {
   return ctx.kind === "ORCHESTRATOR_AUTO"
+}
+
+function isAutoExtractionContext(ctx: ExtractionExecutionContext): boolean {
+  return ctx.kind === "UNIT_CRON" || ctx.kind === "ORCHESTRATOR_AUTO"
+}
+
+function hasValidDetectionProofForAutoExtraction(input: {
+  detectionClassification: string | null | undefined
+  detectionContentHash: string | null | undefined
+  currentContentHash: string
+}): boolean {
+  if (!input.detectionContentHash) return false
+  if (input.detectionContentHash !== input.currentContentHash) return false
+  return isExtractionAuthorizedDetectionClassification(
+    input.detectionClassification as ConsultationClassification | null
+  )
+}
+
+/**
+ * PLAN-ACQ-DETECTION-001 / R7 — matrice retry persistée + runtime alignés.
+ * null historique = fail-closed (jamais sélectionné AUTO).
+ *
+ * ExtractionProviderError : préserver error.retryable, sauf codes métier
+ * explicitement forcés non-retryable (PROVIDER_INVALID_OUTPUT, …).
+ * PROVIDER_TIMEOUT n’est jamais forcé à true.
+ */
+export function resolveExtractionRetryableForError(
+  code: ExtractionErrorCode,
+  providerRetryable?: boolean
+): boolean {
+  switch (code) {
+    case "STALE_CONTENT":
+      return true
+    // Métier / config : toujours terminal pour le contenu courant.
+    case "PROVIDER_INVALID_OUTPUT":
+    case "PROVIDER_DISABLED":
+    case "PROVIDER_NOT_CONFIGURED":
+    case "CONTENT_INSUFFICIENT":
+    case "EMPTY_EXTRACTION":
+    case "DATE_RANGE_INVALID":
+    case "DETECTION_REQUIRED":
+    case "DETECTION_NOT_AUTHORIZED":
+    case "ZOD_VALIDATION_FAILED":
+    case "CONTENT_MISSING":
+      return false
+    // Erreurs provider : vérité exacte du flag retryable (true ou false).
+    case "PROVIDER_TIMEOUT":
+    case "PROVIDER_UNAVAILABLE":
+    case "PROVIDER_INTERNAL_ERROR":
+    case "PROVIDER_INPUT_TOO_LARGE":
+      return providerRetryable === true
+    default:
+      return false
+  }
 }
 
 async function ensureOrchestratorOwned(
@@ -339,6 +397,31 @@ async function runDraftExtractionCore(
     })
   }
 
+  // PLAN-ACQ-DETECTION-001 — défense en profondeur AUTO (avant claim).
+  if (isAutoExtractionContext(executionContext)) {
+    if (
+      !hasValidDetectionProofForAutoExtraction({
+        detectionClassification: draft.detectionClassification,
+        detectionContentHash: draft.detectionContentHash,
+        currentContentHash: content.contentHash,
+      })
+    ) {
+      log("EXTRACTION_BLOCKED_DETECTION", {
+        draftId: draft.id,
+        hashPrefix: contentHashPrefix(content.contentHash),
+        detectionClassification: draft.detectionClassification,
+      })
+      return fail(
+        "FAILED",
+        draft.detectionClassification == null || draft.detectionContentHash == null
+          ? "DETECTION_REQUIRED"
+          : "DETECTION_NOT_AUTHORIZED",
+        "Preuve Detection absente ou non autorisée pour extraction AUTO",
+        { draftId: draft.id }
+      )
+    }
+  }
+
   const message = await repository.findMessage(companyId, draft.acquisitionMessageId)
   const attachments = await repository.listAttachmentMetadata(
     companyId,
@@ -477,6 +560,7 @@ async function runDraftExtractionCore(
         expectedVersion: claimVersion,
         errorCode: "PROVIDER_INVALID_OUTPUT",
         now: nowFn(),
+        extractionRetryable: resolveExtractionRetryableForError("PROVIDER_INVALID_OUTPUT"),
       })
       if (marked === "STATE_CHANGED") {
         return fail("STATE_CHANGED", "EXTRACTION_STATE_CHANGED", "État draft modifié", {
@@ -501,6 +585,7 @@ async function runDraftExtractionCore(
 
     if (!gate.pass) {
       const errorCode = gate.failureCode ?? "CONTENT_INSUFFICIENT"
+      const extractionRetryable = resolveExtractionRetryableForError(errorCode)
       const persistOutcome = await repository.persistExtraction({
         companyId,
         draftId: draft.id,
@@ -515,6 +600,7 @@ async function runDraftExtractionCore(
         model: normalized.model,
         errorCode,
         now: completedAt,
+        extractionRetryable,
       })
       const mapped = mapPersistOutcome(persistOutcome, draft.id)
       if (mapped) {
@@ -530,7 +616,9 @@ async function runDraftExtractionCore(
         code: errorCode,
         hashPrefix: contentHashPrefix(contentHashAtClaim),
       })
-      const retryAllowed = claimed.extractionAttemptCount < maxAttempts
+      // R7 — runtime aligné sur la décision persistée (pas attemptCount seul).
+      const retryAllowed =
+        extractionRetryable && claimed.extractionAttemptCount < maxAttempts
       return fail(
         retryAllowed ? "RETRY_ALLOWED" : "FAILED",
         errorCode,
@@ -634,19 +722,24 @@ async function runDraftExtractionCore(
 
     const completedAt = nowFn()
     let code: ExtractionErrorCode = "INTERNAL_ERROR"
-    /** Deny-by-default : seule une ExtractionProviderError.retryable=true (ou timeout enveloppe) autorise RETRY_ALLOWED. */
-    let errorRetryable = false
+    /** Deny-by-default hors ExtractionProviderError ; enveloppe timeout = retryable true (cause budget). */
+    let providerRetryableFlag: boolean | undefined
     if (isExtractionProviderError(error)) {
       code = error.code
-      errorRetryable = error.retryable
+      providerRetryableFlag = error.retryable
     } else if (
       error instanceof Error &&
       (error.message === "PROVIDER_TIMEOUT" ||
         (error as { code?: string }).code === "PROVIDER_TIMEOUT")
     ) {
       code = "PROVIDER_TIMEOUT"
-      errorRetryable = true
+      providerRetryableFlag = true
     }
+
+    const extractionRetryable = resolveExtractionRetryableForError(
+      code,
+      providerRetryableFlag
+    )
 
     const warningCode =
       code === "PROVIDER_TIMEOUT"
@@ -662,6 +755,7 @@ async function runDraftExtractionCore(
       errorCode: code,
       now: completedAt,
       warnings: warningCode ? [catalogWarning(warningCode, { source: "SERVICE" })] : [],
+      extractionRetryable,
     })
 
     if (marked === "STATE_CHANGED") {
@@ -682,7 +776,7 @@ async function runDraftExtractionCore(
     })
 
     const retryAllowed =
-      errorRetryable && claimed.extractionAttemptCount < maxAttempts
+      extractionRetryable && claimed.extractionAttemptCount < maxAttempts
     return fail(retryAllowed ? "RETRY_ALLOWED" : "FAILED", code, "Échec provider / timeout", {
       draftId: draft.id,
       status: "FAILED",

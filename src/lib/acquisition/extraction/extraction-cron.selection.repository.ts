@@ -60,6 +60,30 @@ const BACKOFF_INTERVAL_SQL = Prisma.sql`
   )
 `
 
+/**
+ * PLAN-ACQ-DETECTION-001 — preuve Detection hash-bound + classification extractible.
+ * NULL / NON_CONSULTATION / AMBIGUOUS / hash stale → exclus (fail-closed).
+ */
+const DETECTION_PROOF_SQL = Prisma.sql`
+  d."detectionContentHash" IS NOT NULL
+  AND d."detectionContentHash" = c."contentHash"
+  AND d."detectionClassification" IN (
+    CAST('CONSULTATION' AS "AcquisitionConsultationClassification"),
+    CAST('CONSULTATION_UPDATE' AS "AcquisitionConsultationClassification"),
+    CAST('CANCELLATION' AS "AcquisitionConsultationClassification")
+  )
+`
+
+/**
+ * Miroir unitaire du prédicat FAILED selector (fail-closed sur NULL/false).
+ * La sélection réelle reste en SQL.
+ */
+export function isFailedDraftRetrySelectable(input: {
+  extractionRetryable: boolean | null | undefined
+}): boolean {
+  return input.extractionRetryable === true
+}
+
 function eligibleWhereSql(input: {
   now: Date
   maxAttempts: number
@@ -75,10 +99,12 @@ function eligibleWhereSql(input: {
     d."extractionAttemptCount" < ${input.maxAttempts}
     ${companyClause}
     AND c."normalizedText" <> ''
+    AND ${DETECTION_PROOF_SQL}
     AND (
       d."status" = CAST('PENDING_EXTRACTION' AS "WorksiteImportDraftStatus")
       OR (
         d."status" = CAST('FAILED' AS "WorksiteImportDraftStatus")
+        AND d."extractionRetryable" = true
         AND d."lastExtractionErrorAt" IS NOT NULL
         AND d."lastExtractionErrorAt" + ${BACKOFF_INTERVAL_SQL} <= ${input.now}
       )

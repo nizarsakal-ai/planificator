@@ -22,6 +22,7 @@ import type {
   SaveCorrectionsOutcome,
 } from "@/lib/acquisition/review/import-draft-review.types"
 import { hasBlockingWarnings } from "@/lib/acquisition/review/consultation-ui"
+import { assertAutoDecisionSourceFreshInTransaction } from "@/lib/acquisition/policy/auto-decision-source-freshness"
 
 const LOG_PREFIX = "[acquisition-review]"
 const ALLOWED_ROLES = new Set<Role>(["ADMIN", "SUPER_ADMIN"])
@@ -29,12 +30,43 @@ const EDITABLE_STATUSES: WorksiteImportDraftStatus[] = ["PENDING_REVIEW", "FAILE
 
 export type ReviewMutationOptions = {
   transactionalOwnershipFence?: TransactionalOwnershipFence
+  /**
+   * PLAN-ACQ-DETECTION-001-R8 — si présent (AUTO), revalide le hash source
+   * courant dans la TX après fence, avant mutation.
+   */
+  requireSourceContentHash?: string
 }
 
 class ReviewLeaseNotOwnedError extends Error {
   readonly code = "LEASE_NOT_OWNED"
   constructor() {
     super("LEASE_NOT_OWNED")
+  }
+}
+
+class ReviewSourceContentStaleError extends Error {
+  readonly code = "SOURCE_CONTENT_STALE"
+  constructor() {
+    super("SOURCE_CONTENT_STALE")
+    this.name = "ReviewSourceContentStaleError"
+  }
+}
+
+function sourceContentStaleApprove(): ApproveOutcome {
+  return {
+    ok: false,
+    outcome: "STATE_CHANGED",
+    code: "SOURCE_CONTENT_STALE",
+    message: "Contenu source modifié depuis l'extraction",
+  }
+}
+
+function sourceContentStaleReject(): RejectOutcome {
+  return {
+    ok: false,
+    outcome: "STATE_CHANGED",
+    code: "SOURCE_CONTENT_STALE",
+    message: "Contenu source modifié depuis l'extraction",
   }
 }
 
@@ -264,6 +296,14 @@ export class ImportDraftReviewService {
         return await this.db.$transaction(async (tx) => {
           const owned = await fence.assertOwnedAndLock(tx)
           if (owned !== "OWNED") throw new ReviewLeaseNotOwnedError()
+          if (options?.requireSourceContentHash) {
+            const fresh = await assertAutoDecisionSourceFreshInTransaction(tx, {
+              companyId: ctx.companyId,
+              draftId: input.draftId,
+              expectedContentHash: options.requireSourceContentHash,
+            })
+            if (fresh !== "FRESH") throw new ReviewSourceContentStaleError()
+          }
           return this.executeApprove(tx, ctx, input)
         })
       } catch (err) {
@@ -275,6 +315,14 @@ export class ImportDraftReviewService {
             code: "LEASE_NOT_OWNED",
           })
           return leaseNotOwnedApprove()
+        }
+        if (err instanceof ReviewSourceContentStaleError) {
+          this.log("APPROVE_SOURCE_CONTENT_STALE", {
+            companyId: ctx.companyId,
+            draftId: input.draftId,
+            code: "SOURCE_CONTENT_STALE",
+          })
+          return sourceContentStaleApprove()
         }
         throw err
       }
@@ -480,6 +528,14 @@ export class ImportDraftReviewService {
         return await this.db.$transaction(async (tx) => {
           const owned = await fence.assertOwnedAndLock(tx)
           if (owned !== "OWNED") throw new ReviewLeaseNotOwnedError()
+          if (options?.requireSourceContentHash) {
+            const fresh = await assertAutoDecisionSourceFreshInTransaction(tx, {
+              companyId: ctx.companyId,
+              draftId: input.draftId,
+              expectedContentHash: options.requireSourceContentHash,
+            })
+            if (fresh !== "FRESH") throw new ReviewSourceContentStaleError()
+          }
           return this.executeReject(tx, ctx, input)
         })
       } catch (err) {
@@ -491,6 +547,14 @@ export class ImportDraftReviewService {
             code: "LEASE_NOT_OWNED",
           })
           return leaseNotOwnedReject()
+        }
+        if (err instanceof ReviewSourceContentStaleError) {
+          this.log("REJECT_SOURCE_CONTENT_STALE", {
+            companyId: ctx.companyId,
+            draftId: input.draftId,
+            code: "SOURCE_CONTENT_STALE",
+          })
+          return sourceContentStaleReject()
         }
         throw err
       }

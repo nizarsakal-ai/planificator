@@ -47,7 +47,16 @@ import {
   applyCancellationFollowUp,
   applyCancellationFollowUpTransactionally,
   CancellationLeaseNotOwnedError,
+  CancellationSourceContentStaleError,
 } from "@/lib/acquisition/policy/cancellation-followup"
+import {
+  assertAutoDecisionSourceFreshInTransaction,
+  loadCurrentAcquisitionContentHash,
+} from "@/lib/acquisition/policy/auto-decision-source-freshness"
+import {
+  gateAutoDecisionByDetectionProof,
+} from "@/lib/acquisition/capabilities/consultation-detection.policy"
+import type { ConsultationClassification } from "@/lib/acquisition/capabilities/consultation-capability.types"
 
 const LOG_PREFIX = "[acquisition-auto-decision]"
 
@@ -56,6 +65,14 @@ export class AutoDecisionLeaseNotOwnedError extends Error {
   constructor(message = "LEASE_NOT_OWNED") {
     super(message)
     this.name = "AutoDecisionLeaseNotOwnedError"
+  }
+}
+
+export class AutoDecisionSourceContentStaleError extends Error {
+  readonly code = "SOURCE_CONTENT_STALE" as const
+  constructor(message = "SOURCE_CONTENT_STALE") {
+    super(message)
+    this.name = "AutoDecisionSourceContentStaleError"
   }
 }
 
@@ -176,16 +193,43 @@ async function appendJournalLegacyOrFenced(input: {
   journal: AcquisitionDecisionJournalRepository
   fence: TransactionalOwnershipFence | undefined
   entry: DecisionJournalEntry
-}): Promise<void> {
-  if (!input.fence) {
+  /** R8-C2 — si fourni, revalidation source dans la même TX que l’append. */
+  companyId?: string
+  draftId?: string
+  requireSourceContentHash?: string
+}): Promise<"APPENDED" | "SOURCE_STALE"> {
+  const expectedHash = input.requireSourceContentHash?.trim() || null
+  const needFreshness = Boolean(expectedHash)
+
+  if (!input.fence && !needFreshness) {
     await input.journal.append(input.entry)
-    return
+    return "APPENDED"
   }
-  await input.db.$transaction(async (tx) => {
-    const owned = await input.fence!.assertOwnedAndLock(tx)
-    if (owned !== "OWNED") throw new AutoDecisionLeaseNotOwnedError()
-    await new AcquisitionDecisionJournalRepository(tx).append(input.entry)
-  })
+
+  try {
+    await input.db.$transaction(async (tx) => {
+      if (input.fence) {
+        const owned = await input.fence.assertOwnedAndLock(tx)
+        if (owned !== "OWNED") throw new AutoDecisionLeaseNotOwnedError()
+      }
+      if (needFreshness) {
+        if (!input.companyId || !input.draftId || !expectedHash) {
+          throw new AutoDecisionSourceContentStaleError()
+        }
+        const fresh = await assertAutoDecisionSourceFreshInTransaction(tx, {
+          companyId: input.companyId,
+          draftId: input.draftId,
+          expectedContentHash: expectedHash,
+        })
+        if (fresh !== "FRESH") throw new AutoDecisionSourceContentStaleError()
+      }
+      await new AcquisitionDecisionJournalRepository(tx).append(input.entry)
+    })
+    return "APPENDED"
+  } catch (err) {
+    if (err instanceof AutoDecisionSourceContentStaleError) return "SOURCE_STALE"
+    throw err
+  }
 }
 
 export async function maybeRunAutoDecisionAfterExtraction(input: {
@@ -235,6 +279,9 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
       extractedData: true,
       contentHashAtExtraction: true,
       extractionSchemaVersion: true,
+      detectionClassification: true,
+      detectionContentHash: true,
+      acquisitionMessageId: true,
       acquisitionMessage: {
         select: {
           resolvedPartnerId: true,
@@ -246,6 +293,23 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
   })
 
   if (!draft || draft.status !== "PENDING_REVIEW") return
+
+  const currentSourceContentHash = await loadCurrentAcquisitionContentHash(
+    db,
+    input.companyId,
+    draft.acquisitionMessageId
+  )
+
+  const detectionClassification =
+    draft.detectionClassification as ConsultationClassification | null
+  const detectionHashOk =
+    Boolean(draft.detectionContentHash) &&
+    Boolean(draft.contentHashAtExtraction) &&
+    Boolean(currentSourceContentHash) &&
+    draft.detectionContentHash === draft.contentHashAtExtraction &&
+    draft.contentHashAtExtraction === currentSourceContentHash
+  const detectionIsCancellation =
+    detectionHashOk && detectionClassification === "CANCELLATION"
 
   let partnerAutoApprove = false
   let partnerAutoConvert = false
@@ -313,9 +377,10 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
 
   const consultationCancelled =
     readRequestClassification(draft.extractedData) === "CANCELLED_CONSULTATION" ||
-    hasConsultationCancelledWarning(draft.warningData)
+    hasConsultationCancelledWarning(draft.warningData) ||
+    detectionIsCancellation
 
-  const decision = evaluateAutoDecision({
+  let decision = evaluateAutoDecision({
     worksiteName: draft.proposedWorksiteName,
     startDate: draft.proposedStartDate,
     endDate: draft.proposedEndDate,
@@ -337,9 +402,28 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
     referenceInstant: input.deps?.referenceInstant,
   })
 
+  decision = gateAutoDecisionByDetectionProof({
+    decision,
+    detectionClassification,
+    detectionContentHash: draft.detectionContentHash,
+    contentHashAtExtraction: draft.contentHashAtExtraction,
+    currentSourceContentHash,
+  })
+
+  const frozenHash = draft.contentHashAtExtraction?.trim() || null
+  const freshnessOpts =
+    frozenHash != null
+      ? { requireSourceContentHash: frozenHash }
+      : {}
+
   const systemActor = await resolveSystemActor(input.companyId, db)
 
-  await appendJournalLegacyOrFenced({
+  const isAutoMutationJournal =
+    decision.code === "AUTO_APPROVE_CONVERT" ||
+    decision.code === "AUTO_APPROVE_ONLY" ||
+    decision.code === "AUTO_REJECT_CANCELLED"
+
+  const journalOutcome = await appendJournalLegacyOrFenced({
     db,
     journal,
     fence,
@@ -365,7 +449,16 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
           : {}),
       },
     },
+    companyId: input.companyId,
+    draftId: draft.id,
+    ...(isAutoMutationJournal && frozenHash
+      ? { requireSourceContentHash: frozenHash }
+      : {}),
   })
+  if (journalOutcome === "SOURCE_STALE") {
+    log("AUTO_JOURNAL_SOURCE_STALE", { draftId: draft.id, code: decision.code })
+    return
+  }
 
   log("DECISION", {
     companyId: input.companyId,
@@ -378,8 +471,8 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
   if (decision.code === "AUTO_REJECT_CANCELLED") {
     if (systemActor.ok) {
       const rejectOpts = fence
-        ? { transactionalOwnershipFence: fence }
-        : undefined
+        ? { transactionalOwnershipFence: fence, ...freshnessOpts }
+        : { ...freshnessOpts }
       const rejected = await review.rejectImportDraft(
         {
           actorUserId: systemActor.userId,
@@ -391,7 +484,7 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
           expectedVersion: draft.version,
           rejectionReason: "CANCELLED_INITIAL",
         },
-        rejectOpts
+        Object.keys(rejectOpts).length > 0 ? rejectOpts : undefined
       )
       if (!rejected.ok) {
         if (fence && rejected.code === "LEASE_NOT_OWNED") {
@@ -417,10 +510,17 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
             db,
             reasons: decision.reasons,
             transactionalOwnershipFence: fence,
+            ...(frozenHash
+              ? { requireSourceContentHash: frozenHash }
+              : {}),
           })
         } catch (err) {
           if (err instanceof CancellationLeaseNotOwnedError) {
             throw new AutoDecisionLeaseNotOwnedError()
+          }
+          if (err instanceof CancellationSourceContentStaleError) {
+            log("AUTO_CANCEL_FOLLOWUP_SOURCE_STALE", { draftId: draft.id })
+            return
           }
           throw err
         }
@@ -481,15 +581,15 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
   }
 
   const approveOpts = fence
-    ? { transactionalOwnershipFence: fence }
-    : undefined
+    ? { transactionalOwnershipFence: fence, ...freshnessOpts }
+    : { ...freshnessOpts }
   const approve = await review.approveImportDraft(
     actor,
     {
       draftId: draft.id,
       expectedVersion: draft.version,
     },
-    approveOpts
+    Object.keys(approveOpts).length > 0 ? approveOpts : undefined
   )
   if (!approve.ok) {
     if (fence && approve.code === "LEASE_NOT_OWNED") {
@@ -558,12 +658,12 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
   }
 
   const convertOpts = fence
-    ? { transactionalOwnershipFence: fence }
-    : undefined
+    ? { transactionalOwnershipFence: fence, ...freshnessOpts }
+    : { ...freshnessOpts }
   const converted = await conversion.convertImportDraft(
     actor,
     convertInput,
-    convertOpts
+    Object.keys(convertOpts).length > 0 ? convertOpts : undefined
   )
   if (!converted.ok && fence && converted.code === "LEASE_NOT_OWNED") {
     throw new AutoDecisionLeaseNotOwnedError()
