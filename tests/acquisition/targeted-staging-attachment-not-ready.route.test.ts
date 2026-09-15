@@ -13,6 +13,7 @@ import {
   isHarnessSurfaceAllowed,
   withHarnessExtractionGatesEnabled,
   type HarnessAttachmentRecord,
+  type HarnessDetectionPrepResult,
   type HarnessDraftRecord,
   type HarnessFuseStats,
 } from "@/lib/acquisition/extraction/targeted-staging-attachment-not-ready.handler"
@@ -115,6 +116,33 @@ function toMeta(att: HarnessAttachmentRecord): AttachmentMetaRow {
     sizeBytes: 10,
     status: att.status,
     storagePublicId: att.storagePublicId,
+  }
+}
+
+function detectionPersisted(
+  overrides?: Partial<HarnessDetectionPrepResult>
+): HarnessDetectionPrepResult {
+  return {
+    persistOutcome: "PERSISTED",
+    classification: "CONSULTATION",
+    draftId: DRAFT,
+    ...overrides,
+  }
+}
+
+/** loadDraft : 1er appel = initial ; appels suivants = version post-Detection (+1). */
+function loadDraftAfterDetectionBump(initial: HarnessDraftRecord) {
+  let calls = 0
+  const post = { ...initial, version: initial.version + 1 }
+  return {
+    post,
+    loadDraft: async () => {
+      calls += 1
+      return calls === 1 ? { ...initial } : { ...post }
+    },
+    get calls() {
+      return calls
+    },
   }
 }
 
@@ -456,6 +484,7 @@ describe("targeted-staging-attachment-not-ready harness", () => {
     const draft = baseDraft()
     const notReady = pendingPlanAtt({ storagePublicId: "   " })
     const stats: HarnessFuseStats = { claimCalls: 0, mutationAttempts: 0, providerCalls: 0 }
+    const loader = loadDraftAfterDetectionBump(draft)
 
     const content: MessageContentLite = {
       normalizedText: "Chantier : Test\nRéférence : REF-1",
@@ -467,9 +496,10 @@ describe("targeted-staging-attachment-not-ready harness", () => {
       receivedAt: new Date("2026-01-01"),
     }
 
+    const postDetectionDraft = loader.post
     const fuse = createHarnessFuseRepository(
       {
-        findDraft: async () => draftRowFromHarness(draft),
+        findDraft: async () => draftRowFromHarness(postDetectionDraft),
         findContent: async () => content,
         findMessage: async () => message,
         listAttachmentMetadata: async () => [toMeta(notReady)],
@@ -483,8 +513,9 @@ describe("targeted-staging-attachment-not-ready harness", () => {
       {
         env: { ...PREVIEW_ENV },
         auth: adminAuth(),
-        loadDraft: async () => draft,
+        loadDraft: loader.loadDraft,
         listAttachments: async () => [notReady],
+        prepareDetection: async () => detectionPersisted(),
         runExtraction: async (input) =>
           withHarnessExtractionGatesEnabled(() =>
             runDraftExtractionSystem(input, { repository: fuse, provider: bomb })
@@ -497,12 +528,13 @@ describe("targeted-staging-attachment-not-ready harness", () => {
     assert.equal(body.ok, true)
     assert.equal(body.result.code, "ATTACHMENT_NOT_READY")
     assert.equal(body.proof.attachmentNotReady, true)
+    assert.equal(body.before.version, draft.version + 1)
+    assert.equal(body.after.version, draft.version + 1)
     assert.equal(body.proof.versionUnchanged, true)
     assert.equal(body.proof.attemptCountUnchanged, true)
     assert.equal(body.proof.noCreatedWorksite, true)
     assert.equal(body.after.status, "PENDING_EXTRACTION")
     assert.equal(body.after.extractionAttemptCount, draft.extractionAttemptCount)
-    assert.equal(body.after.version, draft.version)
     assert.equal(body.after.createdWorksiteId, null)
     assert.equal(stats.claimCalls, 0)
     assert.equal(stats.providerCalls, 0)
@@ -520,6 +552,7 @@ describe("targeted-staging-attachment-not-ready harness", () => {
       storagePublicId: "acquisition/race/ready",
     })
     const stats: HarnessFuseStats = { claimCalls: 0, mutationAttempts: 0, providerCalls: 0 }
+    const loader = loadDraftAfterDetectionBump(draft)
 
     const content: MessageContentLite = {
       normalizedText: "Chantier : Race\nRéférence : REF-RACE",
@@ -533,7 +566,7 @@ describe("targeted-staging-attachment-not-ready harness", () => {
 
     const fuse = createHarnessFuseRepository(
       {
-        findDraft: async () => draftRowFromHarness(draft),
+        findDraft: async () => draftRowFromHarness(loader.post),
         findContent: async () => content,
         findMessage: async () => message,
         listAttachmentMetadata: async () => [toMeta(serviceReady)],
@@ -547,8 +580,9 @@ describe("targeted-staging-attachment-not-ready harness", () => {
       {
         env: { ...PREVIEW_ENV },
         auth: adminAuth(),
-        loadDraft: async () => draft,
+        loadDraft: loader.loadDraft,
         listAttachments: async () => [harnessNotReady],
+        prepareDetection: async () => detectionPersisted(),
         runExtraction: async (input) =>
           withHarnessExtractionGatesEnabled(() =>
             runDraftExtractionSystem(input, { repository: fuse, provider: bomb })
@@ -575,13 +609,15 @@ describe("targeted-staging-attachment-not-ready harness", () => {
       message: "boom",
       draftId: DRAFT,
     }
+    const loader = loadDraftAfterDetectionBump(baseDraft())
     const res = await handleTargetedStagingAttachmentNotReady(
       request({ confirmation: TARGETED_ATTACHMENT_NOT_READY_CONFIRMATION }),
       {
         env: { ...PREVIEW_ENV },
         auth: adminAuth(),
-        loadDraft: async () => baseDraft(),
+        loadDraft: loader.loadDraft,
         listAttachments: async () => [pendingPlanAtt()],
+        prepareDetection: async () => detectionPersisted(),
         runExtraction: async () => fake,
       }
     )
@@ -590,6 +626,277 @@ describe("targeted-staging-attachment-not-ready harness", () => {
     assert.equal(body.ok, false)
     assert.equal(body.code, "HARNESS_PROOF_FAILED")
     assert.equal(body.proof.versionUnchanged, true)
+  })
+
+  it("Detection PERSISTED + classification autorisée → reload puis extraction 1×", async () => {
+    const draft = baseDraft({ version: 3 })
+    const loader = loadDraftAfterDetectionBump(draft)
+    let detectionCalls = 0
+    let extractionCalls = 0
+
+    const res = await handleTargetedStagingAttachmentNotReady(
+      request({ confirmation: TARGETED_ATTACHMENT_NOT_READY_CONFIRMATION }),
+      {
+        env: { ...PREVIEW_ENV },
+        auth: adminAuth(),
+        loadDraft: loader.loadDraft,
+        listAttachments: async () => [pendingPlanAtt()],
+        prepareDetection: async (input) => {
+          detectionCalls += 1
+          assert.equal(input.companyId, COMPANY)
+          assert.equal(input.acquisitionMessageId, MSG)
+          return detectionPersisted()
+        },
+        runExtraction: async () => {
+          extractionCalls += 1
+          return {
+            ok: false,
+            outcome: "FAILED",
+            code: "ATTACHMENT_NOT_READY",
+            message: "Pièce PLAN requise non disponible pour extraction AUTO",
+            draftId: DRAFT,
+          }
+        },
+      }
+    )
+
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.equal(detectionCalls, 1)
+    assert.equal(extractionCalls, 1)
+    assert.equal(loader.calls, 3) // initial + post-detection + after extraction
+    assert.equal(body.before.version, 4)
+    assert.equal(body.after.version, 4)
+    assert.equal(body.proof.versionUnchanged, true)
+    assert.equal(body.result.code, "ATTACHMENT_NOT_READY")
+  })
+
+  it("classification Detection non autorisée → extraction jamais appelée", async () => {
+    let extractionCalls = 0
+    const res = await handleTargetedStagingAttachmentNotReady(
+      request({ confirmation: TARGETED_ATTACHMENT_NOT_READY_CONFIRMATION }),
+      {
+        env: { ...PREVIEW_ENV },
+        auth: adminAuth(),
+        loadDraft: async () => baseDraft(),
+        listAttachments: async () => [pendingPlanAtt()],
+        prepareDetection: async () =>
+          detectionPersisted({ classification: "NON_CONSULTATION" }),
+        runExtraction: async () => {
+          extractionCalls += 1
+          throw new Error("should not run")
+        },
+      }
+    )
+    assert.equal(res.status, 409)
+    assert.equal((await res.json()).code, "HARNESS_DETECTION_NOT_AUTHORIZED")
+    assert.equal(extractionCalls, 0)
+  })
+
+  it("Detection STALE_CONTENT → extraction jamais appelée", async () => {
+    let extractionCalls = 0
+    const res = await handleTargetedStagingAttachmentNotReady(
+      request({ confirmation: TARGETED_ATTACHMENT_NOT_READY_CONFIRMATION }),
+      {
+        env: { ...PREVIEW_ENV },
+        auth: adminAuth(),
+        loadDraft: async () => baseDraft(),
+        listAttachments: async () => [pendingPlanAtt()],
+        prepareDetection: async () =>
+          detectionPersisted({
+            persistOutcome: "STALE_CONTENT",
+            classification: null,
+          }),
+        runExtraction: async () => {
+          extractionCalls += 1
+          throw new Error("should not run")
+        },
+      }
+    )
+    assert.equal(res.status, 409)
+    assert.equal((await res.json()).code, "HARNESS_DETECTION_STALE_CONTENT")
+    assert.equal(extractionCalls, 0)
+  })
+
+  it("Detection STATE_CHANGED → extraction jamais appelée", async () => {
+    let extractionCalls = 0
+    const res = await handleTargetedStagingAttachmentNotReady(
+      request({ confirmation: TARGETED_ATTACHMENT_NOT_READY_CONFIRMATION }),
+      {
+        env: { ...PREVIEW_ENV },
+        auth: adminAuth(),
+        loadDraft: async () => baseDraft(),
+        listAttachments: async () => [pendingPlanAtt()],
+        prepareDetection: async () =>
+          detectionPersisted({
+            persistOutcome: "STATE_CHANGED",
+            classification: null,
+          }),
+        runExtraction: async () => {
+          extractionCalls += 1
+          throw new Error("should not run")
+        },
+      }
+    )
+    assert.equal(res.status, 409)
+    assert.equal((await res.json()).code, "HARNESS_DETECTION_STATE_CHANGED")
+    assert.equal(extractionCalls, 0)
+  })
+
+  it("Detection LEASE_NOT_OWNED → extraction jamais appelée", async () => {
+    let extractionCalls = 0
+    const res = await handleTargetedStagingAttachmentNotReady(
+      request({ confirmation: TARGETED_ATTACHMENT_NOT_READY_CONFIRMATION }),
+      {
+        env: { ...PREVIEW_ENV },
+        auth: adminAuth(),
+        loadDraft: async () => baseDraft(),
+        listAttachments: async () => [pendingPlanAtt()],
+        prepareDetection: async () =>
+          detectionPersisted({
+            persistOutcome: "LEASE_NOT_OWNED",
+            classification: null,
+          }),
+        runExtraction: async () => {
+          extractionCalls += 1
+          throw new Error("should not run")
+        },
+      }
+    )
+    assert.equal(res.status, 409)
+    assert.equal((await res.json()).code, "HARNESS_DETECTION_LEASE_NOT_OWNED")
+    assert.equal(extractionCalls, 0)
+  })
+
+  it("Detection NO_CONTENT → extraction jamais appelée", async () => {
+    let extractionCalls = 0
+    const res = await handleTargetedStagingAttachmentNotReady(
+      request({ confirmation: TARGETED_ATTACHMENT_NOT_READY_CONFIRMATION }),
+      {
+        env: { ...PREVIEW_ENV },
+        auth: adminAuth(),
+        loadDraft: async () => baseDraft(),
+        listAttachments: async () => [pendingPlanAtt()],
+        prepareDetection: async () =>
+          detectionPersisted({
+            persistOutcome: "NO_CONTENT",
+            classification: null,
+            draftId: DRAFT,
+          }),
+        runExtraction: async () => {
+          extractionCalls += 1
+          throw new Error("should not run")
+        },
+      }
+    )
+    assert.equal(res.status, 409)
+    assert.equal((await res.json()).code, "HARNESS_DETECTION_NO_CONTENT")
+    assert.equal(extractionCalls, 0)
+  })
+
+  it("Detection NO_DRAFT → extraction jamais appelée", async () => {
+    let extractionCalls = 0
+    const res = await handleTargetedStagingAttachmentNotReady(
+      request({ confirmation: TARGETED_ATTACHMENT_NOT_READY_CONFIRMATION }),
+      {
+        env: { ...PREVIEW_ENV },
+        auth: adminAuth(),
+        loadDraft: async () => baseDraft(),
+        listAttachments: async () => [pendingPlanAtt()],
+        prepareDetection: async () =>
+          detectionPersisted({
+            persistOutcome: "NO_DRAFT",
+            classification: null,
+            draftId: null,
+          }),
+        runExtraction: async () => {
+          extractionCalls += 1
+          throw new Error("should not run")
+        },
+      }
+    )
+    assert.equal(res.status, 409)
+    assert.equal((await res.json()).code, "HARNESS_DETECTION_NO_DRAFT")
+    assert.equal(extractionCalls, 0)
+  })
+
+  it("post-Detection status ≠ PENDING_EXTRACTION → extraction jamais appelée", async () => {
+    const draft = baseDraft()
+    let calls = 0
+    let extractionCalls = 0
+    const res = await handleTargetedStagingAttachmentNotReady(
+      request({ confirmation: TARGETED_ATTACHMENT_NOT_READY_CONFIRMATION }),
+      {
+        env: { ...PREVIEW_ENV },
+        auth: adminAuth(),
+        loadDraft: async () => {
+          calls += 1
+          if (calls === 1) return draft
+          return { ...draft, version: draft.version + 1, status: "PENDING_REVIEW" }
+        },
+        listAttachments: async () => [pendingPlanAtt()],
+        prepareDetection: async () => detectionPersisted(),
+        runExtraction: async () => {
+          extractionCalls += 1
+          throw new Error("should not run")
+        },
+      }
+    )
+    assert.equal(res.status, 409)
+    assert.equal((await res.json()).code, "HARNESS_POST_DETECTION_STATUS_INVALID")
+    assert.equal(extractionCalls, 0)
+  })
+
+  it("post-Detection createdWorksiteId → extraction jamais appelée", async () => {
+    const draft = baseDraft()
+    let calls = 0
+    let extractionCalls = 0
+    const res = await handleTargetedStagingAttachmentNotReady(
+      request({ confirmation: TARGETED_ATTACHMENT_NOT_READY_CONFIRMATION }),
+      {
+        env: { ...PREVIEW_ENV },
+        auth: adminAuth(),
+        loadDraft: async () => {
+          calls += 1
+          if (calls === 1) return draft
+          return {
+            ...draft,
+            version: draft.version + 1,
+            createdWorksiteId: "worksite-after-detection",
+          }
+        },
+        listAttachments: async () => [pendingPlanAtt()],
+        prepareDetection: async () => detectionPersisted(),
+        runExtraction: async () => {
+          extractionCalls += 1
+          throw new Error("should not run")
+        },
+      }
+    )
+    assert.equal(res.status, 409)
+    assert.equal((await res.json()).code, "HARNESS_POST_DETECTION_CREATED_WORKSITE")
+    assert.equal(extractionCalls, 0)
+  })
+
+  it("Detection draftId mismatch → extraction jamais appelée", async () => {
+    let extractionCalls = 0
+    const res = await handleTargetedStagingAttachmentNotReady(
+      request({ confirmation: TARGETED_ATTACHMENT_NOT_READY_CONFIRMATION }),
+      {
+        env: { ...PREVIEW_ENV },
+        auth: adminAuth(),
+        loadDraft: async () => baseDraft(),
+        listAttachments: async () => [pendingPlanAtt()],
+        prepareDetection: async () => detectionPersisted({ draftId: "other-draft" }),
+        runExtraction: async () => {
+          extractionCalls += 1
+          throw new Error("should not run")
+        },
+      }
+    )
+    assert.equal(res.status, 409)
+    assert.equal((await res.json()).code, "HARNESS_DETECTION_DRAFT_MISMATCH")
+    assert.equal(extractionCalls, 0)
   })
 
   it("aucune possibilité de fournir librement un autre draftId pour scanner", async () => {

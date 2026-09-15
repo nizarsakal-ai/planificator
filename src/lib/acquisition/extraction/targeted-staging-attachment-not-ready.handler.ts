@@ -24,6 +24,10 @@ import type {
   ExtractDraftResult,
   ExtractionWarning,
 } from "@/lib/acquisition/extraction/extraction.types"
+import { DefaultConsultationDetectionCapability } from "@/lib/acquisition/capabilities/consultation-detection.capability"
+import type { PersistDetectionOutcome } from "@/lib/acquisition/capabilities/consultation-detection.repository"
+import { isExtractionAuthorizedDetectionClassification } from "@/lib/acquisition/capabilities/consultation-detection.policy"
+import type { ConsultationClassification } from "@/lib/acquisition/capabilities/consultation-capability.types"
 
 export const TARGETED_ATTACHMENT_NOT_READY_CONFIRMATION =
   "RUN_TARGETED_ATTACHMENT_NOT_READY_TEST" as const
@@ -78,6 +82,13 @@ export type HarnessFuseStats = {
   providerCalls: number
 }
 
+/** Résultat Detection exposable au harness (sans contenu métier / hash / secrets). */
+export type HarnessDetectionPrepResult = {
+  persistOutcome: PersistDetectionOutcome | "NO_CONTENT" | "NO_DRAFT"
+  classification: ConsultationClassification | null
+  draftId: string | null
+}
+
 export type TargetedAttachmentNotReadyHandlerDeps = {
   auth?: () => Promise<{
     user: { id: string; role: string; companyId: string | null }
@@ -88,6 +99,14 @@ export type TargetedAttachmentNotReadyHandlerDeps = {
     companyId: string,
     acquisitionMessageId: string
   ) => Promise<HarnessAttachmentRecord[]>
+  /**
+   * Préparation Detection manuelle ciblée (tests injectables).
+   * Runtime : DefaultConsultationDetectionCapability sans fence (chemin non-AUTO).
+   */
+  prepareDetection?: (input: {
+    companyId: string
+    acquisitionMessageId: string
+  }) => Promise<HarnessDetectionPrepResult>
   /** Override total — tests. Runtime : fuse+bomb via runDraftExtractionSystem. */
   runExtraction?: (input: {
     companyId: string
@@ -260,6 +279,48 @@ async function defaultSecureRunExtraction(input: {
     const { repository, provider } = createHarnessSecureExtractionDeps()
     return runDraftExtractionSystem(input, { repository, provider })
   })
+}
+
+/**
+ * Detection manuelle ciblée — vraie capability + policy + persist hash/version-bound.
+ * Aucune fence / lease (chemin non-AUTO documenté par le repository).
+ */
+async function defaultPrepareHarnessDetection(input: {
+  companyId: string
+  acquisitionMessageId: string
+}): Promise<HarnessDetectionPrepResult> {
+  const capability = new DefaultConsultationDetectionCapability()
+  const result = await capability.detectConsultation({
+    companyId: input.companyId,
+    acquisitionMessageId: input.acquisitionMessageId,
+    subject: null,
+    senderEmail: null,
+    senderDomain: null,
+  })
+  return {
+    persistOutcome: result.persistOutcome,
+    classification: result.classification,
+    draftId: result.draftId,
+  }
+}
+
+function mapDetectionPersistFailureCode(
+  outcome: HarnessDetectionPrepResult["persistOutcome"]
+): string {
+  switch (outcome) {
+    case "STALE_CONTENT":
+      return "HARNESS_DETECTION_STALE_CONTENT"
+    case "STATE_CHANGED":
+      return "HARNESS_DETECTION_STATE_CHANGED"
+    case "LEASE_NOT_OWNED":
+      return "HARNESS_DETECTION_LEASE_NOT_OWNED"
+    case "NO_CONTENT":
+      return "HARNESS_DETECTION_NO_CONTENT"
+    case "NO_DRAFT":
+      return "HARNESS_DETECTION_NO_DRAFT"
+    default:
+      return "HARNESS_DETECTION_FAILED"
+  }
 }
 
 function toSnapshot(row: HarnessDraftRecord): HarnessDraftSnapshot {
@@ -469,8 +530,81 @@ export async function handleTargetedStagingAttachmentNotReady(
     return refused(409, "PLAN_PDF_ALREADY_READY", "PLAN PDF déjà prêt — harness non applicable")
   }
 
-  const before = toSnapshot(draft)
   const planMeta = toPlanMeta(pendingPlan)
+  const prepareDetection = deps.prepareDetection ?? defaultPrepareHarnessDetection
+
+  const detection = await prepareDetection({
+    companyId,
+    acquisitionMessageId: draft.acquisitionMessageId,
+  })
+
+  if (detection.persistOutcome !== "PERSISTED") {
+    return refused(
+      409,
+      mapDetectionPersistFailureCode(detection.persistOutcome),
+      "Préparation Detection échouée — extraction non lancée",
+      {
+        detection: {
+          persistOutcome: detection.persistOutcome,
+          classification: detection.classification,
+        },
+      }
+    )
+  }
+
+  if (!isExtractionAuthorizedDetectionClassification(detection.classification)) {
+    return refused(
+      409,
+      "HARNESS_DETECTION_NOT_AUTHORIZED",
+      "Classification Detection non autorisée pour extraction AUTO",
+      {
+        detection: {
+          persistOutcome: detection.persistOutcome,
+          classification: detection.classification,
+        },
+      }
+    )
+  }
+
+  if (detection.draftId !== draftId) {
+    return refused(
+      409,
+      "HARNESS_DETECTION_DRAFT_MISMATCH",
+      "Detection a retourné un draftId différent de la cible"
+    )
+  }
+
+  const draftAfterDetection = await loadDraft(companyId, draftId)
+  if (
+    !draftAfterDetection ||
+    draftAfterDetection.companyId !== companyId ||
+    draftAfterDetection.draftId !== draftId
+  ) {
+    return refused(
+      409,
+      "HARNESS_POST_DETECTION_DRAFT_INVALID",
+      "Draft introuvable ou identité divergente après Detection"
+    )
+  }
+
+  if (draftAfterDetection.status !== "PENDING_EXTRACTION") {
+    return refused(
+      409,
+      "HARNESS_POST_DETECTION_STATUS_INVALID",
+      "Status draft post-Detection ≠ PENDING_EXTRACTION"
+    )
+  }
+
+  if (draftAfterDetection.createdWorksiteId != null) {
+    return refused(
+      409,
+      "HARNESS_POST_DETECTION_CREATED_WORKSITE",
+      "createdWorksiteId non null après Detection — extraction refusée"
+    )
+  }
+
+  // Snapshot BEFORE = état POST-Detection (version déjà incrémentée par persist).
+  const before = toSnapshot(draftAfterDetection)
 
   const result = await runExtraction({ companyId, draftId })
 
@@ -487,6 +621,10 @@ export async function handleTargetedStagingAttachmentNotReady(
 
   const baseBody = {
     harness: "targeted-staging-attachment-not-ready",
+    detection: {
+      persistOutcome: detection.persistOutcome,
+      classification: detection.classification,
+    },
     before: {
       ...before,
       planAttachment: planMeta,
