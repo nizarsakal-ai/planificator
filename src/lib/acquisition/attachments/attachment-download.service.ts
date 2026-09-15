@@ -43,6 +43,8 @@ export interface AttachmentDownloadServiceDeps {
   gmailSource?: GmailAttachmentSourcePort
   storage?: AttachmentStoragePort
   log?: (event: string, payload?: Record<string, unknown>) => void
+  isAcquisitionEnabled?: () => boolean
+  isAttachmentDownloadEnabled?: () => boolean
 }
 
 function defaultLog(event: string, payload?: Record<string, unknown>): void {
@@ -205,6 +207,9 @@ export async function downloadAcquisitionAttachment(
   const gmailSource = deps.gmailSource ?? gmailAttachmentSource
   const storage = deps.storage ?? cloudinaryAttachmentStorage
   const log = deps.log ?? defaultLog
+  const acquisitionEnabled = deps.isAcquisitionEnabled ?? isAcquisitionEnabled
+  const attachmentDownloadEnabled =
+    deps.isAttachmentDownloadEnabled ?? isAttachmentDownloadEnabled
   const now = input.now ?? (() => new Date())
   const random = input.random ?? Math.random
 
@@ -212,11 +217,11 @@ export async function downloadAcquisitionAttachment(
     return failureResult(input.attachmentId ?? "", "ATTACHMENT_NOT_FOUND")
   }
 
-  if (!isAcquisitionEnabled()) {
+  if (!acquisitionEnabled()) {
     log("DOWNLOAD_SKIPPED", { reason: "ACQUISITION_DISABLED" })
     return { outcome: "SKIPPED", attachmentId: input.attachmentId, errorCode: "ACQUISITION_DISABLED" }
   }
-  if (!isAttachmentDownloadEnabled()) {
+  if (!attachmentDownloadEnabled()) {
     log("DOWNLOAD_SKIPPED", { reason: "ATTACHMENT_DOWNLOAD_DISABLED" })
     return { outcome: "SKIPPED", attachmentId: input.attachmentId, errorCode: "ATTACHMENT_DOWNLOAD_DISABLED" }
   }

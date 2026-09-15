@@ -291,6 +291,35 @@ describe("attachment-download.service", () => {
     assert.ok(r.sha256)
   })
 
+  it("gates injectées autorisent uniquement l’appel sans activer les flags globaux", async () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "false"
+    process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "false"
+
+    const r = await downloadAcquisitionAttachment(
+      { companyId: "co-1", attachmentId: "att-1" },
+      {
+        repository: claimedRepo(),
+        gmailSource: mockGmail({
+          fetchAttachment: async () => ({ data: PDF_BUFFER, sizeBytes: PDF_BUFFER.length }),
+        }),
+        storage: mockStorage({
+          store: async () => ({
+            storageUrl: "https://cloudinary.test/file",
+            storagePublicId: "pid",
+            created: true,
+          }),
+        }),
+        log: () => {},
+        isAcquisitionEnabled: () => true,
+        isAttachmentDownloadEnabled: () => true,
+      }
+    )
+
+    assert.equal(process.env.PLANIFICATOR_ACQUISITION_ENABLED, "false")
+    assert.equal(process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED, "false")
+    assert.equal(r.outcome, "STORED")
+  })
+
   it("hash calculé avant store sur le même Buffer", async () => {
     let storedBuffer: Buffer | null = null
     let hashBeforeStore: string | null = null
