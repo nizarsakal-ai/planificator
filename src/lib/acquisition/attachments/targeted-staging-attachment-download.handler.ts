@@ -8,6 +8,10 @@
  * - aucun identifiant de cible accepté dans la requête
  * - aucune activation globale des flags Acquisition
  * - aucun cron global
+ *
+ * Modes :
+ * - CHECK_* : préflight strictement READ-ONLY (aucune écriture / download)
+ * - RUN_*   : téléchargement mutatif après revalidation complète des préconditions
  */
 
 import { NextResponse } from "next/server"
@@ -30,6 +34,9 @@ import {
 
 export const TARGETED_ATTACHMENT_DOWNLOAD_CONFIRMATION =
   "RUN_TARGETED_STAGING_ATTACHMENT_DOWNLOAD" as const
+
+export const TARGETED_ATTACHMENT_DOWNLOAD_CHECK_CONFIRMATION =
+  "CHECK_TARGETED_STAGING_ATTACHMENT_DOWNLOAD" as const
 
 const ENABLED_FLAG = "TARGETED_STAGING_ATTACHMENT_DOWNLOAD_ENABLED"
 const COMPANY_ENV = "TARGETED_STAGING_ATTACHMENT_NOT_READY_COMPANY_ID"
@@ -68,7 +75,8 @@ export type TargetedAttachmentDownloadHandlerDeps = {
   auth?: () => Promise<{
     user: { id: string; role: string; companyId: string | null }
   } | null>
-  env?: NodeJS.ProcessEnv
+  /** Partial env injectable (tests) — runtime utilise process.env. */
+  env?: Record<string, string | undefined>
   loadDraft?: (
     companyId: string,
     draftId: string
@@ -85,6 +93,14 @@ export type TargetedAttachmentDownloadHandlerDeps = {
     companyId: string
     attachmentId: string
   }) => Promise<AttachmentDownloadResult>
+}
+
+type PreparedDownloadTarget = {
+  companyId: string
+  draftId: string
+  draft: TargetedAttachmentDownloadDraft
+  candidate: TargetedAttachmentDownloadCandidate
+  scopedBefore: TargetedAttachmentDownloadScopedRecord
 }
 
 async function defaultLoadDraft(
@@ -184,13 +200,152 @@ function refused(
   )
 }
 
+/**
+ * Préconditions communes CHECK/RUN — lectures seules jusqu'à mailbox explicite.
+ * Chaque requête (CHECK ou RUN) revalide intégralement ; aucun état CHECK→RUN.
+ */
+async function prepareTargetedDownloadPreconditions(input: {
+  companyId: string
+  draftId: string
+  loadDraft: NonNullable<TargetedAttachmentDownloadHandlerDeps["loadDraft"]>
+  listPlanCandidates: NonNullable<
+    TargetedAttachmentDownloadHandlerDeps["listPlanCandidates"]
+  >
+  findAttachmentWithMessage: NonNullable<
+    TargetedAttachmentDownloadHandlerDeps["findAttachmentWithMessage"]
+  >
+}): Promise<{ ok: true; prepared: PreparedDownloadTarget } | { ok: false; response: Response }> {
+  const { companyId, draftId, loadDraft, listPlanCandidates, findAttachmentWithMessage } =
+    input
+
+  const draft = await loadDraft(companyId, draftId)
+  if (!draft || draft.companyId !== companyId || draft.draftId !== draftId) {
+    return {
+      ok: false,
+      response: refused(404, "DRAFT_NOT_FOUND", "Draft cible introuvable pour ce tenant"),
+    }
+  }
+
+  if (draft.status !== "PENDING_EXTRACTION") {
+    return {
+      ok: false,
+      response: refused(409, "DRAFT_STATUS_INVALID", "Draft doit être PENDING_EXTRACTION"),
+    }
+  }
+
+  if (draft.createdWorksiteId != null) {
+    return {
+      ok: false,
+      response: refused(
+        409,
+        "HARNESS_CREATED_WORKSITE_ALREADY_EXISTS",
+        "Draft déjà lié à un chantier — harness refusé"
+      ),
+    }
+  }
+
+  const candidates = await listPlanCandidates(companyId, draft.acquisitionMessageId)
+
+  if (candidates.length === 0) {
+    return {
+      ok: false,
+      response: refused(409, "HARNESS_PLAN_NOT_FOUND", "Aucun PLAN PDF admissible"),
+    }
+  }
+
+  if (candidates.length !== 1) {
+    return {
+      ok: false,
+      response: refused(
+        409,
+        "HARNESS_PLAN_AMBIGUOUS",
+        "Plusieurs PLAN PDF — sélection refusée",
+        { candidateCount: candidates.length }
+      ),
+    }
+  }
+
+  const candidate = candidates[0]
+  if (
+    candidate.companyId !== companyId ||
+    candidate.acquisitionMessageId !== draft.acquisitionMessageId ||
+    candidate.category !== "PLAN" ||
+    candidate.status !== "DISCOVERED" ||
+    candidate.hasStoragePublicId
+  ) {
+    return {
+      ok: false,
+      response: refused(
+        409,
+        "HARNESS_PLAN_PRECONDITION_INVALID",
+        "État du PLAN incompatible avec le harness"
+      ),
+    }
+  }
+
+  const scopedBefore = await findAttachmentWithMessage(companyId, candidate.id)
+
+  if (
+    !scopedBefore ||
+    scopedBefore.attachment.companyId !== companyId ||
+    scopedBefore.attachment.acquisitionMessageId !== draft.acquisitionMessageId ||
+    scopedBefore.message.companyId !== companyId ||
+    scopedBefore.message.id !== draft.acquisitionMessageId
+  ) {
+    return {
+      ok: false,
+      response: refused(
+        409,
+        "HARNESS_ATTACHMENT_SCOPE_MISMATCH",
+        "Pièce jointe hors cible ou état modifié"
+      ),
+    }
+  }
+
+  if (
+    scopedBefore.attachment.status !== "DISCOVERED" ||
+    Boolean(scopedBefore.attachment.storagePublicId?.trim())
+  ) {
+    return {
+      ok: false,
+      response: refused(
+        409,
+        "HARNESS_PRECONDITION_RACE",
+        "État de la pièce jointe modifié avant téléchargement"
+      ),
+    }
+  }
+
+  if (!scopedBefore.message.sourceMailboxKey.trim()) {
+    return {
+      ok: false,
+      response: refused(
+        409,
+        "HARNESS_MAILBOX_LEGACY_FORBIDDEN",
+        "Message sans identité de boîte explicite — téléchargement refusé"
+      ),
+    }
+  }
+
+  return {
+    ok: true,
+    prepared: {
+      companyId,
+      draftId,
+      draft,
+      candidate,
+      scopedBefore,
+    },
+  }
+}
+
 export async function handleTargetedStagingAttachmentDownload(
   req: Request,
   deps: TargetedAttachmentDownloadHandlerDeps = {}
 ): Promise<Response> {
   const env = deps.env ?? process.env
 
-  if (!isHarnessSurfaceAllowed(env)) {
+  if (!isHarnessSurfaceAllowed(env as NodeJS.ProcessEnv)) {
     return refused(403, "HARNESS_SURFACE_FORBIDDEN", "Surface non autorisée pour ce harness")
   }
 
@@ -220,7 +375,10 @@ export async function handleTargetedStagingAttachmentDownload(
       ? (body as { confirmation?: unknown }).confirmation
       : undefined
 
-  if (confirmation !== TARGETED_ATTACHMENT_DOWNLOAD_CONFIRMATION) {
+  const isCheck = confirmation === TARGETED_ATTACHMENT_DOWNLOAD_CHECK_CONFIRMATION
+  const isRun = confirmation === TARGETED_ATTACHMENT_DOWNLOAD_CONFIRMATION
+
+  if (!isCheck && !isRun) {
     return refused(400, "CONFIRMATION_REQUIRED", "Confirmation exacte requise")
   }
 
@@ -264,106 +422,55 @@ export async function handleTargetedStagingAttachmentDownload(
     deps.findAttachmentWithMessage ?? defaultFindAttachmentWithMessage
   const runDownload = deps.runDownload ?? defaultRunDownload
 
-  const draft = await loadDraft(companyId, draftId)
-  if (!draft || draft.companyId !== companyId || draft.draftId !== draftId) {
-    return refused(404, "DRAFT_NOT_FOUND", "Draft cible introuvable pour ce tenant")
-  }
-
-  if (draft.status !== "PENDING_EXTRACTION") {
-    return refused(409, "DRAFT_STATUS_INVALID", "Draft doit être PENDING_EXTRACTION")
-  }
-
-  if (draft.createdWorksiteId != null) {
-    return refused(
-      409,
-      "HARNESS_CREATED_WORKSITE_ALREADY_EXISTS",
-      "Draft déjà lié à un chantier — harness refusé"
-    )
-  }
-
-  const candidates = await listPlanCandidates(
+  const preparedResult = await prepareTargetedDownloadPreconditions({
     companyId,
-    draft.acquisitionMessageId
-  )
+    draftId,
+    loadDraft,
+    listPlanCandidates,
+    findAttachmentWithMessage,
+  })
 
-  if (candidates.length === 0) {
-    return refused(
-      409,
-      "HARNESS_PLAN_NOT_FOUND",
-      "Aucun PLAN PDF admissible"
-    )
+  if (!preparedResult.ok) {
+    return preparedResult.response
   }
 
-  if (candidates.length !== 1) {
-    return refused(
-      409,
-      "HARNESS_PLAN_AMBIGUOUS",
-      "Plusieurs PLAN PDF — sélection refusée",
-      { candidateCount: candidates.length }
-    )
+  const { prepared } = preparedResult
+
+  if (isCheck) {
+    return NextResponse.json({
+      ok: true,
+      harness: "targeted-staging-attachment-download",
+      mode: "CHECK",
+      ready: true,
+      proof: {
+        draftPendingExtraction: prepared.draft.status === "PENDING_EXTRACTION",
+        noCreatedWorksite: prepared.draft.createdWorksiteId == null,
+        uniquePlanPdf: true,
+        planDiscovered: prepared.candidate.status === "DISCOVERED",
+        noStoragePublicId: !prepared.candidate.hasStoragePublicId,
+        sameTenant:
+          prepared.scopedBefore.attachment.companyId === companyId &&
+          prepared.scopedBefore.message.companyId === companyId,
+        sameMessage:
+          prepared.scopedBefore.attachment.acquisitionMessageId ===
+            prepared.draft.acquisitionMessageId &&
+          prepared.scopedBefore.message.id === prepared.draft.acquisitionMessageId,
+        mailboxProvenanceExplicit: Boolean(
+          prepared.scopedBefore.message.sourceMailboxKey.trim()
+        ),
+      },
+    })
   }
 
-  const candidate = candidates[0]
-  if (
-    candidate.companyId !== companyId ||
-    candidate.acquisitionMessageId !== draft.acquisitionMessageId ||
-    candidate.category !== "PLAN" ||
-    candidate.status !== "DISCOVERED" ||
-    candidate.hasStoragePublicId
-  ) {
-    return refused(
-      409,
-      "HARNESS_PLAN_PRECONDITION_INVALID",
-      "État du PLAN incompatible avec le harness"
-    )
-  }
-
-  const scopedBefore = await findAttachmentWithMessage(
-    companyId,
-    candidate.id
-  )
-
-  if (
-    !scopedBefore ||
-    scopedBefore.attachment.companyId !== companyId ||
-    scopedBefore.attachment.acquisitionMessageId !== draft.acquisitionMessageId ||
-    scopedBefore.message.companyId !== companyId ||
-    scopedBefore.message.id !== draft.acquisitionMessageId
-  ) {
-    return refused(
-      409,
-      "HARNESS_ATTACHMENT_SCOPE_MISMATCH",
-      "Pièce jointe hors cible ou état modifié"
-    )
-  }
-
-  if (
-    scopedBefore.attachment.status !== "DISCOVERED" ||
-    Boolean(scopedBefore.attachment.storagePublicId?.trim())
-  ) {
-    return refused(
-      409,
-      "HARNESS_PRECONDITION_RACE",
-      "État de la pièce jointe modifié avant téléchargement"
-    )
-  }
-
-  if (!scopedBefore.message.sourceMailboxKey.trim()) {
-    return refused(
-      409,
-      "HARNESS_MAILBOX_LEGACY_FORBIDDEN",
-      "Message sans identité de boîte explicite — téléchargement refusé"
-    )
-  }
-
+  // RUN : revalidation déjà effectuée dans cette requête juste avant runDownload.
   const result = await runDownload({
     companyId,
-    attachmentId: candidate.id,
+    attachmentId: prepared.candidate.id,
   })
 
   const scopedAfter = await findAttachmentWithMessage(
     companyId,
-    candidate.id
+    prepared.candidate.id
   )
 
   const proof = {
@@ -379,8 +486,8 @@ export async function handleTargetedStagingAttachmentDownload(
       scopedAfter?.message.companyId === companyId,
     sameMessage:
       scopedAfter?.attachment.acquisitionMessageId ===
-        draft.acquisitionMessageId &&
-      scopedAfter?.message.id === draft.acquisitionMessageId,
+        prepared.draft.acquisitionMessageId &&
+      scopedAfter?.message.id === prepared.draft.acquisitionMessageId,
   }
 
   const proofComplete =

@@ -3,6 +3,7 @@ process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
 import {
+  TARGETED_ATTACHMENT_DOWNLOAD_CHECK_CONFIRMATION,
   TARGETED_ATTACHMENT_DOWNLOAD_CONFIRMATION,
   handleTargetedStagingAttachmentDownload,
   type TargetedAttachmentDownloadCandidate,
@@ -312,9 +313,212 @@ describe("targeted-staging-attachment-download harness", () => {
       TARGETED_ATTACHMENT_DOWNLOAD_CONFIRMATION,
       "RUN_TARGETED_STAGING_ATTACHMENT_DOWNLOAD"
     )
+    assert.equal(
+      TARGETED_ATTACHMENT_DOWNLOAD_CHECK_CONFIRMATION,
+      "CHECK_TARGETED_STAGING_ATTACHMENT_DOWNLOAD"
+    )
     assert.equal(PREVIEW_ENV.VERCEL_ENV, "preview")
     assert.equal(typeof adminAuth, "function")
     assert.equal(typeof request, "function")
     assert.equal(typeof handleTargetedStagingAttachmentDownload, "function")
+  })
+
+  it("CHECK happy path → ready true ; runDownload = 0", async () => {
+    let downloadCalls = 0
+    let readCalls = 0
+
+    const res = await handleTargetedStagingAttachmentDownload(
+      request({ confirmation: TARGETED_ATTACHMENT_DOWNLOAD_CHECK_CONFIRMATION }),
+      {
+        env: PREVIEW_ENV,
+        auth: adminAuth(),
+        loadDraft: async () => baseDraft(),
+        listPlanCandidates: async () => [planCandidate()],
+        findAttachmentWithMessage: async () => {
+          readCalls += 1
+          return scopedRecord()
+        },
+        runDownload: async () => {
+          downloadCalls += 1
+          throw new Error("should not download")
+        },
+      }
+    )
+
+    assert.equal(res.status, 200)
+    assert.equal(downloadCalls, 0)
+    assert.equal(readCalls, 1)
+
+    const body = await res.json()
+    assert.equal(body.ok, true)
+    assert.equal(body.harness, "targeted-staging-attachment-download")
+    assert.equal(body.mode, "CHECK")
+    assert.equal(body.ready, true)
+    assert.deepEqual(body.proof, {
+      draftPendingExtraction: true,
+      noCreatedWorksite: true,
+      uniquePlanPdf: true,
+      planDiscovered: true,
+      noStoragePublicId: true,
+      sameTenant: true,
+      sameMessage: true,
+      mailboxProvenanceExplicit: true,
+    })
+  })
+
+  it("CHECK + mailbox legacy vide → HARNESS_MAILBOX_LEGACY_FORBIDDEN ; runDownload = 0", async () => {
+    let downloadCalls = 0
+
+    const res = await handleTargetedStagingAttachmentDownload(
+      request({ confirmation: TARGETED_ATTACHMENT_DOWNLOAD_CHECK_CONFIRMATION }),
+      {
+        env: PREVIEW_ENV,
+        auth: adminAuth(),
+        loadDraft: async () => baseDraft(),
+        listPlanCandidates: async () => [planCandidate()],
+        findAttachmentWithMessage: async () => ({
+          ...scopedRecord(),
+          message: {
+            ...scopedRecord().message,
+            sourceMailboxKey: "",
+          },
+        }),
+        runDownload: async () => {
+          downloadCalls += 1
+          throw new Error("should not download")
+        },
+      }
+    )
+
+    assert.equal(res.status, 409)
+    assert.equal(downloadCalls, 0)
+    const body = await res.json()
+    assert.equal(body.ok, false)
+    assert.equal(body.code, "HARNESS_MAILBOX_LEGACY_FORBIDDEN")
+  })
+
+  it("CHECK + plusieurs PLAN PDF → HARNESS_PLAN_AMBIGUOUS ; runDownload = 0", async () => {
+    let downloadCalls = 0
+
+    const res = await handleTargetedStagingAttachmentDownload(
+      request({ confirmation: TARGETED_ATTACHMENT_DOWNLOAD_CHECK_CONFIRMATION }),
+      {
+        env: PREVIEW_ENV,
+        auth: adminAuth(),
+        loadDraft: async () => baseDraft(),
+        listPlanCandidates: async () => [
+          planCandidate(),
+          planCandidate({ id: "att-plan-2", filename: "plan-2.pdf" }),
+        ],
+        findAttachmentWithMessage: async () => {
+          throw new Error("should not read attachment")
+        },
+        runDownload: async () => {
+          downloadCalls += 1
+          throw new Error("should not download")
+        },
+      }
+    )
+
+    assert.equal(res.status, 409)
+    assert.equal(downloadCalls, 0)
+    const body = await res.json()
+    assert.equal(body.code, "HARNESS_PLAN_AMBIGUOUS")
+  })
+
+  it("CHECK + PLAN STORED → HARNESS_PLAN_PRECONDITION_INVALID ; runDownload = 0", async () => {
+    let downloadCalls = 0
+
+    const res = await handleTargetedStagingAttachmentDownload(
+      request({ confirmation: TARGETED_ATTACHMENT_DOWNLOAD_CHECK_CONFIRMATION }),
+      {
+        env: PREVIEW_ENV,
+        auth: adminAuth(),
+        loadDraft: async () => baseDraft(),
+        listPlanCandidates: async () => [
+          planCandidate({
+            status: "STORED",
+            hasStoragePublicId: true,
+          }),
+        ],
+        findAttachmentWithMessage: async () => {
+          throw new Error("should not read attachment")
+        },
+        runDownload: async () => {
+          downloadCalls += 1
+          throw new Error("should not download")
+        },
+      }
+    )
+
+    assert.equal(res.status, 409)
+    assert.equal(downloadCalls, 0)
+    const body = await res.json()
+    assert.equal(body.code, "HARNESS_PLAN_PRECONDITION_INVALID")
+  })
+
+  it("CHECK ne retourne aucun identifiant sensible", async () => {
+    const res = await handleTargetedStagingAttachmentDownload(
+      request({ confirmation: TARGETED_ATTACHMENT_DOWNLOAD_CHECK_CONFIRMATION }),
+      {
+        env: PREVIEW_ENV,
+        auth: adminAuth(),
+        loadDraft: async () => baseDraft(),
+        listPlanCandidates: async () => [planCandidate()],
+        findAttachmentWithMessage: async () => scopedRecord(),
+        runDownload: async () => {
+          throw new Error("should not download")
+        },
+      }
+    )
+
+    assert.equal(res.status, 200)
+    const raw = await res.text()
+    assert.equal(raw.includes(COMPANY), false)
+    assert.equal(raw.includes(DRAFT), false)
+    assert.equal(raw.includes(ATTACHMENT), false)
+    assert.equal(raw.includes(MSG), false)
+    assert.equal(raw.includes("gmail-connection-explicit"), false)
+    assert.equal(raw.includes("gmail-msg-1"), false)
+    assert.equal(raw.includes("gmail-att-1"), false)
+    assert.equal(raw.includes("sourceMailboxKey"), false)
+    assert.equal(raw.includes("externalMessageId"), false)
+    assert.equal(raw.includes("externalAttachmentId"), false)
+    assert.equal(raw.includes('"companyId"'), false)
+    assert.equal(raw.includes('"draftId"'), false)
+    assert.equal(raw.includes('"attachmentId"'), false)
+    assert.equal(raw.includes('"storagePublicId"'), false)
+    assert.equal(raw.includes('"storageUrl"'), false)
+    assert.equal(raw.includes('"sha256"'), false)
+  })
+
+  it("confirmation inconnue → refus ; aucun download", async () => {
+    let downloadCalls = 0
+
+    const res = await handleTargetedStagingAttachmentDownload(
+      request({ confirmation: "WRONG_CONFIRMATION" }),
+      {
+        env: PREVIEW_ENV,
+        auth: adminAuth(),
+        loadDraft: async () => {
+          throw new Error("should not load draft")
+        },
+        listPlanCandidates: async () => {
+          throw new Error("should not list")
+        },
+        findAttachmentWithMessage: async () => {
+          throw new Error("should not read")
+        },
+        runDownload: async () => {
+          downloadCalls += 1
+          throw new Error("should not download")
+        },
+      }
+    )
+
+    assert.equal(res.status, 400)
+    assert.equal(downloadCalls, 0)
+    const body = await res.json()
+    assert.equal(body.code, "CONFIRMATION_REQUIRED")
   })
 })
