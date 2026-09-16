@@ -261,6 +261,33 @@ describe("targeted-staging-attachment-download harness", () => {
     assert.equal(body.code, "HARNESS_PLAN_PRECONDITION_INVALID")
   })
 
+  it("RUN + PLAN FAILED → refus avant téléchargement", async () => {
+    let downloadCalls = 0
+
+    const res = await handleTargetedStagingAttachmentDownload(
+      request({ confirmation: TARGETED_ATTACHMENT_DOWNLOAD_CONFIRMATION }),
+      {
+        env: PREVIEW_ENV,
+        auth: adminAuth(),
+        loadDraft: async () => baseDraft(),
+        listPlanCandidates: async () => [planCandidate({ status: "FAILED" })],
+        findAttachmentWithMessage: async () => {
+          throw new Error("should not read attachment")
+        },
+        runDownload: async () => {
+          downloadCalls += 1
+          throw new Error("should not download")
+        },
+      }
+    )
+
+    assert.equal(res.status, 409)
+    assert.equal(downloadCalls, 0)
+    const body = await res.json()
+    assert.equal(body.ok, false)
+    assert.equal(body.code, "HARNESS_PLAN_PRECONDITION_INVALID")
+  })
+
   it("outcome STORED sans preuve DB complète → succès refusé", async () => {
     let downloadCalls = 0
     let readCalls = 0
@@ -359,11 +386,54 @@ describe("targeted-staging-attachment-download harness", () => {
       noCreatedWorksite: true,
       uniquePlanPdf: true,
       planDiscovered: true,
+      planFailed: false,
+      storageFailure: false,
+      retryScheduled: false,
+      retryDue: false,
+      retryCount: 0,
       noStoragePublicId: true,
       sameTenant: true,
       sameMessage: true,
       mailboxProvenanceExplicit: true,
     })
+  })
+
+  it("CHECK + PLAN FAILED storage + retry échu → diagnostic READ-ONLY ; runDownload = 0", async () => {
+    let downloadCalls = 0
+
+    const res = await handleTargetedStagingAttachmentDownload(
+      request({ confirmation: TARGETED_ATTACHMENT_DOWNLOAD_CHECK_CONFIRMATION }),
+      {
+        env: PREVIEW_ENV,
+        auth: adminAuth(),
+        loadDraft: async () => baseDraft(),
+        listPlanCandidates: async () => [planCandidate({ status: "FAILED" })],
+        findAttachmentWithMessage: async () =>
+          scopedRecord({
+            status: "FAILED",
+            lastErrorCode: "ATTACHMENT_STORAGE_FAILED",
+            downloadRetryCount: 1,
+            downloadNextRetryAt: new Date(0),
+          }),
+        runDownload: async () => {
+          downloadCalls += 1
+          throw new Error("should not download")
+        },
+      }
+    )
+
+    assert.equal(res.status, 200)
+    assert.equal(downloadCalls, 0)
+    const body = await res.json()
+    assert.equal(body.ok, true)
+    assert.equal(body.mode, "CHECK")
+    assert.equal(body.ready, true)
+    assert.equal(body.proof.planDiscovered, false)
+    assert.equal(body.proof.planFailed, true)
+    assert.equal(body.proof.storageFailure, true)
+    assert.equal(body.proof.retryScheduled, true)
+    assert.equal(body.proof.retryDue, true)
+    assert.equal(body.proof.retryCount, 1)
   })
 
   it("CHECK + mailbox legacy vide → HARNESS_MAILBOX_LEGACY_FORBIDDEN ; runDownload = 0", async () => {

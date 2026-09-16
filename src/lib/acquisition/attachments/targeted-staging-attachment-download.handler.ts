@@ -214,9 +214,16 @@ async function prepareTargetedDownloadPreconditions(input: {
   findAttachmentWithMessage: NonNullable<
     TargetedAttachmentDownloadHandlerDeps["findAttachmentWithMessage"]
   >
+  allowFailedForCheck?: boolean
 }): Promise<{ ok: true; prepared: PreparedDownloadTarget } | { ok: false; response: Response }> {
-  const { companyId, draftId, loadDraft, listPlanCandidates, findAttachmentWithMessage } =
-    input
+  const {
+    companyId,
+    draftId,
+    loadDraft,
+    listPlanCandidates,
+    findAttachmentWithMessage,
+    allowFailedForCheck = false,
+  } = input
 
   const draft = await loadDraft(companyId, draftId)
   if (!draft || draft.companyId !== companyId || draft.draftId !== draftId) {
@@ -270,7 +277,8 @@ async function prepareTargetedDownloadPreconditions(input: {
     candidate.companyId !== companyId ||
     candidate.acquisitionMessageId !== draft.acquisitionMessageId ||
     candidate.category !== "PLAN" ||
-    candidate.status !== "DISCOVERED" ||
+    (candidate.status !== "DISCOVERED" &&
+      !(allowFailedForCheck && candidate.status === "FAILED")) ||
     candidate.hasStoragePublicId
   ) {
     return {
@@ -303,7 +311,9 @@ async function prepareTargetedDownloadPreconditions(input: {
   }
 
   if (
-    scopedBefore.attachment.status !== "DISCOVERED" ||
+    scopedBefore.attachment.status !== candidate.status ||
+    (scopedBefore.attachment.status !== "DISCOVERED" &&
+      !(allowFailedForCheck && scopedBefore.attachment.status === "FAILED")) ||
     Boolean(scopedBefore.attachment.storagePublicId?.trim())
   ) {
     return {
@@ -428,6 +438,7 @@ export async function handleTargetedStagingAttachmentDownload(
     loadDraft,
     listPlanCandidates,
     findAttachmentWithMessage,
+    allowFailedForCheck: isCheck,
   })
 
   if (!preparedResult.ok) {
@@ -447,6 +458,14 @@ export async function handleTargetedStagingAttachmentDownload(
         noCreatedWorksite: prepared.draft.createdWorksiteId == null,
         uniquePlanPdf: true,
         planDiscovered: prepared.candidate.status === "DISCOVERED",
+        planFailed: prepared.scopedBefore.attachment.status === "FAILED",
+        storageFailure:
+          prepared.scopedBefore.attachment.lastErrorCode === "ATTACHMENT_STORAGE_FAILED",
+        retryScheduled: prepared.scopedBefore.attachment.downloadNextRetryAt != null,
+        retryDue:
+          prepared.scopedBefore.attachment.downloadNextRetryAt != null &&
+          prepared.scopedBefore.attachment.downloadNextRetryAt.getTime() <= Date.now(),
+        retryCount: prepared.scopedBefore.attachment.downloadRetryCount,
         noStoragePublicId: !prepared.candidate.hasStoragePublicId,
         sameTenant:
           prepared.scopedBefore.attachment.companyId === companyId &&
