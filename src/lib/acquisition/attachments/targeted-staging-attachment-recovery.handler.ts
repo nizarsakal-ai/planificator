@@ -565,6 +565,7 @@ export async function handleTargetedStagingAttachmentRecovery(
       scopedAfter.message.id === prepared.draft.acquisitionMessageId &&
       draftAfter.acquisitionMessageId === prepared.draft.acquisitionMessageId,
     sameDraft: draftAfter.draftId === draftId,
+    mailboxProvenanceExplicit: Boolean(scopedAfter.message.sourceMailboxKey.trim()),
     draftStillPendingExtraction: draftAfter.status === "PENDING_EXTRACTION",
     noCreatedWorksite: draftAfter.createdWorksiteId == null,
   }

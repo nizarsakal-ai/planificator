@@ -238,6 +238,7 @@ describe("targeted-staging-attachment-recovery harness", () => {
       sameTenant: true,
       sameMessage: true,
       sameDraft: true,
+      mailboxProvenanceExplicit: true,
       draftStillPendingExtraction: true,
       noCreatedWorksite: true,
     })
@@ -667,6 +668,50 @@ describe("targeted-staging-attachment-recovery harness", () => {
     assert.equal(scheduleCalls, 1)
     assert.equal(readCalls, 2)
     assert.equal(draftCalls, 2)
+
+    const body = await res.json()
+    assert.equal(body.ok, false)
+    assert.equal(body.code, "HARNESS_RECOVERY_PROOF_FAILED")
+    assert.equal(body.transitioned, true)
+  })
+
+  it("RUN post-recovery sans provenance mailbox → preuve refusée", async () => {
+    let readCalls = 0
+    let scheduleCalls = 0
+
+    const res = await handleTargetedStagingAttachmentRecovery(
+      request({ confirmation: TARGETED_ATTACHMENT_RECOVERY_CONFIRMATION }),
+      {
+        env: PREVIEW_ENV,
+        auth: adminAuth(),
+        now: () => NOW,
+        getRecoveryConfig: recoveryConfig,
+        loadDraft: async () => baseDraft(),
+        listPlanCandidates: async () => [planCandidate()],
+        findAttachmentWithMessage: async () => {
+          readCalls += 1
+
+          if (readCalls === 1) {
+            return scopedRecord()
+          }
+
+          const record = scopedRecord({
+            status: "DISCOVERED",
+            downloadNextRetryAt: null,
+          })
+          record.message.sourceMailboxKey = ""
+          return record
+        },
+        scheduleRetryToDiscovered: async () => {
+          scheduleCalls += 1
+          return "TRANSITIONED"
+        },
+      }
+    )
+
+    assert.equal(res.status, 409)
+    assert.equal(scheduleCalls, 1)
+    assert.equal(readCalls, 2)
 
     const body = await res.json()
     assert.equal(body.ok, false)
