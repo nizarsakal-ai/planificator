@@ -11,7 +11,6 @@ import {
   handleTargetedStagingAttachmentNotReady,
   isCompleteAttachmentNotReadyProof,
   isHarnessSurfaceAllowed,
-  withHarnessExtractionGatesEnabled,
   type HarnessAttachmentRecord,
   type HarnessDetectionPrepResult,
   type HarnessDraftRecord,
@@ -462,11 +461,15 @@ describe("targeted-staging-attachment-not-ready harness", () => {
 
     assert.notEqual(process.env.PLANIFICATOR_ACQUISITION_ENABLED, "true")
 
-    const result = await withHarnessExtractionGatesEnabled(() =>
-      runDraftExtractionSystem(
-        { companyId: COMPANY, draftId: DRAFT },
-        { repository: fuse, provider: bomb }
-      )
+    const result = await runDraftExtractionSystem(
+      { companyId: COMPANY, draftId: DRAFT },
+      {
+        repository: fuse,
+        provider: bomb,
+        isAcquisitionEnabled: () => true,
+        isAcquisitionContentFetchEnabled: () => true,
+        isAcquisitionExtractionEnabled: () => true,
+      }
     )
 
     assert.equal(result.ok, false)
@@ -517,9 +520,13 @@ describe("targeted-staging-attachment-not-ready harness", () => {
         listAttachments: async () => [notReady],
         prepareDetection: async () => detectionPersisted(),
         runExtraction: async (input) =>
-          withHarnessExtractionGatesEnabled(() =>
-            runDraftExtractionSystem(input, { repository: fuse, provider: bomb })
-          ),
+          runDraftExtractionSystem(input, {
+            repository: fuse,
+            provider: bomb,
+            isAcquisitionEnabled: () => true,
+            isAcquisitionContentFetchEnabled: () => true,
+            isAcquisitionExtractionEnabled: () => true,
+          }),
       }
     )
 
@@ -584,9 +591,13 @@ describe("targeted-staging-attachment-not-ready harness", () => {
         listAttachments: async () => [harnessNotReady],
         prepareDetection: async () => detectionPersisted(),
         runExtraction: async (input) =>
-          withHarnessExtractionGatesEnabled(() =>
-            runDraftExtractionSystem(input, { repository: fuse, provider: bomb })
-          ),
+          runDraftExtractionSystem(input, {
+            repository: fuse,
+            provider: bomb,
+            isAcquisitionEnabled: () => true,
+            isAcquisitionContentFetchEnabled: () => true,
+            isAcquisitionExtractionEnabled: () => true,
+          }),
       }
     )
 

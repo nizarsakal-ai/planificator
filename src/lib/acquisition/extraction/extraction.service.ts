@@ -65,6 +65,10 @@ const ALLOWED_ROLES = new Set<Role>(["ADMIN", "SUPER_ADMIN"])
 export interface ExtractionServiceDeps {
   repository?: DraftExtractionRepository
   provider?: ExtractionProviderPort
+  /** Overrides ciblés/tests. Défaut : feature flags process.env existants. */
+  isAcquisitionEnabled?: () => boolean
+  isAcquisitionContentFetchEnabled?: () => boolean
+  isAcquisitionExtractionEnabled?: () => boolean
   /** Override timeout (tests). Prod : getExtractionTimeoutMs(). */
   timeoutMs?: number
   /** Charge bytes PDF STORED — injectable (tests). */
@@ -298,13 +302,19 @@ async function runDraftExtractionCore(
   const now = nowFn()
   const executionContext = input.executionContext
 
-  if (!isAcquisitionEnabled()) {
+  const acquisitionEnabled = deps.isAcquisitionEnabled ?? isAcquisitionEnabled
+  const contentFetchEnabled =
+    deps.isAcquisitionContentFetchEnabled ?? isAcquisitionContentFetchEnabled
+  const extractionEnabled =
+    deps.isAcquisitionExtractionEnabled ?? isAcquisitionExtractionEnabled
+
+  if (!acquisitionEnabled()) {
     return fail("DISABLED", "ACQUISITION_DISABLED", "Acquisition désactivée")
   }
-  if (!isAcquisitionContentFetchEnabled()) {
+  if (!contentFetchEnabled()) {
     return fail("DISABLED", "CONTENT_FETCH_DISABLED", "Fetch contenu désactivé")
   }
-  if (!isAcquisitionExtractionEnabled()) {
+  if (!extractionEnabled()) {
     return fail("DISABLED", "EXTRACTION_DISABLED", "Extraction désactivée")
   }
 

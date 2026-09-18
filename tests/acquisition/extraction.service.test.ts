@@ -186,6 +186,64 @@ describe("extraction.service R1", () => {
     process.env.ACQUISITION_EXTRACTION_MAX_ATTEMPTS = envBackup.maxAttempts
   })
 
+  it("SYSTEM : globals OFF sans overrides → bloqué", async () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "false"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "false"
+    process.env.ACQUISITION_EXTRACTION_ENABLED = "false"
+
+    const repo = createFakeRepo()
+    const result = await runDraftExtractionSystem(
+      { companyId: "co1", draftId: "draft1" },
+      { repository: repo as never }
+    )
+
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.code, "ACQUISITION_DISABLED")
+    assert.equal(repo.claimCount, 0)
+  })
+
+  it("SYSTEM : globals OFF + overrides locaux ON → gates franchies sans mutation env", async () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "false"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "false"
+    process.env.ACQUISITION_EXTRACTION_ENABLED = "false"
+
+    const repo = createFakeRepo()
+    let providerCalls = 0
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        providerCalls += 1
+        return {
+          fields: {
+            worksiteName: { value: "Chantier test", confidence: 0.9 },
+            clientReference: { value: "REF-TEST", confidence: 0.9 },
+          },
+          warnings: [],
+          providerMetadata: { providerId: "test" },
+        }
+      },
+    }
+
+    const result = await runDraftExtractionSystem(
+      { companyId: "co1", draftId: "draft1" },
+      {
+        repository: repo as never,
+        provider,
+        isAcquisitionEnabled: () => true,
+        isAcquisitionContentFetchEnabled: () => true,
+        isAcquisitionExtractionEnabled: () => true,
+      }
+    )
+
+    assert.equal(repo.claimCount, 1)
+    assert.equal(providerCalls, 1)
+    assert.equal(process.env.PLANIFICATOR_ACQUISITION_ENABLED, "false")
+    assert.equal(process.env.ACQUISITION_CONTENT_FETCH_ENABLED, "false")
+    assert.equal(process.env.ACQUISITION_EXTRACTION_ENABLED, "false")
+    assert.notEqual(result.ok === false ? result.code : null, "ACQUISITION_DISABLED")
+    assert.notEqual(result.ok === false ? result.code : null, "CONTENT_FETCH_DISABLED")
+    assert.notEqual(result.ok === false ? result.code : null, "EXTRACTION_DISABLED")
+  })
+
   it("refuse si flag extraction OFF", async () => {
     process.env.ACQUISITION_EXTRACTION_ENABLED = "false"
     const result = await runDraftExtraction({ actor: actor(), draftId: "draft1" })
