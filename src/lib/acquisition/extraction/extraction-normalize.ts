@@ -217,8 +217,7 @@ export function evaluateExtractionGate(
   }
 
   if (
-    (fields.requestedStartDate && !fields.requestedEndDate) ||
-    (!fields.requestedStartDate && fields.requestedEndDate)
+    !fields.requestedStartDate && fields.requestedEndDate
   ) {
     next.push(catalogWarning("MISSING_REQUIRED_FOR_CONVERSION", { source: "SERVICE" }))
   }

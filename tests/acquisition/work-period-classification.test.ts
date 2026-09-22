@@ -47,8 +47,8 @@ describe("classifyWorkPeriod", () => {
     assert.equal(classifyWorkPeriod(null, null, ref), "UNKNOWN_DATES")
   })
 
-  it("6. date/NULL → INVALID", () => {
-    assert.equal(classifyWorkPeriod(utcDay("2026-09-01"), null, ref), "INVALID")
+  it("6. date/NULL → START_ONLY", () => {
+    assert.equal(classifyWorkPeriod(utcDay("2026-09-01"), null, ref), "START_ONLY")
   })
 
   it("7. NULL/date → INVALID", () => {

@@ -8,6 +8,7 @@ export const WORK_PERIOD_CLASSIFICATIONS = [
   "ACTIVE",
   "OBSOLETE",
   "UNKNOWN_DATES",
+  "START_ONLY",
   "INVALID",
 ] as const
 
@@ -45,7 +46,8 @@ export function classifyWorkPeriod(
   const hasStart = start != null
   const hasEnd = end != null
   if (!hasStart && !hasEnd) return "UNKNOWN_DATES"
-  if (hasStart !== hasEnd) return "INVALID"
+  if (hasStart && !hasEnd) return "START_ONLY"
+  if (!hasStart && hasEnd) return "INVALID"
 
   const startYmd = dateToUtcCalendarYmd(start!)
   const endYmd = dateToUtcCalendarYmd(end!)

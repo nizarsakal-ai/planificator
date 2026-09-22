@@ -61,13 +61,19 @@ describe("chantier create vs update — dates nullable", () => {
     }
   })
 
-  it("4. update DATE/NULL → refusé", () => {
+  it("4. update DATE/NULL → accepté", () => {
     const r = updateChantierSchema.safeParse({
       ...baseUpdate,
       startDate: "2026-10-01",
       endDate: "",
     })
-    assert.equal(r.success, false)
+    assert.equal(r.success, true)
+    if (r.success) {
+      assert.equal(r.data.startDate, "2026-10-01")
+      assert.equal(r.data.endDate, null)
+      assert.equal(updateDateFieldToDb(r.data.startDate).toISOString(), "2026-10-01T00:00:00.000Z")
+      assert.equal(updateDateFieldToDb(r.data.endDate), null)
+    }
   })
 
   it("5. update NULL/DATE → refusé", () => {

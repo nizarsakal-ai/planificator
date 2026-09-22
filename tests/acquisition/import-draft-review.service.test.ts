@@ -142,6 +142,14 @@ function baseDraft(over: Partial<DraftRow> = {}): DraftRow {
   }
 }
 
+function createService(db: unknown) {
+  return new ImportDraftReviewService({
+    db: db as never,
+    now: () => new Date("2026-09-06T12:00:00.000Z"),
+  })
+}
+
+
 describe("ImportDraftReviewService", () => {
   const env = { ...process.env }
 
@@ -239,7 +247,7 @@ describe("ImportDraftReviewService", () => {
 
   it("approve valide sans clientName", async () => {
     const db = createFakeDb(baseDraft({ proposedClientName: null }))
-    const svc = new ImportDraftReviewService({ db: db as never })
+    const svc = createService(db)
     const r = await svc.approveImportDraft(admin, { draftId: "d1", expectedVersion: 1 })
     assert.equal(r.ok, true)
     if (r.ok) assert.equal(r.outcome, "APPROVED")
@@ -256,13 +264,21 @@ describe("ImportDraftReviewService", () => {
     if (!r.ok) assert.equal(r.outcome, "VALIDATION_ERROR")
   })
 
-  it("approve sans dates (partielle) → MISSING_DATES", async () => {
+  it("approve NULL/DATE → MISSING_DATES", async () => {
     const db = createFakeDb(baseDraft({ proposedStartDate: null }))
     const svc = new ImportDraftReviewService({ db: db as never })
     const r = await svc.approveImportDraft(admin, { draftId: "d1", expectedVersion: 1 })
     assert.equal(r.ok, false)
     if (!r.ok) assert.equal(r.code, "MISSING_DATES")
   })
+  it("approve START/NULL → admissible", async () => {
+    const db = createFakeDb(baseDraft({ proposedEndDate: null }))
+    const svc = new ImportDraftReviewService({ db: db as never })
+    const r = await svc.approveImportDraft(admin, { draftId: "d1", expectedVersion: 1 })
+    assert.equal(r.ok, true)
+    assert.equal(r.outcome, "APPROVED")
+  })
+
 
   it("approve NULL/NULL → admissible", async () => {
     const db = createFakeDb(
@@ -291,7 +307,7 @@ describe("ImportDraftReviewService", () => {
     const db = createFakeDb(
       baseDraft({ warningData: [catalogWarning("CONTENT_INSUFFICIENT", { source: "SERVICE" })] })
     )
-    const svc = new ImportDraftReviewService({ db: db as never })
+    const svc = createService(db)
     const r = await svc.approveImportDraft(admin, { draftId: "d1", expectedVersion: 1 })
     assert.equal(r.ok, false)
     if (!r.ok) assert.equal(r.outcome, "BLOCKING_WARNINGS")
@@ -303,7 +319,7 @@ describe("ImportDraftReviewService", () => {
         warningData: [{ code: "CUSTOM_UNKNOWN", blocking: true, message: "raw" }],
       })
     )
-    const svc = new ImportDraftReviewService({ db: db as never })
+    const svc = createService(db)
     const r = await svc.approveImportDraft(admin, { draftId: "d1", expectedVersion: 1 })
     assert.equal(r.ok, false)
     if (!r.ok) assert.equal(r.outcome, "BLOCKING_WARNINGS")

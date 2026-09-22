@@ -172,6 +172,32 @@ describe("extraction-normalize gate R1", () => {
     assert.equal(gate.failureCode, "DATE_RANGE_INVALID")
   })
 
+  it("START-ONLY — START/NULL sans warning MISSING_REQUIRED_FOR_CONVERSION", () => {
+    const normalized = normalizeProviderResult({
+      fields: {
+        worksiteName: { value: "Site", confidence: 0.35 },
+        requestedStartDate: { value: "2026-10-01", confidence: 0.3 },
+      },
+      warnings: [],
+      providerMetadata: { providerId: "deterministic" },
+    })
+    const gate = evaluateExtractionGate(normalized.fields, normalized.warnings)
+    assert.equal(gate.warnings.some((w) => w.code === "MISSING_REQUIRED_FOR_CONVERSION"), false)
+  })
+
+  it("START-ONLY — NULL/END conserve le warning MISSING_REQUIRED_FOR_CONVERSION", () => {
+    const normalized = normalizeProviderResult({
+      fields: {
+        worksiteName: { value: "Site", confidence: 0.35 },
+        requestedEndDate: { value: "2026-10-01", confidence: 0.3 },
+      },
+      warnings: [],
+      providerMetadata: { providerId: "deterministic" },
+    })
+    const gate = evaluateExtractionGate(normalized.fields, normalized.warnings)
+    assert.equal(gate.warnings.some((w) => w.code === "MISSING_REQUIRED_FOR_CONVERSION"), true)
+  })
+
   it("FAILED si aucun signal fort (dates seules)", () => {
     const normalized = normalizeProviderResult({
       fields: {

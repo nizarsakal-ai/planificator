@@ -74,7 +74,7 @@ describe("evaluateAutoDecision Lot F / registre", () => {
     assert.equal(r.reasons.some((x) => x.startsWith("LOW_CONFIDENCE:requested")), false)
   })
 
-  it("PROVIDENCE-DATES — DATE/NULL → INVALID_DATES", () => {
+  it("PROVIDENCE-DATES — DATE/NULL → AUTO_APPROVE_CONVERT", () => {
     const r = evaluateAutoDecision({
       ...okBase,
       endDate: null,
@@ -82,8 +82,8 @@ describe("evaluateAutoDecision Lot F / registre", () => {
       autoConvertEnabled: true,
       minConfidence: 0.7,
     })
-    assert.equal(r.code, "HUMAN_REVIEW_REQUIRED")
-    assert.ok(r.reasons.includes("INVALID_DATES"))
+    assert.equal(r.code, "AUTO_APPROVE_CONVERT")
+    assert.equal(r.reasons.includes("INVALID_DATES"), false)
   })
 
   it("PROVIDENCE-DATES — NULL/DATE → INVALID_DATES", () => {

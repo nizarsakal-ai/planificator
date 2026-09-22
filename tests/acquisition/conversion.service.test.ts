@@ -676,7 +676,7 @@ describe("ImportDraftConversionService", () => {
     assert.ok(Date.now() - before < 60_000)
   })
 
-  it("PROVIDENCE-DATES — date partielle refusée", async () => {
+  it("START-ONLY — START/NULL → Worksite avec endDate null", async () => {
     const db = createFakeDb({
       draft: baseDraft({
         proposedStartDate: new Date("2026-10-01T00:00:00.000Z"),
@@ -690,6 +690,21 @@ describe("ImportDraftConversionService", () => {
       expectedVersion: 2,
       clientMode: "EXISTING",
       existingClientId: "c1",
+    })
+    assert.equal(r.ok, true)
+    assert.equal(db.worksites.length, 1)
+    assert.equal(db.worksites[0]!.startDate?.toISOString(), "2026-10-01T00:00:00.000Z")
+    assert.equal(db.worksites[0]!.endDate, null)
+  })
+
+  it("START-ONLY — NULL/END reste refusé", async () => {
+    const db = createFakeDb({
+      draft: baseDraft({ proposedStartDate: null, proposedEndDate: new Date("2026-10-01T00:00:00.000Z") }),
+      clients: [{ id: "c1", companyId: "co1" }],
+    })
+    const svc = new ImportDraftConversionService({ db: db as never })
+    const r = await svc.convertImportDraft(admin, {
+      draftId: "d1", expectedVersion: 2, clientMode: "EXISTING", existingClientId: "c1",
     })
     assert.equal(r.ok, false)
     if (!r.ok) assert.equal(r.outcome, "VALIDATION_ERROR")

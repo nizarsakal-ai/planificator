@@ -107,10 +107,10 @@ export function evaluateAutoDecisionRules(
   const name = input.worksiteName?.trim() ?? ""
   if (!name) reasons.push("MISSING_WORKSITE_NAME")
 
-  // PROVIDENCE-DATES-002 — UNKNOWN (null/null) ≠ INVALID (partielle ou inversée).
+  // START-ONLY — START/NULL valide ; NULL/END ou plage inversée invalide.
   const hasStart = input.startDate != null
   const hasEnd = input.endDate != null
-  if (hasStart !== hasEnd) {
+  if (!hasStart && hasEnd) {
     reasons.push("INVALID_DATES")
   } else if (hasStart && hasEnd && input.startDate! > input.endDate!) {
     reasons.push("INVALID_DATES")

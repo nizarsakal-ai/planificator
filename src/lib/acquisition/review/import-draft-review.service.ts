@@ -382,15 +382,15 @@ export class ImportDraftReviewService {
         message: "Le nom du chantier est obligatoire",
       }
     }
-    // PROVIDENCE-DATES-002 — null/null admissible ; partielle / inversée refusée.
+    // START-ONLY — null/null et START/null admissibles ; null/END et plage inversée refusés.
     const hasStart = draft.proposedStartDate != null
     const hasEnd = draft.proposedEndDate != null
-    if (hasStart !== hasEnd) {
+    if (!hasStart && hasEnd) {
       return {
         ok: false,
         outcome: "VALIDATION_ERROR",
         code: "MISSING_DATES",
-        message: "Les dates de début et de fin doivent être toutes deux renseignées ou toutes deux absentes",
+        message: "La date de début est obligatoire lorsqu’une date de fin est renseignée",
       }
     }
     if (

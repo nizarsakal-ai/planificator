@@ -258,10 +258,10 @@ export class ImportDraftConversionService {
             code: "VALIDATION_ERROR",
           })
         }
-        // PROVIDENCE-DATES-002 — null/null → Worksite sans dates ; partielle/inversée refusée.
+        // START-ONLY — null/null et START/null autorisés ; null/END et plage inversée refusés.
         const hasStart = draft.proposedStartDate != null
         const hasEnd = draft.proposedEndDate != null
-        if (hasStart !== hasEnd) {
+        if (!hasStart && hasEnd) {
           throw Object.assign(new Error("MISSING_DATES"), { code: "VALIDATION_ERROR" })
         }
         if (

@@ -37,12 +37,11 @@ export const updateChantierSchema = z
   .superRefine((data, ctx) => {
     const hasStart = data.startDate != null
     const hasEnd = data.endDate != null
-    if (hasStart !== hasEnd) {
+    if (!hasStart && hasEnd) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message:
-          "Les dates de début et de fin doivent être toutes deux renseignées ou toutes deux absentes",
-        path: [hasStart ? "endDate" : "startDate"],
+        message: "La date de début est requise lorsqu’une date de fin est renseignée",
+        path: ["startDate"],
       })
       return
     }
