@@ -140,7 +140,7 @@ export async function handleTargetedStagingConversionPreflight(
   }
 
   const intent = draft.contentHashAtExtraction
-    ? await (deps.findLatestIntent ?? acquisitionDecisionJournalRepository.findLatestPostExtractionAutoIntentForExtractionIdentity)({
+    ? await (deps.findLatestIntent ? deps.findLatestIntent.bind(null) : acquisitionDecisionJournalRepository.findLatestPostExtractionAutoIntentForExtractionIdentity.bind(acquisitionDecisionJournalRepository))({
         companyId,
         draftId,
         contentHash: draft.contentHashAtExtraction,
