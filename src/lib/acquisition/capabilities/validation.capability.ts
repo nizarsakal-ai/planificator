@@ -277,6 +277,7 @@ export function validateConsultation(
     worksiteName: snap.worksiteName,
     startDate: parseIsoDate(snap.requestedStartDate),
     endDate: parseIsoDate(snap.requestedEndDate),
+    referenceInstant: input.referenceInstant,
     address: snap.address,
     postalCode: snap.postalCode ?? null,
     city: snap.city,

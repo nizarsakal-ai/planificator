@@ -58,6 +58,8 @@ export type ConsultationValidationInput = {
   /** Champs / confiances / warnings déjà normalisés — structure opaque au port. */
   extractedSnapshot: unknown
   partnerProfile?: PartnerExtractionProfile | null
+  /** Instant de référence optionnel pour les règles temporelles déterministes. */
+  referenceInstant?: Date
 }
 
 export interface ConsultationValidationCapability {

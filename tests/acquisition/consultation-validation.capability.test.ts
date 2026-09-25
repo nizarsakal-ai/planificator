@@ -13,6 +13,7 @@ import {
   validateConsultation,
   type ConsultationValidationSnapshot,
 } from "@/lib/acquisition/capabilities/validation.capability"
+import type { ConsultationValidationInput } from "@/lib/acquisition/capabilities/consultation-capability.ports"
 import type { PartnerExtractionProfile } from "@/lib/acquisition/capabilities/consultation-capability.types"
 import { catalogWarning } from "@/lib/acquisition/extraction/extraction.schema"
 import {
@@ -24,6 +25,12 @@ const CAPABILITY_SRC = path.join(
   process.cwd(),
   "src/lib/acquisition/capabilities/validation.capability.ts"
 )
+
+const VALIDATION_REFERENCE_INSTANT = new Date("2026-09-11T12:00:00.000Z")
+
+function validate(input: ConsultationValidationInput) {
+  return validateConsultation({ referenceInstant: VALIDATION_REFERENCE_INSTANT, ...input })
+}
 
 function completeSnap(
   overrides: Partial<ConsultationValidationSnapshot> = {}
@@ -60,7 +67,7 @@ function basePartner(
 
 describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
   it("1. consultation complète → PASS", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CONSULTATION",
@@ -69,8 +76,21 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
     assert.equal(r.code, "PASS")
   })
 
+  it("START_ONLY : date de début connue et fin inconnue → PASS", () => {
+    const r = validate({
+      companyId: "c1",
+      draftId: "d1",
+      classification: "CONSULTATION",
+      extractedSnapshot: completeSnap({
+        requestedStartDate: "2026-09-11",
+        requestedEndDate: null,
+      }),
+    })
+    assert.equal(r.code, "PASS")
+  })
+
   it("2. consultation update complète → PASS", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CONSULTATION_UPDATE",
@@ -80,7 +100,7 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
   })
 
   it("3. classification null → QUARANTINE", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: null,
@@ -91,7 +111,7 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
   })
 
   it("4. AMBIGUOUS → QUARANTINE", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "AMBIGUOUS",
@@ -102,7 +122,7 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
   })
 
   it("5. NON_CONSULTATION → FAIL_TERMINAL", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "NON_CONSULTATION",
@@ -115,7 +135,7 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
   })
 
   it("6. cancellation certaine → FAIL_TERMINAL (policy existante)", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CANCELLATION",
@@ -131,7 +151,7 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
   })
 
   it("6b. CANCELLATION sans corroboration → QUARANTINE", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CANCELLATION",
@@ -142,7 +162,7 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
   })
 
   it("7. faible confiance → QUARANTINE", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CONSULTATION",
@@ -159,7 +179,7 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
   })
 
   it("8. warning bloquant → QUARANTINE", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CONSULTATION",
@@ -178,7 +198,7 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
   })
 
   it("9. dates incohérentes → QUARANTINE", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CONSULTATION",
@@ -194,7 +214,7 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
   })
 
   it("10. duplicate_requires_ack → QUARANTINE", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CONSULTATION",
@@ -205,7 +225,7 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
   })
 
   it("11. client ambigu → QUARANTINE", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CONSULTATION",
@@ -216,7 +236,7 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
   })
 
   it("12. contenu retryable missing → FAIL_RETRYABLE", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CONSULTATION",
@@ -229,7 +249,7 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
   })
 
   it("13. profil minConfidence override", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CONSULTATION",
@@ -253,14 +273,14 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
     assert.equal(/lauralu/i.test(src), false)
     assert.equal(/hall-expo/i.test(src), false)
 
-    const a = validateConsultation({
+    const a = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CONSULTATION",
       extractedSnapshot: completeSnap(),
       partnerProfile: basePartner({ partnerCode: "lauralu", minConfidence: 0.75 }),
     })
-    const b = validateConsultation({
+    const b = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CONSULTATION",
@@ -278,12 +298,13 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
       draftId: "d1",
       classification: "CONSULTATION",
       extractedSnapshot: completeSnap(),
+      referenceInstant: VALIDATION_REFERENCE_INSTANT,
     })
     assert.equal(r.code, "PASS")
   })
 
   it("snapshot structurellement invalide → FAIL_TERMINAL", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CONSULTATION",
@@ -293,7 +314,7 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
   })
 
   it("confidence invalid > 1 → QUARANTINE LOW_CONFIDENCE:worksiteName", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CONSULTATION",
@@ -310,7 +331,7 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
   })
 
   it("confidence invalid < 0 → QUARANTINE", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CONSULTATION",
@@ -327,7 +348,7 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
   })
 
   it("confidence boundary 0 → QUARANTINE (sous seuil)", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CONSULTATION",
@@ -344,7 +365,7 @@ describe("PLAN-ACQ-AGENTS-LOT-2 validateConsultation", () => {
   })
 
   it("confidence boundary 1 → PASS si snapshot complet", () => {
-    const r = validateConsultation({
+    const r = validate({
       companyId: "c1",
       draftId: "d1",
       classification: "CONSULTATION",
