@@ -504,10 +504,12 @@ describe("PLAN-ACQ-AGENTS-LOT-3D validation worker", () => {
         journal: journal as never,
         selection,
         evaluationDeps: evalDeps(draft),
+        now: () => new Date("2026-09-05T00:00:00.000Z"),
       })
     const r1 = await runOnce()
     assert.equal(r1.stats.journalAppended, 1)
     assert.equal(journal.entries[0]!.decisionCode, "VALIDATION_QUARANTINE")
+    assert.deepEqual(journal.entries[0]!.reasons, ["LOW_CONFIDENCE:worksiteName"])
     const r2 = await runOnce()
     assert.equal(r2.stats.selected, 0)
     assert.equal(journal.entries.length, 1)
@@ -623,6 +625,7 @@ describe("PLAN-ACQ-AGENTS-LOT-3D validation worker", () => {
           },
         } as never,
       },
+      now: () => new Date("2026-09-05T00:00:00.000Z"),
     })
     assert.equal(result.stats.scanned, 1)
     assert.equal(result.stats.selected, 1)
