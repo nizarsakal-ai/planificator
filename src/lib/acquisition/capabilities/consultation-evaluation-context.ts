@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma"
 import type { ConsultationClassification } from "@/lib/acquisition/capabilities/consultation-capability.types"
 import type { ConsultationValidationSnapshot } from "@/lib/acquisition/capabilities/validation.capability"
 import type { PartnerExtractionProfile } from "@/lib/acquisition/capabilities/consultation-capability.types"
+import { isAutoConversionAuthorizedDetectionClassification } from "@/lib/acquisition/capabilities/consultation-detection.policy"
 import {
   findDuplicateWorksite,
   matchClientForDraft,
@@ -40,6 +41,9 @@ export type ConsultationEvaluationDraft = {
   extractedData: unknown
   contentHashAtExtraction: string | null
   extractionSchemaVersion: string | null
+  /** Preuve Detection persistée — repli de classification uniquement (voir resolveConsultationClassification). */
+  detectionClassification?: string | null
+  detectionContentHash?: string | null
   acquisitionMessage: {
     resolvedPartnerId: string | null
     senderDomain: string | null
@@ -192,6 +196,37 @@ export function mapToConsultationClassification(input: {
   return "AMBIGUOUS"
 }
 
+/**
+ * Classification utilisée par la validation.
+ * La classification d’extraction (ou le warning cancel SERVICE) prime toujours.
+ * À défaut seulement, reprise d’une preuve Detection déterministe POSITIVE
+ * (CONSULTATION / CONSULTATION_UPDATE) portant exactement sur le contenu extrait.
+ * Jamais CANCELLATION / AMBIGUOUS / NON_CONSULTATION par repli ; sinon null (fail-closed).
+ */
+export function resolveConsultationClassification(input: {
+  requestClassification: string | null
+  consultationCancelledWarning: boolean
+  detectionClassification: string | null | undefined
+  detectionContentHash: string | null | undefined
+  contentHashAtExtraction: string | null | undefined
+}): ConsultationClassification | null {
+  const fromExtraction = mapToConsultationClassification({
+    requestClassification: input.requestClassification,
+    consultationCancelledWarning: input.consultationCancelledWarning,
+  })
+  if (fromExtraction != null) return fromExtraction
+
+  if (
+    !input.detectionContentHash ||
+    !input.contentHashAtExtraction ||
+    input.detectionContentHash !== input.contentHashAtExtraction
+  ) {
+    return null
+  }
+  const detection = input.detectionClassification as ConsultationClassification | null | undefined
+  return isAutoConversionAuthorizedDetectionClassification(detection) ? detection : null
+}
+
 export function buildValidationCycleIdentity(
   draft: Pick<
     ConsultationEvaluationDraft,
@@ -232,6 +267,8 @@ export async function loadConsultationEvaluationDraft(input: {
       extractedData: true,
       contentHashAtExtraction: true,
       extractionSchemaVersion: true,
+      detectionClassification: true,
+      detectionContentHash: true,
       acquisitionMessage: {
         select: {
           resolvedPartnerId: true,
@@ -324,9 +361,12 @@ export async function buildConsultationEvaluationContext(input: {
 
   const cancelWarning = hasConsultationCancelledWarning(draft.warningData)
   const requestClassification = readRequestClassification(draft.extractedData)
-  const classification = mapToConsultationClassification({
+  const classification = resolveConsultationClassification({
     requestClassification,
     consultationCancelledWarning: cancelWarning,
+    detectionClassification: draft.detectionClassification,
+    detectionContentHash: draft.detectionContentHash,
+    contentHashAtExtraction: draft.contentHashAtExtraction,
   })
   const consultationCancelled =
     requestClassification === "CANCELLED_CONSULTATION" || cancelWarning
