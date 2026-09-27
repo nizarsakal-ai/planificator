@@ -81,6 +81,23 @@ function hasAnyKey(body: unknown, keys: readonly string[]): boolean {
   return Boolean(body && typeof body === "object" && keys.some((k) => k in body))
 }
 
+/**
+ * Diagnostic AMBIGUOUS_ADDRESS : booléens seuls, jamais le texte adresse/ville.
+ * Reflète les conditions de evaluateAutoDecisionRules, qui reste seule autorité.
+ */
+export function preflightAddressDiagnostic(snapshot: {
+  address: string | null
+  city: string | null
+}): { addressEmpty: boolean; addressTooShort: boolean; cityEmpty: boolean } {
+  const address = snapshot.address?.trim() ?? ""
+  const city = snapshot.city?.trim() ?? ""
+  return {
+    addressEmpty: address.length === 0,
+    addressTooShort: address.length > 0 && address.length < 5,
+    cityEmpty: city.length === 0,
+  }
+}
+
 export async function handleTargetedStagingValidationPreflight(
   req: Request,
   deps: TargetedValidationPreflightDeps = {}
@@ -185,5 +202,6 @@ async function runPreflight(
       reasons: decision.reasons,
       errorCode: "errorCode" in decision ? decision.errorCode : null,
     },
+    addressDiagnostic: preflightAddressDiagnostic(ctx.snapshot),
   })
 }

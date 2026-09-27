@@ -15,6 +15,7 @@ import {
   TARGETED_STAGING_VALIDATION_PREFLIGHT_CHECK_CONFIRMATION,
   handleTargetedStagingValidationPreflight,
   isHarnessSurfaceAllowed as localIsHarnessSurfaceAllowed,
+  preflightAddressDiagnostic,
   preflightValidationDecisionCode,
   type TargetedValidationPreflightDeps,
 } from "@/lib/acquisition/capabilities/targeted-staging-validation-preflight.handler"
@@ -448,6 +449,7 @@ describe("targeted staging validation preflight — read-only evaluation", () =>
         reasons: ["THRESHOLDS_OK"],
         errorCode: null,
       },
+      addressDiagnostic: { addressEmpty: false, addressTooShort: false, cityEmpty: false },
     })
 
     // Scope strict : le builder ne reçoit que la cible env.
@@ -520,6 +522,124 @@ describe("targeted staging validation preflight — read-only evaluation", () =>
     for (const secret of ["client@expo.fr", "12 rue de la Foire", "Lyon", "69002", "Client Expo", "0.95", "snapshot", "confidence"]) {
       assert.ok(!text.includes(secret), `response leaks ${secret}`)
     }
+  })
+})
+
+describe("targeted staging validation preflight — AMBIGUOUS_ADDRESS diagnostic", () => {
+  async function runWith(over: Partial<ConsultationEvaluationDraft>) {
+    const ctx = recordingContext(draft(over))
+    const res = await handleTargetedStagingValidationPreflight(
+      request({ confirmation: CONFIRM }),
+      { auth: sessionAuth(), env: PREVIEW_ENV, now: () => BEFORE_PERIOD, buildContext: ctx.buildContext }
+    )
+    assert.equal(res.status, 200)
+    const text = await res.text()
+    return { text, body: JSON.parse(text), dbCalls: ctx.dbCalls }
+  }
+
+  it("null / blank address → addressEmpty, not addressTooShort; policy still reports AMBIGUOUS_ADDRESS", async () => {
+    for (const proposedAddress of [null, "", "   "]) {
+      const r = await runWith({ proposedAddress })
+      assert.deepEqual(r.body.addressDiagnostic, {
+        addressEmpty: true,
+        addressTooShort: false,
+        cityEmpty: false,
+      })
+      assert.equal(r.body.validation.code, "QUARANTINE")
+      assert.ok(r.body.validation.reasons.includes("AMBIGUOUS_ADDRESS"), JSON.stringify(proposedAddress))
+    }
+  })
+
+  it("non-empty address shorter than 5 after trim → addressTooShort; policy reports AMBIGUOUS_ADDRESS", async () => {
+    for (const proposedAddress of ["  Zq9 ", "a", " abcd "]) {
+      const r = await runWith({ proposedAddress })
+      assert.deepEqual(r.body.addressDiagnostic, {
+        addressEmpty: false,
+        addressTooShort: true,
+        cityEmpty: false,
+      })
+      assert.ok(r.body.validation.reasons.includes("AMBIGUOUS_ADDRESS"), proposedAddress)
+    }
+    // Frontière : 5 caractères après trim → ni vide ni trop court, pas d'AMBIGUOUS_ADDRESS.
+    const boundary = await runWith({ proposedAddress: "  abcde  " })
+    assert.deepEqual(boundary.body.addressDiagnostic, {
+      addressEmpty: false,
+      addressTooShort: false,
+      cityEmpty: false,
+    })
+    assert.ok(!boundary.body.validation.reasons.includes("AMBIGUOUS_ADDRESS"))
+  })
+
+  it("null / blank city → cityEmpty; policy reports AMBIGUOUS_ADDRESS", async () => {
+    for (const proposedCity of [null, "", "  "]) {
+      const r = await runWith({ proposedCity })
+      assert.deepEqual(r.body.addressDiagnostic, {
+        addressEmpty: false,
+        addressTooShort: false,
+        cityEmpty: true,
+      })
+      assert.ok(r.body.validation.reasons.includes("AMBIGUOUS_ADDRESS"), JSON.stringify(proposedCity))
+    }
+  })
+
+  it("valid address + city → all false, no AMBIGUOUS_ADDRESS, validation unchanged", async () => {
+    const r = await runWith({})
+    assert.deepEqual(r.body.addressDiagnostic, {
+      addressEmpty: false,
+      addressTooShort: false,
+      cityEmpty: false,
+    })
+    assert.deepEqual(r.body.validation, {
+      code: "PASS",
+      decisionCode: "VALIDATION_PASS",
+      reasons: ["THRESHOLDS_OK"],
+      errorCode: null,
+    })
+    assert.deepEqual(r.dbCalls, ["worksiteImportDraft.findFirst"])
+  })
+
+  it("exposes exactly three booleans and never the address / city / postal text", async () => {
+    const cases: Array<Partial<ConsultationEvaluationDraft>> = [
+      { proposedAddress: "  Zq9 ", proposedCity: "Qwertyville", proposedPostalCode: "75123" },
+      { proposedAddress: "99 avenue Unique Xyz", proposedCity: "   " },
+      { proposedAddress: null, proposedCity: "Villeneuve-Zed" },
+    ]
+    for (const over of cases) {
+      const r = await runWith(over)
+      assert.deepEqual(Object.keys(r.body.addressDiagnostic).sort(), [
+        "addressEmpty",
+        "addressTooShort",
+        "cityEmpty",
+      ])
+      for (const v of Object.values(r.body.addressDiagnostic)) assert.equal(typeof v, "boolean")
+      for (const secret of [over.proposedAddress, over.proposedCity, over.proposedPostalCode]) {
+        const t = typeof secret === "string" ? secret.trim() : ""
+        if (t) assert.ok(!r.text.includes(t), `response leaks ${t}`)
+      }
+    }
+  })
+
+  it("pure helper mirrors the policy branches (null / blank / short / boundary)", () => {
+    assert.deepEqual(preflightAddressDiagnostic({ address: null, city: null }), {
+      addressEmpty: true,
+      addressTooShort: false,
+      cityEmpty: true,
+    })
+    assert.deepEqual(preflightAddressDiagnostic({ address: " \t ", city: "Lyon" }), {
+      addressEmpty: true,
+      addressTooShort: false,
+      cityEmpty: false,
+    })
+    assert.deepEqual(preflightAddressDiagnostic({ address: " 1234 ", city: "Lyon" }), {
+      addressEmpty: false,
+      addressTooShort: true,
+      cityEmpty: false,
+    })
+    assert.deepEqual(preflightAddressDiagnostic({ address: "12345", city: "Lyon" }), {
+      addressEmpty: false,
+      addressTooShort: false,
+      cityEmpty: false,
+    })
   })
 })
 
