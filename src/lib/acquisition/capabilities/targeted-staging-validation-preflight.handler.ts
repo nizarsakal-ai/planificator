@@ -98,6 +98,35 @@ export function preflightAddressDiagnostic(snapshot: {
   }
 }
 
+function isPlainRecord(v: unknown): v is Record<string, unknown> {
+  return v != null && typeof v === "object" && !Array.isArray(v)
+}
+
+function hasOwnKey(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key)
+}
+
+/**
+ * Provenance stockée de l'adresse : présence seule (jamais quote, source ni valeur).
+ * Formes persistées : extractedData.evidence.address = { source, quote? } ;
+ * confidenceData.address = nombre fini. Ne distingue pas omission provider / rejet evidence.
+ */
+export function preflightAddressProvenance(draft: {
+  extractedData: unknown
+  confidenceData: unknown
+}): { addressEvidencePresent: boolean; addressConfidencePresent: boolean } {
+  const evidence = isPlainRecord(draft.extractedData) ? draft.extractedData.evidence : undefined
+  const addressEvidencePresent =
+    isPlainRecord(evidence) && hasOwnKey(evidence, "address") && isPlainRecord(evidence.address)
+  const confidence = draft.confidenceData
+  const addressConfidencePresent =
+    isPlainRecord(confidence) &&
+    hasOwnKey(confidence, "address") &&
+    typeof confidence.address === "number" &&
+    Number.isFinite(confidence.address)
+  return { addressEvidencePresent, addressConfidencePresent }
+}
+
 export async function handleTargetedStagingValidationPreflight(
   req: Request,
   deps: TargetedValidationPreflightDeps = {}
@@ -202,6 +231,9 @@ async function runPreflight(
       reasons: decision.reasons,
       errorCode: "errorCode" in decision ? decision.errorCode : null,
     },
-    addressDiagnostic: preflightAddressDiagnostic(ctx.snapshot),
+    addressDiagnostic: {
+      ...preflightAddressDiagnostic(ctx.snapshot),
+      ...preflightAddressProvenance(ctx.draft),
+    },
   })
 }

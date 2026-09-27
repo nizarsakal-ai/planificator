@@ -16,6 +16,7 @@ import {
   handleTargetedStagingValidationPreflight,
   isHarnessSurfaceAllowed as localIsHarnessSurfaceAllowed,
   preflightAddressDiagnostic,
+  preflightAddressProvenance,
   preflightValidationDecisionCode,
   type TargetedValidationPreflightDeps,
 } from "@/lib/acquisition/capabilities/targeted-staging-validation-preflight.handler"
@@ -449,7 +450,7 @@ describe("targeted staging validation preflight — read-only evaluation", () =>
         reasons: ["THRESHOLDS_OK"],
         errorCode: null,
       },
-      addressDiagnostic: { addressEmpty: false, addressTooShort: false, cityEmpty: false },
+      addressDiagnostic: { addressEmpty: false, addressTooShort: false, cityEmpty: false, addressEvidencePresent: false, addressConfidencePresent: false },
     })
 
     // Scope strict : le builder ne reçoit que la cible env.
@@ -544,6 +545,8 @@ describe("targeted staging validation preflight — AMBIGUOUS_ADDRESS diagnostic
         addressEmpty: true,
         addressTooShort: false,
         cityEmpty: false,
+        addressEvidencePresent: false,
+        addressConfidencePresent: false,
       })
       assert.equal(r.body.validation.code, "QUARANTINE")
       assert.ok(r.body.validation.reasons.includes("AMBIGUOUS_ADDRESS"), JSON.stringify(proposedAddress))
@@ -557,6 +560,8 @@ describe("targeted staging validation preflight — AMBIGUOUS_ADDRESS diagnostic
         addressEmpty: false,
         addressTooShort: true,
         cityEmpty: false,
+        addressEvidencePresent: false,
+        addressConfidencePresent: false,
       })
       assert.ok(r.body.validation.reasons.includes("AMBIGUOUS_ADDRESS"), proposedAddress)
     }
@@ -566,6 +571,8 @@ describe("targeted staging validation preflight — AMBIGUOUS_ADDRESS diagnostic
       addressEmpty: false,
       addressTooShort: false,
       cityEmpty: false,
+      addressEvidencePresent: false,
+      addressConfidencePresent: false,
     })
     assert.ok(!boundary.body.validation.reasons.includes("AMBIGUOUS_ADDRESS"))
   })
@@ -577,6 +584,8 @@ describe("targeted staging validation preflight — AMBIGUOUS_ADDRESS diagnostic
         addressEmpty: false,
         addressTooShort: false,
         cityEmpty: true,
+        addressEvidencePresent: false,
+        addressConfidencePresent: false,
       })
       assert.ok(r.body.validation.reasons.includes("AMBIGUOUS_ADDRESS"), JSON.stringify(proposedCity))
     }
@@ -588,6 +597,8 @@ describe("targeted staging validation preflight — AMBIGUOUS_ADDRESS diagnostic
       addressEmpty: false,
       addressTooShort: false,
       cityEmpty: false,
+      addressEvidencePresent: false,
+      addressConfidencePresent: false,
     })
     assert.deepEqual(r.body.validation, {
       code: "PASS",
@@ -598,7 +609,7 @@ describe("targeted staging validation preflight — AMBIGUOUS_ADDRESS diagnostic
     assert.deepEqual(r.dbCalls, ["worksiteImportDraft.findFirst"])
   })
 
-  it("exposes exactly three booleans and never the address / city / postal text", async () => {
+  it("exposes exactly five booleans and never the address / city / postal text", async () => {
     const cases: Array<Partial<ConsultationEvaluationDraft>> = [
       { proposedAddress: "  Zq9 ", proposedCity: "Qwertyville", proposedPostalCode: "75123" },
       { proposedAddress: "99 avenue Unique Xyz", proposedCity: "   " },
@@ -607,7 +618,9 @@ describe("targeted staging validation preflight — AMBIGUOUS_ADDRESS diagnostic
     for (const over of cases) {
       const r = await runWith(over)
       assert.deepEqual(Object.keys(r.body.addressDiagnostic).sort(), [
+        "addressConfidencePresent",
         "addressEmpty",
+        "addressEvidencePresent",
         "addressTooShort",
         "cityEmpty",
       ])
@@ -640,6 +653,122 @@ describe("targeted staging validation preflight — AMBIGUOUS_ADDRESS diagnostic
       addressTooShort: false,
       cityEmpty: false,
     })
+  })
+})
+
+describe("targeted staging validation preflight — stored address provenance", () => {
+  const QUOTE = "Qx 77 chemin Zorrovale"
+  const BASE_EXTRACTED = {
+    requestClassification: "CONSULTATION",
+    clientEmail: "client@expo.fr",
+    consultationReference: "REF-001",
+  }
+  const BASE_CONFIDENCE = { worksiteName: 0.95, requestedStartDate: 0.95, requestedEndDate: 0.95 }
+
+  async function runWith(over: Partial<ConsultationEvaluationDraft>) {
+    const ctx = recordingContext(draft(over))
+    const res = await handleTargetedStagingValidationPreflight(
+      request({ confirmation: CONFIRM }),
+      { auth: sessionAuth(), env: PREVIEW_ENV, now: () => BEFORE_PERIOD, buildContext: ctx.buildContext }
+    )
+    assert.equal(res.status, 200)
+    const text = await res.text()
+    return { text, body: JSON.parse(text), dbCalls: ctx.dbCalls }
+  }
+
+  it("evidence.address present → addressEvidencePresent=true, independent of the empty proposed address", async () => {
+    const r = await runWith({
+      proposedAddress: null,
+      extractedData: {
+        ...BASE_EXTRACTED,
+        evidence: { address: { source: "ATTACHMENT_TEXT", quote: QUOTE }, city: { source: "BODY" } },
+      },
+    })
+    assert.equal(r.body.addressDiagnostic.addressEvidencePresent, true)
+    assert.equal(r.body.addressDiagnostic.addressConfidencePresent, false)
+    // Sémantique addressDiagnostic existante inchangée.
+    assert.equal(r.body.addressDiagnostic.addressEmpty, true)
+    assert.equal(r.body.addressDiagnostic.addressTooShort, false)
+    assert.ok(r.body.validation.reasons.includes("AMBIGUOUS_ADDRESS"))
+    assert.deepEqual(r.dbCalls, ["worksiteImportDraft.findFirst"])
+  })
+
+  it("evidence.address absent or not in the persisted shape → addressEvidencePresent=false", async () => {
+    const shapes: unknown[] = [
+      BASE_EXTRACTED,
+      { ...BASE_EXTRACTED, evidence: {} },
+      { ...BASE_EXTRACTED, evidence: { city: { source: "BODY", quote: "Lyon" } } },
+      { ...BASE_EXTRACTED, evidence: null },
+      { ...BASE_EXTRACTED, evidence: [{ address: { source: "BODY" } }] },
+      { ...BASE_EXTRACTED, evidence: { address: QUOTE } },
+      { ...BASE_EXTRACTED, evidence: { address: null } },
+      { ...BASE_EXTRACTED, address: { source: "BODY", quote: QUOTE } },
+      null,
+    ]
+    for (const extractedData of shapes) {
+      const r = await runWith({ extractedData })
+      assert.equal(r.body.addressDiagnostic.addressEvidencePresent, false, JSON.stringify(extractedData))
+    }
+  })
+
+  it("confidenceData.address key with a finite number (including 0) → addressConfidencePresent=true", async () => {
+    for (const value of [0, 0.73, 1]) {
+      const r = await runWith({ confidenceData: { ...BASE_CONFIDENCE, address: value } })
+      assert.equal(r.body.addressDiagnostic.addressConfidencePresent, true, String(value))
+      assert.equal(r.body.addressDiagnostic.addressEvidencePresent, false)
+    }
+  })
+
+  it("confidenceData.address absent or not a finite number → addressConfidencePresent=false", async () => {
+    const shapes: unknown[] = [
+      BASE_CONFIDENCE,
+      { ...BASE_CONFIDENCE, city: 0.8 },
+      { ...BASE_CONFIDENCE, address: null },
+      { ...BASE_CONFIDENCE, address: "0.7" },
+      { ...BASE_CONFIDENCE, address: { value: 0.7 } },
+      null,
+      [0.7],
+    ]
+    for (const confidenceData of shapes) {
+      const r = await runWith({ confidenceData })
+      assert.equal(r.body.addressDiagnostic.addressConfidencePresent, false, JSON.stringify(confidenceData))
+    }
+  })
+
+  it("never returns the evidence quote, evidence source or confidence value", async () => {
+    const r = await runWith({
+      proposedAddress: null,
+      extractedData: {
+        ...BASE_EXTRACTED,
+        evidence: { address: { source: "ATTACHMENT_TEXT", quote: QUOTE } },
+      },
+      confidenceData: { ...BASE_CONFIDENCE, address: 0.73 },
+    })
+    assert.equal(r.body.addressDiagnostic.addressEvidencePresent, true)
+    assert.equal(r.body.addressDiagnostic.addressConfidencePresent, true)
+    for (const secret of [QUOTE, "Zorrovale", "ATTACHMENT_TEXT", "0.73", "evidence", "quote", "source"]) {
+      assert.ok(!r.text.includes(secret), `response leaks ${secret}`)
+    }
+    for (const v of Object.values(r.body.addressDiagnostic)) assert.equal(typeof v, "boolean")
+  })
+
+  it("pure helper checks own keys only (inherited keys never count)", () => {
+    const inheritedEvidence = Object.create({ address: { source: "BODY" } }) as Record<string, unknown>
+    const inheritedConfidence = Object.create({ address: 0.5 }) as Record<string, unknown>
+    assert.deepEqual(
+      preflightAddressProvenance({
+        extractedData: { evidence: inheritedEvidence },
+        confidenceData: inheritedConfidence,
+      }),
+      { addressEvidencePresent: false, addressConfidencePresent: false }
+    )
+    assert.deepEqual(
+      preflightAddressProvenance({
+        extractedData: { evidence: { address: { source: "BODY" } } },
+        confidenceData: { address: 0 },
+      }),
+      { addressEvidencePresent: true, addressConfidencePresent: true }
+    )
   })
 })
 
