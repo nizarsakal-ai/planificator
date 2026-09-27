@@ -156,8 +156,22 @@ type RunDraftExtractionCoreInput = {
   companyId: string
   draftId: string
   force?: boolean
+  /**
+   * Relance ciblée d'un draft PENDING_REVIEW (harness Preview uniquement).
+   * Exige exactement PENDING_REVIEW, ignore ALREADY_EXTRACTED, conserve le plafond
+   * de tentatives, claim ["PENDING_REVIEW"] sans reclaim EXTRACTING. Incompatible avec force.
+   */
+  rerunPendingReview?: boolean
   now?: () => Date
   executionContext: ExtractionExecutionContext
+}
+
+/** force et relance PENDING_REVIEW ne se combinent jamais (refus avant flags/claim/provider). */
+export function isConflictingExtractionMode(input: {
+  force?: boolean
+  rerunPendingReview?: boolean
+}): boolean {
+  return input.rerunPendingReview === true && Boolean(input.force)
 }
 
 function isOrchestratorAutoContext(
@@ -301,6 +315,17 @@ async function runDraftExtractionCore(
   const nowFn = input.now ?? (() => new Date())
   const now = nowFn()
   const executionContext = input.executionContext
+  const rerunPendingReview = input.rerunPendingReview === true
+
+  // Fail-closed : jamais de choix silencieux entre force et relance ciblée.
+  if (isConflictingExtractionMode(input)) {
+    return fail(
+      "FAILED",
+      "INTERNAL_ERROR",
+      "Modes force et relance PENDING_REVIEW incompatibles",
+      { draftId: input.draftId }
+    )
+  }
 
   const acquisitionEnabled = deps.isAcquisitionEnabled ?? isAcquisitionEnabled
   const contentFetchEnabled =
@@ -341,6 +366,7 @@ async function runDraftExtractionCore(
   if (
     draft.status === "PENDING_REVIEW" &&
     !input.force &&
+    !rerunPendingReview &&
     draft.contentHashAtExtraction &&
     draft.extractionSchemaVersion === EXTRACTION_SCHEMA_VERSION
   ) {
@@ -377,11 +403,12 @@ async function runDraftExtractionCore(
     draft.extractionStartedAt !== null &&
     draft.extractionStartedAt < reclaimBefore
 
-  const allowed =
-    draft.status === "PENDING_EXTRACTION" ||
-    draft.status === "FAILED" ||
-    (force && draft.status === "PENDING_REVIEW") ||
-    reclaimableExtracting
+  const allowed = rerunPendingReview
+    ? draft.status === "PENDING_REVIEW"
+    : draft.status === "PENDING_EXTRACTION" ||
+      draft.status === "FAILED" ||
+      (force && draft.status === "PENDING_REVIEW") ||
+      reclaimableExtracting
 
   if (!allowed) {
     return fail(
@@ -475,11 +502,14 @@ async function runDraftExtractionCore(
     companyId,
     draftId: draft.id,
     expectedVersion: draft.version,
-    allowedStatuses: force
-      ? ["PENDING_EXTRACTION", "FAILED", "PENDING_REVIEW"]
-      : ["PENDING_EXTRACTION", "FAILED"],
+    allowedStatuses: rerunPendingReview
+      ? ["PENDING_REVIEW"]
+      : force
+        ? ["PENDING_EXTRACTION", "FAILED", "PENDING_REVIEW"]
+        : ["PENDING_EXTRACTION", "FAILED"],
     now,
-    reclaimBefore,
+    // Relance ciblée : jamais de reclaim d'un EXTRACTING périmé.
+    reclaimBefore: rerunPendingReview ? null : reclaimBefore,
   })
 
   if (!claimed) {
@@ -873,6 +903,28 @@ export async function runDraftExtractionSystem(
       companyId: input.companyId,
       draftId: input.draftId,
       force: false,
+      now: input.now,
+      executionContext: UNIT_CRON_EXTRACTION_CONTEXT,
+    },
+    deps
+  )
+}
+
+/**
+ * Relance ciblée harness Preview — contexte UNIT_CRON (preuve Detection + PLAN prêt),
+ * force=false, plafond de tentatives conservé, PENDING_REVIEW exclusivement.
+ * Les deps (provider, gates locales) restent injectées par l'appelant.
+ */
+export async function runDraftExtractionSystemTargetedRerun(
+  input: { companyId: string; draftId: string; now?: () => Date },
+  deps: ExtractionServiceDeps = {}
+): Promise<ExtractDraftResult> {
+  return runDraftExtractionCore(
+    {
+      companyId: input.companyId,
+      draftId: input.draftId,
+      force: false,
+      rerunPendingReview: true,
       now: input.now,
       executionContext: UNIT_CRON_EXTRACTION_CONTEXT,
     },

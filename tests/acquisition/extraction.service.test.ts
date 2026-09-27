@@ -3,7 +3,13 @@ process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 import { describe, it, beforeEach, afterEach } from "node:test"
 import assert from "node:assert/strict"
 import type { WorksiteImportDraftStatus } from "@prisma/client"
-import { runDraftExtraction, runDraftExtractionSystem } from "@/lib/acquisition/extraction/extraction.service"
+import {
+  isConflictingExtractionMode,
+  runDraftExtraction,
+  runDraftExtractionSystem,
+  runDraftExtractionSystemTargetedRerun,
+} from "@/lib/acquisition/extraction/extraction.service"
+import { EXTRACTION_SCHEMA_VERSION } from "@/lib/acquisition/extraction/extraction-feature-flag"
 import type {
   AttachmentMetaRow,
   DraftExtractionRow,
@@ -1191,4 +1197,348 @@ describe("extraction.service R1", () => {
     assert.equal(providerCalls, 1)
   })
 
+})
+
+describe("extraction.service — targeted PENDING_REVIEW rerun", () => {
+  const envBackup = {
+    master: process.env.PLANIFICATOR_ACQUISITION_ENABLED,
+    content: process.env.ACQUISITION_CONTENT_FETCH_ENABLED,
+    extraction: process.env.ACQUISITION_EXTRACTION_ENABLED,
+    provider: process.env.ACQUISITION_EXTRACTION_PROVIDER,
+    maxAttempts: process.env.ACQUISITION_EXTRACTION_MAX_ATTEMPTS,
+  }
+
+  beforeEach(() => {
+    // Globales OFF : la relance ne passe que par les gates locales injectées (comme le harness).
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "false"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "false"
+    process.env.ACQUISITION_EXTRACTION_ENABLED = "false"
+    process.env.ACQUISITION_EXTRACTION_PROVIDER = "deterministic"
+    delete process.env.ACQUISITION_EXTRACTION_MAX_ATTEMPTS
+  })
+
+  afterEach(() => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = envBackup.master
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = envBackup.content
+    process.env.ACQUISITION_EXTRACTION_ENABLED = envBackup.extraction
+    process.env.ACQUISITION_EXTRACTION_PROVIDER = envBackup.provider
+    process.env.ACQUISITION_EXTRACTION_MAX_ATTEMPTS = envBackup.maxAttempts
+  })
+
+  function reviewedDraft(over: Partial<FakeDraft> = {}): FakeDraft {
+    return {
+      id: "draft1",
+      companyId: "co1",
+      acquisitionMessageId: "msg1",
+      status: "PENDING_REVIEW",
+      version: 3,
+      extractionAttemptCount: 1,
+      extractionStartedAt: new Date("2026-09-01T00:00:00.000Z"),
+      // Même hash + schéma courant : le chemin normal répondrait ALREADY_EXTRACTED.
+      contentHashAtExtraction: "hash-abc",
+      extractionSchemaVersion: EXTRACTION_SCHEMA_VERSION,
+      detectionClassification: "CONSULTATION_UPDATE",
+      detectionContentHash: "hash-abc",
+      extractionRetryable: null,
+      ...over,
+    }
+  }
+
+  type ClaimArgs = {
+    allowedStatuses: string[]
+    reclaimBefore: Date | null
+    expectedVersion: number
+  }
+
+  function harnessDeps(repo: ReturnType<typeof createFakeRepo>, extra: Record<string, unknown> = {}) {
+    const calls = { provider: 0, claims: [] as ClaimArgs[], auto: 0 }
+    const originalClaim = repo.claimExtracting.bind(repo)
+    repo.claimExtracting = (async (input: ClaimArgs & { companyId: string; draftId: string; now: Date }) => {
+      calls.claims.push({
+        allowedStatuses: input.allowedStatuses,
+        reclaimBefore: input.reclaimBefore,
+        expectedVersion: input.expectedVersion,
+      })
+      return originalClaim(input)
+    }) as never
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        calls.provider += 1
+        return {
+          fields: {
+            worksiteName: { value: "Chantier relancé", confidence: 0.9 },
+            clientReference: { value: "REF-RERUN", confidence: 0.9 },
+          },
+          warnings: [],
+          providerMetadata: { providerId: "anthropic" },
+        }
+      },
+    }
+    const deps = {
+      repository: repo as never,
+      provider,
+      isAcquisitionEnabled: () => true,
+      isAcquisitionContentFetchEnabled: () => true,
+      isAcquisitionExtractionEnabled: () => true,
+      runAutoDecisionAfterExtraction: async () => {
+        calls.auto += 1
+      },
+      ...extra,
+    }
+    return { deps, calls }
+  }
+
+  const rerun = (deps: object) =>
+    runDraftExtractionSystemTargetedRerun({ companyId: "co1", draftId: "draft1" }, deps)
+
+  it("PENDING_REVIEW with current hash + schema is really re-extracted (no ALREADY_EXTRACTED)", async () => {
+    const repo = createFakeRepo({ draft: reviewedDraft() })
+    const { deps, calls } = harnessDeps(repo)
+    const result = await rerun(deps)
+
+    assert.equal(result.ok, true)
+    if (result.ok) {
+      assert.equal(result.outcome, "EXTRACTED")
+      assert.equal(result.status, "PENDING_REVIEW")
+    }
+    assert.equal(calls.claims.length, 1)
+    assert.equal(calls.provider, 1)
+    assert.equal(repo.persists.length, 1)
+    assert.equal(repo.persists[0]?.expectedContentHash, "hash-abc")
+    assert.equal(repo.draft?.status, "PENDING_REVIEW")
+    assert.equal(repo.draft?.version, 5)
+    assert.equal(repo.draft?.extractionAttemptCount, 2)
+    assert.equal(repo.draft?.proposedWorksiteName, "Chantier relancé")
+    // Globales jamais modifiées.
+    assert.equal(process.env.PLANIFICATOR_ACQUISITION_ENABLED, "false")
+    assert.equal(process.env.ACQUISITION_EXTRACTION_ENABLED, "false")
+  })
+
+  it("claim is exactly [PENDING_REVIEW] with no reclaimBefore, at the version read", async () => {
+    const repo = createFakeRepo({ draft: reviewedDraft({ version: 7 }) })
+    const { deps, calls } = harnessDeps(repo)
+    await rerun(deps)
+    assert.deepEqual(calls.claims, [
+      { allowedStatuses: ["PENDING_REVIEW"], reclaimBefore: null, expectedVersion: 7 },
+    ])
+  })
+
+  it("every other status is refused before claim / provider", async () => {
+    const stale = new Date("2020-01-01T00:00:00.000Z")
+    const cases: Array<[Partial<FakeDraft>, string, string]> = [
+      [{ status: "PENDING_EXTRACTION" }, "FAILED", "EXTRACTION_INVALID_STATUS"],
+      [{ status: "FAILED" }, "FAILED", "EXTRACTION_INVALID_STATUS"],
+      [{ status: "EXTRACTING", extractionStartedAt: stale }, "FAILED", "EXTRACTION_INVALID_STATUS"],
+      [{ status: "EXTRACTING", extractionStartedAt: new Date() }, "IN_PROGRESS", "EXTRACTION_IN_PROGRESS"],
+      [{ status: "APPROVED" }, "FAILED", "EXTRACTION_INVALID_STATUS"],
+      [{ status: "REJECTED" }, "FAILED", "EXTRACTION_INVALID_STATUS"],
+      [{ status: "CONVERTED" }, "FAILED", "EXTRACTION_INVALID_STATUS"],
+      [{ status: "OBSOLETE" }, "FAILED", "EXTRACTION_INVALID_STATUS"],
+    ]
+    for (const [over, outcome, code] of cases) {
+      const repo = createFakeRepo({ draft: reviewedDraft(over) })
+      const { deps, calls } = harnessDeps(repo)
+      const result = await rerun(deps)
+      assert.equal(result.ok, false, JSON.stringify(over))
+      if (!result.ok) {
+        assert.equal(result.outcome, outcome, JSON.stringify(over))
+        assert.equal(result.code, code, JSON.stringify(over))
+      }
+      assert.equal(calls.claims.length, 0, JSON.stringify(over))
+      assert.equal(calls.provider, 0, JSON.stringify(over))
+      assert.equal(repo.persists.length, 0, JSON.stringify(over))
+    }
+  })
+
+  it("attempt limit stays active: at max → MAX_ATTEMPTS_REACHED, no claim / provider", async () => {
+    const repo = createFakeRepo({ draft: reviewedDraft({ extractionAttemptCount: 3 }) })
+    const { deps, calls } = harnessDeps(repo)
+    const result = await rerun(deps)
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.outcome, "MAX_ATTEMPTS_REACHED")
+      assert.equal(result.code, "EXTRACTION_MAX_ATTEMPTS")
+    }
+    assert.equal(calls.claims.length, 0)
+    assert.equal(calls.provider, 0)
+
+    // Plafond configuré : 4 tentatives < 5 → relance autorisée.
+    process.env.ACQUISITION_EXTRACTION_MAX_ATTEMPTS = "5"
+    const repo2 = createFakeRepo({ draft: reviewedDraft({ extractionAttemptCount: 4 }) })
+    const h2 = harnessDeps(repo2)
+    const ok = await rerun(h2.deps)
+    assert.equal(ok.ok, true)
+    assert.equal(h2.calls.provider, 1)
+  })
+
+  it("detection proof stays mandatory (absent / other hash / not authorized)", async () => {
+    const cases: Array<[Partial<FakeDraft>, string]> = [
+      [{ detectionClassification: null, detectionContentHash: null }, "DETECTION_REQUIRED"],
+      [{ detectionContentHash: "hash-other" }, "DETECTION_NOT_AUTHORIZED"],
+      [{ detectionClassification: "AMBIGUOUS" }, "DETECTION_NOT_AUTHORIZED"],
+      [{ detectionClassification: "NON_CONSULTATION" }, "DETECTION_NOT_AUTHORIZED"],
+    ]
+    for (const [over, code] of cases) {
+      const repo = createFakeRepo({ draft: reviewedDraft(over) })
+      const { deps, calls } = harnessDeps(repo)
+      const result = await rerun(deps)
+      assert.equal(result.ok, false)
+      if (!result.ok) assert.equal(result.code, code, JSON.stringify(over))
+      assert.equal(calls.claims.length, 0)
+      assert.equal(calls.provider, 0)
+    }
+  })
+
+  it("PLAN readiness stays mandatory", async () => {
+    const repo = createFakeRepo({
+      draft: reviewedDraft(),
+      attachments: [
+        {
+          filename: "plan.pdf",
+          mimeType: "application/pdf",
+          category: "PLAN",
+          sizeBytes: 1234,
+          status: "DISCOVERED",
+          storagePublicId: null,
+        },
+      ],
+    })
+    const { deps, calls } = harnessDeps(repo)
+    const result = await rerun(deps)
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.code, "ATTACHMENT_NOT_READY")
+    assert.equal(calls.claims.length, 0)
+    assert.equal(calls.provider, 0)
+  })
+
+  it("normal PDF loading is unchanged: every STORED PDF is loaded, not only the PLAN", async () => {
+    const loaded: string[] = []
+    const repo = createFakeRepo({
+      draft: reviewedDraft(),
+      attachments: [
+        { filename: "plan.pdf", mimeType: "application/pdf", category: "PLAN", sizeBytes: 1, status: "STORED", storagePublicId: "p/plan" },
+        { filename: "cctp.pdf", mimeType: "application/pdf", category: "OTHER", sizeBytes: 1, status: "STORED", storagePublicId: "p/cctp" },
+      ],
+    })
+    const { deps } = harnessDeps(repo, {
+      loadAttachmentBytes: async (a: { filename: string }) => {
+        loaded.push(a.filename)
+        return null
+      },
+    })
+    const result = await rerun(deps)
+    assert.equal(result.ok, true)
+    assert.deepEqual(loaded.sort(), ["cctp.pdf", "plan.pdf"])
+  })
+
+  it("lost claim race → IN_PROGRESS, no provider call", async () => {
+    const repo = createFakeRepo({ draft: reviewedDraft() })
+    const { deps, calls } = harnessDeps(repo)
+    repo.claimExtracting = (async () => null) as never
+    const result = await rerun(deps)
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.outcome, "IN_PROGRESS")
+    assert.equal(calls.provider, 0)
+  })
+
+  it("two concurrent reruns → exactly one claim wins, exactly one provider call", async () => {
+    const repo = createFakeRepo({ draft: reviewedDraft() })
+    const { deps, calls } = harnessDeps(repo)
+    const [a, b] = await Promise.all([rerun(deps), rerun(deps)])
+    const outcomes = [a, b].map((r) => (r.ok ? r.outcome : r.outcome)).sort()
+    assert.deepEqual(outcomes, ["EXTRACTED", "IN_PROGRESS"])
+    assert.equal(calls.provider, 1)
+  })
+
+  it("stale content at persist stays fail-closed", async () => {
+    const repo = createFakeRepo({ draft: reviewedDraft() })
+    const { deps } = harnessDeps(repo)
+    repo.persistExtraction = async () => "STALE_CONTENT"
+    const result = await rerun(deps)
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.outcome, "STALE_CONTENT")
+  })
+
+  it("never runs the auto-decision hook (UNIT_CRON context)", async () => {
+    process.env.ACQUISITION_AUTO_APPROVE_ENABLED = "true"
+    process.env.ACQUISITION_AUTO_CONVERT_ENABLED = "true"
+    try {
+      const repo = createFakeRepo({ draft: reviewedDraft() })
+      const { deps, calls } = harnessDeps(repo)
+      const result = await rerun(deps)
+      assert.equal(result.ok, true)
+      assert.equal(calls.auto, 0)
+      assert.equal(repo.clientCreates, 0)
+      assert.equal(repo.worksiteCreates, 0)
+    } finally {
+      delete process.env.ACQUISITION_AUTO_APPROVE_ENABLED
+      delete process.env.ACQUISITION_AUTO_CONVERT_ENABLED
+    }
+  })
+
+  it("SECURITY — force and rerun never combine", async () => {
+    assert.equal(isConflictingExtractionMode({ force: true, rerunPendingReview: true }), true)
+    assert.equal(isConflictingExtractionMode({ force: false, rerunPendingReview: true }), false)
+    assert.equal(isConflictingExtractionMode({ force: true, rerunPendingReview: false }), false)
+    assert.equal(isConflictingExtractionMode({ force: true }), false)
+    assert.equal(isConflictingExtractionMode({}), false)
+
+    // Un force introduit en douce dans l'entrée du wrapper est ignoré : plafond et statut restent appliqués.
+    const atMax = createFakeRepo({ draft: reviewedDraft({ extractionAttemptCount: 3 }) })
+    const h1 = harnessDeps(atMax)
+    const r1 = await runDraftExtractionSystemTargetedRerun(
+      { companyId: "co1", draftId: "draft1", force: true } as never,
+      h1.deps
+    )
+    assert.equal(r1.ok, false)
+    if (!r1.ok) assert.equal(r1.outcome, "MAX_ATTEMPTS_REACHED")
+    assert.equal(h1.calls.provider, 0)
+
+    const approved = createFakeRepo({ draft: reviewedDraft({ status: "APPROVED" }) })
+    const h2 = harnessDeps(approved)
+    const r2 = await runDraftExtractionSystemTargetedRerun(
+      { companyId: "co1", draftId: "draft1", force: true } as never,
+      h2.deps
+    )
+    assert.equal(r2.ok, false)
+    if (!r2.ok) assert.equal(r2.code, "EXTRACTION_INVALID_STATUS")
+    assert.equal(h2.calls.claims.length, 0)
+  })
+
+  it("existing SYSTEM path is unchanged: PENDING_REVIEW → ALREADY_EXTRACTED or INVALID_STATUS, standard claim", async () => {
+    const same = createFakeRepo({ draft: reviewedDraft() })
+    const h1 = harnessDeps(same)
+    const r1 = await runDraftExtractionSystem({ companyId: "co1", draftId: "draft1" }, h1.deps)
+    assert.equal(r1.ok, true)
+    if (r1.ok) assert.equal(r1.outcome, "ALREADY_EXTRACTED")
+    assert.equal(h1.calls.claims.length, 0)
+    assert.equal(h1.calls.provider, 0)
+
+    const changed = createFakeRepo({ draft: reviewedDraft({ contentHashAtExtraction: "hash-old" }) })
+    const h2 = harnessDeps(changed)
+    const r2 = await runDraftExtractionSystem({ companyId: "co1", draftId: "draft1" }, h2.deps)
+    assert.equal(r2.ok, false)
+    if (!r2.ok) assert.equal(r2.code, "EXTRACTION_INVALID_STATUS")
+    assert.equal(h2.calls.provider, 0)
+
+    const pending = createFakeRepo()
+    const h3 = harnessDeps(pending)
+    await runDraftExtractionSystem({ companyId: "co1", draftId: "draft1" }, h3.deps)
+    assert.equal(h3.calls.claims.length, 1)
+    assert.deepEqual(h3.calls.claims[0]?.allowedStatuses, ["PENDING_EXTRACTION", "FAILED"])
+    assert.ok(h3.calls.claims[0]?.reclaimBefore instanceof Date)
+  })
+
+  it("existing UI force path is unchanged: PENDING_REVIEW allowed, historical claim statuses + reclaim", async () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
+    process.env.ACQUISITION_EXTRACTION_ENABLED = "true"
+    const repo = createFakeRepo({ draft: reviewedDraft({ extractionAttemptCount: 3 }) })
+    const { deps, calls } = harnessDeps(repo)
+    const result = await runDraftExtraction({ actor: actor(), draftId: "draft1", force: true }, deps)
+    assert.equal(result.ok, true)
+    assert.equal(calls.claims.length, 1)
+    assert.deepEqual(calls.claims[0]?.allowedStatuses, ["PENDING_EXTRACTION", "FAILED", "PENDING_REVIEW"])
+    assert.ok(calls.claims[0]?.reclaimBefore instanceof Date)
+  })
 })

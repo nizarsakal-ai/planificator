@@ -18,7 +18,10 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { runDraftExtractionSystem } from "@/lib/acquisition/extraction/extraction.service"
+import {
+  runDraftExtractionSystem,
+  runDraftExtractionSystemTargetedRerun,
+} from "@/lib/acquisition/extraction/extraction.service"
 import { createAnthropicExtractionAdapter } from "@/lib/acquisition/extraction/anthropic-extraction.adapter"
 import {
   getAnthropicAdapterTimeoutMs,
@@ -29,17 +32,30 @@ import {
   resolveAnthropicExtractionModel,
   type AnthropicPublicConfig,
 } from "@/lib/acquisition/extraction/anthropic-extraction.config"
-import { getExtractionTimeoutMs } from "@/lib/acquisition/extraction/extraction-feature-flag"
+import {
+  getExtractionMaxAttempts,
+  getExtractionTimeoutMs,
+} from "@/lib/acquisition/extraction/extraction-feature-flag"
 import {
   FORBIDDEN_ALREADY_EXTRACTED_DRAFT_ID,
   isHarnessSurfaceAllowed,
 } from "@/lib/acquisition/extraction/targeted-staging-attachment-not-ready.handler"
+import { isExtractionAuthorizedDetectionClassification } from "@/lib/acquisition/capabilities/consultation-detection.policy"
+import type { ConsultationClassification } from "@/lib/acquisition/capabilities/consultation-capability.types"
 
 export const TARGETED_STAGING_EXTRACTION_CHECK_CONFIRMATION =
   "CHECK_TARGETED_STAGING_EXTRACTION" as const
 
 export const TARGETED_STAGING_EXTRACTION_RUN_CONFIRMATION =
   "RUN_TARGETED_STAGING_EXTRACTION" as const
+
+/** Relance ciblée d'un draft PENDING_REVIEW — préflight READ-ONLY. */
+export const TARGETED_STAGING_EXTRACTION_RERUN_CHECK_CONFIRMATION =
+  "CHECK_TARGETED_STAGING_EXTRACTION_RERUN" as const
+
+/** Relance ciblée d'un draft PENDING_REVIEW — exécution réelle (Anthropic). */
+export const TARGETED_STAGING_EXTRACTION_RERUN_CONFIRMATION =
+  "RERUN_TARGETED_STAGING_EXTRACTION_PENDING_REVIEW" as const
 
 const ENABLED_FLAG = "TARGETED_STAGING_EXTRACTION_ENABLED"
 const COMPANY_ENV = "TARGETED_STAGING_ATTACHMENT_NOT_READY_COMPANY_ID"
@@ -94,6 +110,17 @@ export type TargetedStagingExtractionHandlerDeps = {
     companyId: string
     draftId: string
   }) => ReturnType<typeof runDraftExtractionSystem>
+  /** Relance ciblée complète (tests) — remplace le câblage Anthropic par défaut. */
+  runRerun?: (input: {
+    companyId: string
+    draftId: string
+  }) => ReturnType<typeof runDraftExtractionSystemTargetedRerun>
+  /** Service de relance injecté dans le câblage par défaut (tests). */
+  rerunService?: typeof runDraftExtractionSystemTargetedRerun
+  /** Config Anthropic ciblée (tests). Défaut : env Preview. */
+  anthropicConfig?: () => AnthropicPublicConfig | null
+  /** Plafond de tentatives (tests). Défaut : getExtractionMaxAttempts(). */
+  maxAttempts?: () => number
 }
 
 type PreparedTarget = {
@@ -238,7 +265,8 @@ function refused(
 async function prepareTarget(
   companyId: string,
   draftId: string,
-  deps: TargetedStagingExtractionHandlerDeps
+  deps: TargetedStagingExtractionHandlerDeps,
+  requiredStatus: "PENDING_EXTRACTION" | "PENDING_REVIEW" = "PENDING_EXTRACTION"
 ): Promise<
   | { ok: true; prepared: PreparedTarget }
   | { ok: false; response: Response }
@@ -266,13 +294,13 @@ async function prepareTarget(
     }
   }
 
-  if (draft.status !== "PENDING_EXTRACTION") {
+  if (draft.status !== requiredStatus) {
     return {
       ok: false,
       response: refused(
         409,
         "DRAFT_STATUS_INVALID",
-        "Draft doit être PENDING_EXTRACTION"
+        `Draft doit être ${requiredStatus}`
       ),
     }
   }
@@ -403,6 +431,36 @@ async function defaultRunExtraction(input: {
   })
 }
 
+/**
+ * Relance ciblée : provider Anthropic explicitement injecté (jamais la factory),
+ * gates Acquisition locales à cet appel uniquement, wrapper dédié PENDING_REVIEW.
+ */
+async function defaultRunRerun(
+  input: { companyId: string; draftId: string },
+  deps: TargetedStagingExtractionHandlerDeps
+) {
+  const config = (deps.anthropicConfig ?? buildTargetedAnthropicConfig)()
+
+  if (!config) {
+    return {
+      ok: false as const,
+      outcome: "FAILED" as const,
+      code: "PROVIDER_NOT_CONFIGURED" as const,
+      message: "Provider Anthropic ciblé non configuré",
+    }
+  }
+
+  const provider = createAnthropicExtractionAdapter({ config })
+  const rerun = deps.rerunService ?? runDraftExtractionSystemTargetedRerun
+
+  return rerun(input, {
+    provider,
+    isAcquisitionEnabled: () => true,
+    isAcquisitionContentFetchEnabled: () => true,
+    isAcquisitionExtractionEnabled: () => true,
+  })
+}
+
 export async function handleTargetedStagingExtraction(
   req: Request,
   deps: TargetedStagingExtractionHandlerDeps = {}
@@ -467,8 +525,12 @@ export async function handleTargetedStagingExtraction(
     confirmation === TARGETED_STAGING_EXTRACTION_CHECK_CONFIRMATION
   const isRun =
     confirmation === TARGETED_STAGING_EXTRACTION_RUN_CONFIRMATION
+  const isRerunCheck =
+    confirmation === TARGETED_STAGING_EXTRACTION_RERUN_CHECK_CONFIRMATION
+  const isRerun =
+    confirmation === TARGETED_STAGING_EXTRACTION_RERUN_CONFIRMATION
 
-  if (!isCheck && !isRun) {
+  if (!isCheck && !isRun && !isRerunCheck && !isRerun) {
     return refused(
       400,
       "CONFIRMATION_REQUIRED",
@@ -523,10 +585,12 @@ export async function handleTargetedStagingExtraction(
     )
   }
 
+  // Relance : PENDING_REVIEW exclusivement ; modes historiques : PENDING_EXTRACTION inchangé.
   const preparedResult = await prepareTarget(
     companyId,
     draftId,
-    deps
+    deps,
+    isRerunCheck || isRerun ? "PENDING_REVIEW" : "PENDING_EXTRACTION"
   )
 
   if (!preparedResult.ok) {
@@ -570,16 +634,71 @@ export async function handleTargetedStagingExtraction(
     })
   }
 
+  if (isRerunCheck) {
+    const config = (deps.anthropicConfig ?? buildTargetedAnthropicConfig)()
+    const maxAttempts = (deps.maxAttempts ?? getExtractionMaxAttempts)()
+    const attemptCount = prepared.draft.extractionAttemptCount
+    const remaining = Math.max(0, maxAttempts - attemptCount)
+    // Présence seule ; l'égalité avec le hash contenu courant est vérifiée par le service au RERUN.
+    const detectionProofPresent =
+      isExtractionAuthorizedDetectionClassification(
+        prepared.draft.detectionClassification as ConsultationClassification | null
+      ) && Boolean(prepared.draft.detectionContentHash)
+
+    return NextResponse.json({
+      ok: true,
+      harness: "targeted-staging-extraction",
+      mode: "CHECK_RERUN",
+      ready: Boolean(config) && remaining > 0 && detectionProofPresent,
+      attemptBudget: {
+        attemptCount,
+        maxAttempts,
+        remaining,
+        rerunAllowed: remaining > 0,
+      },
+      proof: {
+        draftPendingReview:
+          prepared.draft.status === "PENDING_REVIEW",
+        noCreatedWorksite:
+          prepared.draft.createdWorksiteId === null,
+        uniquePlanPdf: true,
+        planStored:
+          prepared.plan.status === "STORED",
+        hasStoragePublicId:
+          prepared.plan.hasStoragePublicId,
+        sameTenant:
+          prepared.draft.companyId === companyId &&
+          prepared.plan.companyId === companyId &&
+          prepared.mailbox.companyId === companyId,
+        sameMessage:
+          prepared.plan.acquisitionMessageId ===
+            prepared.draft.acquisitionMessageId &&
+          prepared.mailbox.messageId ===
+            prepared.draft.acquisitionMessageId,
+        mailboxProvenanceExplicit:
+          Boolean(prepared.mailbox.sourceMailboxKey.trim()),
+        detectionProofPresent,
+        anthropicConfigured:
+          Boolean(config),
+      },
+    })
+  }
+
   const loadDraft = deps.loadDraft ?? defaultLoadDraft
   const runExtraction =
     deps.runExtraction ?? defaultRunExtraction
+  const runRerun =
+    deps.runRerun ??
+    ((input: { companyId: string; draftId: string }) => defaultRunRerun(input, deps))
 
   const before = prepared.draft
 
-  const result = await runExtraction({
-    companyId,
-    draftId,
-  })
+  const result = isRerun
+    ? await runRerun({ companyId, draftId })
+    : await runExtraction({
+        companyId,
+        draftId,
+      })
 
   const after = await loadDraft(
     companyId,
@@ -613,9 +732,14 @@ export async function handleTargetedStagingExtraction(
       after !== null &&
       after.acquisitionMessageId ===
         before.acquisitionMessageId,
+    // Relance : l'état de départ doit être PENDING_REVIEW (champ absent en RUN historique).
+    ...(isRerun
+      ? { startedFromPendingReview: before.status === "PENDING_REVIEW" }
+      : {}),
   }
 
   const proofComplete =
+    (!isRerun || before.status === "PENDING_REVIEW") &&
     proof.extracted &&
     proof.finalStatusAllowed &&
     proof.attemptIncrementedExactlyOnce &&
@@ -663,7 +787,7 @@ export async function handleTargetedStagingExtraction(
   return NextResponse.json({
     ok: true,
     harness: "targeted-staging-extraction",
-    mode: "RUN",
+    mode: isRerun ? "RERUN" : "RUN",
     outcome: result.outcome,
     status: after?.status ?? null,
     proof,
