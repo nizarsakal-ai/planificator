@@ -411,7 +411,7 @@ describe("A. frontière capability — factory privée, aucune capability depuis
     assert.deepEqual(Object.keys(result).sort(), ["outcome", "release"])
   })
 
-  it("seuls le wiring et le runner référencent la fonction ciblée ; aucune route", () => {
+  it("seuls le wiring et le runner référencent la fonction ciblée ; seule la route RUN (via handler) atteint le runner", () => {
     const srcFiles = listFilesRecursive(path.join(ROOT, "src")).filter((f) => /\.(ts|tsx)$/.test(f))
     const users = srcFiles
       .filter((f) => readFileSync(f, "utf8").includes("runTargetedAutoDecisionUnderOrchestratorLease"))
@@ -422,7 +422,11 @@ describe("A. frontière capability — factory privée, aucune capability depuis
       const s = readFileSync(f, "utf8")
       return s.includes("targeted-staging-auto-decision-runner") || s.includes("targeted-staging-auto-decision-selection")
     })
-    assert.deepEqual(routeImporters, [], "aucune route RUN")
+    assert.deepEqual(routeImporters, [], "aucune route n'importe runner/sélection directement")
+    const runnerUsers = srcFiles
+      .filter((f) => readFileSync(f, "utf8").includes("targeted-staging-auto-decision-runner\""))
+      .map((f) => path.relative(ROOT, f))
+    assert.deepEqual(runnerUsers, ["src/lib/acquisition/orchestrator/targeted-staging-auto-decision-run.handler.ts"])
   })
 })
 
