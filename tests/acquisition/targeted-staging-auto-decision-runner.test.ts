@@ -206,6 +206,9 @@ const PROCESS_ENV_KEYS = [
   "PLANIFICATOR_ACQUISITION_ENABLED",
   "ACQUISITION_ORCHESTRATOR_POST_EXTRACTION_STEPS",
   "ACQUISITION_ORCHESTRATOR_CRON_ENABLED",
+  "ACQUISITION_ORCHESTRATOR_ALLOW_STUBS",
+  "TARGETED_STAGING_ATTACHMENT_NOT_READY_COMPANY_ID",
+  "TARGETED_STAGING_ATTACHMENT_NOT_READY_DRAFT_ID",
 ] as const
 let savedEnv: Record<string, string | undefined> = {}
 beforeEach(() => {
@@ -219,9 +222,10 @@ afterEach(() => {
   }
 })
 
-function enablePipelineKillSwitches() {
-  process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
-  process.env.ACQUISITION_ORCHESTRATOR_POST_EXTRACTION_STEPS = "true"
+/** Cible autorisée côté serveur (process.env, seule source lue par le wiring). */
+function authorizeTargetEnv() {
+  process.env.TARGETED_STAGING_ATTACHMENT_NOT_READY_COMPANY_ID = COMPANY
+  process.env.TARGETED_STAGING_ATTACHMENT_NOT_READY_DRAFT_ID = DRAFT
 }
 
 async function runWiring(
@@ -345,7 +349,7 @@ function runnerDeps(over: Partial<TargetedAutoDecisionRunnerDeps> = {}): Targete
 
 /** Runner avec lease canonique instrumentée : aucune opération lease attendue. */
 async function runRunner(deps: TargetedAutoDecisionRunnerDeps) {
-  enablePipelineKillSwitches()
+  authorizeTargetEnv()
   const lease = installCanonicalLease()
   const steps = installOtherStepTraps()
   try {
@@ -397,7 +401,7 @@ describe("A. frontière capability — factory privée, aucune capability depuis
   })
 
   it("résultat du wiring : ni ownerRunId, ni lease key, ni capability, ni fence exposés", async () => {
-    enablePipelineKillSwitches()
+    authorizeTargetEnv()
     const { result, lease } = await runWiring()
     const serialized = JSON.stringify(result)
     const runId = lease.calls[0]?.ownerRunId ?? ""
@@ -424,7 +428,7 @@ describe("A. frontière capability — factory privée, aucune capability depuis
 
 describe("B. lease canonique — acquisition, ALREADY_RUNNING, capability après ACQUIRED, release finally", () => {
   it("acquire unique sur la clé canonique, runId ciblé généré, TTL production", async () => {
-    enablePipelineKillSwitches()
+    authorizeTargetEnv()
     const { lease } = await runWiring()
     const acquires = lease.calls.filter((c) => c.op === "acquire")
     assert.equal(acquires.length, 1)
@@ -439,14 +443,14 @@ describe("B. lease canonique — acquisition, ALREADY_RUNNING, capability après
   })
 
   it("deux exécutions → runIds distincts (jamais fournis par l'appelant)", async () => {
-    enablePipelineKillSwitches()
+    authorizeTargetEnv()
     const a = await runWiring()
     const b = await runWiring()
     assert.notEqual(a.lease.calls[0]?.ownerRunId, b.lease.calls[0]?.ownerRunId)
   })
 
   it("ALREADY_RUNNING (orchestrateur actif) → refus, aucun heartbeat, aucune release, lease intacte", async () => {
-    enablePipelineKillSwitches()
+    authorizeTargetEnv()
     const lease = installCanonicalLease()
     lease.mem.forceOwner(ACQUISITION_ORCHESTRATOR_LEASE_KEY, "cron-run-live", 60_000)
     const steps = installOtherStepTraps()
@@ -465,7 +469,7 @@ describe("B. lease canonique — acquisition, ALREADY_RUNNING, capability après
   })
 
   it("capability seulement après ACQUIRED : acquire en erreur → aucun heartbeat, release best-effort", async () => {
-    enablePipelineKillSwitches()
+    authorizeTargetEnv()
     const { result, lease } = await runWiring({ acquireThrows: true })
     assert.equal(result.outcome, "LEASE_ACQUIRE_FAILED")
     assert.deepEqual(lease.ops(), ["acquire", "release"])
@@ -473,7 +477,7 @@ describe("B. lease canonique — acquisition, ALREADY_RUNNING, capability après
   })
 
   it("ACQUIRED → heartbeat de la capability sur la lease canonique (assertOwned + renew), puis release", async () => {
-    enablePipelineKillSwitches()
+    authorizeTargetEnv()
     const { result, lease } = await runWiring()
     assert.deepEqual(result, { outcome: "NOT_ARMED", release: "RELEASED" })
     assert.deepEqual(lease.ops(), ["acquire", "assertOwned", "renew", "release"])
@@ -481,7 +485,7 @@ describe("B. lease canonique — acquisition, ALREADY_RUNNING, capability après
   })
 
   it("lease perdue après acquire (volée) → LEASE_NOT_OWNED, release NOT_OWNER, lease du voleur intacte", async () => {
-    enablePipelineKillSwitches()
+    authorizeTargetEnv()
     const { result, lease } = await runWiring({
       onAcquired: (mem) => mem.forceOwner(ACQUISITION_ORCHESTRATOR_LEASE_KEY, "cron-run-thief", 60_000),
     })
@@ -491,7 +495,7 @@ describe("B. lease canonique — acquisition, ALREADY_RUNNING, capability après
   })
 
   it("lease expirée après acquire → LEASE_NOT_OWNED fail-closed", async () => {
-    enablePipelineKillSwitches()
+    authorizeTargetEnv()
     const { result } = await runWiring({
       onAcquired: (mem) => {
         const t0 = Date.now()
@@ -502,14 +506,14 @@ describe("B. lease canonique — acquisition, ALREADY_RUNNING, capability après
   })
 
   it("heartbeat en erreur → LEASE_NOT_OWNED, release quand même exécutée", async () => {
-    enablePipelineKillSwitches()
+    authorizeTargetEnv()
     const { result, lease } = await runWiring({ assertOwnedThrows: true })
     assert.deepEqual(result, { outcome: "LEASE_NOT_OWNED", release: "RELEASED" })
     assert.equal(lease.ops().at(-1), "release")
   })
 
   it("release NOT_FOUND / en erreur → état remonté (fail-closed côté runner)", async () => {
-    enablePipelineKillSwitches()
+    authorizeTargetEnv()
     const notFound = await runWiring({ releaseOutcome: "NOT_FOUND" })
     assert.deepEqual(notFound.result, { outcome: "NOT_ARMED", release: "NOT_FOUND" })
     const thrown = await runWiring({ releaseOutcome: "THROW" })
@@ -530,38 +534,156 @@ describe("B. lease canonique — acquisition, ALREADY_RUNNING, capability après
   })
 })
 
-describe("C. kill-switches production et cible — refus avant toute lease", () => {
-  it("master acquisition OFF → ACQUISITION_DISABLED, aucune opération lease", async () => {
+/** Listings des étapes sœurs vides (run production sans I/O). */
+function installEmptyProductionListings() {
+  const restore = [
+    patchMethod(acquisitionGmailConnectionListingAdapter, "listActiveAcquisitionGmailConnections", async () => []),
+    patchMethod(acquisitionAttachmentRepository, "listCompanyIdsWithReclaimCandidates", async () => []),
+    patchMethod(acquisitionAttachmentRepository, "listCompanyIdsWithRetryCandidates", async () => []),
+    patchMethod(acquisitionAttachmentRepository, "listCompanyIdsWithDiscoveredAttachments", async () => []),
+    patchMethod(acquisitionContentFetchStateRepository, "listCompanyIdsWithEligibleContentFetch", async () => []),
+    patchMethod(acquisitionConsultationDetectionSelectionRepository, "listCompanyIdsNeedingDetection", async () => []),
+    patchMethod(acquisitionConsultationDetectionSelectionRepository, "listCandidatesForCompany", async () => []),
+    patchMethod(acquisitionExtractionCronSelectionRepository, "listCompanyIdsWithEligibleExtraction", async () => []),
+  ]
+  return () => {
+    for (const fn of restore) fn()
+  }
+}
+
+async function runProduction() {
+  const lease = installCanonicalLease()
+  const restoreListings = installEmptyProductionListings()
+  try {
+    const result = await orchestratorWorkers.runProductionAcquisitionOrchestrator({ runId: "prod-regression" })
+    return { result, lease }
+  } finally {
+    lease.restore()
+    restoreListings()
+  }
+}
+
+describe("C. gates globaux : production inchangée, primitive ciblée indépendante", () => {
+  it("A. master acquisition OFF → production SKIPPED MASTER_DISABLED, aucune lease", async () => {
+    process.env.ACQUISITION_ORCHESTRATOR_CRON_ENABLED = "true"
     process.env.ACQUISITION_ORCHESTRATOR_POST_EXTRACTION_STEPS = "true"
-    const { result, lease } = await runWiring()
-    assert.deepEqual(result, { outcome: "ACQUISITION_DISABLED" })
+    const { result, lease } = await runProduction()
+    assert.equal(result.status, "SKIPPED")
+    assert.equal(result.skipReason, "MASTER_DISABLED")
+    assert.equal(result.steps.autoDecision.status, "NOT_RUN")
     assert.deepEqual(lease.ops(), [])
   })
 
-  it("steps post-extraction OFF → POST_EXTRACTION_STEPS_DISABLED, aucune opération lease", async () => {
+  it("A. master acquisition OFF → primitive ciblée non dépendante (atteint NOT_ARMED)", async () => {
+    authorizeTargetEnv()
+    process.env.ACQUISITION_ORCHESTRATOR_POST_EXTRACTION_STEPS = "true"
+    const { result } = await runWiring()
+    assert.deepEqual(result, { outcome: "NOT_ARMED", release: "RELEASED" })
+  })
+
+  it("B. post-extraction OFF → production : validation / autoDecision / worksiteCreation DISABLED", async () => {
+    process.env.ACQUISITION_ORCHESTRATOR_CRON_ENABLED = "true"
     process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    const { result, lease } = await runProduction()
+    for (const step of ["validation", "autoDecision", "worksiteCreation"] as const) {
+      assert.equal(result.steps[step].status, "SKIPPED", step)
+      assert.equal(result.steps[step].skipReason, "DISABLED", step)
+    }
+    assert.equal(lease.calls.filter((c) => c.op === "acquire")[0]?.ownerRunId, "prod-regression")
+  })
+
+  it("B. post-extraction OFF → primitive ciblée non dépendante (atteint NOT_ARMED)", async () => {
+    authorizeTargetEnv()
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    const { result } = await runWiring()
+    assert.deepEqual(result, { outcome: "NOT_ARMED", release: "RELEASED" })
+  })
+
+  it("A+B. les deux gates globaux OFF → primitive ciblée atteint NOT_ARMED, gates non modifiés", async () => {
+    authorizeTargetEnv()
+    const { result } = await runWiring()
+    assert.deepEqual(result, { outcome: "NOT_ARMED", release: "RELEASED" })
+    assert.equal(process.env.PLANIFICATOR_ACQUISITION_ENABLED, undefined)
+    assert.equal(process.env.ACQUISITION_ORCHESTRATOR_POST_EXTRACTION_STEPS, undefined)
+    const src = targetedWiringSource()
+    assert.ok(!src.includes("isAcquisitionEnabled"))
+    assert.ok(!src.includes("isAcquisitionOrchestratorPostExtractionStepsEnabled"))
+    assert.ok(!src.includes("process.env.PLANIFICATOR_ACQUISITION_ENABLED ="))
+  })
+
+  it("C. cible ≠ env autorisées → TARGET_NOT_AUTHORIZED avant toute opération lease", async () => {
+    authorizeTargetEnv()
+    for (const target of [
+      { companyId: COMPANY, draftId: "draft-other" },
+      { companyId: "co-other", draftId: DRAFT },
+      { companyId: "co-other", draftId: "draft-other" },
+      { companyId: ` ${COMPANY}`, draftId: DRAFT },
+      { companyId: COMPANY, draftId: `${DRAFT} ` },
+      { companyId: COMPANY.toUpperCase(), draftId: DRAFT },
+      { companyId: DRAFT, draftId: COMPANY },
+    ]) {
+      const { result, lease, steps } = await runWiring({}, target)
+      assert.deepEqual(result, { outcome: "TARGET_NOT_AUTHORIZED" }, JSON.stringify(target))
+      assert.deepEqual(lease.ops(), [])
+      assert.deepEqual(steps.hits, [])
+    }
+  })
+
+  it("C. env cible absentes / vides → TARGET_NOT_AUTHORIZED, même pour la « bonne » cible", async () => {
+    for (const env of [
+      {},
+      { TARGETED_STAGING_ATTACHMENT_NOT_READY_COMPANY_ID: COMPANY },
+      { TARGETED_STAGING_ATTACHMENT_NOT_READY_DRAFT_ID: DRAFT },
+      { TARGETED_STAGING_ATTACHMENT_NOT_READY_COMPANY_ID: " ", TARGETED_STAGING_ATTACHMENT_NOT_READY_DRAFT_ID: " " },
+    ]) {
+      delete process.env.TARGETED_STAGING_ATTACHMENT_NOT_READY_COMPANY_ID
+      delete process.env.TARGETED_STAGING_ATTACHMENT_NOT_READY_DRAFT_ID
+      Object.assign(process.env, env)
+      const { result, lease } = await runWiring()
+      assert.deepEqual(result, { outcome: "TARGET_NOT_AUTHORIZED" })
+      assert.deepEqual(lease.ops(), [])
+    }
+  })
+
+  it("C. vérification de cible avant acquire (ordre source), env non injectable", () => {
+    const src = targetedWiringSource()
+    const iAuth = src.indexOf("isAuthorizedTargetedAutoDecisionTarget({ companyId, draftId })")
+    const iAcquire = src.indexOf("leaseRepository.acquire(")
+    assert.ok(iAuth > 0 && iAcquire > iAuth)
+    const signature = src.slice(0, src.indexOf("): Promise<TargetedAutoDecisionLeaseRunResult>"))
+    assert.ok(!/env/.test(signature))
+    assert.match(readCode(SELECTION_PATH), /process\.env\[TARGETED_AUTO_DECISION_COMPANY_ENV\]/)
+    assert.match(readCode(SELECTION_PATH), /target\.companyId === companyId && target\.draftId === draftId/)
+  })
+
+  it("D. cible exacte → NOT_ARMED dans le wiring", async () => {
+    authorizeTargetEnv()
     const { result, lease } = await runWiring()
-    assert.deepEqual(result, { outcome: "POST_EXTRACTION_STEPS_DISABLED" })
-    assert.deepEqual(lease.ops(), [])
+    assert.deepEqual(result, { outcome: "NOT_ARMED", release: "RELEASED" })
+    assert.deepEqual(lease.ops(), ["acquire", "assertOwned", "renew", "release"])
   })
 
   it("le cron orchestrateur global n'est ni requis ni activé", async () => {
-    enablePipelineKillSwitches()
+    authorizeTargetEnv()
     await runWiring()
     assert.equal(process.env.ACQUISITION_ORCHESTRATOR_CRON_ENABLED, undefined)
     assert.ok(!targetedWiringSource().includes("resolveAcquisitionOrchestratorCronGate"))
   })
 
-  it("cible vide → INVALID_TARGET, aucune opération lease", async () => {
-    enablePipelineKillSwitches()
+  it("cible vide / non-string → INVALID_TARGET ; blanche → TARGET_NOT_AUTHORIZED ; aucune lease", async () => {
+    authorizeTargetEnv()
     for (const target of [
       { companyId: "", draftId: DRAFT },
-      { companyId: COMPANY, draftId: "  " },
+      { companyId: COMPANY, draftId: "" },
+      { companyId: 42 as unknown as string, draftId: DRAFT },
     ]) {
       const { result, lease } = await runWiring({}, target)
       assert.deepEqual(result, { outcome: "INVALID_TARGET" })
       assert.deepEqual(lease.ops(), [])
     }
+    const blank = await runWiring({}, { companyId: COMPANY, draftId: "  " })
+    assert.deepEqual(blank.result, { outcome: "TARGET_NOT_AUTHORIZED" })
+    assert.deepEqual(blank.lease.ops(), [])
   })
 })
 
@@ -572,7 +694,7 @@ describe("D. aucune autre étape orchestrateur, aucun worker tant que hard-stop 
   })
 
   it("wiring : aucune étape Gmail/recovery/download/content/detection/extraction, worker non appelé", async () => {
-    enablePipelineKillSwitches()
+    authorizeTargetEnv()
     process.env.ACQUISITION_AUTO_APPROVE_ENABLED = "true"
     const { result, lease, steps } = await runWiring()
     assert.deepEqual(result, { outcome: "NOT_ARMED", release: "RELEASED" })

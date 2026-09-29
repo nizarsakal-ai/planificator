@@ -19,13 +19,14 @@ import {
   runTargetedAutoDecisionUnderOrchestratorLease,
   type TargetedAutoDecisionLeaseRunResult,
 } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
-import { TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED } from "@/lib/acquisition/orchestrator/targeted-staging-auto-decision-selection"
+import {
+  TARGETED_AUTO_DECISION_COMPANY_ENV as COMPANY_ENV,
+  TARGETED_AUTO_DECISION_DRAFT_ENV as DRAFT_ENV,
+  TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED,
+} from "@/lib/acquisition/orchestrator/targeted-staging-auto-decision-selection"
 
 /** Gate dédié, distinct du flag CHECK du preflight. Exactement "true" requis. */
 export const TARGETED_AUTO_DECISION_RUN_GATE = "TARGETED_STAGING_AUTO_DECISION_RUN_ENABLED"
-
-const COMPANY_ENV = "TARGETED_STAGING_ATTACHMENT_NOT_READY_COMPANY_ID"
-const DRAFT_ENV = "TARGETED_STAGING_ATTACHMENT_NOT_READY_DRAFT_ID"
 
 export type TargetedAutoDecisionRunnerDeps = {
   env?: Record<string, string | undefined>

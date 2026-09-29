@@ -53,12 +53,12 @@ import { runAcquisitionWorksiteCreationWorker } from "@/lib/acquisition/orchestr
 import { createOrchestratorLeaseTransactionalFence } from "@/lib/acquisition/orchestrator/orchestrator-lease-tx-fence"
 import type { ConversionTransactionalOwnershipFence } from "@/lib/acquisition/conversion/conversion-ownership-fence.port"
 import { randomUUID } from "node:crypto"
-import { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
 import type { AutoDecisionWorkerRunResult } from "@/lib/acquisition/orchestrator/acquisition-auto-decision.worker"
 import {
   TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED,
   buildTargetedAutoDecisionWorkerDeps,
   createTargetedAutoDecisionSelectionPort,
+  isAuthorizedTargetedAutoDecisionTarget,
 } from "@/lib/acquisition/orchestrator/targeted-staging-auto-decision-selection"
 
 const ORCHESTRATOR_AUTO_BRAND: unique symbol = Symbol(
@@ -483,8 +483,7 @@ export type TargetedAutoDecisionLeaseReleaseState =
 
 export type TargetedAutoDecisionLeaseRunResult =
   | { outcome: "INVALID_TARGET" }
-  | { outcome: "ACQUISITION_DISABLED" }
-  | { outcome: "POST_EXTRACTION_STEPS_DISABLED" }
+  | { outcome: "TARGET_NOT_AUTHORIZED" }
   | { outcome: "ALREADY_RUNNING" }
   | { outcome: "LEASE_ACQUIRE_FAILED"; release: TargetedAutoDecisionLeaseReleaseState }
   | {
@@ -502,18 +501,21 @@ export type TargetedAutoDecisionLeaseRunResult =
  * La capability AUTO est créée ICI uniquement, après acquire ACQUIRED, et ne quitte jamais
  * ce module (ni capability, ni ownerRunId, ni lease key, ni fence exposés).
  * Aucune autre étape orchestrateur. Worker verrouillé par TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED.
+ * Cible liée aux variables serveur du harness (refus avant lease sinon). Ne dépend pas des
+ * gates globaux pipeline ; ceux-ci restent appliqués par runProductionAcquisitionOrchestrator.
  */
 export async function runTargetedAutoDecisionUnderOrchestratorLease(input: {
   target: { companyId: string; draftId: string }
 }): Promise<TargetedAutoDecisionLeaseRunResult> {
-  const companyId = input.target.companyId.trim()
-  const draftId = input.target.draftId.trim()
-  if (!companyId || !draftId) return { outcome: "INVALID_TARGET" }
-
-  // Kill-switches production de l'étape autoDecision (snapshot unique, jamais activés ici).
-  if (!isAcquisitionEnabled()) return { outcome: "ACQUISITION_DISABLED" }
-  if (!isAcquisitionOrchestratorPostExtractionStepsEnabled()) {
-    return { outcome: "POST_EXTRACTION_STEPS_DISABLED" }
+  const { companyId, draftId } = input.target
+  if (typeof companyId !== "string" || typeof draftId !== "string" || !companyId || !draftId) {
+    return { outcome: "INVALID_TARGET" }
+  }
+  // Cible liée aux variables serveur du harness : toute autre cible → refus AVANT la lease.
+  // Indépendant des gates globaux pipeline (PLANIFICATOR_ACQUISITION_ENABLED,
+  // ACQUISITION_ORCHESTRATOR_POST_EXTRACTION_STEPS), qui continuent de protéger la production.
+  if (!isAuthorizedTargetedAutoDecisionTarget({ companyId, draftId })) {
+    return { outcome: "TARGET_NOT_AUTHORIZED" }
   }
 
   const leaseRepository = acquisitionOrchestratorLeaseRepository

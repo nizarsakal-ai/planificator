@@ -26,7 +26,26 @@ import { AcquisitionDecisionJournalRepository } from "@/lib/acquisition/policy/d
  */
 export const TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED = false as boolean
 
-type TargetJournal = Pick<AcquisitionDecisionJournalRepository, "findLatestValidationDecisionForCycle">
+/** Seules sources de la cible autorisée (variables serveur du harness). */
+export const TARGETED_AUTO_DECISION_COMPANY_ENV = "TARGETED_STAGING_ATTACHMENT_NOT_READY_COMPANY_ID"
+export const TARGETED_AUTO_DECISION_DRAFT_ENV = "TARGETED_STAGING_ATTACHMENT_NOT_READY_DRAFT_ID"
+
+/**
+ * Défense en profondeur : la cible fournie doit être EXACTEMENT (sans normalisation)
+ * celle des variables serveur du harness, lues ici dans process.env (non injectable).
+ * Variables absentes / vides → refus.
+ */
+export function isAuthorizedTargetedAutoDecisionTarget(target: {
+  companyId: string
+  draftId: string
+}): boolean {
+  const companyId = (process.env[TARGETED_AUTO_DECISION_COMPANY_ENV] ?? "").trim()
+  const draftId = (process.env[TARGETED_AUTO_DECISION_DRAFT_ENV] ?? "").trim()
+  if (!companyId || !draftId) return false
+  return target.companyId === companyId && target.draftId === draftId
+}
+
+type TargetJournal =Pick<AcquisitionDecisionJournalRepository, "findLatestValidationDecisionForCycle">
 
 /**
  * Sélection mono-draft : ne lit que la cible exacte (id + companyId) et ne peut
