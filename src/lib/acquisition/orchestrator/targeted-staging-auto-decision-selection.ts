@@ -4,7 +4,8 @@
  * `acquisition-orchestrator-workers.ts` et par le runner ciblé.
  *
  * - sélection mono-draft (jamais le selector Prisma global)
- * - liste blanche des deps worker : aucun override politique / system actor / contexte / revue
+ * - liste blanche des deps worker : aucun override system actor / contexte / revue / kill-switch
+ * - override de politique target-only (resolveTargetedAutoDecisionEffectiveFlags)
  * - verrou de code TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED
  */
 
@@ -12,6 +13,7 @@ import type { PrismaClient } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import {
   isConsultationCancelledTerminal,
+  type AutoDecisionEffectiveFlagsResolver,
   type AutoDecisionWorkerCandidate,
   type AutoDecisionWorkerDeps,
   type AutoDecisionWorkerSelectionPort,
@@ -45,7 +47,21 @@ export function isAuthorizedTargetedAutoDecisionTarget(target: {
   return target.companyId === companyId && target.draftId === draftId
 }
 
-type TargetJournal =Pick<AcquisitionDecisionJournalRepository, "findLatestValidationDecisionForCycle">
+/**
+ * Override de politique TARGET-ONLY : approve + convert effectifs pour la seule cible serveur
+ * autorisée, relue dans process.env à CHAQUE appel (défense en profondeur, indépendante du
+ * selector). Toute autre cible → null (fail-closed : candidat ignoré sans écriture).
+ * Non paramétrable : aucun appelant ne choisit la cible ni les valeurs retournées.
+ * N'écrit ni env global ni flags partner ; ne touche pas ctx.partner.
+ */
+export const resolveTargetedAutoDecisionEffectiveFlags: AutoDecisionEffectiveFlagsResolver = (input) => {
+  if (!isAuthorizedTargetedAutoDecisionTarget({ companyId: input.companyId, draftId: input.draftId })) {
+    return null
+  }
+  return { effectiveAutoApproveEnabled: true, effectiveAutoConvertEnabled: true }
+}
+
+type TargetJournal = Pick<AcquisitionDecisionJournalRepository, "findLatestValidationDecisionForCycle">
 
 /**
  * Sélection mono-draft : ne lit que la cible exacte (id + companyId) et ne peut
@@ -113,8 +129,8 @@ export function createTargetedAutoDecisionSelectionPort(input: {
 }
 
 /**
- * Deps worker autorisées — liste blanche : aucune clé de politique / system actor /
- * contexte / revue ; bornes à 1 candidat.
+ * Deps worker autorisées — liste blanche : aucun override system actor / contexte / revue /
+ * kill-switch ; seul override de politique = resolver target-only fixe ; bornes à 1 candidat.
  */
 export function buildTargetedAutoDecisionWorkerDeps(input: {
   selection: AutoDecisionWorkerSelectionPort
@@ -133,6 +149,7 @@ export function buildTargetedAutoDecisionWorkerDeps(input: {
     maxCandidates: 1,
     maxScan: 1,
     maxPerCompany: 1,
+    resolveEffectiveAutoFlags: resolveTargetedAutoDecisionEffectiveFlags,
     ...(input.maxDurationMs != null ? { maxDurationMs: input.maxDurationMs } : {}),
   }
 }

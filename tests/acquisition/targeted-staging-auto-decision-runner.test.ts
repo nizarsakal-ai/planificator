@@ -40,6 +40,7 @@ import {
   TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED,
   buildTargetedAutoDecisionWorkerDeps,
   createTargetedAutoDecisionSelectionPort,
+  resolveTargetedAutoDecisionEffectiveFlags,
 } from "@/lib/acquisition/orchestrator/targeted-staging-auto-decision-selection"
 
 const ROOT = path.resolve(__dirname, "../..")
@@ -972,9 +973,12 @@ describe("H. politiques production non contournées (partner, kill-switches, sys
       "maxDurationMs",
       "maxPerCompany",
       "maxScan",
+      "resolveEffectiveAutoFlags",
       "selection",
       "transactionalOwnershipFence",
     ])
+    // Seul override de politique : le resolver target-only fixe.
+    assert.equal(deps.resolveEffectiveAutoFlags, resolveTargetedAutoDecisionEffectiveFlags)
     assert.equal(deps.selection, selection)
     assert.equal(deps.maxCandidates, 1)
     assert.equal(deps.maxScan, 1)
@@ -1009,10 +1013,10 @@ describe("H. politiques production non contournées (partner, kill-switches, sys
     )
   })
 
-  it("kill-switch auto-approve OFF → worker réel SKIPPED avant sélection", async () => {
+  it("kill-switch auto-approve OFF, deps SANS resolver (production) → worker réel SKIPPED avant sélection", async () => {
     let selected = 0
     const trap = trapDb()
-    const deps = buildTargetedAutoDecisionWorkerDeps({
+    const { resolveEffectiveAutoFlags: _targetedOnly, ...productionLike } = buildTargetedAutoDecisionWorkerDeps({
       selection: {
         async listEligibleCandidates() {
           selected++
@@ -1024,10 +1028,42 @@ describe("H. politiques production non contournées (partner, kill-switches, sys
       db: trap.db,
       journal: trap.db as never,
     })
-    const out = await runAcquisitionAutoDecisionWorker({ ...deps, log: () => {} })
+    void _targetedOnly
+    const out = await runAcquisitionAutoDecisionWorker({ ...productionLike, log: () => {} })
     assert.equal(out.status, "SKIPPED")
     assert.equal(out.skipReason, "AUTO_APPROVE_DISABLED")
     assert.equal(selected, 0)
+    assert.deepEqual(trap.accesses, [])
+  })
+
+  it("kill-switch OFF, deps ciblées, cible env non autorisée → candidat ignoré sans aucun accès DB", async () => {
+    // TARGETED_STAGING_* absentes (beforeEach) : le resolver refuse toute cible.
+    const trap = trapDb()
+    const deps = buildTargetedAutoDecisionWorkerDeps({
+      selection: {
+        async listEligibleCandidates() {
+          return [
+            {
+              draftId: DRAFT,
+              companyId: COMPANY,
+              status: "PENDING_REVIEW",
+              version: 3,
+              contentHashAtExtraction: HASH,
+              extractionSchemaVersion: "2",
+              updatedAt: NOW,
+              selectionPath: "PASS",
+            },
+          ]
+        },
+      },
+      ensureOwnership: async () => "OWNED",
+      transactionalOwnershipFence: FAKE_FENCE,
+      db: trap.db,
+      journal: trap.db as never,
+    })
+    const out = await runAcquisitionAutoDecisionWorker({ ...deps, log: () => {} })
+    assert.equal(out.stats.skipped, 1)
+    assert.equal(out.stats.intentAppended, 0)
     assert.deepEqual(trap.accesses, [])
   })
 

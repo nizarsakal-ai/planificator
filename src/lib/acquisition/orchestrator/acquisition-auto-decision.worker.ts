@@ -143,6 +143,58 @@ export type AutoDecisionWorkerDeps = {
   /** Kill-switches injectables (tests). */
   isAutoApproveEnabled?: () => boolean
   isAutoConvertEnabled?: () => boolean
+  /**
+   * Résolution des flags effectifs. Absent (production) → computeEffectiveAutoFlags,
+   * comportement inchangé. Présent → voir AutoDecisionEffectiveFlagsResolver.
+   */
+  resolveEffectiveAutoFlags?: AutoDecisionEffectiveFlagsResolver
+}
+
+export type AutoDecisionEffectiveFlagsInput = {
+  companyId: string
+  draftId: string
+  partnerAutoApprove: boolean
+  partnerAutoConvert: boolean
+  globalAutoApprove: boolean
+  globalAutoConvert: boolean
+}
+
+export type AutoDecisionEffectiveFlags = {
+  effectiveAutoApproveEnabled: boolean
+  effectiveAutoConvertEnabled: boolean
+}
+
+/**
+ * Contrat : retourne null ssi (companyId, draftId) n'est pas autorisé — indépendamment des
+ * flags partner/global. null, exception ou forme invalide → candidat ignoré AVANT toute
+ * lecture/écriture (fail-closed). Injecté, il remplace le skip run-level AUTO_APPROVE_DISABLED
+ * par cette autorisation par candidat.
+ */
+export type AutoDecisionEffectiveFlagsResolver = (
+  input: AutoDecisionEffectiveFlagsInput
+) => AutoDecisionEffectiveFlags | null
+
+/** Appel défensif du resolver injecté : exception / forme invalide → null (fail-closed). */
+function callEffectiveFlagsResolver(
+  resolver: AutoDecisionEffectiveFlagsResolver,
+  input: AutoDecisionEffectiveFlagsInput
+): AutoDecisionEffectiveFlags | null {
+  try {
+    const out = resolver(input)
+    if (
+      !out ||
+      typeof out.effectiveAutoApproveEnabled !== "boolean" ||
+      typeof out.effectiveAutoConvertEnabled !== "boolean"
+    ) {
+      return null
+    }
+    return {
+      effectiveAutoApproveEnabled: out.effectiveAutoApproveEnabled,
+      effectiveAutoConvertEnabled: out.effectiveAutoConvertEnabled,
+    }
+  } catch {
+    return null
+  }
 }
 
 function defaultLog(event: string, payload?: Record<string, unknown>): void {
@@ -613,7 +665,9 @@ export async function runAcquisitionAutoDecisionWorker(
     }
   }
 
-  if (!isApproveOn()) {
+  // Sans resolver (production) : skip run-level inchangé. Avec resolver : autorisation
+  // par candidat en tête de processCandidate (fail-closed, avant toute écriture).
+  if (!isApproveOn() && !input.resolveEffectiveAutoFlags) {
     return {
       status: "SKIPPED",
       skipReason: "AUTO_APPROVE_DISABLED",
@@ -658,6 +712,7 @@ export async function runAcquisitionAutoDecisionWorker(
         transactionalOwnershipFence: input.transactionalOwnershipFence,
         isConvertOn: isConvertOn(),
         isApproveOn: isApproveOn(),
+        resolveEffectiveAutoFlags: input.resolveEffectiveAutoFlags,
         stats,
         log,
       })
@@ -717,11 +772,28 @@ async function processCandidate(input: {
   transactionalOwnershipFence?: TransactionalOwnershipFence
   isConvertOn: boolean
   isApproveOn: boolean
+  resolveEffectiveAutoFlags?: AutoDecisionEffectiveFlagsResolver
   stats: AutoDecisionWorkerRunStats
   log: (event: string, payload?: Record<string, unknown>) => void
 }): Promise<{ leaseStolen?: boolean } | void> {
   const { candidate, journal, review, db, stats, log } = input
   const fence = input.transactionalOwnershipFence
+
+  // Resolver injecté : autorisation de la cible AVANT toute lecture/écriture (fail-closed).
+  if (
+    input.resolveEffectiveAutoFlags &&
+    !callEffectiveFlagsResolver(input.resolveEffectiveAutoFlags, {
+      companyId: candidate.companyId,
+      draftId: candidate.draftId,
+      partnerAutoApprove: false,
+      partnerAutoConvert: false,
+      globalAutoApprove: input.isApproveOn,
+      globalAutoConvert: input.isConvertOn,
+    })
+  ) {
+    stats.skipped++
+    return
+  }
 
   if (!(await isOrchestratorOwnershipValid(input.ensureOwnership))) {
     return { leaseStolen: true }
@@ -870,12 +942,23 @@ async function processCandidate(input: {
         scores: ctx.snapshot.confidenceData,
       }
     } else {
-      const flags = computeEffectiveAutoFlags({
+      const flagsInput = {
         partnerAutoApprove: ctx.partner?.autoApproveEnabled === true,
         partnerAutoConvert: ctx.partner?.autoConvertEnabled === true,
         globalAutoApprove: input.isApproveOn,
         globalAutoConvert: input.isConvertOn,
-      })
+      }
+      const flags = input.resolveEffectiveAutoFlags
+        ? callEffectiveFlagsResolver(input.resolveEffectiveAutoFlags, {
+            companyId: candidate.companyId,
+            draftId: candidate.draftId,
+            ...flagsInput,
+          })
+        : computeEffectiveAutoFlags(flagsInput)
+      if (!flags) {
+        stats.skipped++
+        return
+      }
       decision = evaluateAutoDecision(
         buildAutoDecisionPolicyInput({
           ctx,
