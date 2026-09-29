@@ -52,6 +52,14 @@ import { runAcquisitionAutoDecisionWorker } from "@/lib/acquisition/orchestrator
 import { runAcquisitionWorksiteCreationWorker } from "@/lib/acquisition/orchestrator/acquisition-worksite-creation.worker"
 import { createOrchestratorLeaseTransactionalFence } from "@/lib/acquisition/orchestrator/orchestrator-lease-tx-fence"
 import type { ConversionTransactionalOwnershipFence } from "@/lib/acquisition/conversion/conversion-ownership-fence.port"
+import { randomUUID } from "node:crypto"
+import { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
+import type { AutoDecisionWorkerRunResult } from "@/lib/acquisition/orchestrator/acquisition-auto-decision.worker"
+import {
+  TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED,
+  buildTargetedAutoDecisionWorkerDeps,
+  createTargetedAutoDecisionSelectionPort,
+} from "@/lib/acquisition/orchestrator/targeted-staging-auto-decision-selection"
 
 const ORCHESTRATOR_AUTO_BRAND: unique symbol = Symbol(
   "ORCHESTRATOR_AUTO_CAPABILITY"
@@ -465,4 +473,120 @@ export async function runProductionAcquisitionOrchestrator(input: {
     }),
     config: getAcquisitionOrchestratorConfig(),
   })
+}
+
+export type TargetedAutoDecisionLeaseReleaseState =
+  | "RELEASED"
+  | "NOT_OWNER"
+  | "NOT_FOUND"
+  | "RELEASE_FAILED"
+
+export type TargetedAutoDecisionLeaseRunResult =
+  | { outcome: "INVALID_TARGET" }
+  | { outcome: "ACQUISITION_DISABLED" }
+  | { outcome: "POST_EXTRACTION_STEPS_DISABLED" }
+  | { outcome: "ALREADY_RUNNING" }
+  | { outcome: "LEASE_ACQUIRE_FAILED"; release: TargetedAutoDecisionLeaseReleaseState }
+  | {
+      outcome: "FENCE_UNAVAILABLE" | "LEASE_NOT_OWNED" | "NOT_ARMED" | "UNEXPECTED_FAILURE"
+      release: TargetedAutoDecisionLeaseReleaseState
+    }
+  | {
+      outcome: "WORKER_FINISHED"
+      release: TargetedAutoDecisionLeaseReleaseState
+      worker: Pick<AutoDecisionWorkerRunResult, "status" | "skipReason" | "stats">
+    }
+
+/**
+ * Exécution auto-decision CIBLÉE (un seul draft) sous la lease canonique orchestrateur.
+ * La capability AUTO est créée ICI uniquement, après acquire ACQUIRED, et ne quitte jamais
+ * ce module (ni capability, ni ownerRunId, ni lease key, ni fence exposés).
+ * Aucune autre étape orchestrateur. Worker verrouillé par TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED.
+ */
+export async function runTargetedAutoDecisionUnderOrchestratorLease(input: {
+  target: { companyId: string; draftId: string }
+}): Promise<TargetedAutoDecisionLeaseRunResult> {
+  const companyId = input.target.companyId.trim()
+  const draftId = input.target.draftId.trim()
+  if (!companyId || !draftId) return { outcome: "INVALID_TARGET" }
+
+  // Kill-switches production de l'étape autoDecision (snapshot unique, jamais activés ici).
+  if (!isAcquisitionEnabled()) return { outcome: "ACQUISITION_DISABLED" }
+  if (!isAcquisitionOrchestratorPostExtractionStepsEnabled()) {
+    return { outcome: "POST_EXTRACTION_STEPS_DISABLED" }
+  }
+
+  const leaseRepository = acquisitionOrchestratorLeaseRepository
+  const config = getAcquisitionOrchestratorConfig()
+  // runId ciblé généré ici : jamais fourni par l'appelant, jamais retourné.
+  const runId = `targeted-auto-decision:${randomUUID()}`
+
+  const release = async (): Promise<TargetedAutoDecisionLeaseReleaseState> => {
+    try {
+      const released = await leaseRepository.release({
+        key: ACQUISITION_ORCHESTRATOR_LEASE_KEY,
+        ownerRunId: runId,
+      })
+      return released.outcome
+    } catch {
+      return "RELEASE_FAILED"
+    }
+  }
+
+  let acquired: boolean
+  try {
+    const acquire = await leaseRepository.acquire({
+      key: ACQUISITION_ORCHESTRATOR_LEASE_KEY,
+      ownerRunId: runId,
+      leaseTtlMs: config.leaseTtlMs,
+    })
+    acquired = acquire.outcome === "ACQUIRED"
+  } catch {
+    // Issue inconnue : libération best-effort (ne libère que si ce runId possède la lease).
+    return { outcome: "LEASE_ACQUIRE_FAILED", release: await release() }
+  }
+  if (!acquired) return { outcome: "ALREADY_RUNNING" }
+
+  let body:
+    | { outcome: "FENCE_UNAVAILABLE" | "LEASE_NOT_OWNED" | "NOT_ARMED" | "UNEXPECTED_FAILURE" }
+    | {
+        outcome: "WORKER_FINISHED"
+        worker: Pick<AutoDecisionWorkerRunResult, "status" | "skipReason" | "stats">
+      } = { outcome: "UNEXPECTED_FAILURE" }
+  let releaseState: TargetedAutoDecisionLeaseReleaseState = "RELEASE_FAILED"
+  try {
+    const capability = createOrchestratorAutoCapability({
+      leaseRepository,
+      ownerRunId: runId,
+    })
+    const fence = resolveOrchestratorAutoTransactionalFence(capability)
+    if (!fence) {
+      body = { outcome: "FENCE_UNAVAILABLE" }
+    } else if ((await resolveOrchestratorAutoOwnership(capability)) !== "OWNED") {
+      body = { outcome: "LEASE_NOT_OWNED" }
+    } else if (!TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED) {
+      body = { outcome: "NOT_ARMED" }
+    } else {
+      const worker = await runAcquisitionAutoDecisionWorker(
+        buildTargetedAutoDecisionWorkerDeps({
+          selection: createTargetedAutoDecisionSelectionPort({ companyId, draftId }),
+          ensureOwnership: ownershipCheckFrom(capability),
+          transactionalOwnershipFence: fence,
+          maxDurationMs: clampChildBudget(
+            config.maxDurationMs - config.safetyMarginMs,
+            config.maxDurationMs
+          ),
+        })
+      )
+      body = {
+        outcome: "WORKER_FINISHED",
+        worker: { status: worker.status, skipReason: worker.skipReason, stats: worker.stats },
+      }
+    }
+  } catch {
+    body = { outcome: "UNEXPECTED_FAILURE" }
+  } finally {
+    releaseState = await release()
+  }
+  return { ...body, release: releaseState }
 }
