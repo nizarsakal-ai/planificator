@@ -537,7 +537,7 @@ describe("H/I. bornes et hard-stop", () => {
     assert.equal(out.approveCalls, 1)
   })
 
-  it("I. hard-stop toujours false", () => {
-    assert.equal(TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED, false)
+  it("I. état armé (armement explicite) : l'override reste target-only (cf. D-G)", () => {
+    assert.equal(TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED, true)
   })
 })

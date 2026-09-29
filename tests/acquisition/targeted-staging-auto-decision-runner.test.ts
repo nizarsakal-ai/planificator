@@ -42,6 +42,28 @@ import {
   createTargetedAutoDecisionSelectionPort,
   resolveTargetedAutoDecisionEffectiveFlags,
 } from "@/lib/acquisition/orchestrator/targeted-staging-auto-decision-selection"
+import { prisma } from "@/lib/prisma"
+
+// ---------------------------------------------------------------------------
+// Prisma 100 % mocké : middleware qui ne rappelle JAMAIS next() → aucune connexion DB.
+// Réponse par défaut : cible introuvable (worksiteImportDraft.findFirst → null) ;
+// toute autre requête (lecture hors sélection, écriture, raw) → erreur explicite.
+// ---------------------------------------------------------------------------
+
+const dbCalls: string[] = []
+const dbArgs: unknown[] = []
+type DbResponder = (key: string) => unknown
+const DEFAULT_DB_RESPONDER: DbResponder = (key) => {
+  if (key === "WorksiteImportDraft.findFirst") return null
+  throw new Error(`DB_ACCESS_FORBIDDEN:${key}`)
+}
+let dbResponder: DbResponder = DEFAULT_DB_RESPONDER
+prisma.$use(async (params) => {
+  const key = `${params.model ?? "raw"}.${params.action}`
+  dbCalls.push(key)
+  dbArgs.push(params.args)
+  return dbResponder(key)
+})
 
 const ROOT = path.resolve(__dirname, "../..")
 const RUNNER_PATH = "src/lib/acquisition/orchestrator/targeted-staging-auto-decision-runner.ts"
@@ -137,7 +159,10 @@ function installCanonicalLease(opts: {
   acquireThrows?: boolean
   assertOwnedThrows?: boolean
   releaseOutcome?: "NOT_FOUND" | "THROW"
+  /** Vol de lease juste avant le N-ième assertOwned (1 = heartbeat wiring, 2 = worker). */
+  stealBeforeAssertOwnedCall?: number
 } = {}) {
+  let assertOwnedCalls = 0
   const mem = new InMemoryAcquisitionOrchestratorLeaseRepository()
   const calls: LeaseCall[] = []
   const repo = acquisitionOrchestratorLeaseRepository
@@ -151,6 +176,10 @@ function installCanonicalLease(opts: {
     }),
     patchMethod(repo, "assertOwned", async (input) => {
       calls.push({ op: "assertOwned", ...input })
+      assertOwnedCalls++
+      if (opts.stealBeforeAssertOwnedCall === assertOwnedCalls) {
+        mem.forceOwner(ACQUISITION_ORCHESTRATOR_LEASE_KEY, "cron-run-thief", 60_000)
+      }
       if (opts.assertOwnedThrows) throw new Error("lease lookup failed")
       return mem.assertOwned(input)
     }),
@@ -215,6 +244,9 @@ let savedEnv: Record<string, string | undefined> = {}
 beforeEach(() => {
   savedEnv = Object.fromEntries(PROCESS_ENV_KEYS.map((k) => [k, process.env[k]]))
   for (const k of PROCESS_ENV_KEYS) delete process.env[k]
+  dbCalls.length = 0
+  dbArgs.length = 0
+  dbResponder = DEFAULT_DB_RESPONDER
 })
 afterEach(() => {
   for (const k of PROCESS_ENV_KEYS) {
@@ -227,6 +259,21 @@ afterEach(() => {
 function authorizeTargetEnv() {
   process.env.TARGETED_STAGING_ATTACHMENT_NOT_READY_COMPANY_ID = COMPANY
   process.env.TARGETED_STAGING_ATTACHMENT_NOT_READY_DRAFT_ID = DRAFT
+}
+
+/** Worker réel exécuté sous lease, cible introuvable (DB mockée) → SUCCESS, 0 sélection, 0 écriture. */
+function assertWorkerRanEmpty(
+  result: Awaited<ReturnType<typeof runTargetedAutoDecisionUnderOrchestratorLease>>,
+  release: string
+) {
+  assert.equal(result.outcome, "WORKER_FINISHED", JSON.stringify(result))
+  if (result.outcome !== "WORKER_FINISHED") return
+  assert.equal(result.release, release)
+  assert.equal(result.worker.status, "SUCCESS")
+  assert.equal(result.worker.stats.selected, 0)
+  assert.equal(result.worker.stats.intentAppended, 0)
+  assert.equal(result.worker.stats.approved, 0)
+  assert.equal(result.worker.stats.rejected, 0)
 }
 
 async function runWiring(
@@ -348,13 +395,29 @@ function runnerDeps(over: Partial<TargetedAutoDecisionRunnerDeps> = {}): Targete
   return { env: { ...RUN_ENV }, auth: sessionAuth(), ...over }
 }
 
-/** Runner avec lease canonique instrumentée : aucune opération lease attendue. */
+/** Refus des gardes runner : doivent intervenir avant toute lease / DB / worker / étape. */
+const RUNNER_GUARD_CODES = new Set([
+  "HARNESS_SURFACE_FORBIDDEN",
+  "TARGETED_RUN_DISABLED",
+  "UNAUTHORIZED",
+  "FORBIDDEN",
+  "HARNESS_TARGET_UNSET",
+  "FORBIDDEN_DRAFT",
+  "TENANT_MISMATCH",
+])
+
+/** Runner avec lease canonique instrumentée et DB mockée. */
 async function runRunner(deps: TargetedAutoDecisionRunnerDeps) {
   authorizeTargetEnv()
   const lease = installCanonicalLease()
   const steps = installOtherStepTraps()
   try {
     const out = await runTargetedStagingAutoDecision(deps)
+    if (!out.ok && RUNNER_GUARD_CODES.has(out.code)) {
+      assert.deepEqual(lease.ops(), [], `${out.code} : aucune lease`)
+      assert.deepEqual(dbCalls, [], `${out.code} : aucune DB`)
+      assert.deepEqual(steps.hits, [], `${out.code} : aucune étape`)
+    }
     return { out, leaseOps: lease.ops(), stepHits: steps.hits }
   } finally {
     lease.restore()
@@ -409,7 +472,11 @@ describe("A. frontière capability — factory privée, aucune capability depuis
     assert.ok(runId.length > 0)
     assert.ok(!serialized.includes(runId))
     assert.ok(!serialized.includes(ACQUISITION_ORCHESTRATOR_LEASE_KEY))
-    assert.deepEqual(Object.keys(result).sort(), ["outcome", "release"])
+    assert.equal(result.outcome, "WORKER_FINISHED")
+    assert.deepEqual(Object.keys(result).sort(), ["outcome", "release", "worker"])
+    if (result.outcome === "WORKER_FINISHED") {
+      assert.deepEqual(Object.keys(result.worker).sort(), ["skipReason", "stats", "status"])
+    }
   })
 
   it("seuls le wiring et le runner référencent la fonction ciblée ; seule la route RUN (via handler) atteint le runner", () => {
@@ -481,12 +548,29 @@ describe("B. lease canonique — acquisition, ALREADY_RUNNING, capability après
     assert.equal(lease.calls[1]?.ownerRunId, lease.calls[0]?.ownerRunId)
   })
 
-  it("ACQUIRED → heartbeat de la capability sur la lease canonique (assertOwned + renew), puis release", async () => {
+  it("ACQUIRED → heartbeat wiring, PUIS worker (son propre heartbeat + sélection mono-draft), puis release", async () => {
     authorizeTargetEnv()
     const { result, lease } = await runWiring()
-    assert.deepEqual(result, { outcome: "NOT_ARMED", release: "RELEASED" })
-    assert.deepEqual(lease.ops(), ["acquire", "assertOwned", "renew", "release"])
+    assertWorkerRanEmpty(result, "RELEASED")
+    // wiring : acquire + heartbeat ; worker : heartbeat ; finally : release.
+    assert.deepEqual(lease.ops(), ["acquire", "assertOwned", "renew", "assertOwned", "renew", "release"])
     assert.equal(lease.mem.peek(ACQUISITION_ORCHESTRATOR_LEASE_KEY)?.ownerRunId, null)
+    // Seule requête DB : lecture de la cible exacte par le port mono-draft (mockée → introuvable).
+    assert.deepEqual(dbCalls, ["WorksiteImportDraft.findFirst"])
+  })
+
+  it("lease volée entre heartbeat wiring et worker → worker SKIPPED LEASE_STOLEN avant toute sélection", async () => {
+    authorizeTargetEnv()
+    const { result, lease } = await runWiring({ stealBeforeAssertOwnedCall: 2 })
+    assert.equal(result.outcome, "WORKER_FINISHED")
+    if (result.outcome === "WORKER_FINISHED") {
+      assert.equal(result.worker.status, "SKIPPED")
+      assert.equal(result.worker.skipReason, "LEASE_STOLEN")
+      assert.equal(result.worker.stats.selected, 0)
+      assert.equal(result.release, "NOT_OWNER")
+    }
+    assert.deepEqual(dbCalls, [], "aucune lecture métier")
+    assert.equal(lease.mem.peek(ACQUISITION_ORCHESTRATOR_LEASE_KEY)?.ownerRunId, "cron-run-thief")
   })
 
   it("lease perdue après acquire (volée) → LEASE_NOT_OWNED, release NOT_OWNER, lease du voleur intacte", async () => {
@@ -497,6 +581,7 @@ describe("B. lease canonique — acquisition, ALREADY_RUNNING, capability après
     assert.deepEqual(result, { outcome: "LEASE_NOT_OWNED", release: "NOT_OWNER" })
     assert.deepEqual(lease.ops(), ["acquire", "assertOwned", "release"])
     assert.equal(lease.mem.peek(ACQUISITION_ORCHESTRATOR_LEASE_KEY)?.ownerRunId, "cron-run-thief")
+    assert.deepEqual(dbCalls, [], "worker jamais appelé")
   })
 
   it("lease expirée après acquire → LEASE_NOT_OWNED fail-closed", async () => {
@@ -515,14 +600,15 @@ describe("B. lease canonique — acquisition, ALREADY_RUNNING, capability après
     const { result, lease } = await runWiring({ assertOwnedThrows: true })
     assert.deepEqual(result, { outcome: "LEASE_NOT_OWNED", release: "RELEASED" })
     assert.equal(lease.ops().at(-1), "release")
+    assert.deepEqual(dbCalls, [], "worker jamais appelé")
   })
 
   it("release NOT_FOUND / en erreur → état remonté (fail-closed côté runner)", async () => {
     authorizeTargetEnv()
     const notFound = await runWiring({ releaseOutcome: "NOT_FOUND" })
-    assert.deepEqual(notFound.result, { outcome: "NOT_ARMED", release: "NOT_FOUND" })
+    assertWorkerRanEmpty(notFound.result, "NOT_FOUND")
     const thrown = await runWiring({ releaseOutcome: "THROW" })
-    assert.deepEqual(thrown.result, { outcome: "NOT_ARMED", release: "RELEASE_FAILED" })
+    assertWorkerRanEmpty(thrown.result, "RELEASE_FAILED")
     const src = readSource(RUNNER_PATH)
     assert.match(src, /run\.release !== "RELEASED"\) return refused\("LEASE_RELEASE_NOT_CONFIRMED"\)/)
   })
@@ -579,11 +665,11 @@ describe("C. gates globaux : production inchangée, primitive ciblée indépenda
     assert.deepEqual(lease.ops(), [])
   })
 
-  it("A. master acquisition OFF → primitive ciblée non dépendante (atteint NOT_ARMED)", async () => {
+  it("A. master acquisition OFF → primitive ciblée non dépendante (worker exécuté)", async () => {
     authorizeTargetEnv()
     process.env.ACQUISITION_ORCHESTRATOR_POST_EXTRACTION_STEPS = "true"
     const { result } = await runWiring()
-    assert.deepEqual(result, { outcome: "NOT_ARMED", release: "RELEASED" })
+    assertWorkerRanEmpty(result, "RELEASED")
   })
 
   it("B. post-extraction OFF → production : validation / autoDecision / worksiteCreation DISABLED", async () => {
@@ -597,17 +683,17 @@ describe("C. gates globaux : production inchangée, primitive ciblée indépenda
     assert.equal(lease.calls.filter((c) => c.op === "acquire")[0]?.ownerRunId, "prod-regression")
   })
 
-  it("B. post-extraction OFF → primitive ciblée non dépendante (atteint NOT_ARMED)", async () => {
+  it("B. post-extraction OFF → primitive ciblée non dépendante (worker exécuté)", async () => {
     authorizeTargetEnv()
     process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
     const { result } = await runWiring()
-    assert.deepEqual(result, { outcome: "NOT_ARMED", release: "RELEASED" })
+    assertWorkerRanEmpty(result, "RELEASED")
   })
 
-  it("A+B. les deux gates globaux OFF → primitive ciblée atteint NOT_ARMED, gates non modifiés", async () => {
+  it("A+B. les deux gates globaux OFF → primitive ciblée exécute le worker, gates non modifiés", async () => {
     authorizeTargetEnv()
     const { result } = await runWiring()
-    assert.deepEqual(result, { outcome: "NOT_ARMED", release: "RELEASED" })
+    assertWorkerRanEmpty(result, "RELEASED")
     assert.equal(process.env.PLANIFICATOR_ACQUISITION_ENABLED, undefined)
     assert.equal(process.env.ACQUISITION_ORCHESTRATOR_POST_EXTRACTION_STEPS, undefined)
     const src = targetedWiringSource()
@@ -630,6 +716,7 @@ describe("C. gates globaux : production inchangée, primitive ciblée indépenda
       const { result, lease, steps } = await runWiring({}, target)
       assert.deepEqual(result, { outcome: "TARGET_NOT_AUTHORIZED" }, JSON.stringify(target))
       assert.deepEqual(lease.ops(), [])
+      assert.deepEqual(dbCalls, [], "aucune lecture métier")
       assert.deepEqual(steps.hits, [])
     }
   })
@@ -647,6 +734,7 @@ describe("C. gates globaux : production inchangée, primitive ciblée indépenda
       const { result, lease } = await runWiring()
       assert.deepEqual(result, { outcome: "TARGET_NOT_AUTHORIZED" })
       assert.deepEqual(lease.ops(), [])
+      assert.deepEqual(dbCalls, [], "aucune lecture métier")
     }
   })
 
@@ -661,11 +749,13 @@ describe("C. gates globaux : production inchangée, primitive ciblée indépenda
     assert.match(readCode(SELECTION_PATH), /target\.companyId === companyId && target\.draftId === draftId/)
   })
 
-  it("D. cible exacte → NOT_ARMED dans le wiring", async () => {
+  it("D. cible exacte → worker exécuté sous lease, sélection limitée à la cible exacte", async () => {
     authorizeTargetEnv()
     const { result, lease } = await runWiring()
-    assert.deepEqual(result, { outcome: "NOT_ARMED", release: "RELEASED" })
-    assert.deepEqual(lease.ops(), ["acquire", "assertOwned", "renew", "release"])
+    assertWorkerRanEmpty(result, "RELEASED")
+    assert.deepEqual(lease.ops(), ["acquire", "assertOwned", "renew", "assertOwned", "renew", "release"])
+    assert.deepEqual(dbCalls, ["WorksiteImportDraft.findFirst"])
+    assert.deepEqual((dbArgs[0] as { where: unknown }).where, { id: DRAFT, companyId: COMPANY })
   })
 
   it("le cron orchestrateur global n'est ni requis ni activé", async () => {
@@ -692,21 +782,33 @@ describe("C. gates globaux : production inchangée, primitive ciblée indépenda
   })
 })
 
-describe("D. aucune autre étape orchestrateur, aucun worker tant que hard-stop false", () => {
-  it("hard-stop constant false", () => {
-    assert.equal(TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED, false)
-    assert.match(readSource(SELECTION_PATH), /TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED = false as boolean/)
+describe("D. armé : aucune autre étape orchestrateur, worker seulement après lease + ownership + fence", () => {
+  it("état armé : constante true (armement explicite)", () => {
+    assert.equal(TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED, true)
+    assert.match(readSource(SELECTION_PATH), /TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED = true as boolean/)
   })
 
-  it("wiring : aucune étape Gmail/recovery/download/content/detection/extraction, worker non appelé", async () => {
+  it("wiring : aucune étape Gmail/recovery/download/content/detection/extraction ; worker après heartbeat wiring", async () => {
     authorizeTargetEnv()
-    process.env.ACQUISITION_AUTO_APPROVE_ENABLED = "true"
     const { result, lease, steps } = await runWiring()
-    assert.deepEqual(result, { outcome: "NOT_ARMED", release: "RELEASED" })
+    assertWorkerRanEmpty(result, "RELEASED")
     assert.deepEqual(steps.hits, [])
-    // Le worker ferait son propre contrôle d'ownership (assertOwned supplémentaire) :
-    // un seul heartbeat = heartbeat du wiring uniquement.
-    assert.equal(lease.calls.filter((c) => c.op === "assertOwned").length, 1)
+    // 1er heartbeat = wiring (avant worker), 2e = contrôle d'ownership du worker.
+    assert.equal(lease.calls.filter((c) => c.op === "assertOwned").length, 2)
+  })
+
+  it("10. aucune conversion / création chantier / client : aucune écriture, aucune requête hors cible", async () => {
+    authorizeTargetEnv()
+    await runWiring()
+    assert.deepEqual(dbCalls, ["WorksiteImportDraft.findFirst"])
+    for (const call of dbCalls) {
+      assert.ok(!/\.(create|createMany|update|updateMany|upsert|delete|deleteMany|executeRaw)/.test(call), call)
+      assert.ok(!/^(Worksite|Client)\./.test(call), call)
+    }
+    const src = targetedWiringSource()
+    for (const forbidden of ["runAcquisitionWorksiteCreationWorker", "convertImportDraft", "ImportDraftConversion"]) {
+      assert.ok(!src.includes(forbidden), forbidden)
+    }
   })
 
   it("wiring : jamais runProductionAcquisitionOrchestrator / runAcquisitionOrchestrator / autres workers", () => {
@@ -747,17 +849,61 @@ describe("D. aucune autre étape orchestrateur, aucun worker tant que hard-stop 
     }
   })
 
-  it("runner : chemin entièrement valide → TARGETED_RUN_NOT_ARMED sans aucune opération lease", async () => {
-    const { out, leaseOps, stepHits } = await runRunner(runnerDeps())
-    assert.deepEqual(out, { ok: false, code: "TARGETED_RUN_NOT_ARMED" })
-    assert.deepEqual(leaseOps, [])
-    assert.deepEqual(stepHits, [])
+  for (const role of ["ADMIN", "SUPER_ADMIN"]) {
+    it(`runner : chemin entièrement valide (${role}) → worker exécuté sous lease, cible exacte uniquement`, async () => {
+      const { out, leaseOps, stepHits } = await runRunner(runnerDeps({ auth: sessionAuth(role) }))
+      assert.equal(out.ok, true, JSON.stringify(out))
+      if (out.ok) {
+        assert.equal(out.workerStatus, "SUCCESS")
+        assert.equal(out.stats.selected, 0)
+        assert.equal(out.stats.intentAppended, 0)
+      }
+      assert.deepEqual(leaseOps, ["acquire", "assertOwned", "renew", "assertOwned", "renew", "release"])
+      assert.deepEqual(stepHits, [])
+      assert.deepEqual(dbCalls, ["WorksiteImportDraft.findFirst"])
+      assert.deepEqual((dbArgs[0] as { where: unknown }).where, { id: DRAFT, companyId: COMPANY })
+    })
+  }
+
+  it("runner : lease occupée → LEASE refusée, worker jamais appelé", async () => {
+    authorizeTargetEnv()
+    const lease = installCanonicalLease()
+    lease.mem.forceOwner(ACQUISITION_ORCHESTRATOR_LEASE_KEY, "cron-run-live", 60_000)
+    try {
+      const out = await runTargetedStagingAutoDecision(runnerDeps())
+      assert.deepEqual(out, { ok: false, code: "ALREADY_RUNNING" })
+      assert.deepEqual(lease.ops(), ["acquire"])
+      assert.deepEqual(dbCalls, [])
+    } finally {
+      lease.restore()
+    }
   })
 
-  it("runner : SUPER_ADMIN du tenant → même hard-stop", async () => {
-    const { out, leaseOps } = await runRunner(runnerDeps({ auth: sessionAuth("SUPER_ADMIN") }))
-    assert.deepEqual(out, { ok: false, code: "TARGETED_RUN_NOT_ARMED" })
-    assert.deepEqual(leaseOps, [])
+  it("runner : release non confirmée → LEASE_RELEASE_NOT_CONFIRMED (jamais ok)", async () => {
+    authorizeTargetEnv()
+    const lease = installCanonicalLease({ releaseOutcome: "NOT_FOUND" })
+    const steps = installOtherStepTraps()
+    try {
+      const out = await runTargetedStagingAutoDecision(runnerDeps())
+      assert.deepEqual(out, { ok: false, code: "LEASE_RELEASE_NOT_CONFIRMED" })
+    } finally {
+      lease.restore()
+      steps.restore()
+    }
+  })
+
+  it("runner : env serveur de la cible (process) ≠ env runner → TARGET_NOT_AUTHORIZED, worker jamais appelé", async () => {
+    process.env.TARGETED_STAGING_ATTACHMENT_NOT_READY_COMPANY_ID = COMPANY
+    process.env.TARGETED_STAGING_ATTACHMENT_NOT_READY_DRAFT_ID = "draft-other"
+    const lease = installCanonicalLease()
+    try {
+      const out = await runTargetedStagingAutoDecision(runnerDeps())
+      assert.deepEqual(out, { ok: false, code: "TARGET_NOT_AUTHORIZED" })
+      assert.deepEqual(lease.ops(), [])
+      assert.deepEqual(dbCalls, [])
+    } finally {
+      lease.restore()
+    }
   })
 })
 

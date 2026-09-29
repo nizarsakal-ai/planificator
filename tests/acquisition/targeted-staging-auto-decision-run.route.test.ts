@@ -12,7 +12,11 @@ import {
 import { acquisitionContentFetchStateRepository } from "@/lib/acquisition/content/message-content-fetch-state.repository"
 import { acquisitionConsultationDetectionSelectionRepository } from "@/lib/acquisition/detection/consultation-detection.selection.repository"
 import { acquisitionExtractionCronSelectionRepository } from "@/lib/acquisition/extraction/extraction-cron.selection.repository"
-import { acquisitionOrchestratorLeaseRepository } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-lease.repository"
+import { ACQUISITION_ORCHESTRATOR_LEASE_KEY } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-feature-flag"
+import {
+  InMemoryAcquisitionOrchestratorLeaseRepository,
+  acquisitionOrchestratorLeaseRepository,
+} from "@/lib/acquisition/orchestrator/acquisition-orchestrator-lease.repository"
 import { acquisitionGmailConnectionListingAdapter } from "@/lib/acquisition/persistence/acquisition-gmail-connection.listing.adapter"
 import {
   TARGETED_STAGING_AUTO_DECISION_RUN_CONFIRMATION,
@@ -84,28 +88,49 @@ function patchMethod<T extends object, K extends keyof T>(target: T, key: K, imp
 // Pièges : DB (middleware Prisma : requêtes modèle ET raw), lease canonique, autres étapes.
 // ---------------------------------------------------------------------------
 
+// Prisma 100 % mocké : le middleware ne rappelle JAMAIS next() → aucune connexion DB possible.
 const dbHits: string[] = []
-let dbTrapActive = false
-prisma.$use(async (params, next) => {
-  if (dbTrapActive) {
-    dbHits.push(`${params.model ?? "raw"}.${params.action}`)
-    throw new Error(`DB_ACCESS_FORBIDDEN:${params.model ?? "raw"}.${params.action}`)
-  }
-  return next(params)
+const dbArgs: unknown[] = []
+let dbResponder: ((key: string) => unknown) | null = null
+prisma.$use(async (params) => {
+  const key = `${params.model ?? "raw"}.${params.action}`
+  dbHits.push(key)
+  dbArgs.push(params.args)
+  if (dbResponder) return dbResponder(key)
+  throw new Error(`DB_ACCESS_FORBIDDEN:${key}`)
 })
+
+/** Cible introuvable (sélection mono-draft vide) ; toute autre requête → erreur explicite. */
+const TARGET_NOT_FOUND_DB = (key: string) => {
+  if (key === "WorksiteImportDraft.findFirst") return null
+  throw new Error(`DB_ACCESS_FORBIDDEN:${key}`)
+}
 
 type Traps = { dbHits: string[]; leaseOps: string[]; stepHits: string[] }
 
-function installTraps(): { traps: Traps; restore: () => void } {
+function installTraps(
+  opts: {
+    /** "trap" : toute opération lease lève ; "memory" : lease canonique mémoire fonctionnelle. */
+    lease?: "trap" | "memory"
+    busyBy?: string
+    assertOwnedThrows?: boolean
+  } = {}
+): { traps: Traps; restore: () => void } {
   dbHits.length = 0
-  dbTrapActive = true
+  dbArgs.length = 0
+  dbResponder = opts.lease === "memory" ? TARGET_NOT_FOUND_DB : null
   const leaseOps: string[] = []
   const stepHits: string[] = []
   const lease = acquisitionOrchestratorLeaseRepository
-  const leaseTrap = (op: string) => async () => {
-    leaseOps.push(op)
-    throw new Error(`LEASE_FORBIDDEN:${op}`)
-  }
+  const mem = new InMemoryAcquisitionOrchestratorLeaseRepository()
+  if (opts.busyBy) mem.forceOwner(ACQUISITION_ORCHESTRATOR_LEASE_KEY, opts.busyBy, 60_000)
+  const leaseTrap = (op: "acquire" | "assertOwned" | "renew" | "release") =>
+    (async (input: never) => {
+      leaseOps.push(op)
+      if (opts.lease !== "memory") throw new Error(`LEASE_FORBIDDEN:${op}`)
+      if (op === "assertOwned" && opts.assertOwnedThrows) throw new Error("lease lookup failed")
+      return (mem[op] as (i: never) => Promise<unknown>)(input)
+    }) as never
   const stepTrap = (name: string) => async () => {
     stepHits.push(name)
     throw new Error(`OTHER_STEP_FORBIDDEN:${name}`)
@@ -125,9 +150,28 @@ function installTraps(): { traps: Traps; restore: () => void } {
   return {
     traps: { dbHits, leaseOps, stepHits },
     restore: () => {
-      dbTrapActive = false
+      dbResponder = null
       for (const fn of restore) fn()
     },
+  }
+}
+
+/** Appel handler sur la chaîne armée complète (lease mémoire, DB mockée) ; retourne les pièges. */
+async function callArmed(
+  req: Request,
+  opts: Parameters<typeof installTraps>[0] & { env?: Record<string, string | undefined>; auth?: never } = {}
+) {
+  const { traps, restore } = installTraps({ lease: "memory", ...opts })
+  try {
+    const res = await handleTargetedStagingAutoDecisionRun(req, {
+      env: opts.env ?? { ...RUN_ENV },
+      auth: opts.auth ?? sessionAuth(),
+    })
+    const json = (await res.json()) as Record<string, unknown>
+    assert.deepEqual(traps.stepHits, [], "aucune autre étape orchestrateur")
+    return { status: res.status, json, traps: { ...traps, dbHits: [...traps.dbHits], dbArgs: [...dbArgs] } }
+  } finally {
+    restore()
   }
 }
 
@@ -299,23 +343,54 @@ describe("targeted staging auto-decision RUN route — 4. aucune cible / overrid
   })
 })
 
-describe("targeted staging auto-decision RUN route — 5-10. hard-stop, aucune lease / DB / worker / autre étape", () => {
-  it("10. constante TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED toujours false", () => {
-    assert.equal(TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED, false)
-    assert.ok(!/MUTATION_ARMED/.test(readCode(HANDLER_PATH)), "handler ne touche pas le hard-stop")
+describe("targeted staging auto-decision RUN route — armé : worker seulement après toutes les protections", () => {
+  it("état armé ; la route et le handler ne touchent pas la constante", () => {
+    assert.equal(TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED, true)
+    assert.ok(!/MUTATION_ARMED/.test(readCode(HANDLER_PATH)), "handler ne touche pas le verrou")
     assert.ok(!/MUTATION_ARMED/.test(readCode(ROUTE_PATH)))
   })
 
-  it("5-9. contrat exact, toutes gardes passées → 403 TARGETED_RUN_NOT_ARMED, zéro lease / DB / worker / étape", async () => {
-    const { status, json } = await call(request({ confirmation: CONFIRM }))
-    assert.equal(status, 403)
-    assert.deepEqual(json, { ok: false, code: "TARGETED_RUN_NOT_ARMED" })
+  for (const role of ["ADMIN", "SUPER_ADMIN"]) {
+    it(`contrat exact, toutes gardes passées (${role}) → 200, worker exécuté sous lease, cible exacte uniquement`, async () => {
+      const { status, json, traps } = await callArmed(request({ confirmation: CONFIRM }), {
+        auth: sessionAuth(role),
+      })
+      assert.equal(status, 200, JSON.stringify(json))
+      assert.equal(json.ok, true)
+      assert.equal(json.workerStatus, "SUCCESS")
+      assert.equal((json.stats as { selected: number }).selected, 0)
+      assert.equal((json.stats as { intentAppended: number }).intentAppended, 0)
+      // Ordre : lease + heartbeat wiring, PUIS worker (son heartbeat + sélection), puis release.
+      assert.deepEqual(traps.leaseOps, ["acquire", "assertOwned", "renew", "assertOwned", "renew", "release"])
+      // Seule requête DB : lecture de la cible exacte (mockée introuvable) ; aucune écriture.
+      assert.deepEqual(traps.dbHits, ["WorksiteImportDraft.findFirst"])
+      assert.deepEqual((traps.dbArgs[0] as { where: unknown }).where, { id: DRAFT, companyId: COMPANY })
+    })
+  }
+
+  it("lease occupée par l'orchestrateur → 409 ALREADY_RUNNING, worker jamais appelé", async () => {
+    const { status, json, traps } = await callArmed(request({ confirmation: CONFIRM }), { busyBy: "cron-run-live" })
+    assert.equal(status, 409)
+    assert.deepEqual(json, { ok: false, code: "ALREADY_RUNNING" })
+    assert.deepEqual(traps.leaseOps, ["acquire"])
+    assert.deepEqual(traps.dbHits, [])
   })
 
-  it("SUPER_ADMIN du tenant → même hard-stop", async () => {
-    const { status, json } = await call(request({ confirmation: CONFIRM }), { auth: sessionAuth("SUPER_ADMIN") })
-    assert.equal(status, 403)
-    assert.deepEqual(json, { ok: false, code: "TARGETED_RUN_NOT_ARMED" })
+  it("ownership / fence non prouvés (heartbeat en échec) → 409 LEASE_NOT_OWNED, worker jamais appelé", async () => {
+    const { status, json, traps } = await callArmed(request({ confirmation: CONFIRM }), { assertOwnedThrows: true })
+    assert.equal(status, 409)
+    assert.deepEqual(json, { ok: false, code: "LEASE_NOT_OWNED" })
+    assert.deepEqual(traps.leaseOps, ["acquire", "assertOwned", "release"])
+    assert.deepEqual(traps.dbHits, [])
+  })
+
+  it("cible serveur (process) ≠ cible runner → 409 TARGET_NOT_AUTHORIZED, ni lease ni worker", async () => {
+    process.env.TARGETED_STAGING_ATTACHMENT_NOT_READY_DRAFT_ID = "draft-other"
+    const { status, json, traps } = await callArmed(request({ confirmation: CONFIRM }))
+    assert.equal(status, 409)
+    assert.deepEqual(json, { ok: false, code: "TARGET_NOT_AUTHORIZED" })
+    assert.deepEqual(traps.leaseOps, [])
+    assert.deepEqual(traps.dbHits, [])
   })
 
   it("8. worker jamais appelé : le handler n'importe ni worker ni wiring directement", () => {
@@ -353,10 +428,14 @@ describe("targeted staging auto-decision RUN route — protections runner conser
     ["tenant null", { auth: sessionAuth("SUPER_ADMIN", null) }, 403, "TENANT_MISMATCH"],
   ]
   for (const [label, deps, status, code] of cases) {
-    it(`${label} → ${status} ${code}`, async () => {
-      const out = await call(request({ confirmation: CONFIRM }), deps)
+    it(`${label} → ${status} ${code} (chaîne armée fonctionnelle : ni lease, ni DB, ni worker)`, async () => {
+      // Lease mémoire fonctionnelle + DB mockée répondante : si une garde était contournée,
+      // le worker s'exécuterait et laisserait des traces lease/DB.
+      const out = await callArmed(request({ confirmation: CONFIRM }), deps)
       assert.equal(out.status, status)
       assert.deepEqual(out.json, { ok: false, code })
+      assert.deepEqual(out.traps.leaseOps, [], "aucune opération lease")
+      assert.deepEqual(out.traps.dbHits, [], "aucune lecture/écriture DB")
     })
   }
 

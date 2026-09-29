@@ -26,7 +26,7 @@ import { AcquisitionDecisionJournalRepository } from "@/lib/acquisition/policy/d
  * Verrou de code : false = l'appel worker est inatteignable (runner ET wiring), même gate
  * activé et lease authentique. L'armement exigera une modification de code revue (lot séparé).
  */
-export const TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED = false as boolean
+export const TARGETED_AUTO_DECISION_RUN_MUTATION_ARMED = true as boolean
 
 /** Seules sources de la cible autorisée (variables serveur du harness). */
 export const TARGETED_AUTO_DECISION_COMPANY_ENV = "TARGETED_STAGING_ATTACHMENT_NOT_READY_COMPANY_ID"
