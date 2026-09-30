@@ -59,6 +59,7 @@ import {
   type SystemActorResolution,
 } from "@/lib/acquisition/policy/system-actor"
 import { ImportDraftReviewService } from "@/lib/acquisition/review/import-draft-review.service"
+import type { ApprovalMasterGateExemption } from "@/lib/acquisition/review/import-draft-review.types"
 
 const LOG_PREFIX = "[acquisition-auto-decision-worker]"
 
@@ -148,6 +149,11 @@ export type AutoDecisionWorkerDeps = {
    * comportement inchangé. Présent → voir AutoDecisionEffectiveFlagsResolver.
    */
   resolveEffectiveAutoFlags?: AutoDecisionEffectiveFlagsResolver
+  /**
+   * Port interne transmis tel quel à approveImportDraft (master gate acquisition uniquement).
+   * Absent (production) → options d'approbation inchangées.
+   */
+  approvalMasterGateExemption?: ApprovalMasterGateExemption
 }
 
 export type AutoDecisionEffectiveFlagsInput = {
@@ -713,6 +719,7 @@ export async function runAcquisitionAutoDecisionWorker(
         isConvertOn: isConvertOn(),
         isApproveOn: isApproveOn(),
         resolveEffectiveAutoFlags: input.resolveEffectiveAutoFlags,
+        approvalMasterGateExemption: input.approvalMasterGateExemption,
         stats,
         log,
       })
@@ -773,6 +780,7 @@ async function processCandidate(input: {
   isConvertOn: boolean
   isApproveOn: boolean
   resolveEffectiveAutoFlags?: AutoDecisionEffectiveFlagsResolver
+  approvalMasterGateExemption?: ApprovalMasterGateExemption
   stats: AutoDecisionWorkerRunStats
   log: (event: string, payload?: Record<string, unknown>) => void
 }): Promise<{ leaseStolen?: boolean } | void> {
@@ -1267,6 +1275,9 @@ async function processCandidate(input: {
         ? {
             transactionalOwnershipFence: fence,
             requireSourceContentHash: frozenForWork.contentHash,
+            ...(input.approvalMasterGateExemption
+              ? { approvalMasterGateExemption: input.approvalMasterGateExemption }
+              : {}),
           }
         : { requireSourceContentHash: frozenForWork.contentHash }
     )

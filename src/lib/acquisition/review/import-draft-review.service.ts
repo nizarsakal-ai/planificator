@@ -16,6 +16,7 @@ import {
   type SaveImportDraftCorrectionsInput,
 } from "@/lib/acquisition/review/import-draft-review.schema"
 import type {
+  ApprovalMasterGateExemption,
   ApproveOutcome,
   RejectOutcome,
   ReviewActorContext,
@@ -35,6 +36,11 @@ export type ReviewMutationOptions = {
    * courant dans la TX après fence, avant mutation.
    */
   requireSourceContentHash?: string
+  /**
+   * approveImportDraft uniquement : port interne d'exemption du master gate acquisition
+   * (cf. ApprovalMasterGateExemption). Absent → comportement historique strict.
+   */
+  approvalMasterGateExemption?: ApprovalMasterGateExemption
 }
 
 class ReviewLeaseNotOwnedError extends Error {
@@ -138,6 +144,34 @@ async function resolveUpdateMiss(
   if (!allowedStatuses.includes(row.status)) return "INVALID_STATE"
   if (row.version !== expectedVersion) return "STATE_CHANGED"
   return "STATE_CHANGED"
+}
+
+/**
+ * Master gate OFF : exemption uniquement si port fourni + acteur SYSTEM + fence présent
+ * (sa validité OWNED reste vérifiée dans la TX) + entrée valide + port === true.
+ * Fail-closed sur toute autre situation, y compris exception du port.
+ */
+function isMasterGateExempted(
+  ctx: ReviewActorContext,
+  raw: unknown,
+  options: ReviewMutationOptions | undefined
+): boolean {
+  const exemption = options?.approvalMasterGateExemption
+  if (!exemption) return false
+  if (ctx.actorRole !== "SYSTEM" || !options?.transactionalOwnershipFence) return false
+  const parsed = approveImportDraftSchema.safeParse(raw)
+  if (!parsed.success) return false
+  try {
+    return (
+      exemption.allowsApproval({
+        companyId: ctx.companyId,
+        draftId: parsed.data.draftId,
+        actorRole: ctx.actorRole,
+      }) === true
+    )
+  } catch {
+    return false
+  }
 }
 
 function leaseNotOwnedApprove(): ApproveOutcome {
@@ -266,7 +300,7 @@ export class ImportDraftReviewService {
   ): Promise<ApproveOutcome> {
     const authz = authorize(ctx)
     if (!authz.ok) return authz
-    if (!isAcquisitionEnabled()) return disabled()
+    if (!isAcquisitionEnabled() && !isMasterGateExempted(ctx, raw, options)) return disabled()
 
     const parsed = approveImportDraftSchema.safeParse(raw)
     if (!parsed.success) {

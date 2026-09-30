@@ -19,6 +19,7 @@ import {
   type AutoDecisionWorkerSelectionPort,
 } from "@/lib/acquisition/orchestrator/acquisition-auto-decision.worker"
 import type { OrchestratorItemOwnershipCheck } from "@/lib/acquisition/orchestrator/orchestrator-ownership"
+import type { ApprovalMasterGateExemption } from "@/lib/acquisition/review/import-draft-review.types"
 import type { TransactionalOwnershipFence } from "@/lib/acquisition/conversion/conversion-ownership-fence.port"
 import { AcquisitionDecisionJournalRepository } from "@/lib/acquisition/policy/decision-journal.repository"
 
@@ -60,6 +61,18 @@ export const resolveTargetedAutoDecisionEffectiveFlags: AutoDecisionEffectiveFla
   }
   return { effectiveAutoApproveEnabled: true, effectiveAutoConvertEnabled: true }
 }
+
+/**
+ * Exemption TARGET-ONLY du master gate d'approbation : acteur SYSTEM + cible serveur exacte,
+ * relue dans process.env à chaque appel. Le review service exige en plus un fence (validé OWNED
+ * dans sa TX) et applique tous ses autres contrôles. Non paramétrable.
+ */
+export const targetedApprovalMasterGateExemption: ApprovalMasterGateExemption = Object.freeze({
+  allowsApproval(input: { companyId: string; draftId: string; actorRole: string }): boolean {
+    if (input.actorRole !== "SYSTEM") return false
+    return isAuthorizedTargetedAutoDecisionTarget({ companyId: input.companyId, draftId: input.draftId })
+  },
+})
 
 type TargetJournal = Pick<AcquisitionDecisionJournalRepository, "findLatestValidationDecisionForCycle">
 
@@ -150,6 +163,7 @@ export function buildTargetedAutoDecisionWorkerDeps(input: {
     maxScan: 1,
     maxPerCompany: 1,
     resolveEffectiveAutoFlags: resolveTargetedAutoDecisionEffectiveFlags,
+    approvalMasterGateExemption: targetedApprovalMasterGateExemption,
     ...(input.maxDurationMs != null ? { maxDurationMs: input.maxDurationMs } : {}),
   }
 }

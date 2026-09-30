@@ -41,6 +41,7 @@ import {
   buildTargetedAutoDecisionWorkerDeps,
   createTargetedAutoDecisionSelectionPort,
   resolveTargetedAutoDecisionEffectiveFlags,
+  targetedApprovalMasterGateExemption,
 } from "@/lib/acquisition/orchestrator/targeted-staging-auto-decision-selection"
 import { prisma } from "@/lib/prisma"
 
@@ -1114,6 +1115,7 @@ describe("H. politiques production non contournées (partner, kill-switches, sys
       maxDurationMs: 1_000,
     })
     assert.deepEqual(Object.keys(deps).sort(), [
+      "approvalMasterGateExemption",
       "ensureOwnership",
       "maxCandidates",
       "maxDurationMs",
@@ -1125,6 +1127,9 @@ describe("H. politiques production non contournées (partner, kill-switches, sys
     ])
     // Seul override de politique : le resolver target-only fixe.
     assert.equal(deps.resolveEffectiveAutoFlags, resolveTargetedAutoDecisionEffectiveFlags)
+    // Seule exemption du master gate d'approbation : l'implémentation target-only figée.
+    assert.equal(deps.approvalMasterGateExemption, targetedApprovalMasterGateExemption)
+    assert.ok(Object.isFrozen(targetedApprovalMasterGateExemption))
     assert.equal(deps.selection, selection)
     assert.equal(deps.maxCandidates, 1)
     assert.equal(deps.maxScan, 1)

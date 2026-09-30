@@ -11,6 +11,20 @@ export type ReviewActorContext = {
   companyId: string
 }
 
+/**
+ * Port interne (jamais HTTP) : exemption du SEUL master gate acquisition pour une approbation.
+ * Consulté uniquement si PLANIFICATOR_ACQUISITION_ENABLED est OFF, pour un acteur SYSTEM muni
+ * d'un transactionalOwnershipFence ; tous les autres contrôles d'approbation restent appliqués.
+ * Exception / valeur ≠ true → refus (ACQUISITION_DISABLED).
+ */
+export type ApprovalMasterGateExemption = {
+  allowsApproval(input: {
+    companyId: string
+    draftId: string
+    actorRole: ReviewActorContext["actorRole"]
+  }): boolean
+}
+
 export type ImportDraftListItem = {
   draftId: string
   status: WorksiteImportDraftStatus
