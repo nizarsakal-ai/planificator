@@ -10,6 +10,26 @@ function isAttachmentPart(part: GmailMessagePart): boolean {
 }
 
 /**
+ * Ressource image embarquée (référencée par cid: dans le HTML, ex. logos de signature Outlook).
+ * Exclue UNIQUEMENT si les 3 conditions sont vraies : mimeType image/*, disposition-type
+ * exactement « inline », Content-ID non vide. Tout cas ambigu reste une pièce jointe.
+ */
+export function isEmbeddedInlineImage(part: GmailMessagePart): boolean {
+  const mimeType = typeof part.mimeType === "string" ? part.mimeType.trim().toLowerCase() : ""
+  if (!mimeType.startsWith("image/")) return false
+
+  const disposition = getGmailHeader(part.headers, "Content-Disposition")
+  const dispositionType = (typeof disposition === "string" ? disposition : "")
+    .split(";")[0]
+    .trim()
+    .toLowerCase()
+  if (dispositionType !== "inline") return false
+
+  const contentId = getGmailHeader(part.headers, "Content-ID")
+  return typeof contentId === "string" && contentId.trim().length > 0
+}
+
+/**
  * Parcourt récursivement la structure MIME Gmail et extrait les métadonnées
  * des pièces jointes (sans décoder le binaire).
  */
@@ -25,7 +45,8 @@ export function extractAttachmentMetadataFromPayload(
   function walk(part: GmailMessagePart, depth: number, ordinal: number): void {
     if (depth > maxDepth) return
 
-    if (isAttachmentPart(part)) {
+    // Ressource inline embarquée : non émise, mais ses enfants restent parcourus.
+    if (isAttachmentPart(part) && !isEmbeddedInlineImage(part)) {
       const partId = part.partId ?? `ord:${ordinal}`
       const externalId = part.body?.attachmentId?.trim()
       const filename = part.filename?.trim() || (externalId ? `attachment-${externalId}` : `part-${partId}`)
