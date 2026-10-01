@@ -20,6 +20,7 @@ import {
 import type { ConvertImportDraftInput } from "@/lib/acquisition/conversion/conversion.schema"
 import type {
   ConversionActorContext,
+  ConversionMasterGateExemption,
   ConvertImportDraftResult,
 } from "@/lib/acquisition/conversion/conversion.types"
 import type {
@@ -124,6 +125,11 @@ export type WorksiteCreationWorkerDeps = {
   ensureOwnership?: OrchestratorItemOwnershipCheck
   /** LOT-3F — fence TX authentique (WeakMap orchestrateur). */
   transactionalOwnershipFence?: ConversionTransactionalOwnershipFence
+  /**
+   * Port interne transmis tel quel à convertImportDraft (gate conversion uniquement),
+   * seulement avec un fence. Absent (production) → options de conversion inchangées.
+   */
+  conversionMasterGateExemption?: ConversionMasterGateExemption
   now?: () => Date
   maxCandidates?: number
   maxScan?: number
@@ -617,6 +623,7 @@ export async function runAcquisitionWorksiteCreationWorker(
         evaluationDeps: input.evaluationDeps,
         ensureOwnership: input.ensureOwnership,
         transactionalOwnershipFence: input.transactionalOwnershipFence,
+        conversionMasterGateExemption: input.conversionMasterGateExemption,
         log,
         stats,
       })
@@ -664,6 +671,7 @@ async function processCandidate(input: {
   evaluationDeps?: ConsultationEvaluationContextDeps
   ensureOwnership?: OrchestratorItemOwnershipCheck
   transactionalOwnershipFence?: ConversionTransactionalOwnershipFence
+  conversionMasterGateExemption?: ConversionMasterGateExemption
   log: (event: string, payload?: Record<string, unknown>) => void
   stats: WorksiteCreationWorkerRunStats
 }): Promise<{ leaseStolen?: boolean } | void> {
@@ -872,6 +880,9 @@ async function processCandidate(input: {
       ? { transactionalOwnershipFence: input.transactionalOwnershipFence }
       : {}),
     requireSourceContentHash: requiredSourceContentHash,
+    ...(input.transactionalOwnershipFence && input.conversionMasterGateExemption
+      ? { conversionMasterGateExemption: input.conversionMasterGateExemption }
+      : {}),
   })
 
   if (!result.ok && result.code === "LEASE_NOT_OWNED") {

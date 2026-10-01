@@ -11,6 +11,21 @@ export type ConversionActorContext = {
   companyId: string
 }
 
+/**
+ * Port interne (jamais HTTP) : exemption des DEUX composantes du gate conversion
+ * (isAcquisitionConversionFullyEnabled) pour UNE conversion. Consulté uniquement si ce gate
+ * est OFF, pour un acteur SYSTEM muni d'un transactionalOwnershipFence et d'une entrée valide ;
+ * tous les autres contrôles de conversion restent appliqués.
+ * Exception / valeur ≠ true → refus (CONVERSION_DISABLED).
+ */
+export type ConversionMasterGateExemption = {
+  allowsConversion(input: {
+    companyId: string
+    draftId: string
+    actorRole: ConversionActorContext["actorRole"]
+  }): boolean
+}
+
 export type ConvertImportDraftSuccess = {
   ok: true
   outcome: "CONVERTED" | "ALREADY_CONVERTED"

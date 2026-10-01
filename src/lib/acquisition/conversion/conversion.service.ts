@@ -60,6 +60,34 @@ function authorize(
   return { ok: true }
 }
 
+/**
+ * Gate conversion OFF : exemption uniquement si port fourni + acteur SYSTEM + fence présent
+ * (sa validité OWNED reste vérifiée en tête de TX) + entrée valide + port === true.
+ * Fail-closed sur toute autre situation, y compris exception du port.
+ */
+function isConversionGateExempted(
+  ctx: ConversionActorContext,
+  raw: unknown,
+  options: ConvertImportDraftOptions | undefined
+): boolean {
+  const exemption = options?.conversionMasterGateExemption
+  if (!exemption) return false
+  if (ctx.actorRole !== "SYSTEM" || !options?.transactionalOwnershipFence) return false
+  const parsed = convertImportDraftSchema.safeParse(raw)
+  if (!parsed.success) return false
+  try {
+    return (
+      exemption.allowsConversion({
+        companyId: ctx.companyId,
+        draftId: parsed.data.draftId,
+        actorRole: ctx.actorRole,
+      }) === true
+    )
+  } catch {
+    return false
+  }
+}
+
 function fail(
   outcome: ConvertImportDraftFailure["outcome"],
   code: string,
@@ -138,7 +166,7 @@ export class ImportDraftConversionService {
   ): Promise<ConvertImportDraftResult> {
     const authz = authorize(ctx)
     if (!authz.ok) return authz
-    if (!isAcquisitionConversionFullyEnabled()) {
+    if (!isAcquisitionConversionFullyEnabled() && !isConversionGateExempted(ctx, raw, options)) {
       return fail("DISABLED", "CONVERSION_DISABLED", "Conversion désactivée")
     }
 

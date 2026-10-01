@@ -436,6 +436,7 @@ describe("A. frontière capability — factory privée, aucune capability depuis
       "resolveOrchestratorAutoTransactionalFence",
       "runProductionAcquisitionOrchestrator",
       "runTargetedAutoDecisionUnderOrchestratorLease",
+      "runTargetedWorksiteCreationUnderOrchestratorLease",
     ])
     assert.equal("createOrchestratorAutoCapability" in orchestratorWorkers, false)
     assert.ok(!/export\s+(async\s+)?function\s+createOrchestratorAutoCapability/.test(readSource(WORKERS_PATH)))

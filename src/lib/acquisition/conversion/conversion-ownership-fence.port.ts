@@ -4,6 +4,7 @@
  */
 
 import type { Prisma } from "@prisma/client"
+import type { ConversionMasterGateExemption } from "@/lib/acquisition/conversion/conversion.types"
 
 export type ConversionTxOwnershipState = "OWNED" | "NOT_OWNED"
 export type TxOwnershipState = ConversionTxOwnershipState
@@ -28,4 +29,9 @@ export type ConvertImportDraftOptions = {
    * courant dans la TX après fence, avant mutation.
    */
   requireSourceContentHash?: string
+  /**
+   * Port interne d'exemption du gate conversion (cf. ConversionMasterGateExemption).
+   * Absent → comportement historique strict.
+   */
+  conversionMasterGateExemption?: ConversionMasterGateExemption
 }
