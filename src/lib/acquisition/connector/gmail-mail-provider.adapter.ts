@@ -114,7 +114,7 @@ export function buildAcquisitionGmailLookbackQuery(
   return { ok: true, query: `${after} (${fromParts.join(" OR ")})` }
 }
 
-function mapGmailResourceToCanonical(resource: GmailMessageResource): CanonicalMailMessage {
+export function mapGmailResourceToCanonical(resource: GmailMessageResource): CanonicalMailMessage {
   const sanitizedPayload = sanitizePayloadForMetadata(resource.payload)
   const headers = extractAllowedHeaders(sanitizedPayload?.headers)
 
