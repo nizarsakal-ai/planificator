@@ -19,6 +19,9 @@ import {
   isPenvenCandidateSubject,
   handleTargetedStagingGmailSync,
   type GmailSyncInspectArgs,
+  type GmailSyncInspectCursorArgs,
+  type GmailSyncInspectCursorRow,
+  buildInspectCursorFindUniqueArgs,
   type GmailSyncInspectRow,
   type GmailSyncConnectionTarget,
   type GmailSyncInvocation,
@@ -93,6 +96,7 @@ function deps(over: Partial<TargetedGmailSyncHandlerDeps> = {}) {
     cursorRepository: CURSOR,
     // INSPECT uniquement : toute lecture hors INSPECT est une faute (prouve CHECK / RUN inchangés).
     findMessages: bomb("findMessages"),
+    findCursor: bomb("findCursor"),
     ...over,
   }
   return { d, calls }
@@ -396,6 +400,10 @@ describe("source", () => {
     // INSPECT : exactement une lecture findMany, uniquement sur acquisitionMessage.
     assert.equal((code.match(/\.findMany\(/g) ?? []).length, 1)
     assert.match(code, /prisma\.acquisitionMessage\.findMany\(args\)/)
+    // Curseur : exactement une findUnique, uniquement sur acquisitionScanCursor ; jamais d'écriture curseur.
+    assert.equal((code.match(/\.findUnique\(/g) ?? []).length, 1)
+    assert.match(code, /prisma\.acquisitionScanCursor\.findUnique\(args\)/)
+    assert.ok(!/getOrCreate|saveSuccessfulPage|recordFailure|recordSuccess/.test(code))
   })
 
   it("un seul appel sync, câblé sur les adaptateurs normaux, mailShadow false", () => {
@@ -440,6 +448,7 @@ function inspectRow(over: Partial<GmailSyncInspectRow> = {}): GmailSyncInspectRo
 
 function inspectDeps(rows: GmailSyncInspectRow[], over: Partial<TargetedGmailSyncHandlerDeps> = {}) {
   const reads: GmailSyncInspectArgs[] = []
+  const cursorReads: GmailSyncInspectCursorArgs[] = []
   const base = deps({
     sync: bomb("sync"),
     createProvider: NO_IO.createProvider,
@@ -447,9 +456,13 @@ function inspectDeps(rows: GmailSyncInspectRow[], over: Partial<TargetedGmailSyn
       reads.push(args)
       return rows
     },
+    findCursor: async (args) => {
+      cursorReads.push(args)
+      return null
+    },
     ...over,
   })
-  return { ...base, reads }
+  return { ...base, reads, cursorReads }
 }
 
 describe("INSPECT — lecture seule post-504", () => {
@@ -459,7 +472,7 @@ describe("INSPECT — lecture seule post-504", () => {
     assert.equal(r.status, 200, r.text)
     assert.equal(r.cache, "no-store")
     assert.deepEqual(Object.keys(r.json).sort(), [
-      "count", "gmailCalled", "harness", "messages", "mode", "ok", "penvenFound", "readOnly", "syncCalled",
+      "count", "cursor", "gmailCalled", "harness", "messages", "mode", "ok", "penvenFound", "readOnly", "syncCalled",
     ])
     assert.equal(r.json.ok, true)
     assert.equal(r.json.harness, "targeted-staging-gmail-sync")
@@ -650,5 +663,177 @@ describe("INSPECT — lecture seule post-504", () => {
     assert.ok(!/sync\(|createProvider|syncAcquisitionMailForCompany|getValidAccessToken/.test(branch))
     assert.ok(!/\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\(/.test(code))
     assert.ok(!/\$executeRaw|\$queryRaw|\$transaction/.test(code))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// INSPECT — curseur Acquisition Gmail (lecture seule, findUnique, jamais getOrCreate)
+// ---------------------------------------------------------------------------
+
+function cursorRow(over: Partial<GmailSyncInspectCursorRow> = {}): GmailSyncInspectCursorRow {
+  return {
+    lastHistoryId: "1234567",
+    lastSyncedAt: new Date("2026-09-30T22:00:00.000Z"),
+    consecutiveFailures: 2,
+    lastErrorCode: "GMAIL_UNAVAILABLE",
+    lastErrorAt: new Date("2026-10-02T09:15:00.000Z"),
+    createdAt: new Date("2026-09-20T10:00:00.000Z"),
+    updatedAt: new Date("2026-10-02T09:15:00.000Z"),
+    ...over,
+  }
+}
+
+describe("INSPECT — curseur Gmail de la connexion cible", () => {
+  it("filtre exact : clé unique companyId + source GMAIL + mailboxKey cible ; select d'état uniquement", async () => {
+    const { d, cursorReads } = inspectDeps([])
+    await call(INSPECT, d)
+    assert.equal(cursorReads.length, 1, "exactement une lecture curseur")
+    assert.deepEqual(cursorReads[0], {
+      where: { companyId_source_mailboxKey: { companyId: COMPANY, source: "GMAIL", mailboxKey: CONNECTION } },
+      select: {
+        lastHistoryId: true,
+        lastSyncedAt: true,
+        consecutiveFailures: true,
+        lastErrorCode: true,
+        lastErrorAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    })
+    assert.deepEqual(buildInspectCursorFindUniqueArgs({ companyId: COMPANY, connectionId: CONNECTION }), cursorReads[0])
+  })
+
+  it("curseur absent → cursor: null (aucune création)", async () => {
+    const { d, cursorReads } = inspectDeps([])
+    const r = await call(INSPECT, d)
+    assert.equal(r.status, 200, r.text)
+    assert.equal(r.json.cursor, null)
+    assert.equal(cursorReads.length, 1)
+  })
+
+  it("curseur présent → mapping exact, dates ISO, sans companyId ni mailboxKey", async () => {
+    const { d } = inspectDeps([], { findCursor: async () => cursorRow() })
+    const r = await call(INSPECT, d)
+    assert.deepEqual(r.json.cursor, {
+      hasHistoryId: true,
+      lastHistoryId: "1234567",
+      lastSyncedAt: "2026-09-30T22:00:00.000Z",
+      consecutiveFailures: 2,
+      lastErrorCode: "GMAIL_UNAVAILABLE",
+      lastErrorAt: "2026-10-02T09:15:00.000Z",
+      createdAt: "2026-09-20T10:00:00.000Z",
+      updatedAt: "2026-10-02T09:15:00.000Z",
+    })
+    assert.ok(!r.text.includes("mailboxKey"))
+    assert.ok(!r.text.includes(COMPANY))
+  })
+
+  it("hasHistoryId false si lastHistoryId null ; champs nullables restés null", async () => {
+    const { d } = inspectDeps([], {
+      findCursor: async () =>
+        cursorRow({ lastHistoryId: null, lastSyncedAt: null, consecutiveFailures: 0, lastErrorCode: null, lastErrorAt: null }),
+    })
+    const r = await call(INSPECT, d)
+    const c = r.json.cursor as Record<string, unknown>
+    assert.equal(c.hasHistoryId, false)
+    assert.equal(c.lastHistoryId, null)
+    assert.equal(c.lastSyncedAt, null)
+    assert.equal(c.consecutiveFailures, 0)
+    assert.equal(c.lastErrorCode, null)
+    assert.equal(c.lastErrorAt, null)
+  })
+
+  it("hasHistoryId true si lastHistoryId non nul ; chaîne vide → false", async () => {
+    const yes = inspectDeps([], { findCursor: async () => cursorRow({ lastHistoryId: "42" }) })
+    assert.equal(((await call(INSPECT, yes.d)).json.cursor as Record<string, unknown>).hasHistoryId, true)
+    const empty = inspectDeps([], { findCursor: async () => cursorRow({ lastHistoryId: "" }) })
+    assert.equal(((await call(INSPECT, empty.d)).json.cursor as Record<string, unknown>).hasHistoryId, false)
+  })
+
+  it("champs supplémentaires renvoyés par la lecture (id, companyId, mailboxKey) jamais exposés", async () => {
+    const { d } = inspectDeps([], {
+      findCursor: async () =>
+        ({ ...cursorRow(), id: "cursor-raw-id", companyId: COMPANY, mailboxKey: CONNECTION, source: "GMAIL" }) as unknown as GmailSyncInspectCursorRow,
+    })
+    const r = await call(INSPECT, d)
+    assert.deepEqual(Object.keys(r.json.cursor as object).sort(), [
+      "consecutiveFailures", "createdAt", "hasHistoryId", "lastErrorAt", "lastErrorCode", "lastHistoryId", "lastSyncedAt", "updatedAt",
+    ])
+    assert.ok(!r.text.includes("cursor-raw-id"))
+  })
+
+  it("lecture curseur en erreur → 500 INSPECT_CURSOR_READ_FAILED, code seul, aucune sync", async () => {
+    const { d, calls } = inspectDeps([], {
+      findCursor: async () => {
+        throw new Error(`Invalid prisma.acquisitionScanCursor.findUnique() ${SECRET_TOKEN}`)
+      },
+    })
+    const r = await call(INSPECT, d)
+    assert.equal(r.status, 500)
+    assert.equal(r.json.code, "INSPECT_CURSOR_READ_FAILED")
+    assert.ok(!r.text.includes(SECRET_TOKEN))
+    assert.ok(!r.text.includes("prisma"))
+    assert.deepEqual(calls.sync, [])
+  })
+
+  it("INSPECT : exactement 1 findMany + 1 findUnique ; Gmail / provider / sync jamais appelés", async () => {
+    const cursorReadsLocal: GmailSyncInspectCursorArgs[] = []
+    const { d, calls, reads, cursorReads } = inspectDeps([], {
+      findCursor: async (args) => {
+        cursorReadsLocal.push(args)
+        return cursorRow()
+      },
+    })
+    const r = await call(INSPECT, d)
+    assert.equal(r.status, 200, r.text)
+    assert.equal(reads.length, 1)
+    assert.equal(cursorReadsLocal.length, 1)
+    assert.equal(cursorReads.length, 0, "la dépendance injectée remplace bien la lecture par défaut")
+    assert.deepEqual(calls.sync, [])
+    assert.equal(calls.provider, 0)
+    assert.equal(r.json.gmailCalled, false)
+    assert.equal(r.json.syncCalled, false)
+    assert.equal(r.json.readOnly, true)
+  })
+
+  it("garde refusée (tenant / connexion inactive) → ni messages ni curseur lus", async () => {
+    for (const over of [
+      { auth: async () => ({ user: { id: "u", role: "ADMIN", companyId: "co-other" } }) },
+      { loadConnection: async () => ({ id: CONNECTION, companyId: COMPANY, active: false }) },
+    ] as Array<Partial<TargetedGmailSyncHandlerDeps>>) {
+      const { d, reads, cursorReads } = inspectDeps([], over)
+      const r = await call(INSPECT, d)
+      assert.equal(r.json.ok, false)
+      assert.equal(reads.length, 0)
+      assert.equal(cursorReads.length, 0)
+    }
+  })
+
+  it("CHECK et RUN ne lisent jamais le curseur diagnostic (findCursor bombe par défaut)", async () => {
+    const check = deps({ sync: bomb("sync") })
+    const rc = await call(CHECK, check.d)
+    assert.equal(rc.status, 200, rc.text)
+    assert.ok(!("cursor" in rc.json))
+
+    const run = deps()
+    const rr = await call(RUN, run.d)
+    assert.equal(rr.status, 200, rr.text)
+    assert.equal(run.calls.sync.length, 1)
+    assert.ok(!("cursor" in rr.json))
+  })
+
+  it("source : la branche INSPECT ne contient ni getOrCreate, saveSuccessfulPage, recordFailure, cursorRepository, sync ni écriture", () => {
+    const src = readFileSync(path.join(ROOT, HANDLER_PATH), "utf8")
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+    const branch = code.slice(code.indexOf('if (mode === "INSPECT") {'), code.indexOf("const sync = deps.sync"))
+    assert.ok(branch.length > 0)
+    for (const forbidden of [
+      /getOrCreate/, /saveSuccessfulPage/, /recordFailure/, /cursorRepository/, /acquisitionScanCursorRepository/,
+      /sync\(/, /createProvider/, /getValidAccessToken/,
+      /\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\(/,
+    ]) {
+      assert.ok(!forbidden.test(branch), String(forbidden))
+    }
+    assert.match(branch, /findCursor\(buildInspectCursorFindUniqueArgs\(\{ companyId, connectionId \}\)\)/)
   })
 })

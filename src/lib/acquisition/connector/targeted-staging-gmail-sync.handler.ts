@@ -123,6 +123,44 @@ export function buildInspectFindManyArgs(input: { companyId: string; connectionI
 
 export type GmailSyncInspectArgs = ReturnType<typeof buildInspectFindManyArgs>
 
+/** Curseur Acquisition Gmail (lecture seule) : champs d'état uniquement, sans companyId / mailboxKey. */
+export type GmailSyncInspectCursorRow = {
+  lastHistoryId: string | null
+  lastSyncedAt: Date | null
+  consecutiveFailures: number
+  lastErrorCode: string | null
+  lastErrorAt: Date | null
+  createdAt: Date
+  updatedAt: Date
+}
+
+/**
+ * Arguments Prisma findUnique du curseur de la connexion cible (clé unique exacte).
+ * Jamais getOrCreate (qui peut créer) : une absence reste une absence.
+ */
+export function buildInspectCursorFindUniqueArgs(input: { companyId: string; connectionId: string }) {
+  return {
+    where: {
+      companyId_source_mailboxKey: {
+        companyId: input.companyId,
+        source: "GMAIL" as const,
+        mailboxKey: input.connectionId,
+      },
+    },
+    select: {
+      lastHistoryId: true,
+      lastSyncedAt: true,
+      consecutiveFailures: true,
+      lastErrorCode: true,
+      lastErrorAt: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  } satisfies Prisma.AcquisitionScanCursorFindUniqueArgs
+}
+
+export type GmailSyncInspectCursorArgs = ReturnType<typeof buildInspectCursorFindUniqueArgs>
+
 export function isPenvenCandidateSubject(subject: unknown): boolean {
   if (typeof subject !== "string") return false
   const s = subject.toLowerCase()
@@ -142,6 +180,8 @@ export type TargetedGmailSyncHandlerDeps = {
   cursorRepository?: GmailSyncInvocation["cursorRepository"]
   /** INSPECT — lecture seule (défaut : prisma.acquisitionMessage.findMany). */
   findMessages?: (args: GmailSyncInspectArgs) => Promise<GmailSyncInspectRow[]>
+  /** INSPECT — lecture seule du curseur (défaut : prisma.acquisitionScanCursor.findUnique). */
+  findCursor?: (args: GmailSyncInspectCursorArgs) => Promise<GmailSyncInspectCursorRow | null>
 }
 
 function normalizeKey(key: string): string {
@@ -165,6 +205,10 @@ async function defaultLoadConnection(input: {
 
 async function defaultFindMessages(args: GmailSyncInspectArgs): Promise<GmailSyncInspectRow[]> {
   return prisma.acquisitionMessage.findMany(args)
+}
+
+async function defaultFindCursor(args: GmailSyncInspectCursorArgs): Promise<GmailSyncInspectCursorRow | null> {
+  return prisma.acquisitionScanCursor.findUnique(args)
 }
 
 function isoOrNull(d: unknown): string | null {
@@ -289,7 +333,8 @@ export async function handleTargetedStagingGmailSync(
   }
 
   if (mode === "INSPECT") {
-    // Lecture seule : une seule findMany, cible env uniquement. Aucun Gmail, aucune sync.
+    // Lecture seule : une findMany (messages) + une findUnique (curseur), cible env uniquement.
+    // Aucun Gmail, aucune sync, aucun getOrCreate / écriture du curseur.
     const findMessages = deps.findMessages ?? defaultFindMessages
     let rows: GmailSyncInspectRow[]
     try {
@@ -312,6 +357,30 @@ export async function handleTargetedStagingGmailSync(
         : null,
       penvenCandidate: isPenvenCandidateSubject(m.subject),
     }))
+
+    const findCursor = deps.findCursor ?? defaultFindCursor
+    let cursorRow: GmailSyncInspectCursorRow | null
+    try {
+      cursorRow = await findCursor(buildInspectCursorFindUniqueArgs({ companyId, connectionId }))
+    } catch {
+      return refused(500, "INSPECT_CURSOR_READ_FAILED", "Lecture du curseur cible impossible")
+    }
+    const cursor = cursorRow
+      ? {
+          hasHistoryId: typeof cursorRow.lastHistoryId === "string" && cursorRow.lastHistoryId.length > 0,
+          lastHistoryId: typeof cursorRow.lastHistoryId === "string" ? cursorRow.lastHistoryId : null,
+          lastSyncedAt: isoOrNull(cursorRow.lastSyncedAt),
+          consecutiveFailures:
+            typeof cursorRow.consecutiveFailures === "number" && Number.isFinite(cursorRow.consecutiveFailures)
+              ? cursorRow.consecutiveFailures
+              : 0,
+          lastErrorCode: typeof cursorRow.lastErrorCode === "string" ? cursorRow.lastErrorCode : null,
+          lastErrorAt: isoOrNull(cursorRow.lastErrorAt),
+          createdAt: isoOrNull(cursorRow.createdAt),
+          updatedAt: isoOrNull(cursorRow.updatedAt),
+        }
+      : null
+
     return respond(200, {
       ok: true,
       harness: HARNESS,
@@ -322,6 +391,7 @@ export async function handleTargetedStagingGmailSync(
       count: messages.length,
       penvenFound: messages.some((m) => m.penvenCandidate),
       messages,
+      cursor,
     })
   }
 
