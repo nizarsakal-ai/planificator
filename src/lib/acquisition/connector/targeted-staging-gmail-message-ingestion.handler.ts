@@ -3,8 +3,8 @@
  * via le pipeline NORMAL (registerIncomingMessage). Fail-closed. Cible via env uniquement.
  *
  * CHECK : gardes + connexion cible active. Aucun token, aucun Gmail, aucune ingestion, aucune écriture.
- * RUN   : filtre partenaire fail-closed (buildAcquisitionGmailLookbackQuery) + subject:BISCUITERIE
- *         subject:PENVEN (termes indépendants), UNE page
+ * RUN   : filtre partenaire fail-closed (buildAcquisitionGmailLookbackQuery) + subject:Consultation
+ *         (présélection bornée), UNE page
  *         messages.list (maxResults ≤ 10, aucun pageToken), messages.get par candidat (≤ 10),
  *         mapping canonique normal, correspondance EXACTE du sujet attendu ; exactement 1 → UN appel
  *         registerIncomingMessage(mapGmailMessageToAcquisitionInput(msg, companyId, connectionId)).
@@ -49,10 +49,11 @@ export const GMAIL_MESSAGE_INGESTION_CONNECTION_ENV = "TARGETED_STAGING_GMAIL_SY
 /** Message attendu (sujet exact, comparé après normalisation minimale). */
 export const TARGET_EXPECTED_SUBJECT = "Consultation démontage_BISCUITERIE PENVEN_20/10 et 21/10"
 /**
- * Termes de sujet INDÉPENDANTS ajoutés à la requête Gmail (présélection bornée, pas de phrase :
- * le sujet réel colle les mots à des « _ »). L'autorité finale reste isExactTargetSubject().
+ * Filtre sujet Gmail : un seul terme autonome du sujet réel, « Consultation », utilisé uniquement
+ * comme présélection bornée (avec le filtre partenaire, la fenêtre de 7 jours et maxResults ≤ 10).
+ * L'autorité finale reste isExactTargetSubject() sur le sujet canonique après messages.get.
  */
-export const TARGET_SUBJECT_QUERY_TERMS = Object.freeze(["BISCUITERIE", "PENVEN"] as const)
+export const TARGET_SUBJECT_QUERY_TERM = "Consultation"
 /** Fenêtre de recherche (jours) — message reçu le 01/10/2026. */
 export const TARGET_LOOKBACK_DAYS = 7
 /** Borne stricte d'une unique page Gmail. */
@@ -142,7 +143,7 @@ export function isExactTargetSubject(subject: unknown): boolean {
 }
 
 /**
- * Requête Gmail ciblée : base partenaire fail-closed + termes sujet Penven indépendants.
+ * Requête Gmail ciblée : base partenaire fail-closed + subject:Consultation (présélection bornée).
  * Aucune identité partenaire active → refus (jamais de recherche non filtrée).
  */
 export function buildTargetedPenvenQuery(
@@ -150,8 +151,7 @@ export function buildTargetedPenvenQuery(
 ): { ok: true; query: string } | { ok: false; code: "NO_ACTIVE_PARTNER_IDENTITIES" } {
   const base = buildAcquisitionGmailLookbackQuery(TARGET_LOOKBACK_DAYS, identities)
   if (!base.ok) return base
-  const subjectFilters = TARGET_SUBJECT_QUERY_TERMS.map((t) => `subject:${escapeGmailQueryTerm(t)}`).join(" ")
-  return { ok: true, query: `${base.query} ${subjectFilters}` }
+  return { ok: true, query: `${base.query} subject:${escapeGmailQueryTerm(TARGET_SUBJECT_QUERY_TERM)}` }
 }
 
 /** Runtime fail-closed : uniquement Preview du projet Staging exact. */

@@ -278,35 +278,56 @@ describe("12–16. requête Gmail : partenaire fail-closed, une page ≤ 10, auc
     assert.deepEqual(buildTargetedPenvenQuery({ domains: [], emails: [] }), { ok: false, code: "NO_ACTIVE_PARTNER_IDENTITIES" })
   })
 
-  it("12. requête = base partenaire officielle (identique) + termes sujet Penven indépendants", async () => {
+  const EXPECTED_SUBJECT_FILTER = "subject:Consultation"
+
+  it("12. requête = base partenaire officielle (identique) + subject:Consultation", async () => {
     const { d, calls } = setup()
     await call(RUN, d)
     const base = buildAcquisitionGmailLookbackQuery(TARGET_LOOKBACK_DAYS, IDENTITIES)
     assert.ok(base.ok)
-    assert.equal(calls.list[0]!.query, `${base.ok ? base.query : ""} subject:BISCUITERIE subject:PENVEN`)
-    assert.match(calls.list[0]!.query, /^after:\d{4}\/\d{2}\/\d{2} \(from:planning@hylight\.test OR from:@hylight\.test\) subject:BISCUITERIE subject:PENVEN$/)
+    assert.equal(calls.list[0]!.query, `${base.ok ? base.query : ""} ${EXPECTED_SUBJECT_FILTER}`)
+    assert.equal(
+      calls.list[0]!.query.replace(/^after:\d{4}\/\d{2}\/\d{2} /, "after:<date> "),
+      `after:<date> (from:planning@hylight.test OR from:@hylight.test) ${EXPECTED_SUBJECT_FILTER}`
+    )
     assert.deepEqual(calls.identities, [COMPANY])
   })
 
-  it("12. query : base intégrale + BISCUITERIE + PENVEN, sans phrase exacte, bornée à listMessages(…, 10), sans nextPageToken suivi", async () => {
-    for (const identities of [IDENTITIES, { domains: ["a.test", "b.test"], emails: [] }, { domains: [], emails: ["x@c.test"] }]) {
+  it("12 (a/b/c). query : base partenaire intégrale + exactement subject:Consultation, jamais élargie", async () => {
+    for (const identities of [
+      IDENTITIES,
+      { domains: ["gl-events.com", "lauralu.fr"], emails: [] },
+      { domains: ["a.test", "b.test"], emails: [] },
+      { domains: [], emails: ["x@c.test"] },
+    ]) {
       const built = buildTargetedPenvenQuery(identities)
       const base = buildAcquisitionGmailLookbackQuery(7, identities)
       assert.ok(built.ok && base.ok)
       if (!built.ok || !base.ok) continue
-      // Base partenaire / lookback (7 jours) conservée intégralement, en préfixe.
+      // (a) base partenaire / lookback 7 jours conservée intégralement, en préfixe.
       assert.ok(built.query.startsWith(`${base.query} `))
+      assert.match(base.query, /^after:\d{4}\/\d{2}\/\d{2} \(from:/)
+      // (b) exactement un filtre subject:, et c'est subject:Consultation.
       const tail = built.query.slice(base.query.length + 1)
-      assert.equal(tail, "subject:BISCUITERIE subject:PENVEN")
-      // Termes indépendants présents ; plus aucune dépendance à la phrase exacte.
-      assert.ok(/(^|\s)subject:BISCUITERIE(\s|$)/.test(built.query))
-      assert.ok(/(^|\s)subject:PENVEN(\s|$)/.test(built.query))
-      assert.ok(!built.query.includes('"BISCUITERIE PENVEN"'))
-      assert.ok(!built.query.includes("BISCUITERIE PENVEN"))
-      // Le filtre sujet n'est jamais absent (pas de scan sans filtre subject).
-      assert.ok(built.query.includes("subject:"))
+      assert.equal(tail, EXPECTED_SUBJECT_FILTER)
+      assert.equal((built.query.match(/subject:/g) ?? []).length, 1)
+      assert.equal((built.query.match(/(^|\s)subject:Consultation(\s|$)/g) ?? []).length, 1)
+      // Ni BISCUITERIE / PENVEN, ni phrase exacte, ni guillemets dans le filtre Gmail.
+      assert.ok(!/BISCUITERIE|PENVEN/i.test(built.query))
+      assert.ok(!built.query.includes(TARGET_EXPECTED_SUBJECT))
+      assert.ok(!built.query.includes('"'))
+      // (c) aucun élargissement : ni OR supplémentaire hors base partenaire, ni joker, ni in:anywhere.
+      assert.ok(!/\bOR\b/.test(tail) && !tail.includes("{") && !tail.includes("*"))
+      assert.ok(!/in:anywhere|in:spam|in:trash/i.test(built.query))
+      // Les seuls OR sont ceux de la base partenaire officielle.
+      assert.equal((built.query.match(/\bOR\b/g) ?? []).length, (base.query.match(/\bOR\b/g) ?? []).length)
     }
     assert.equal(TARGET_LOOKBACK_DAYS, 7)
+    // Domaine expéditeur réel couvert par la base partenaire.
+    const real = buildTargetedPenvenQuery({ domains: ["gl-events.com", "lauralu.fr"], emails: [] })
+    assert.ok(real.ok && real.query.includes("from:@lauralu.fr") && real.query.includes("from:@gl-events.com"))
+    // Fail-closed inchangé : pas d'identité → pas de requête du tout.
+    assert.deepEqual(buildTargetedPenvenQuery({ domains: [], emails: [] }), { ok: false, code: "NO_ACTIVE_PARTNER_IDENTITIES" })
 
     // Bornage de la page et pagination non suivie, via un RUN réel du handler.
     const { d, calls } = setup()
@@ -570,5 +591,83 @@ describe("25. route", () => {
     const route = readFileSync(path.join(ROOT, ROUTE_PATH), "utf8")
     assert.match(route, /return handleTargetedStagingGmailMessageIngestion\(req\)/)
     assert.ok(!/export async function (GET|PUT|PATCH|DELETE)/.test(route))
+  })
+})
+
+describe("présélection subject:Consultation — (d/e/f/g) post-fetch exact toujours autorité finale", () => {
+  const REAL_IDENTITIES = { domains: ["gl-events.com", "lauralu.fr"], emails: [] }
+  function lauralu(id: string, subject: string) {
+    const m = gmailMessage(id, subject)
+    m.payload!.headers = m.payload!.headers!.map((h) =>
+      h.name === "From" ? { name: "From", value: "Jean-Laurent Cazala <jeanlaurentcazala@lauralu.fr>" } : h
+    )
+    return m
+  }
+  const NEAR_MISSES: Record<string, string> = {
+    tr: "TR: Consultation démontage_BISCUITERIE PENVEN_20/10 et 21/10",
+    re: "RE: Consultation démontage_BISCUITERIE PENVEN_20/10 et 21/10",
+    suffix: "Consultation démontage_BISCUITERIE PENVEN_20/10 et 21/10 - modifié",
+    other: "Consultation démontage_BISCUITERIE PENVEN_27/10 et 28/10",
+    spaced: "Consultation démontage BISCUITERIE PENVEN 20/10 et 21/10",
+  }
+
+  it("(e/f) Gmail renvoie uniquement des faux candidats → TARGET_MESSAGE_NOT_FOUND, aucune ingestion", async () => {
+    const listed = Object.keys(NEAR_MISSES)
+    const messages = Object.fromEntries(listed.map((id) => [id, lauralu(id, NEAR_MISSES[id]!)]))
+    const { d, calls } = setup({ listed, messages, over: { listActiveIdentities: async () => REAL_IDENTITIES } })
+    const r = await call(RUN, d)
+    assert.equal(r.status, 404)
+    assert.equal(r.json.code, "TARGET_MESSAGE_NOT_FOUND")
+    assert.equal(r.json.candidateCount, 5)
+    assert.equal(r.json.matchedCount, 0)
+    assert.deepEqual(calls.register, [])
+  })
+
+  it("(d/f) faux candidats + 1 exact (expéditeur lauralu.fr) → ingestion exactement 1 fois, sur le seul exact", async () => {
+    const listed = [...Object.keys(NEAR_MISSES), "exact"]
+    const messages = {
+      ...Object.fromEntries(Object.keys(NEAR_MISSES).map((id) => [id, lauralu(id, NEAR_MISSES[id]!)])),
+      exact: lauralu("exact", TARGET_EXPECTED_SUBJECT),
+    }
+    const { d, calls } = setup({ listed, messages, over: { listActiveIdentities: async () => REAL_IDENTITIES } })
+    const r = await call(RUN, d)
+    assert.equal(r.status, 200, r.text)
+    assert.equal(r.json.candidateCount, 6)
+    assert.equal(r.json.matchedCount, 1)
+    assert.equal(calls.register.length, 1)
+    assert.equal(calls.register[0]!.externalMessageId, "exact")
+    assert.equal(calls.register[0]!.sourceMailboxKey, CONNECTION)
+    assert.match(calls.list[0]!.query, /^after:\d{4}\/\d{2}\/\d{2} \(from:@gl-events\.com OR from:@lauralu\.fr\) subject:Consultation$/)
+  })
+
+  it("(f) deux exacts (dont variante casse / accents / espaces) → TARGET_MESSAGE_AMBIGUOUS, aucune ingestion", async () => {
+    const messages = {
+      a: lauralu("a", TARGET_EXPECTED_SUBJECT),
+      b: lauralu("b", "CONSULTATION DEMONTAGE_BISCUITERIE  PENVEN_20/10 ET 21/10"),
+    }
+    const { d, calls } = setup({ listed: ["a", "b"], messages, over: { listActiveIdentities: async () => REAL_IDENTITIES } })
+    const r = await call(RUN, d)
+    assert.equal(r.json.code, "TARGET_MESSAGE_AMBIGUOUS")
+    assert.deepEqual(calls.register, [])
+  })
+
+  it("(g) source : un seul subject:Consultation, aucune pagination / curseur / History / retry introduits", () => {
+    const src = readFileSync(path.join(ROOT, HANDLER_PATH), "utf8")
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+    assert.match(code, /export const TARGET_SUBJECT_QUERY_TERM = "Consultation"/)
+    assert.match(code, /subject:\$\{escapeGmailQueryTerm\(TARGET_SUBJECT_QUERY_TERM\)\}/)
+    // Opérateur Gmail : un seul filtre interpolé ; aucun subject:<littéral> (hors annotations TS « subject: unknown »).
+    assert.equal((code.match(/subject:\$\{/g) ?? []).length, 1)
+    assert.ok(!/subject:["A-Za-z]/.test(code))
+    assert.ok(!/TARGET_SUBJECT_QUERY_TERMS|TARGET_SUBJECT_QUERY_PHRASE|in:anywhere/.test(code))
+    assert.match(code, /if \(isExactTargetSubject\(canonical\.subject\)\) exact\.push\(canonical\)/)
+    for (const forbidden of [/ScanCursor/, /cursorRepository/, /listHistory/, /nextPageToken/, /while\s*\(/, /retry/i]) {
+      assert.ok(!forbidden.test(code), String(forbidden))
+    }
+    // « pageToken » n'apparaît que comme clé de body INTERDITE (garde), jamais transmis à Gmail.
+    assert.deepEqual(code.match(/pageToken/g), ["pageToken"])
+    assert.match(code, /"pageToken",/)
+    assert.equal((code.match(/\.listMessages\(/g) ?? []).length, 1)
+    assert.match(code, /gmail\.listMessages\(accessToken, built\.query, TARGET_MAX_RESULTS\)/)
   })
 })
