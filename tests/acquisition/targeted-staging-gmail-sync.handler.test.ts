@@ -12,7 +12,14 @@ import {
   GMAIL_SYNC_ALLOWED_VERCEL_PROJECT_ID,
   TARGETED_GMAIL_SYNC_CHECK_CONFIRMATION,
   TARGETED_GMAIL_SYNC_RUN_CONFIRMATION,
+  TARGETED_GMAIL_SYNC_INSPECT_CONFIRMATION,
+  INSPECT_MAX_MESSAGES,
+  INSPECT_RECEIVED_SINCE,
+  buildInspectFindManyArgs,
+  isPenvenCandidateSubject,
   handleTargetedStagingGmailSync,
+  type GmailSyncInspectArgs,
+  type GmailSyncInspectRow,
   type GmailSyncConnectionTarget,
   type GmailSyncInvocation,
   type GmailSyncSession,
@@ -84,6 +91,8 @@ function deps(over: Partial<TargetedGmailSyncHandlerDeps> = {}) {
     },
     ingestion: INGESTION,
     cursorRepository: CURSOR,
+    // INSPECT uniquement : toute lecture hors INSPECT est une faute (prouve CHECK / RUN inchangés).
+    findMessages: bomb("findMessages"),
     ...over,
   }
   return { d, calls }
@@ -378,13 +387,15 @@ describe("source", () => {
       /acquisition-gmail-sync\.handler/,
       /getValidAccessToken/,
       /console\./,
-      /\.findMany\(/,
       /\bfor\s*\(/,
       /\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\(/,
       /\$executeRaw|\$queryRaw|\$transaction/,
     ]) {
       assert.ok(!forbidden.test(code), String(forbidden))
     }
+    // INSPECT : exactement une lecture findMany, uniquement sur acquisitionMessage.
+    assert.equal((code.match(/\.findMany\(/g) ?? []).length, 1)
+    assert.match(code, /prisma\.acquisitionMessage\.findMany\(args\)/)
   })
 
   it("un seul appel sync, câblé sur les adaptateurs normaux, mailShadow false", () => {
@@ -402,5 +413,242 @@ describe("source", () => {
     const route = readFileSync(path.join(ROOT, ROUTE_PATH), "utf8")
     assert.match(route, /return handleTargetedStagingGmailSync\(req\)/)
     assert.ok(!/export async function (GET|PUT|PATCH|DELETE)/.test(route))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// INSPECT — lecture seule post-504 : le mail Penven est-il déjà en base ?
+// ---------------------------------------------------------------------------
+
+const INSPECT = { confirmation: TARGETED_GMAIL_SYNC_INSPECT_CONFIRMATION }
+
+function inspectRow(over: Partial<GmailSyncInspectRow> = {}): GmailSyncInspectRow {
+  return {
+    id: "msg-1",
+    externalMessageId: "gmail-ext-1",
+    sourceMailboxKey: CONNECTION,
+    senderEmail: "planning@partner.test",
+    subject: "Consultation démontage_BISCUITERIE PENVEN_20/10 et 21/10",
+    receivedAt: new Date("2026-10-01T14:24:00.000Z"),
+    status: "DRAFT_CREATED",
+    createdAt: new Date("2026-10-02T08:00:00.000Z"),
+    updatedAt: new Date("2026-10-02T08:00:01.000Z"),
+    draft: { id: "draft-1", status: "PENDING_EXTRACTION", createdWorksiteId: null },
+    ...over,
+  }
+}
+
+function inspectDeps(rows: GmailSyncInspectRow[], over: Partial<TargetedGmailSyncHandlerDeps> = {}) {
+  const reads: GmailSyncInspectArgs[] = []
+  const base = deps({
+    sync: bomb("sync"),
+    createProvider: NO_IO.createProvider,
+    findMessages: async (args) => {
+      reads.push(args)
+      return rows
+    },
+    ...over,
+  })
+  return { ...base, reads }
+}
+
+describe("INSPECT — lecture seule post-504", () => {
+  it("confirmation INSPECT exacte acceptée → réponse compacte, readOnly, gmailCalled/syncCalled false", async () => {
+    const { d, calls, reads } = inspectDeps([inspectRow()])
+    const r = await call(INSPECT, d)
+    assert.equal(r.status, 200, r.text)
+    assert.equal(r.cache, "no-store")
+    assert.deepEqual(Object.keys(r.json).sort(), [
+      "count", "gmailCalled", "harness", "messages", "mode", "ok", "penvenFound", "readOnly", "syncCalled",
+    ])
+    assert.equal(r.json.ok, true)
+    assert.equal(r.json.harness, "targeted-staging-gmail-sync")
+    assert.equal(r.json.mode, "INSPECT")
+    assert.equal(r.json.readOnly, true)
+    assert.equal(r.json.gmailCalled, false)
+    assert.equal(r.json.syncCalled, false)
+    assert.equal(r.json.count, 1)
+    assert.equal(r.json.penvenFound, true)
+    assert.equal(reads.length, 1, "exactement une lecture findMany")
+    assert.deepEqual(calls.sync, [], "sync jamais appelée")
+    assert.equal(calls.provider, 0, "provider Gmail jamais créé")
+    assert.deepEqual(calls.load, [{ companyId: COMPANY, connectionId: CONNECTION }])
+  })
+
+  for (const bad of [
+    "INSPECT",
+    `${TARGETED_GMAIL_SYNC_INSPECT_CONFIRMATION} `,
+    TARGETED_GMAIL_SYNC_INSPECT_CONFIRMATION.toLowerCase(),
+    "INSPECT_TARGETED_STAGING_GMAIL_MIME_DIAGNOSTIC",
+  ]) {
+    it(`mauvaise confirmation « ${bad} » → CONFIRMATION_REQUIRED, aucune lecture`, async () => {
+      const { d, reads } = inspectDeps([inspectRow()], { loadConnection: bomb("loadConnection") })
+      const r = await call({ confirmation: bad }, d)
+      assert.equal(r.status, 400)
+      assert.equal(r.json.code, "CONFIRMATION_REQUIRED")
+      assert.equal(reads.length, 0)
+    })
+  }
+
+  const guardCases: Array<[string, Partial<TargetedGmailSyncHandlerDeps>, unknown, number, string]> = [
+    ["surface non Preview", { env: { ...ENV, VERCEL_ENV: "production" } }, INSPECT, 403, "HARNESS_SURFACE_FORBIDDEN"],
+    ["mauvais project", { env: { ...ENV, VERCEL_PROJECT_ID: "prj_other" } }, INSPECT, 403, "HARNESS_SURFACE_FORBIDDEN"],
+    ["flag off", { env: { ...ENV, TARGETED_STAGING_GMAIL_SYNC_ENABLED: undefined } }, INSPECT, 403, "HARNESS_DISABLED"],
+    ["non authentifié", { auth: async () => null }, INSPECT, 401, "UNAUTHORIZED"],
+    ["rôle USER", { auth: async () => ({ user: { id: "u", role: "USER", companyId: COMPANY } }) }, INSPECT, 403, "FORBIDDEN"],
+    ["tenant mismatch", { auth: async () => ({ user: { id: "u", role: "ADMIN", companyId: "co-other" } }) }, INSPECT, 403, "TENANT_MISMATCH"],
+    ["cible env absente", { env: { ...ENV, TARGETED_STAGING_GMAIL_SYNC_CONNECTION_ID: undefined } }, INSPECT, 403, "HARNESS_TARGET_UNSET"],
+    ["override cible body", {}, { ...INSPECT, sourceMailboxKey: "conn-other" }, 400, "TARGET_OVERRIDE_FORBIDDEN"],
+    ["override receivedAt / take refusé (champ inconnu)", {}, { ...INSPECT, take: 500 }, 400, "UNKNOWN_FIELD"],
+    ["connexion absente", { loadConnection: async () => null }, INSPECT, 404, "CONNECTION_NOT_FOUND"],
+    ["connexion inactive", { loadConnection: async () => ({ id: CONNECTION, companyId: COMPANY, active: false }) }, INSPECT, 409, "CONNECTION_INACTIVE"],
+  ]
+  for (const [label, over, body, status, code] of guardCases) {
+    it(`gardes existantes appliquées à INSPECT : ${label} → ${status} ${code}, aucune lecture messages`, async () => {
+      const { d, reads } = inspectDeps([inspectRow()], over)
+      const r = await call(body, d)
+      assert.equal(r.status, status)
+      assert.equal(r.json.code, code)
+      assert.equal(reads.length, 0)
+    })
+  }
+
+  it("filtre exact : companyId + source GMAIL + sourceMailboxKey cibles, receivedAt ≥ 2026-10-01, desc, take 20, select minimal", async () => {
+    const { d, reads } = inspectDeps([])
+    await call(INSPECT, d)
+    const args = reads[0]!
+    assert.deepEqual(Object.keys(args).sort(), ["orderBy", "select", "take", "where"])
+    assert.deepEqual(Object.keys(args.where).sort(), ["companyId", "receivedAt", "source", "sourceMailboxKey"])
+    assert.equal(args.where.companyId, COMPANY)
+    assert.equal(args.where.source, "GMAIL")
+    assert.equal(args.where.sourceMailboxKey, CONNECTION)
+    assert.deepEqual(Object.keys(args.where.receivedAt), ["gte"])
+    assert.equal(args.where.receivedAt.gte.toISOString(), "2026-10-01T00:00:00.000Z")
+    assert.equal(INSPECT_RECEIVED_SINCE, "2026-10-01T00:00:00.000Z")
+    assert.deepEqual(args.orderBy, { receivedAt: "desc" })
+    assert.equal(args.take, 20)
+    assert.ok(args.take <= 20 && INSPECT_MAX_MESSAGES === 20)
+    assert.deepEqual(args.select, {
+      id: true,
+      externalMessageId: true,
+      sourceMailboxKey: true,
+      senderEmail: true,
+      subject: true,
+      receivedAt: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+      draft: { select: { id: true, status: true, createdWorksiteId: true } },
+    })
+    assert.deepEqual(buildInspectFindManyArgs({ companyId: COMPANY, connectionId: CONNECTION }).where.sourceMailboxKey, CONNECTION)
+  })
+
+  it("plus de 20 lignes retournées par la lecture → réponse bornée à 20", async () => {
+    const many = Array.from({ length: 30 }, (_, i) => inspectRow({ id: `m${i}`, subject: `Autre ${i}` }))
+    const { d } = inspectDeps(many)
+    const r = await call(INSPECT, d)
+    assert.equal(r.json.count, 20)
+    assert.equal((r.json.messages as unknown[]).length, 20)
+  })
+
+  it("détection Penven positive (variantes) / négative, penvenFound correct", () => {
+    for (const s of [
+      "Consultation démontage_BISCUITERIE PENVEN_20/10 et 21/10",
+      "biscuiterie penven",
+      "RE: Penven démontage",
+      "Chantier PONTAVEN",
+      "Usine Pont Aven",
+      "pont aven",
+    ]) {
+      assert.equal(isPenvenCandidateSubject(s), true, s)
+    }
+    for (const s of ["Consultation démontage GL Events", "", "Penve", "Pont-Avenue", null, undefined, 42]) {
+      assert.equal(isPenvenCandidateSubject(s), false, String(s))
+    }
+  })
+
+  it("liste mixte : penvenCandidate par message, penvenFound true ; liste sans Penven → false ; vide → false", async () => {
+    const mixed = inspectDeps([inspectRow({ id: "a", subject: "Consultation GL Events" }), inspectRow({ id: "b" })])
+    const r1 = await call(INSPECT, mixed.d)
+    assert.deepEqual((r1.json.messages as Array<{ id: string; penvenCandidate: boolean }>).map((m) => [m.id, m.penvenCandidate]), [["a", false], ["b", true]])
+    assert.equal(r1.json.penvenFound, true)
+
+    const none = inspectDeps([inspectRow({ subject: "Consultation GL Events" })])
+    const r2 = await call(INSPECT, none.d)
+    assert.equal(r2.json.penvenFound, false)
+
+    const empty = inspectDeps([])
+    const r3 = await call(INSPECT, empty.d)
+    assert.deepEqual({ count: r3.json.count, penvenFound: r3.json.penvenFound, messages: r3.json.messages }, { count: 0, penvenFound: false, messages: [] })
+  })
+
+  it("forme d'un message : champs sélectionnés + draft (ou null) + penvenCandidate, dates ISO, rien d'autre", async () => {
+    const withExtras = {
+      ...inspectRow(),
+      rawMetadata: { secret: "RAW-SENSITIVE" },
+      normalizedText: "BODY-SENSITIVE",
+      attachments: [{ storagePublicId: "pub/SENSITIVE" }],
+    } as unknown as GmailSyncInspectRow
+    const { d } = inspectDeps([withExtras, inspectRow({ id: "no-draft", draft: null })])
+    const r = await call(INSPECT, d)
+    const [m1, m2] = r.json.messages as Array<Record<string, unknown>>
+    assert.deepEqual(m1, {
+      id: "msg-1",
+      externalMessageId: "gmail-ext-1",
+      sourceMailboxKey: CONNECTION,
+      senderEmail: "planning@partner.test",
+      subject: "Consultation démontage_BISCUITERIE PENVEN_20/10 et 21/10",
+      receivedAt: "2026-10-01T14:24:00.000Z",
+      status: "DRAFT_CREATED",
+      createdAt: "2026-10-02T08:00:00.000Z",
+      updatedAt: "2026-10-02T08:00:01.000Z",
+      draft: { id: "draft-1", status: "PENDING_EXTRACTION", createdWorksiteId: null },
+      penvenCandidate: true,
+    })
+    assert.equal(m2!.draft, null)
+    for (const s of ["RAW-SENSITIVE", "BODY-SENSITIVE", "SENSITIVE", "rawMetadata", "normalizedText", "attachments", "storagePublicId", SECRET_TOKEN]) {
+      assert.ok(!r.text.includes(s), s)
+    }
+  })
+
+  it("lecture en erreur → 500 INSPECT_READ_FAILED, code seul, aucune fuite, aucune sync", async () => {
+    const { d, calls } = inspectDeps([], {
+      findMessages: async () => {
+        throw new Error(`Invalid prisma.acquisitionMessage.findMany() ${SECRET_TOKEN}`)
+      },
+    })
+    const r = await call(INSPECT, d)
+    assert.equal(r.status, 500)
+    assert.equal(r.json.code, "INSPECT_READ_FAILED")
+    assert.ok(!r.text.includes(SECRET_TOKEN))
+    assert.ok(!r.text.includes("prisma"))
+    assert.deepEqual(calls.sync, [])
+  })
+
+  it("CHECK et RUN inchangés : jamais de lecture findMessages (bombe par défaut), mêmes réponses", async () => {
+    const check = deps({ sync: bomb("sync") })
+    const rc = await call(CHECK, check.d)
+    assert.equal(rc.status, 200)
+    assert.equal(rc.json.mode, "CHECK")
+    assert.ok(!("messages" in rc.json))
+
+    const run = deps()
+    const rr = await call(RUN, run.d)
+    assert.equal(rr.status, 200)
+    assert.equal(rr.json.mode, "RUN")
+    assert.equal(run.calls.sync.length, 1)
+    assert.ok(!("messages" in rr.json))
+  })
+
+  it("source : INSPECT avant RUN, aucune écriture Prisma, aucune sync ni provider dans la branche INSPECT", () => {
+    const src = readFileSync(path.join(ROOT, HANDLER_PATH), "utf8")
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+    const start = code.indexOf('if (mode === "INSPECT") {')
+    const end = code.indexOf("const sync = deps.sync")
+    assert.ok(start > 0 && end > start, "branche INSPECT avant le câblage RUN")
+    const branch = code.slice(start, end)
+    assert.ok(!/sync\(|createProvider|syncAcquisitionMailForCompany|getValidAccessToken/.test(branch))
+    assert.ok(!/\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\(/.test(code))
+    assert.ok(!/\$executeRaw|\$queryRaw|\$transaction/.test(code))
   })
 })

@@ -7,11 +7,14 @@
  * RUN   : UN appel à syncAcquisitionMailForCompany (service normal du cron) pour la connexion
  *         configurée, mailShadow désactivé. Opération WRITE staging réelle : lecture Gmail, refresh
  *         OAuth normal possible, ingestion normale (message / draft / attachments), avance du curseur.
+ * INSPECT : lecture seule des AcquisitionMessage GMAIL de la connexion cible reçus depuis
+ *         INSPECT_RECEIVED_SINCE (≤ 20, champs minimaux + draft associé). Aucun Gmail, aucune sync.
  * Jamais : cron global, listing des connexions, driver, boucle multi-connexions, retry.
  * Sortie : statut + compteurs + code d'erreur sûr. Aucun token, secret, message Gmail ou message d'erreur brut.
  */
 
 import { NextResponse } from "next/server"
+import type { Prisma } from "@prisma/client"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { syncAcquisitionMailForCompany } from "@/lib/acquisition/connector/acquisition-gmail-sync.service"
@@ -23,6 +26,14 @@ import type { MailProviderPort } from "@/lib/acquisition/ports/mail-provider.por
 
 export const TARGETED_GMAIL_SYNC_CHECK_CONFIRMATION = "CHECK_TARGETED_STAGING_GMAIL_SYNC" as const
 export const TARGETED_GMAIL_SYNC_RUN_CONFIRMATION = "RUN_TARGETED_STAGING_GMAIL_SYNC" as const
+export const TARGETED_GMAIL_SYNC_INSPECT_CONFIRMATION = "INSPECT_TARGETED_STAGING_GMAIL_SYNC" as const
+
+/** INSPECT : fenêtre de réception et borne de lecture (fixes, non paramétrables par la requête). */
+export const INSPECT_RECEIVED_SINCE = "2026-10-01T00:00:00.000Z"
+export const INSPECT_MAX_MESSAGES = 20
+
+/** Termes de détection (sujet, insensible à la casse). */
+const PENVEN_SUBJECT_TERMS = ["biscuiterie penven", "penven", "pontaven", "pont aven"]
 
 /** planificator-staging (Preview only). */
 export const GMAIL_SYNC_ALLOWED_VERCEL_PROJECT_ID = "prj_CRp6XttdXjBjPMjJMSMbsUp6hwVD"
@@ -68,6 +79,56 @@ export type GmailSyncConnectionTarget = { id: string; companyId: string; active:
 
 export type GmailSyncInvocation = Parameters<typeof syncAcquisitionMailForCompany>[0]
 
+/** Ligne INSPECT : exactement les champs sélectionnés. */
+export type GmailSyncInspectRow = {
+  id: string
+  externalMessageId: string
+  sourceMailboxKey: string
+  senderEmail: string
+  subject: string
+  receivedAt: Date
+  status: string
+  createdAt: Date
+  updatedAt: Date
+  draft: { id: string; status: string; createdWorksiteId: string | null } | null
+}
+
+const INSPECT_SELECT = {
+  id: true,
+  externalMessageId: true,
+  sourceMailboxKey: true,
+  senderEmail: true,
+  subject: true,
+  receivedAt: true,
+  status: true,
+  createdAt: true,
+  updatedAt: true,
+  draft: { select: { id: true, status: true, createdWorksiteId: true } },
+} satisfies Prisma.AcquisitionMessageSelect
+
+/** Arguments Prisma INSPECT (lecture seule), construits uniquement depuis la cible env. */
+export function buildInspectFindManyArgs(input: { companyId: string; connectionId: string }) {
+  return {
+    where: {
+      companyId: input.companyId,
+      source: "GMAIL" as const,
+      sourceMailboxKey: input.connectionId,
+      receivedAt: { gte: new Date(INSPECT_RECEIVED_SINCE) },
+    },
+    orderBy: { receivedAt: "desc" as const },
+    take: INSPECT_MAX_MESSAGES,
+    select: INSPECT_SELECT,
+  } satisfies Prisma.AcquisitionMessageFindManyArgs
+}
+
+export type GmailSyncInspectArgs = ReturnType<typeof buildInspectFindManyArgs>
+
+export function isPenvenCandidateSubject(subject: unknown): boolean {
+  if (typeof subject !== "string") return false
+  const s = subject.toLowerCase()
+  return PENVEN_SUBJECT_TERMS.some((t) => s.includes(t))
+}
+
 export type TargetedGmailSyncHandlerDeps = {
   auth?: () => Promise<GmailSyncSession>
   env?: Record<string, string | undefined>
@@ -79,6 +140,8 @@ export type TargetedGmailSyncHandlerDeps = {
   createProvider?: () => MailProviderPort
   ingestion?: GmailSyncInvocation["ingestion"]
   cursorRepository?: GmailSyncInvocation["cursorRepository"]
+  /** INSPECT — lecture seule (défaut : prisma.acquisitionMessage.findMany). */
+  findMessages?: (args: GmailSyncInspectArgs) => Promise<GmailSyncInspectRow[]>
 }
 
 function normalizeKey(key: string): string {
@@ -98,6 +161,14 @@ async function defaultLoadConnection(input: {
     where: { id: input.connectionId, companyId: input.companyId },
     select: { id: true, companyId: true, active: true },
   })
+}
+
+async function defaultFindMessages(args: GmailSyncInspectArgs): Promise<GmailSyncInspectRow[]> {
+  return prisma.acquisitionMessage.findMany(args)
+}
+
+function isoOrNull(d: unknown): string | null {
+  return d instanceof Date && !Number.isNaN(d.getTime()) ? d.toISOString() : null
 }
 
 function safeErrorCode(result: MailSyncResult): string | null {
@@ -167,7 +238,9 @@ export async function handleTargetedStagingGmailSync(
       ? "CHECK"
       : confirmation === TARGETED_GMAIL_SYNC_RUN_CONFIRMATION
         ? "RUN"
-        : null
+        : confirmation === TARGETED_GMAIL_SYNC_INSPECT_CONFIRMATION
+          ? "INSPECT"
+          : null
   if (!mode) {
     return refused(400, "CONFIRMATION_REQUIRED", "Confirmation exacte requise")
   }
@@ -212,6 +285,43 @@ export async function handleTargetedStagingGmailSync(
       },
       gmailCalled: false,
       syncCalled: false,
+    })
+  }
+
+  if (mode === "INSPECT") {
+    // Lecture seule : une seule findMany, cible env uniquement. Aucun Gmail, aucune sync.
+    const findMessages = deps.findMessages ?? defaultFindMessages
+    let rows: GmailSyncInspectRow[]
+    try {
+      rows = await findMessages(buildInspectFindManyArgs({ companyId, connectionId }))
+    } catch {
+      return refused(500, "INSPECT_READ_FAILED", "Lecture des messages cibles impossible")
+    }
+    const messages = (Array.isArray(rows) ? rows : []).slice(0, INSPECT_MAX_MESSAGES).map((m) => ({
+      id: m.id,
+      externalMessageId: m.externalMessageId,
+      sourceMailboxKey: m.sourceMailboxKey,
+      senderEmail: m.senderEmail,
+      subject: m.subject,
+      receivedAt: isoOrNull(m.receivedAt),
+      status: m.status,
+      createdAt: isoOrNull(m.createdAt),
+      updatedAt: isoOrNull(m.updatedAt),
+      draft: m.draft
+        ? { id: m.draft.id, status: m.draft.status, createdWorksiteId: m.draft.createdWorksiteId ?? null }
+        : null,
+      penvenCandidate: isPenvenCandidateSubject(m.subject),
+    }))
+    return respond(200, {
+      ok: true,
+      harness: HARNESS,
+      mode: "INSPECT",
+      readOnly: true,
+      gmailCalled: false,
+      syncCalled: false,
+      count: messages.length,
+      penvenFound: messages.some((m) => m.penvenCandidate),
+      messages,
     })
   }
 
