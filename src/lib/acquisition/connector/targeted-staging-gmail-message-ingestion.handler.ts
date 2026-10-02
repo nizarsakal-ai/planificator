@@ -3,8 +3,8 @@
  * via le pipeline NORMAL (registerIncomingMessage). Fail-closed. Cible via env uniquement.
  *
  * CHECK : gardes + connexion cible active. Aucun token, aucun Gmail, aucune ingestion, aucune écriture.
- * RUN   : filtre partenaire fail-closed (buildAcquisitionGmailLookbackQuery) + subject:Consultation
- *         (présélection bornée), UNE page
+ * RUN   : identités partenaires fail-closed (buildAcquisitionGmailLookbackQuery) + expéditeur cible
+ *         autorisé ; requête after:<lookback> from:<expéditeur exact> subject:Consultation, UNE page
  *         messages.list (maxResults ≤ 10, aucun pageToken), messages.get par candidat (≤ 10),
  *         mapping canonique normal, correspondance EXACTE du sujet attendu ; exactement 1 → UN appel
  *         registerIncomingMessage(mapGmailMessageToAcquisitionInput(msg, companyId, connectionId)).
@@ -50,10 +50,16 @@ export const GMAIL_MESSAGE_INGESTION_CONNECTION_ENV = "TARGETED_STAGING_GMAIL_SY
 export const TARGET_EXPECTED_SUBJECT = "Consultation démontage_BISCUITERIE PENVEN_20/10 et 21/10"
 /**
  * Filtre sujet Gmail : un seul terme autonome du sujet réel, « Consultation », utilisé uniquement
- * comme présélection bornée (avec le filtre partenaire, la fenêtre de 7 jours et maxResults ≤ 10).
+ * comme présélection bornée (avec le filtre expéditeur exact, la fenêtre de 7 jours et maxResults ≤ 10).
  * L'autorité finale reste isExactTargetSubject() sur le sujet canonique après messages.get.
  */
 export const TARGET_SUBJECT_QUERY_TERM = "Consultation"
+/**
+ * Expéditeur exact du message cible, utilisé comme seul filtre from: de ce harness.
+ * Utilisable uniquement s'il reste autorisé par les identités partenaires actives
+ * (adresse exacte dans emails, ou son domaine dans domains) ; sinon fail-closed.
+ */
+export const TARGET_SENDER_EMAIL = "jeanlaurentcazala@lauralu.fr"
 /** Fenêtre de recherche (jours) — message reçu le 01/10/2026. */
 export const TARGET_LOOKBACK_DAYS = 7
 /** Borne stricte d'une unique page Gmail. */
@@ -143,15 +149,43 @@ export function isExactTargetSubject(subject: unknown): boolean {
 }
 
 /**
- * Requête Gmail ciblée : base partenaire fail-closed + subject:Consultation (présélection bornée).
- * Aucune identité partenaire active → refus (jamais de recherche non filtrée).
+ * L'expéditeur cible est-il autorisé par les identités partenaires actives ?
+ * Adresse exacte dans emails, ou son domaine exact dans domains (comparaison trim + minuscules,
+ * « @ » de tête toléré comme dans le builder global). Toute autre situation → false.
  */
-export function buildTargetedPenvenQuery(
-  identities: ActivePartnerIdentities
-): { ok: true; query: string } | { ok: false; code: "NO_ACTIVE_PARTNER_IDENTITIES" } {
+export function isTargetSenderAuthorized(identities: ActivePartnerIdentities): boolean {
+  const sender = TARGET_SENDER_EMAIL.toLowerCase()
+  const domain = sender.slice(sender.lastIndexOf("@") + 1)
+  const emails = Array.isArray(identities?.emails) ? identities.emails : []
+  const domains = Array.isArray(identities?.domains) ? identities.domains : []
+  const emailOk = emails.some((e) => typeof e === "string" && e.trim().toLowerCase() === sender)
+  const domainOk = domains.some(
+    (d) => typeof d === "string" && d.trim().toLowerCase().replace(/^@+/, "") === domain
+  )
+  return emailOk || domainOk
+}
+
+export type TargetedPenvenQueryResult =
+  | { ok: true; query: string }
+  | { ok: false; code: "NO_ACTIVE_PARTNER_IDENTITIES" | "TARGET_SENDER_NOT_AUTHORIZED" | "QUERY_BUILD_FAILED" }
+
+/**
+ * Requête Gmail ciblée : after:<date> from:<expéditeur exact> subject:Consultation.
+ * 1. builder global INCHANGÉ (fail-closed partenaires) : aucune identité valide → refus ;
+ * 2. expéditeur cible autorisé par les identités actives, sinon refus ;
+ * 3. la date « after:YYYY/MM/DD » est reprise telle quelle du builder global (même calcul lookback),
+ *    sa clause from:… est remplacée par le seul expéditeur exact (aucun from:@domaine, aucun OR).
+ */
+export function buildTargetedPenvenQuery(identities: ActivePartnerIdentities): TargetedPenvenQueryResult {
   const base = buildAcquisitionGmailLookbackQuery(TARGET_LOOKBACK_DAYS, identities)
   if (!base.ok) return base
-  return { ok: true, query: `${base.query} subject:${escapeGmailQueryTerm(TARGET_SUBJECT_QUERY_TERM)}` }
+  if (!isTargetSenderAuthorized(identities)) return { ok: false, code: "TARGET_SENDER_NOT_AUTHORIZED" }
+  const after = /^(after:\d{4}\/\d{2}\/\d{2}) /.exec(base.query)?.[1]
+  if (!after) return { ok: false, code: "QUERY_BUILD_FAILED" }
+  return {
+    ok: true,
+    query: `${after} from:${escapeGmailQueryTerm(TARGET_SENDER_EMAIL)} subject:${escapeGmailQueryTerm(TARGET_SUBJECT_QUERY_TERM)}`,
+  }
 }
 
 /** Runtime fail-closed : uniquement Preview du projet Staging exact. */
@@ -289,7 +323,13 @@ export async function handleTargetedStagingGmailMessageIngestion(
   }
   const built = buildTargetedPenvenQuery(identities)
   if (!built.ok) {
-    return refused(409, built.code, "Aucune identité partenaire active — recherche Gmail refusée", {
+    const message =
+      built.code === "TARGET_SENDER_NOT_AUTHORIZED"
+        ? "Expéditeur cible non autorisé par les identités partenaires actives — recherche Gmail refusée"
+        : built.code === "QUERY_BUILD_FAILED"
+          ? "Construction de la requête Gmail ciblée impossible — recherche refusée"
+          : "Aucune identité partenaire active — recherche Gmail refusée"
+    return refused(409, built.code, message, {
       gmailCalled: false,
       ingestionCalled: false,
     })

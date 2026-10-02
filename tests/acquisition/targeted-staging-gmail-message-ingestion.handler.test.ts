@@ -16,7 +16,9 @@ import {
   TARGET_EXPECTED_SUBJECT,
   TARGET_LOOKBACK_DAYS,
   TARGET_MAX_RESULTS,
+  TARGET_SENDER_EMAIL,
   buildTargetedPenvenQuery,
+  isTargetSenderAuthorized,
   handleTargetedStagingGmailMessageIngestion,
   isExactTargetSubject,
   type GmailMessageIngestionConnection,
@@ -51,7 +53,8 @@ const ENV = {
 const ADMIN: GmailMessageIngestionSession = { user: { id: "u1", role: "ADMIN", companyId: COMPANY } }
 const CHECK = { confirmation: TARGETED_GMAIL_MESSAGE_INGESTION_CHECK_CONFIRMATION }
 const RUN = { confirmation: TARGETED_GMAIL_MESSAGE_INGESTION_RUN_CONFIRMATION }
-const IDENTITIES = { domains: ["hylight.test"], emails: ["planning@hylight.test"] }
+/** Identités partenaires actives réelles vérifiées (l'expéditeur cible est autorisé par lauralu.fr). */
+const IDENTITIES = { domains: ["gl-events.com", "lauralu.fr"], emails: [] }
 
 function gmailMessage(id: string, subject: string, over: Partial<GmailMessageResource> = {}): GmailMessageResource {
   return {
@@ -278,56 +281,89 @@ describe("12–16. requête Gmail : partenaire fail-closed, une page ≤ 10, auc
     assert.deepEqual(buildTargetedPenvenQuery({ domains: [], emails: [] }), { ok: false, code: "NO_ACTIVE_PARTNER_IDENTITIES" })
   })
 
-  const EXPECTED_SUBJECT_FILTER = "subject:Consultation"
+  const SENDER = "jeanlaurentcazala@lauralu.fr"
+  const EXPECTED_TAIL = `from:${SENDER} subject:Consultation`
+  /** Date after: produite par le builder global inchangé (même calcul lookback 7 jours). */
+  function globalAfter(identities: { domains: string[]; emails: string[] }): string {
+    const base = buildAcquisitionGmailLookbackQuery(TARGET_LOOKBACK_DAYS, identities)
+    assert.ok(base.ok)
+    return base.ok ? base.query.split(" ")[0]! : ""
+  }
 
-  it("12. requête = base partenaire officielle (identique) + subject:Consultation", async () => {
+  it("1. domains contient lauralu.fr → expéditeur exact autorisé (variantes casse / @ / espaces)", () => {
+    assert.equal(TARGET_SENDER_EMAIL, SENDER)
+    for (const domains of [["lauralu.fr"], ["gl-events.com", "lauralu.fr"], ["  LAURALU.FR "], ["@lauralu.fr"]]) {
+      const identities = { domains, emails: [] }
+      assert.equal(isTargetSenderAuthorized(identities), true, JSON.stringify(domains))
+      const built = buildTargetedPenvenQuery(identities)
+      assert.ok(built.ok, JSON.stringify(domains))
+    }
+  })
+
+  it("2. emails contient jeanlaurentcazala@lauralu.fr (sans domaine) → expéditeur exact autorisé", () => {
+    for (const emails of [[SENDER], ["other@x.test", " JeanLaurentCazala@Lauralu.FR "]]) {
+      const identities = { domains: ["gl-events.com"], emails }
+      assert.equal(isTargetSenderAuthorized(identities), true, JSON.stringify(emails))
+      const built = buildTargetedPenvenQuery(identities)
+      assert.ok(built.ok)
+      if (built.ok) assert.equal(built.query, `${globalAfter(identities)} ${EXPECTED_TAIL}`)
+    }
+  })
+
+  it("3. ni domaine ni email cible autorisés → TARGET_SENDER_NOT_AUTHORIZED avant token / listMessages, aucune ingestion", async () => {
+    for (const ids of [
+      { domains: ["gl-events.com"], emails: [] },
+      { domains: ["gl-events.com", "sub.lauralu.fr", "lauralu.fr.evil.test", "lauralu.com"], emails: ["other@lauralu.fr", "jeanlaurentcazala@other.fr"] },
+      { domains: [], emails: ["planning@hylight.test"] },
+    ]) {
+      assert.equal(isTargetSenderAuthorized(ids), false, JSON.stringify(ids))
+      assert.deepEqual(buildTargetedPenvenQuery(ids), { ok: false, code: "TARGET_SENDER_NOT_AUTHORIZED" })
+      const { d, calls } = setup({ over: { listActiveIdentities: async () => ids, getValidAccessToken: bomb("token") } })
+      const r = await call(RUN, d)
+      assert.equal(r.status, 409)
+      assert.equal(r.json.code, "TARGET_SENDER_NOT_AUTHORIZED")
+      assert.equal(r.json.gmailCalled, false)
+      assert.equal(r.json.ingestionCalled, false)
+      assert.deepEqual([calls.token.length, calls.list.length, calls.get.length, calls.register.length], [0, 0, 0, 0])
+    }
+    // Aucune identité valide : le fail-closed global reste prioritaire.
+    assert.deepEqual(buildTargetedPenvenQuery({ domains: [], emails: [] }), { ok: false, code: "NO_ACTIVE_PARTNER_IDENTITIES" })
+  })
+
+  it("4. query finale exacte : after:<lookback global> from:jeanlaurentcazala@lauralu.fr subject:Consultation", async () => {
     const { d, calls } = setup()
     await call(RUN, d)
-    const base = buildAcquisitionGmailLookbackQuery(TARGET_LOOKBACK_DAYS, IDENTITIES)
-    assert.ok(base.ok)
-    assert.equal(calls.list[0]!.query, `${base.ok ? base.query : ""} ${EXPECTED_SUBJECT_FILTER}`)
-    assert.equal(
-      calls.list[0]!.query.replace(/^after:\d{4}\/\d{2}\/\d{2} /, "after:<date> "),
-      `after:<date> (from:planning@hylight.test OR from:@hylight.test) ${EXPECTED_SUBJECT_FILTER}`
-    )
+    const q = calls.list[0]!.query
+    assert.equal(q, `${globalAfter(IDENTITIES)} ${EXPECTED_TAIL}`)
+    assert.match(q, /^after:\d{4}\/\d{2}\/\d{2} from:jeanlaurentcazala@lauralu\.fr subject:Consultation$/)
+    // Date non codée en dur : exactement celle du builder global (lookback 7 jours) au moment de l'exécution.
+    assert.equal(q.split(" ")[0], globalAfter(IDENTITIES))
     assert.deepEqual(calls.identities, [COMPANY])
   })
 
-  it("12 (a/b/c). query : base partenaire intégrale + exactement subject:Consultation, jamais élargie", async () => {
+  it("5–10. un seul from: (adresse exacte), aucun from:@, un seul subject:Consultation, ni BISCUITERIE/PENVEN, ni phrase, ni OR/joker/in: ; une page ≤ 10", async () => {
     for (const identities of [
       IDENTITIES,
-      { domains: ["gl-events.com", "lauralu.fr"], emails: [] },
-      { domains: ["a.test", "b.test"], emails: [] },
-      { domains: [], emails: ["x@c.test"] },
+      { domains: ["lauralu.fr"], emails: [] },
+      { domains: ["gl-events.com", "a.test", "b.test"], emails: [SENDER, "x@c.test"] },
     ]) {
       const built = buildTargetedPenvenQuery(identities)
-      const base = buildAcquisitionGmailLookbackQuery(7, identities)
-      assert.ok(built.ok && base.ok)
-      if (!built.ok || !base.ok) continue
-      // (a) base partenaire / lookback 7 jours conservée intégralement, en préfixe.
-      assert.ok(built.query.startsWith(`${base.query} `))
-      assert.match(base.query, /^after:\d{4}\/\d{2}\/\d{2} \(from:/)
-      // (b) exactement un filtre subject:, et c'est subject:Consultation.
-      const tail = built.query.slice(base.query.length + 1)
-      assert.equal(tail, EXPECTED_SUBJECT_FILTER)
-      assert.equal((built.query.match(/subject:/g) ?? []).length, 1)
-      assert.equal((built.query.match(/(^|\s)subject:Consultation(\s|$)/g) ?? []).length, 1)
-      // Ni BISCUITERIE / PENVEN, ni phrase exacte, ni guillemets dans le filtre Gmail.
-      assert.ok(!/BISCUITERIE|PENVEN/i.test(built.query))
-      assert.ok(!built.query.includes(TARGET_EXPECTED_SUBJECT))
-      assert.ok(!built.query.includes('"'))
-      // (c) aucun élargissement : ni OR supplémentaire hors base partenaire, ni joker, ni in:anywhere.
-      assert.ok(!/\bOR\b/.test(tail) && !tail.includes("{") && !tail.includes("*"))
-      assert.ok(!/in:anywhere|in:spam|in:trash/i.test(built.query))
-      // Les seuls OR sont ceux de la base partenaire officielle.
-      assert.equal((built.query.match(/\bOR\b/g) ?? []).length, (base.query.match(/\bOR\b/g) ?? []).length)
+      assert.ok(built.ok)
+      if (!built.ok) continue
+      const q = built.query
+      assert.equal((q.match(/from:/g) ?? []).length, 1) // 5
+      assert.ok(q.includes(`from:${SENDER}`))
+      assert.ok(!q.includes("from:@")) // 6
+      assert.equal((q.match(/subject:/g) ?? []).length, 1) // 7
+      assert.equal((q.match(/(^|\s)subject:Consultation(\s|$)/g) ?? []).length, 1)
+      assert.ok(!/BISCUITERIE|PENVEN/i.test(q)) // 8
+      assert.ok(!q.includes(TARGET_EXPECTED_SUBJECT) && !q.includes('"')) // 9
+      assert.ok(!/\bOR\b/.test(q) && !q.includes("{") && !q.includes("(") && !q.includes("*"))
+      assert.ok(!/in:anywhere|in:spam|in:trash/i.test(q))
+      assert.ok(!q.includes("gl-events") && !q.includes("x@c.test"))
+      assert.equal(q.split(" ").length, 3)
     }
     assert.equal(TARGET_LOOKBACK_DAYS, 7)
-    // Domaine expéditeur réel couvert par la base partenaire.
-    const real = buildTargetedPenvenQuery({ domains: ["gl-events.com", "lauralu.fr"], emails: [] })
-    assert.ok(real.ok && real.query.includes("from:@lauralu.fr") && real.query.includes("from:@gl-events.com"))
-    // Fail-closed inchangé : pas d'identité → pas de requête du tout.
-    assert.deepEqual(buildTargetedPenvenQuery({ domains: [], emails: [] }), { ok: false, code: "NO_ACTIVE_PARTNER_IDENTITIES" })
 
     // Bornage de la page et pagination non suivie, via un RUN réel du handler.
     const { d, calls } = setup()
@@ -637,7 +673,7 @@ describe("présélection subject:Consultation — (d/e/f/g) post-fetch exact tou
     assert.equal(calls.register.length, 1)
     assert.equal(calls.register[0]!.externalMessageId, "exact")
     assert.equal(calls.register[0]!.sourceMailboxKey, CONNECTION)
-    assert.match(calls.list[0]!.query, /^after:\d{4}\/\d{2}\/\d{2} \(from:@gl-events\.com OR from:@lauralu\.fr\) subject:Consultation$/)
+    assert.match(calls.list[0]!.query, /^after:\d{4}\/\d{2}\/\d{2} from:jeanlaurentcazala@lauralu\.fr subject:Consultation$/)
   })
 
   it("(f) deux exacts (dont variante casse / accents / espaces) → TARGET_MESSAGE_AMBIGUOUS, aucune ingestion", async () => {
@@ -651,9 +687,17 @@ describe("présélection subject:Consultation — (d/e/f/g) post-fetch exact tou
     assert.deepEqual(calls.register, [])
   })
 
-  it("(g) source : un seul subject:Consultation, aucune pagination / curseur / History / retry introduits", () => {
+  it("(g) source : un seul from:<expéditeur exact> + un seul subject:Consultation, aucune pagination / curseur / History / retry", () => {
     const src = readFileSync(path.join(ROOT, HANDLER_PATH), "utf8")
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+    assert.match(code, /export const TARGET_SENDER_EMAIL = "jeanlaurentcazala@lauralu\.fr"/)
+    assert.equal((code.match(/from:\$\{/g) ?? []).length, 1)
+    assert.match(code, /from:\$\{escapeGmailQueryTerm\(TARGET_SENDER_EMAIL\)\}/)
+    assert.ok(!/from:@|from:["A-Za-z]/.test(code))
+    assert.ok(!/["'`]\s*OR\s|in:(anywhere|spam|trash)/.test(code))
+    // Builder global réutilisé tel quel, autorisation expéditeur vérifiée AVANT la construction finale.
+    assert.match(code, /buildAcquisitionGmailLookbackQuery\(TARGET_LOOKBACK_DAYS, identities\)/)
+    assert.ok(code.indexOf("isTargetSenderAuthorized(identities)") < code.indexOf("from:${escapeGmailQueryTerm(TARGET_SENDER_EMAIL)}"))
     assert.match(code, /export const TARGET_SUBJECT_QUERY_TERM = "Consultation"/)
     assert.match(code, /subject:\$\{escapeGmailQueryTerm\(TARGET_SUBJECT_QUERY_TERM\)\}/)
     // Opérateur Gmail : un seul filtre interpolé ; aucun subject:<littéral> (hors annotations TS « subject: unknown »).
