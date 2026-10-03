@@ -4,7 +4,10 @@
  */
 
 import { getAcquisitionAutoMinConfidence } from "@/lib/acquisition/policy/auto-decision-feature-flag"
-import { classifyWorkPeriod } from "@/lib/acquisition/policy/work-period-classification"
+import {
+  classifyWorkPeriod,
+  isStartOnlyWorkPeriodDemonstrable,
+} from "@/lib/acquisition/policy/work-period-classification"
 
 export type AutoDecisionCode =
   | "AUTO_APPROVE_CONVERT"
@@ -103,14 +106,25 @@ export function evaluateAutoDecisionRules(
       scores,
     }
   }
+  // START_ONLY — fail-closed : début passé sans fin = pertinence non démontrable → revue humaine.
+  if (
+    workPeriod === "START_ONLY" &&
+    !isStartOnlyWorkPeriodDemonstrable(input.startDate, input.endDate, input.referenceInstant)
+  ) {
+    return {
+      code: "HUMAN_REVIEW_REQUIRED",
+      reasons: ["START_ONLY_PERIOD_NOT_DEMONSTRABLE"],
+      scores,
+    }
+  }
 
   const name = input.worksiteName?.trim() ?? ""
   if (!name) reasons.push("MISSING_WORKSITE_NAME")
 
-  // PROVIDENCE-DATES-002 — UNKNOWN (null/null) ≠ INVALID (partielle ou inversée).
+  // START-ONLY — START/NULL valide ; NULL/END ou plage inversée invalide.
   const hasStart = input.startDate != null
   const hasEnd = input.endDate != null
-  if (hasStart !== hasEnd) {
+  if (!hasStart && hasEnd) {
     reasons.push("INVALID_DATES")
   } else if (hasStart && hasEnd && input.startDate! > input.endDate!) {
     reasons.push("INVALID_DATES")
@@ -179,6 +193,15 @@ export function evaluateAutoDecisionRules(
     return { code: "HUMAN_REVIEW_REQUIRED", reasons: [...new Set(reasons)], scores }
   }
 
+  // START_ONLY — jamais de conversion AUTO (Worksite START/null interdit côté SYSTEM) :
+  // approbation seule, conversion humaine.
+  if (workPeriod === "START_ONLY") {
+    return {
+      code: "AUTO_APPROVE_ONLY",
+      reasons: ["THRESHOLDS_OK", "START_ONLY_REQUIRES_HUMAN_CONVERSION"],
+      scores,
+    }
+  }
   if (input.autoConvertEnabled) {
     return { code: "AUTO_APPROVE_CONVERT", reasons: ["THRESHOLDS_OK"], scores }
   }

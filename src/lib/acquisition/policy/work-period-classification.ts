@@ -8,6 +8,7 @@ export const WORK_PERIOD_CLASSIFICATIONS = [
   "ACTIVE",
   "OBSOLETE",
   "UNKNOWN_DATES",
+  "START_ONLY",
   "INVALID",
 ] as const
 
@@ -45,7 +46,8 @@ export function classifyWorkPeriod(
   const hasStart = start != null
   const hasEnd = end != null
   if (!hasStart && !hasEnd) return "UNKNOWN_DATES"
-  if (hasStart !== hasEnd) return "INVALID"
+  if (hasStart && !hasEnd) return "START_ONLY"
+  if (!hasStart && hasEnd) return "INVALID"
 
   const startYmd = dateToUtcCalendarYmd(start!)
   const endYmd = dateToUtcCalendarYmd(end!)
@@ -55,6 +57,21 @@ export function classifyWorkPeriod(
   if (endYmd < todayYmd) return "OBSOLETE"
   if (startYmd > todayYmd) return "FUTURE"
   return "ACTIVE"
+}
+
+/**
+ * START_ONLY (début connu, fin absente) — pertinence temporelle démontrable uniquement si le
+ * début est aujourd’hui ou futur (jour calendaire Europe/Paris). Un début passé sans fin ne
+ * permet pas de prouver que la prestation n’est pas obsolète : les chemins AUTO échouent fermés
+ * (revue humaine). Aucun repli sur receivedAt. Toute autre forme de plage → false.
+ */
+export function isStartOnlyWorkPeriodDemonstrable(
+  start: Date | null | undefined,
+  end: Date | null | undefined,
+  referenceInstant: Date = new Date()
+): boolean {
+  if (classifyWorkPeriod(start, end, referenceInstant) !== "START_ONLY") return false
+  return dateToUtcCalendarYmd(start!) >= instantToParisCalendarYmd(referenceInstant)
 }
 
 export function isWorkPeriodObsolete(

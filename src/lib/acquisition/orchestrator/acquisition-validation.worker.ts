@@ -621,6 +621,7 @@ export async function runAcquisitionValidationWorker(
         classification: ctx.classification,
         extractedSnapshot: ctx.snapshot,
         partnerProfile: ctx.partnerProfile,
+        referenceInstant: nowFn(),
       })
       const decisionCode = validationDecisionToCode(decision)
 

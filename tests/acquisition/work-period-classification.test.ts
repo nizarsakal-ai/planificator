@@ -6,6 +6,7 @@ import { describe, it } from "node:test"
 import {
   classifyWorkPeriod,
   instantToParisCalendarYmd,
+  isStartOnlyWorkPeriodDemonstrable,
 } from "@/lib/acquisition/policy/work-period-classification"
 
 function utcDay(ymd: string): Date {
@@ -47,8 +48,8 @@ describe("classifyWorkPeriod", () => {
     assert.equal(classifyWorkPeriod(null, null, ref), "UNKNOWN_DATES")
   })
 
-  it("6. date/NULL → INVALID", () => {
-    assert.equal(classifyWorkPeriod(utcDay("2026-09-01"), null, ref), "INVALID")
+  it("6. date/NULL → START_ONLY", () => {
+    assert.equal(classifyWorkPeriod(utcDay("2026-09-01"), null, ref), "START_ONLY")
   })
 
   it("7. NULL/date → INVALID", () => {
@@ -86,5 +87,35 @@ describe("classifyWorkPeriod", () => {
     const paris16 = new Date("2026-01-15T23:30:00.000Z")
     assert.equal(instantToParisCalendarYmd(paris16), "2026-01-16")
     assert.equal(classifyWorkPeriod(end, end, paris16), "OBSOLETE")
+  })
+})
+
+describe("isStartOnlyWorkPeriodDemonstrable", () => {
+  const ref = new Date("2026-09-06T12:00:00.000Z") // Europe/Paris = 06/09/2026
+
+  it("début passé → false", () => {
+    assert.equal(isStartOnlyWorkPeriodDemonstrable(utcDay("2026-09-05"), null, ref), false)
+  })
+
+  it("début aujourd’hui Europe/Paris → true", () => {
+    assert.equal(isStartOnlyWorkPeriodDemonstrable(utcDay("2026-09-06"), null, ref), true)
+  })
+
+  it("début futur → true", () => {
+    assert.equal(isStartOnlyWorkPeriodDemonstrable(utcDay("2026-10-01"), null, ref), true)
+  })
+
+  it("frontière Paris : 06/09 22:30 UTC = 07/09 Paris → début 06/09 devenu passé", () => {
+    const paris7 = new Date("2026-09-06T22:30:00.000Z")
+    assert.equal(isStartOnlyWorkPeriodDemonstrable(utcDay("2026-09-06"), null, paris7), false)
+    assert.equal(isStartOnlyWorkPeriodDemonstrable(utcDay("2026-09-07"), null, paris7), true)
+  })
+
+  it("hors START_ONLY → false (START_END, NULL/NULL)", () => {
+    assert.equal(
+      isStartOnlyWorkPeriodDemonstrable(utcDay("2026-10-01"), utcDay("2026-10-02"), ref),
+      false
+    )
+    assert.equal(isStartOnlyWorkPeriodDemonstrable(null, null, ref), false)
   })
 })

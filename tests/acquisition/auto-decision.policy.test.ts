@@ -74,16 +74,18 @@ describe("evaluateAutoDecision Lot F / registre", () => {
     assert.equal(r.reasons.some((x) => x.startsWith("LOW_CONFIDENCE:requested")), false)
   })
 
-  it("PROVIDENCE-DATES — DATE/NULL → INVALID_DATES", () => {
+  it("START_ONLY futur — DATE/NULL → AUTO_APPROVE_ONLY (jamais de conversion AUTO)", () => {
     const r = evaluateAutoDecision({
       ...okBase,
       endDate: null,
+      referenceInstant: new Date("2026-09-06T12:00:00.000Z"),
       autoApproveEnabled: true,
       autoConvertEnabled: true,
       minConfidence: 0.7,
     })
-    assert.equal(r.code, "HUMAN_REVIEW_REQUIRED")
-    assert.ok(r.reasons.includes("INVALID_DATES"))
+    assert.equal(r.code, "AUTO_APPROVE_ONLY")
+    assert.deepEqual(r.reasons, ["THRESHOLDS_OK", "START_ONLY_REQUIRES_HUMAN_CONVERSION"])
+    assert.equal(r.reasons.includes("INVALID_DATES"), false)
   })
 
   it("PROVIDENCE-DATES — NULL/DATE → INVALID_DATES", () => {
@@ -196,5 +198,46 @@ describe("evaluateAutoDecision Lot F / registre", () => {
     })
     assert.equal(r.code, "HUMAN_REVIEW_REQUIRED")
     assert.ok(r.reasons.includes("WORK_PERIOD_OBSOLETE"))
+  })
+
+  it("START_ONLY — début passé (Europe/Paris) → HUMAN_REVIEW_REQUIRED", () => {
+    const r = evaluateAutoDecision({
+      ...okBase,
+      startDate: new Date("2026-09-05T00:00:00.000Z"),
+      endDate: null,
+      referenceInstant: new Date("2026-09-06T12:00:00.000Z"),
+      autoApproveEnabled: true,
+      autoConvertEnabled: true,
+      minConfidence: 0.7,
+    })
+    assert.equal(r.code, "HUMAN_REVIEW_REQUIRED")
+    assert.deepEqual(r.reasons, ["START_ONLY_PERIOD_NOT_DEMONSTRABLE"])
+  })
+
+  it("START_ONLY — début aujourd’hui Paris → AUTO_APPROVE_ONLY, jamais CONVERT", () => {
+    const r = evaluateAutoDecision({
+      ...okBase,
+      startDate: new Date("2026-09-06T00:00:00.000Z"),
+      endDate: null,
+      referenceInstant: new Date("2026-09-06T12:00:00.000Z"),
+      autoApproveEnabled: true,
+      autoConvertEnabled: true,
+      minConfidence: 0.7,
+    })
+    assert.equal(r.code, "AUTO_APPROVE_ONLY")
+  })
+
+  it("START_END futur valide → comportement inchangé (AUTO_APPROVE_CONVERT)", () => {
+    const r = evaluateAutoDecision({
+      ...okBase,
+      startDate: new Date("2026-10-01T00:00:00.000Z"),
+      endDate: new Date("2026-10-15T00:00:00.000Z"),
+      referenceInstant: new Date("2026-09-06T12:00:00.000Z"),
+      autoApproveEnabled: true,
+      autoConvertEnabled: true,
+      minConfidence: 0.7,
+    })
+    assert.equal(r.code, "AUTO_APPROVE_CONVERT")
+    assert.deepEqual(r.reasons, ["THRESHOLDS_OK"])
   })
 })
