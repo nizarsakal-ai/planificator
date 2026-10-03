@@ -31,7 +31,24 @@ const db = enabled
 
 const RUN = { skip: enabled ? undefined : "TEST_ACQUISITION_DATABASE_URL non défini" }
 
-async function seedMessage(companyId: string, body: string, subject: string) {
+/**
+ * Contrat permanent : extraction AUTO ⇒ preuve Detection hash-bound sur le contenu courant.
+ * Par défaut, la fixture représente un draft AUTO éligible (preuve CONSULTATION valide).
+ * `detectionProof: "NONE"` / `"STALE_HASH"` / classification non extractible = cas négatifs.
+ */
+type DetectionProofFixture =
+  | "VALID"
+  | "NONE"
+  | "STALE_HASH"
+  | "NON_CONSULTATION"
+  | "AMBIGUOUS"
+
+async function seedMessage(
+  companyId: string,
+  body: string,
+  subject: string,
+  opts: { detectionProof?: DetectionProofFixture } = {}
+) {
   const reg = await registerIncomingMessage(
     {
       companyId,
@@ -62,6 +79,20 @@ async function seedMessage(companyId: string, body: string, subject: string) {
     sanitized,
     fetchedAt: new Date(),
   })
+
+  const proof = opts.detectionProof ?? "VALID"
+  if (proof !== "NONE") {
+    await db.worksiteImportDraft.update({
+      where: { id: reg.draftId! },
+      data: {
+        detectionClassification:
+          proof === "NON_CONSULTATION" || proof === "AMBIGUOUS" ? proof : "CONSULTATION",
+        detectionContentHash:
+          proof === "STALE_HASH" ? `stale-${sanitized.contentHash}` : sanitized.contentHash,
+        detectionCompletedAt: new Date(),
+      },
+    })
+  }
 
   return {
     messageId: reg.messageId,
@@ -159,6 +190,275 @@ describe("OPS-004 extraction cron — intégration PostgreSQL", RUN, () => {
     assert.ok(candidates.some((c) => c.draftId === newer.draftId))
   })
 
+
+  it("selector AUTO exclut PLAN PDF non prêt", async () => {
+    const seeded = await seedMessage(
+      companyA,
+      "Chantier : Pending Plan\nRéférence : REF-PLAN-PENDING",
+      "Pending plan"
+    )
+
+    await db.worksiteImportDraft.update({
+      where: { id: seeded.draftId },
+      data: {
+        detectionClassification: "CONSULTATION",
+        detectionContentHash: seeded.contentHash,
+      },
+    })
+
+    await db.acquisitionAttachment.create({
+      data: {
+        companyId: companyA,
+        acquisitionMessageId: seeded.messageId,
+        attachmentKey: `plan-pending-${Date.now()}`,
+        filename: "plan.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 10,
+        category: "PLAN",
+        status: "DISCOVERED",
+      },
+    })
+
+    const cfg = getExtractionCronConfig()
+    const candidates = await selection().listEligibleCandidatesForCompany({
+      companyId: companyA,
+      limit: 50,
+      now: new Date(),
+      maxAttempts: cfg.maxAttempts,
+      reclaimTtlMs: cfg.reclaimTtlMs,
+    })
+
+    assert.ok(!candidates.some((c) => c.draftId === seeded.draftId))
+  })
+
+
+  it("selector AUTO exclut PLAN PDF STORED sans storagePublicId", async () => {
+    const seeded = await seedMessage(
+      companyA,
+      "Chantier : Stored Plan Missing PublicId\nRéférence : REF-PLAN-STORED-NO-PUBLICID",
+      "Stored plan missing public id"
+    )
+
+    await db.worksiteImportDraft.update({
+      where: { id: seeded.draftId },
+      data: {
+        detectionClassification: "CONSULTATION",
+        detectionContentHash: seeded.contentHash,
+      },
+    })
+
+    await db.acquisitionAttachment.create({
+      data: {
+        companyId: companyA,
+        acquisitionMessageId: seeded.messageId,
+        attachmentKey: `plan-stored-no-publicid-${Date.now()}`,
+        filename: "plan.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 10,
+        category: "PLAN",
+        status: "STORED",
+        storagePublicId: null,
+      },
+    })
+
+    const cfg = getExtractionCronConfig()
+    const candidates = await selection().listEligibleCandidatesForCompany({
+      companyId: companyA,
+      limit: 50,
+      now: new Date(),
+      maxAttempts: cfg.maxAttempts,
+      reclaimTtlMs: cfg.reclaimTtlMs,
+    })
+
+    assert.ok(!candidates.some((c) => c.draftId === seeded.draftId))
+  })
+
+
+  it("selector AUTO inclut PLAN PDF STORED avec storagePublicId", async () => {
+    const seeded = await seedMessage(
+      companyA,
+      "Chantier : Stored Plan\nRéférence : REF-PLAN-STORED",
+      "Stored plan"
+    )
+
+    await db.worksiteImportDraft.update({
+      where: { id: seeded.draftId },
+      data: {
+        detectionClassification: "CONSULTATION",
+        detectionContentHash: seeded.contentHash,
+      },
+    })
+
+    await db.acquisitionAttachment.create({
+      data: {
+        companyId: companyA,
+        acquisitionMessageId: seeded.messageId,
+        attachmentKey: `plan-stored-${Date.now()}`,
+        filename: "plan.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 10,
+        category: "PLAN",
+        status: "STORED",
+        storagePublicId: "acquisition/test/plan-stored",
+      },
+    })
+
+    const cfg = getExtractionCronConfig()
+    const candidates = await selection().listEligibleCandidatesForCompany({
+      companyId: companyA,
+      limit: 50,
+      now: new Date(),
+      maxAttempts: cfg.maxAttempts,
+      reclaimTtlMs: cfg.reclaimTtlMs,
+    })
+
+    assert.ok(candidates.some((c) => c.draftId === seeded.draftId))
+  })
+
+
+  it("selector AUTO n'exclut pas PDF non-PLAN non prêt", async () => {
+    const seeded = await seedMessage(
+      companyA,
+      "Chantier : Other PDF\nRéférence : REF-OTHER-PDF",
+      "Other pdf"
+    )
+
+    await db.worksiteImportDraft.update({
+      where: { id: seeded.draftId },
+      data: {
+        detectionClassification: "CONSULTATION",
+        detectionContentHash: seeded.contentHash,
+      },
+    })
+
+    await db.acquisitionAttachment.create({
+      data: {
+        companyId: companyA,
+        acquisitionMessageId: seeded.messageId,
+        attachmentKey: `other-pdf-${Date.now()}`,
+        filename: "document.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 10,
+        category: "DOCUMENT",
+        status: "DISCOVERED",
+      },
+    })
+
+    const cfg = getExtractionCronConfig()
+    const candidates = await selection().listEligibleCandidatesForCompany({
+      companyId: companyA,
+      limit: 50,
+      now: new Date(),
+      maxAttempts: cfg.maxAttempts,
+      reclaimTtlMs: cfg.reclaimTtlMs,
+    })
+
+    assert.ok(candidates.some((c) => c.draftId === seeded.draftId))
+  })
+
+  it("preuve Detection absente → jamais sélectionné ni extrait en AUTO", async () => {
+    const seeded = await seedMessage(
+      companyA,
+      "Chantier : No Proof\nRéférence : REF-NP-1",
+      "No proof",
+      { detectionProof: "NONE" }
+    )
+    const cfg = getExtractionCronConfig()
+    const candidates = await selection().listEligibleCandidatesForCompany({
+      companyId: companyA,
+      limit: 50,
+      now: new Date(),
+      maxAttempts: cfg.maxAttempts,
+      reclaimTtlMs: cfg.reclaimTtlMs,
+    })
+    assert.ok(!candidates.some((c) => c.draftId === seeded.draftId))
+
+    const result = await runDraftExtractionSystem(
+      { companyId: companyA, draftId: seeded.draftId },
+      { repository: new DraftExtractionRepository(db) }
+    )
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.code, "DETECTION_REQUIRED")
+    const draft = await db.worksiteImportDraft.findUniqueOrThrow({ where: { id: seeded.draftId } })
+    assert.equal(draft.status, "PENDING_EXTRACTION")
+    assert.equal(draft.extractionAttemptCount, 0)
+  })
+
+  it("preuve Detection sur un autre hash que le contenu courant → non sélectionné", async () => {
+    const seeded = await seedMessage(
+      companyA,
+      "Chantier : Stale Proof\nRéférence : REF-SP-1",
+      "Stale proof",
+      { detectionProof: "STALE_HASH" }
+    )
+    const cfg = getExtractionCronConfig()
+    const candidates = await selection().listEligibleCandidatesForCompany({
+      companyId: companyA,
+      limit: 50,
+      now: new Date(),
+      maxAttempts: cfg.maxAttempts,
+      reclaimTtlMs: cfg.reclaimTtlMs,
+    })
+    assert.ok(!candidates.some((c) => c.draftId === seeded.draftId))
+
+    const result = await runDraftExtractionSystem(
+      { companyId: companyA, draftId: seeded.draftId },
+      { repository: new DraftExtractionRepository(db) }
+    )
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.code, "DETECTION_NOT_AUTHORIZED")
+  })
+
+  it("classification Detection non extractible (NON_CONSULTATION / AMBIGUOUS) → non sélectionné", async () => {
+    const cfg = getExtractionCronConfig()
+    for (const proof of ["NON_CONSULTATION", "AMBIGUOUS"] as const) {
+      const seeded = await seedMessage(
+        companyA,
+        `Chantier : ${proof}\nRéférence : REF-${proof}`,
+        `Class ${proof}`,
+        { detectionProof: proof }
+      )
+      const candidates = await selection().listEligibleCandidatesForCompany({
+        companyId: companyA,
+        limit: 50,
+        now: new Date(),
+        maxAttempts: cfg.maxAttempts,
+        reclaimTtlMs: cfg.reclaimTtlMs,
+      })
+      assert.ok(!candidates.some((c) => c.draftId === seeded.draftId), proof)
+    }
+  })
+
+  it("FAILED + extractionRetryable NULL/false → non resélectionné même backoff dû", async () => {
+    const cfg = getExtractionCronConfig()
+    const now = new Date()
+    for (const extractionRetryable of [null, false]) {
+      const seeded = await seedMessage(
+        companyA,
+        `Chantier : Not Retryable ${String(extractionRetryable)}\nRéférence : REF-NR`,
+        `Not retryable ${String(extractionRetryable)}`
+      )
+      await db.worksiteImportDraft.update({
+        where: { id: seeded.draftId },
+        data: {
+          status: "FAILED",
+          extractionAttemptCount: 1,
+          lastExtractionErrorAt: new Date(now.getTime() - 3_600_000),
+          lastExtractionErrorCode: "PROVIDER_INVALID_OUTPUT",
+          extractionRetryable,
+        },
+      })
+      const candidates = await selection().listEligibleCandidatesForCompany({
+        companyId: companyA,
+        limit: 50,
+        now,
+        maxAttempts: cfg.maxAttempts,
+        reclaimTtlMs: cfg.reclaimTtlMs,
+      })
+      assert.ok(!candidates.some((c) => c.draftId === seeded.draftId))
+    }
+  })
+
   it("FAILED backoff dû / non dû + maxAttempts exclu", async () => {
     const seeded = await seedMessage(
       companyA,
@@ -173,6 +473,8 @@ describe("OPS-004 extraction cron — intégration PostgreSQL", RUN, () => {
         extractionAttemptCount: 1,
         lastExtractionErrorAt: new Date(now.getTime() - 30_000),
         lastExtractionErrorCode: "PROVIDER_TIMEOUT",
+        // Contrat R7 : seul un FAILED explicitement retryable est resélectionnable.
+        extractionRetryable: true,
       },
     })
     const cfg = getExtractionCronConfig()
@@ -267,6 +569,7 @@ describe("OPS-004 extraction cron — intégration PostgreSQL", RUN, () => {
         status: "FAILED",
         extractionAttemptCount: 1,
         lastExtractionErrorAt: null,
+        extractionRetryable: true,
       },
     })
     let candidates = await selection().listEligibleCandidatesForCompany({
@@ -316,6 +619,7 @@ describe("OPS-004 extraction cron — intégration PostgreSQL", RUN, () => {
             status: "FAILED",
             extractionAttemptCount: 1,
             lastExtractionErrorAt: new Date(now.getTime() - 5_000),
+            extractionRetryable: true,
             createdAt: new Date(now.getTime() - 500_000 + i),
           },
         })

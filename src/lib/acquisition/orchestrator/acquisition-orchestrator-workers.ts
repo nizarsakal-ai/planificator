@@ -20,6 +20,7 @@ import {
 import { createGmailMailProviderAdapter } from "@/lib/acquisition/connector/gmail-mail-provider.adapter"
 import { getContentCronConfig } from "@/lib/acquisition/content/content-cron-feature-flag"
 import { runAcquisitionContentCronOrchestratorDefault } from "@/lib/acquisition/content/message-content-cron.orchestrator"
+import { runConsultationDetectionWorker } from "@/lib/acquisition/detection/consultation-detection.worker"
 import { getExtractionCronConfig } from "@/lib/acquisition/extraction/extraction-cron-feature-flag"
 import { runAcquisitionExtractionCronOrchestrator } from "@/lib/acquisition/extraction/extraction-cron.orchestrator"
 import { acquisitionExtractionCronSelectionRepository } from "@/lib/acquisition/extraction/extraction-cron.selection.repository"
@@ -346,6 +347,21 @@ function createProductionStepRunners(
           maxDurationMs: clampChildBudget(remainingMs, base.maxDurationMs),
         },
         ensureOwnership: ownershipCheckFrom(capability),
+      })
+      return mapChildWorkerResult(result)
+    },
+
+    /** Barrière pré-extraction — indépendante de POST_EXTRACTION_STEPS. */
+    consultationDetection: async ({ runId, remainingMs }) => {
+      const capability = createOrchestratorAutoCapability({
+        leaseRepository,
+        ownerRunId: runId,
+      })
+      const result = await runConsultationDetectionWorker({
+        ensureOwnership: ownershipCheckFrom(capability),
+        transactionalOwnershipFence:
+          resolveOrchestratorAutoTransactionalFence(capability),
+        maxDurationMs: clampChildBudget(remainingMs, remainingMs),
       })
       return mapChildWorkerResult(result)
     },

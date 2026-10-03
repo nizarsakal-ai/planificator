@@ -31,6 +31,10 @@ function createFakeRepo() {
     extractionStartedAt: null,
     contentHashAtExtraction: null,
     extractionSchemaVersion: null,
+    // Chemin manuel (UI) : aucune preuve Detection requise.
+    detectionClassification: null,
+    detectionContentHash: null,
+    extractionRetryable: null,
   }
   const persists: PersistExtractionInput[] = []
   return {

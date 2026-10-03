@@ -18,7 +18,13 @@ import { EXTRACTION_TOOL_NAME } from "@/lib/acquisition/extraction/anthropic-ext
 import type { AnthropicExtractionClient } from "@/lib/acquisition/extraction/anthropic-extraction.client"
 import { ExtractionProviderError } from "@/lib/acquisition/extraction/extraction-provider.errors"
 import type { Message } from "@anthropic-ai/sdk/resources/messages"
-import { ANTHROPIC_EXTRACTION_SYSTEM_PROMPT } from "@/lib/acquisition/extraction/anthropic-extraction.prompt"
+import {
+  ANTHROPIC_EXTRACTION_SYSTEM_PROMPT,
+  evidenceQuoteInHaystack,
+  normalizeEvidenceText,
+} from "@/lib/acquisition/extraction/anthropic-extraction.prompt"
+import { htmlToPlainText } from "@/lib/acquisition/content/message-content-sanitizer"
+import { applyDeterministicPostEnrichment } from "@/lib/acquisition/extraction/extraction-normalize"
 
 function baseConfig(over: Partial<AnthropicPublicConfig> = {}): AnthropicPublicConfig {
   return {
@@ -881,5 +887,181 @@ describe("AnthropicExtractionAdapter", () => {
       (e: unknown) => e instanceof ExtractionProviderError && e.code === "PROVIDER_INVALID_OUTPUT"
     )
     assert.equal(n, 1)
+  })
+})
+
+describe("AnthropicExtractionAdapter — strong-field evidence across line breaks", () => {
+  const HTML = "<p>Adresse du chantier :<br>12 rue Exemple<br>75001 Paris</p>"
+
+  function addressClient(quote: string): AnthropicExtractionClient {
+    return {
+      async messagesCreate() {
+        return toolMessage({
+          fields: {
+            address: {
+              value: "12 rue Exemple",
+              confidence: 0.8,
+              evidence: { source: "BODY", quote },
+            },
+            city: {
+              value: "Paris",
+              confidence: 0.8,
+              evidence: { source: "BODY", quote: "Paris" },
+            },
+          },
+          warnings: [],
+        })
+      },
+    }
+  }
+
+  async function extractAddress(normalizedText: string, quote: string) {
+    const adapter = new AnthropicExtractionAdapter({ client: addressClient(quote), config: baseConfig() })
+    const result = await adapter.extract({
+      subject: null,
+      normalizedText,
+      locale: "fr-FR",
+      attachmentMetadata: [],
+      extractionSchemaVersion: "1",
+    })
+    return { normalizedText, result }
+  }
+
+  function extractFromHtml(quote: string) {
+    return extractAddress(htmlToPlainText(HTML), quote)
+  }
+
+  it("regression — single-line quote of a multiline sanitized address keeps the address", async () => {
+    const { normalizedText, result } = await extractFromHtml("12 rue Exemple 75001 Paris")
+    // Précondition : le sanitizer réel produit bien l'adresse sur plusieurs lignes.
+    assert.ok(normalizedText.includes("Adresse du chantier :\n12 rue Exemple\n75001 Paris"))
+    assert.equal(result.fields.city?.value, "Paris")
+    // Comportement souhaité : même adresse, seuls les sauts de ligne diffèrent → conservée.
+    assert.ok(result.fields.address, "address dropped: single-line quote vs multiline source")
+    assert.equal(result.fields.address.value, "12 rue Exemple")
+  })
+
+  it("control — exact multiline quote is kept; a quote absent from the source is still dropped", async () => {
+    const exact = await extractFromHtml("12 rue Exemple\n75001 Paris")
+    assert.equal(exact.result.fields.address?.value, "12 rue Exemple")
+
+    const absent = await extractFromHtml("99 avenue Inexistante 13000 Marseille")
+    assert.equal(absent.result.fields.address, undefined)
+    assert.equal(absent.result.fields.city?.value, "Paris")
+  })
+
+  it("adapter keeps the address when only the whitespace representation differs (CRLF / LF / runs / PDF wrap)", async () => {
+    const cases: Array<[string, string]> = [
+      ["12 rue Exemple\r\n75001 Paris", "12 rue Exemple 75001 Paris"],
+      ["12 rue Exemple\r75001 Paris", "12 rue Exemple\n75001 Paris"],
+      ["12 rue Exemple 75001 Paris", "12 rue Exemple\n75001 Paris"],
+      ["12  \t rue\n\n  Exemple \r\n 75001\tParis", "12 rue Exemple 75001 Paris"],
+      ["Chantier : 12 rue de la\nGrande Exemple 75001 Paris", "12 rue de la Grande Exemple"],
+    ]
+    for (const [source, quote] of cases) {
+      const { result } = await extractAddress(source, quote)
+      assert.equal(result.fields.address?.value, "12 rue Exemple", JSON.stringify([source, quote]))
+    }
+  })
+
+  it("adapter still drops the address for real textual differences (punctuation, apostrophe, missing space)", async () => {
+    const cases: Array<[string, string]> = [
+      ["12 rue Exemple\n75001 Paris", "12 rue Exemple, 75001 Paris"],
+      ["12 rue Exemple, 75001 Paris", "12 rue Exemple 75001 Paris"],
+      ["12 rue de l’Eglise 75001 Paris", "12 rue de l'Eglise 75001 Paris"],
+      ["12 rue Exemple 75001 Paris", "12 rue Exemple 75001 Paris."],
+      ["12 rue Exem-\nple 75001 Paris", "12 rue Exemple 75001 Paris"],
+      ["12 rue Exemple\n75001 Paris", "12rue Exemple 75001 Paris"],
+    ]
+    for (const [source, quote] of cases) {
+      const { result } = await extractAddress(source, quote)
+      assert.equal(result.fields.address, undefined, JSON.stringify([source, quote]))
+    }
+  })
+
+  it("matcher: only whitespace representation is neutralised", () => {
+    const accepted: Array<[string, string]> = [
+      ["12 rue Exemple\n75001 Paris", "12 rue Exemple 75001 Paris"],
+      ["12 rue Exemple\r\n75001 Paris", "12 rue Exemple\n75001 Paris"],
+      ["12 rue Exemple\r\n75001 Paris", "12 rue Exemple 75001 Paris"],
+      ["12\t\t rue \n\n\n Exemple", "12 rue Exemple"],
+      ["12 rue Exemple", "12 rue Exemple"],
+      ["12 rue Exemple", "12 rue Exemple"],
+      ["12 rue Exemple\n75001 Paris", "12 rue Exemple\n75001 Paris"],
+      ["12 RUE EXEMPLE\n75001 PARIS", "12 rue exemple 75001 paris"],
+    ]
+    for (const [hay, quote] of accepted) {
+      assert.equal(evidenceQuoteInHaystack(hay, quote), true, JSON.stringify([hay, quote]))
+    }
+    const rejected: Array<[string, string]> = [
+      ["12 rue Exemple\n75001 Paris", "12 rue Exemple, 75001 Paris"],
+      ["12 rue Exemple; 75001 Paris", "12 rue Exemple 75001 Paris"],
+      ["12 rue de l’Eglise", "12 rue de l'Eglise"],
+      ["12 rue Exemple", "12 rue Exemple."],
+      ["12 rue Exemple\n75001 Paris", "99 avenue Inexistante"],
+      ["12 rue Exemple\n75001 Paris", "12rue Exemple"],
+      ["chantier\n de \n Paris", " \n de \n "],
+      ["accès\nà Paris", "\nà\n"],
+    ]
+    for (const [hay, quote] of rejected) {
+      assert.equal(evidenceQuoteInHaystack(hay, quote), false, JSON.stringify([hay, quote]))
+    }
+    assert.equal(normalizeEvidenceText(" 12 \r\n\t rue \n Exemple  "), "12 rue exemple")
+  })
+
+  it("cancellation evidence: same phrase across a line break is now valid evidence; triple guard unchanged", () => {
+    const baseFields = {
+      worksiteName: "Site",
+      clientName: null,
+      clientEmail: null,
+      clientPhone: null,
+      contactName: null,
+      contactEmail: null,
+      contactPhone: null,
+      address: null,
+      postalCode: null,
+      city: null,
+      requestedStartDate: null,
+      requestedEndDate: null,
+      clientConsultationDate: null,
+      consultationReference: null,
+      description: null,
+      attachmentClassifications: [],
+      interventionNature: null,
+      constraints: null,
+      clientReference: null,
+      requestClassification: "CANCELLED_CONSULTATION" as const,
+      estimatedDurationHours: null,
+      endClientName: null,
+      requestedWeekNumber: null,
+      requestedWeekYear: null,
+    }
+    const enrich = (body: string, quote: string) =>
+      applyDeterministicPostEnrichment(
+        {
+          fields: { ...baseFields },
+          confidenceData: {},
+          evidenceData: { requestClassification: { source: "BODY", quote } },
+          warnings: [],
+          providerId: "anthropic",
+          model: "t",
+        },
+        { subject: null, body }
+      )
+
+    // Même phrase, coupée par un saut de ligne dans la source : evidence valide + corroboration → cancel.
+    const wrapped = enrich("Bonjour,\ncette consultation\nest annulée.", "cette consultation est annulée")
+    assert.equal(wrapped.fields.requestClassification, "CANCELLED_CONSULTATION")
+    assert.ok(wrapped.warnings.some((w) => w.code === "CONSULTATION_CANCELLED" && w.blocking))
+
+    // Quote absente de la source : toujours déclassée, jamais de cancel.
+    const absent = enrich("Bonjour,\ncette consultation\nest annulée.", "le projet est annulé")
+    assert.equal(absent.fields.requestClassification, "CONSULTATION")
+    assert.ok(!absent.warnings.some((w) => w.code === "CONSULTATION_CANCELLED"))
+
+    // Evidence valide mais sans corroboration textuelle : toujours déclassée.
+    const noCorroboration = enrich("Merci de chiffrer\nla consultation.", "chiffrer la consultation")
+    assert.equal(noCorroboration.fields.requestClassification, "CONSULTATION")
+    assert.ok(!noCorroboration.warnings.some((w) => w.code === "CONSULTATION_CANCELLED"))
   })
 })

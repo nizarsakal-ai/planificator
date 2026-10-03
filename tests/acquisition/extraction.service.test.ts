@@ -3,7 +3,10 @@ process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 import { describe, it, beforeEach, afterEach } from "node:test"
 import assert from "node:assert/strict"
 import type { WorksiteImportDraftStatus } from "@prisma/client"
-import { runDraftExtraction } from "@/lib/acquisition/extraction/extraction.service"
+import {
+  runDraftExtraction,
+  runDraftExtractionSystem,
+} from "@/lib/acquisition/extraction/extraction.service"
 import type {
   AttachmentMetaRow,
   DraftExtractionRow,
@@ -43,6 +46,9 @@ function createFakeRepo(seed?: {
           extractionStartedAt: null,
           contentHashAtExtraction: null,
           extractionSchemaVersion: null,
+          detectionClassification: "CONSULTATION",
+          detectionContentHash: "hash-abc",
+          extractionRetryable: null,
         }
       : seed.draft
 
@@ -123,18 +129,27 @@ function createFakeRepo(seed?: {
         contentHashAtExtraction: input.expectedContentHash,
         extractionSchemaVersion: "2",
         proposedWorksiteName: input.fields.worksiteName,
+        extractionRetryable:
+          input.errorCode == null
+            ? null
+            : input.extractionRetryable === undefined
+              ? false
+              : input.extractionRetryable,
       }
       return "OK"
     },
     async markFailedWhileExtracting(input: {
       expectedVersion: number
       errorCode: string
+      extractionRetryable?: boolean
     }): Promise<MarkFailedOutcome> {
       if (!draft || draft.version !== input.expectedVersion) return "STATE_CHANGED"
       draft = {
         ...draft,
         status: "FAILED",
         version: draft.version + 1,
+        extractionRetryable:
+          input.extractionRetryable === undefined ? false : input.extractionRetryable,
       }
       return "OK"
     },
@@ -172,6 +187,22 @@ describe("extraction.service R1", () => {
     process.env.ACQUISITION_EXTRACTION_ENABLED = envBackup.extraction
     process.env.ACQUISITION_EXTRACTION_PROVIDER = envBackup.provider
     process.env.ACQUISITION_EXTRACTION_MAX_ATTEMPTS = envBackup.maxAttempts
+  })
+
+  it("SYSTEM : globals OFF sans overrides → bloqué", async () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "false"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "false"
+    process.env.ACQUISITION_EXTRACTION_ENABLED = "false"
+
+    const repo = createFakeRepo()
+    const result = await runDraftExtractionSystem(
+      { companyId: "co1", draftId: "draft1" },
+      { repository: repo as never }
+    )
+
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.code, "ACQUISITION_DISABLED")
+    assert.equal(repo.claimCount, 0)
   })
 
   it("refuse si flag extraction OFF", async () => {
@@ -265,6 +296,9 @@ describe("extraction.service R1", () => {
         extractionAttemptCount: 1,
         extractionStartedAt: new Date(),
         contentHashAtExtraction: "hash-abc",
+        detectionClassification: "CONSULTATION",
+        detectionContentHash: "hash-abc",
+        extractionRetryable: null,
         extractionSchemaVersion: "3",
       },
     })
@@ -351,6 +385,9 @@ describe("extraction.service R1", () => {
         extractionStartedAt: new Date(),
         contentHashAtExtraction: null,
         extractionSchemaVersion: null,
+        detectionClassification: "CONSULTATION",
+        detectionContentHash: "hash-abc",
+        extractionRetryable: null,
       },
     })
     const provider: ExtractionProviderPort = {
@@ -390,7 +427,7 @@ describe("extraction.service R1", () => {
     }
   })
 
-  it("PROVIDER_INTERNAL_ERROR → FAILED même si attempts restantes", async () => {
+  it("PROVIDER_INTERNAL_ERROR retryable=false → FAILED même si attempts restantes", async () => {
     const repo = createFakeRepo()
     const provider: ExtractionProviderPort = {
       async extract() {
@@ -406,6 +443,216 @@ describe("extraction.service R1", () => {
       assert.equal(result.outcome, "FAILED")
       assert.equal(result.code, "PROVIDER_INTERNAL_ERROR")
     }
+    assert.equal(repo.draft?.extractionRetryable, false)
+  })
+
+  it("R7 gate CONTENT_INSUFFICIENT → extractionRetryable=false + FAILED", async () => {
+    const repo = createFakeRepo()
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        return {
+          fields: { description: { value: "seul texte", confidence: 0.9 } },
+          warnings: [],
+          providerMetadata: { providerId: "test" },
+        }
+      },
+    }
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.code, "CONTENT_INSUFFICIENT")
+      assert.equal(result.outcome, "FAILED")
+    }
+    assert.equal(repo.persists[0]?.extractionRetryable, false)
+    assert.equal(repo.draft?.extractionRetryable, false)
+  })
+
+  it("R7 gate DATE_RANGE_INVALID → FAILED (pas RETRY_ALLOWED)", async () => {
+    const repo = createFakeRepo({
+      content: {
+        normalizedText: "Chantier : Tour Alpha\nContact: alice@example.com\nRéférence : REF-99",
+        contentHash: "hash-dat",
+      },
+    })
+    // Align detection hash with content for AUTO not relevant (UI path)
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        return {
+          fields: {
+            worksiteName: { value: "Tour Alpha", confidence: 0.9 },
+            requestedStartDate: { value: "2026-08-10", confidence: 0.9 },
+            requestedEndDate: { value: "2026-08-01", confidence: 0.9 },
+          },
+          warnings: [],
+          providerMetadata: { providerId: "test" },
+        }
+      },
+    }
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.code, "DATE_RANGE_INVALID")
+      assert.equal(result.outcome, "FAILED")
+    }
+    assert.equal(repo.persists[0]?.extractionRetryable, false)
+  })
+
+  it("R7 PROVIDER_TIMEOUT retryable=true → RETRY_ALLOWED si attempts restantes", async () => {
+    const repo = createFakeRepo()
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        throw new ExtractionProviderError("PROVIDER_TIMEOUT", "slow", true)
+      },
+    }
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.code, "PROVIDER_TIMEOUT")
+      assert.equal(result.outcome, "RETRY_ALLOWED")
+    }
+    assert.equal(repo.draft?.extractionRetryable, true)
+  })
+
+  it("R7 PROVIDER_TIMEOUT retryable=false → FAILED", async () => {
+    const repo = createFakeRepo()
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        throw new ExtractionProviderError("PROVIDER_TIMEOUT", "abort", false)
+      },
+    }
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.outcome, "FAILED")
+      assert.equal(result.code, "PROVIDER_TIMEOUT")
+    }
+    assert.equal(repo.draft?.extractionRetryable, false)
+  })
+
+  it("R7 PROVIDER_UNAVAILABLE true/false respecté exactement", async () => {
+    const repoTrue = createFakeRepo()
+    const rTrue = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      {
+        repository: repoTrue as never,
+        provider: {
+          async extract() {
+            throw new ExtractionProviderError("PROVIDER_UNAVAILABLE", "down", true)
+          },
+        },
+      }
+    )
+    assert.equal(rTrue.ok, false)
+    if (!rTrue.ok) assert.equal(rTrue.outcome, "RETRY_ALLOWED")
+    assert.equal(repoTrue.draft?.extractionRetryable, true)
+
+    const repoFalse = createFakeRepo()
+    const rFalse = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      {
+        repository: repoFalse as never,
+        provider: {
+          async extract() {
+            throw new ExtractionProviderError("PROVIDER_UNAVAILABLE", "down", false)
+          },
+        },
+      }
+    )
+    assert.equal(rFalse.ok, false)
+    if (!rFalse.ok) assert.equal(rFalse.outcome, "FAILED")
+    assert.equal(repoFalse.draft?.extractionRetryable, false)
+  })
+
+  it("R7 PROVIDER_INTERNAL_ERROR retryable=true respecté → RETRY_ALLOWED", async () => {
+    const repo = createFakeRepo()
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      {
+        repository: repo as never,
+        provider: {
+          async extract() {
+            throw new ExtractionProviderError("PROVIDER_INTERNAL_ERROR", "transient", true)
+          },
+        },
+      }
+    )
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.outcome, "RETRY_ALLOWED")
+      assert.equal(result.code, "PROVIDER_INTERNAL_ERROR")
+    }
+    assert.equal(repo.draft?.extractionRetryable, true)
+  })
+
+  it("R7 PROVIDER_INPUT_TOO_LARGE retryable=false → terminal FAILED", async () => {
+    const repo = createFakeRepo()
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      {
+        repository: repo as never,
+        provider: {
+          async extract() {
+            throw new ExtractionProviderError("PROVIDER_INPUT_TOO_LARGE", "too big", false)
+          },
+        },
+      }
+    )
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.outcome, "FAILED")
+      assert.equal(result.code, "PROVIDER_INPUT_TOO_LARGE")
+    }
+    assert.equal(repo.draft?.extractionRetryable, false)
+  })
+
+  it("R7 max attempts atteint → FAILED même si provider retryable=true", async () => {
+    process.env.ACQUISITION_EXTRACTION_MAX_ATTEMPTS = "2"
+    const repo = createFakeRepo({
+      draft: {
+        id: "draft1",
+        companyId: "co1",
+        acquisitionMessageId: "msg1",
+        status: "FAILED",
+        version: 1,
+        extractionAttemptCount: 1,
+        extractionStartedAt: new Date(),
+        contentHashAtExtraction: null,
+        extractionSchemaVersion: null,
+        detectionClassification: "CONSULTATION",
+        detectionContentHash: "hash-abc",
+        extractionRetryable: true,
+      },
+    })
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      {
+        repository: repo as never,
+        provider: {
+          async extract() {
+            throw new ExtractionProviderError("PROVIDER_TIMEOUT", "again", true)
+          },
+        },
+      }
+    )
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.outcome, "FAILED")
+      assert.equal(result.attemptCount, 2)
+      assert.equal(result.maxAttempts, 2)
+    }
+    assert.equal(repo.draft?.extractionRetryable, true)
   })
 
   it("PROVIDER_INPUT_TOO_LARGE → FAILED même si attempts restantes", async () => {
@@ -522,6 +769,9 @@ describe("extraction.service R1", () => {
         extractionStartedAt: new Date(),
         contentHashAtExtraction: null,
         extractionSchemaVersion: null,
+        detectionClassification: "CONSULTATION",
+        detectionContentHash: "hash-abc",
+        extractionRetryable: null,
       },
     })
     const result = await runDraftExtraction(
@@ -558,6 +808,9 @@ describe("extraction.service R1", () => {
         extractionStartedAt: null,
         contentHashAtExtraction: null,
         extractionSchemaVersion: null,
+        detectionClassification: "CONSULTATION",
+        detectionContentHash: "hash-abc",
+        extractionRetryable: null,
       },
     })
     const result = await runDraftExtraction(
@@ -633,6 +886,271 @@ describe("extraction.service R1", () => {
     assert.equal(persisted.fields.requestedStartDate, "2026-08-31")
     assert.equal(persisted.fields.requestedEndDate, "2026-09-06")
     assert.ok(!persisted.warningData.some((w) => w.code === "DATE_AMBIGUOUS"))
+  })
+
+
+  it("AUTO : PLAN PDF non stocké → ATTACHMENT_NOT_READY avant claim/provider", async () => {
+    const repo = createFakeRepo({
+      attachments: [
+        {
+          filename: "plan.pdf",
+          mimeType: "application/pdf",
+          category: "PLAN",
+          sizeBytes: 1234,
+          status: "DISCOVERED",
+          storagePublicId: null,
+        },
+      ],
+    })
+
+    let providerCalls = 0
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        providerCalls += 1
+        return {
+          fields: {},
+          warnings: [],
+          providerMetadata: { providerId: "test" },
+        }
+      },
+    }
+
+    const result = await runDraftExtractionSystem(
+      { companyId: "co1", draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.outcome, "FAILED")
+      assert.equal(result.code, "ATTACHMENT_NOT_READY")
+    }
+
+    assert.equal(repo.claimCount, 0)
+    assert.equal(providerCalls, 0)
+    assert.equal(repo.draft?.status, "PENDING_EXTRACTION")
+    assert.equal(repo.draft?.extractionAttemptCount, 0)
+  })
+
+
+  it("AUTO : PLAN PDF STORED sans storagePublicId → ATTACHMENT_NOT_READY", async () => {
+    const repo = createFakeRepo({
+      attachments: [
+        {
+          filename: "plan.pdf",
+          mimeType: "application/pdf",
+          category: "PLAN",
+          sizeBytes: 1234,
+          status: "STORED",
+          storagePublicId: null,
+        },
+      ],
+    })
+
+    let providerCalls = 0
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        providerCalls += 1
+        return {
+          fields: {},
+          warnings: [],
+          providerMetadata: { providerId: "test" },
+        }
+      },
+    }
+
+    const result = await runDraftExtractionSystem(
+      { companyId: "co1", draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.code, "ATTACHMENT_NOT_READY")
+    assert.equal(repo.claimCount, 0)
+    assert.equal(providerCalls, 0)
+    assert.equal(repo.draft?.extractionAttemptCount, 0)
+  })
+
+
+  it("AUTO : PLAN PDF STORED avec storagePublicId espaces → ATTACHMENT_NOT_READY", async () => {
+    const repo = createFakeRepo({
+      attachments: [
+        {
+          filename: "plan.pdf",
+          mimeType: "application/pdf",
+          category: "PLAN",
+          sizeBytes: 1234,
+          status: "STORED",
+          storagePublicId: "   ",
+        },
+      ],
+    })
+
+    let providerCalls = 0
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        providerCalls += 1
+        return {
+          fields: {},
+          warnings: [],
+          providerMetadata: { providerId: "test" },
+        }
+      },
+    }
+
+    const result = await runDraftExtractionSystem(
+      { companyId: "co1", draftId: "draft1" },
+      { repository: repo as never, provider }
+    )
+
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.code, "ATTACHMENT_NOT_READY")
+    assert.equal(repo.claimCount, 0)
+    assert.equal(providerCalls, 0)
+    assert.equal(repo.draft?.extractionAttemptCount, 0)
+  })
+
+
+  it("AUTO : PLAN PDF STORED avec storagePublicId → extraction autorisée", async () => {
+    const repo = createFakeRepo({
+      attachments: [
+        {
+          filename: "plan.pdf",
+          mimeType: "application/pdf",
+          category: "PLAN",
+          sizeBytes: 1234,
+          status: "STORED",
+          storagePublicId: "acquisition/test/plan",
+        },
+      ],
+    })
+
+    let providerCalls = 0
+    let loaderCalls = 0
+
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        providerCalls += 1
+        return {
+          fields: {
+            worksiteName: { value: "Chantier test", confidence: 0.9 },
+            clientReference: { value: "REF-TEST", confidence: 0.9 },
+          },
+          warnings: [],
+          providerMetadata: { providerId: "test" },
+        }
+      },
+    }
+
+    const result = await runDraftExtractionSystem(
+      { companyId: "co1", draftId: "draft1" },
+      {
+        repository: repo as never,
+        provider,
+        loadAttachmentBytes: async () => {
+          loaderCalls += 1
+          return Buffer.from("%PDF-1.4\n")
+        },
+      }
+    )
+
+    assert.notEqual(
+      result.ok === false ? result.code : null,
+      "ATTACHMENT_NOT_READY"
+    )
+    assert.equal(repo.claimCount, 1)
+    assert.equal(providerCalls, 1)
+    assert.equal(loaderCalls, 1)
+  })
+
+
+  it("AUTO : PDF non-PLAN non stocké → pas de blocage ATTACHMENT_NOT_READY", async () => {
+    const repo = createFakeRepo({
+      attachments: [
+        {
+          filename: "document.pdf",
+          mimeType: "application/pdf",
+          category: "OTHER",
+          sizeBytes: 1234,
+          status: "DISCOVERED",
+          storagePublicId: null,
+        },
+      ],
+    })
+
+    let providerCalls = 0
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        providerCalls += 1
+        return {
+          fields: {
+            worksiteName: { value: "Chantier test", confidence: 0.9 },
+            clientReference: { value: "REF-TEST", confidence: 0.9 },
+          },
+          warnings: [],
+          providerMetadata: { providerId: "test" },
+        }
+      },
+    }
+
+    const result = await runDraftExtractionSystem(
+      { companyId: "co1", draftId: "draft1" },
+      {
+        repository: repo as never,
+        provider,
+        loadAttachmentBytes: async () => null,
+      }
+    )
+
+    assert.notEqual(
+      result.ok === false ? result.code : null,
+      "ATTACHMENT_NOT_READY"
+    )
+    assert.equal(repo.claimCount, 1)
+    assert.equal(providerCalls, 1)
+  })
+
+
+  it("UI_MANUAL : PLAN PDF non prêt → comportement historique préservé", async () => {
+    const repo = createFakeRepo({
+      attachments: [
+        {
+          filename: "plan.pdf",
+          mimeType: "application/pdf",
+          category: "PLAN",
+          sizeBytes: 1234,
+          status: "DISCOVERED",
+          storagePublicId: null,
+        },
+      ],
+    })
+
+    let providerCalls = 0
+    const provider: ExtractionProviderPort = {
+      async extract() {
+        providerCalls += 1
+        return {
+          fields: {},
+          warnings: [],
+          providerMetadata: { providerId: "test" },
+        }
+      },
+    }
+
+    const result = await runDraftExtraction(
+      { actor: actor(), draftId: "draft1" },
+      {
+        repository: repo as never,
+        provider,
+      }
+    )
+
+    assert.notEqual(
+      result.ok === false ? result.code : null,
+      "ATTACHMENT_NOT_READY"
+    )
+    assert.equal(repo.claimCount, 1)
+    assert.equal(providerCalls, 1)
   })
 
 })

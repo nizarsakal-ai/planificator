@@ -7,6 +7,7 @@ export const ORCHESTRATOR_STEP_KEYS = [
   "attachmentRecovery",
   "attachmentDownload",
   "contentFetch",
+  "consultationDetection",
   "extraction",
   "validation",
   "autoDecision",
@@ -86,6 +87,7 @@ export interface AcquisitionOrchestratorStepRunners {
   attachmentRecovery: OrchestratorStepRunner
   attachmentDownload: OrchestratorStepRunner
   contentFetch: OrchestratorStepRunner
+  consultationDetection: OrchestratorStepRunner
   extraction: OrchestratorStepRunner
   validation: OrchestratorStepRunner
   autoDecision: OrchestratorStepRunner

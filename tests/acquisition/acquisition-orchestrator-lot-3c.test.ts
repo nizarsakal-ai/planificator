@@ -63,6 +63,9 @@ function createFakeRepo() {
     extractionStartedAt: null,
     contentHashAtExtraction: null,
     extractionSchemaVersion: null,
+    detectionClassification: "CONSULTATION",
+    detectionContentHash: "hash-abc",
+    extractionRetryable: null,
   }
   const content: MessageContentLite = {
     normalizedText: "Chantier : Tour Alpha\nContact: alice@example.com\nRéférence : REF-99",
@@ -149,18 +152,19 @@ describe("PLAN-ACQ-AGENTS-LOT-3C post-extraction foundations", () => {
     )
   })
 
-  it("8. STEP_ORDER exact 8 steps", () => {
+  it("8. STEP_ORDER exact 9 steps (Detection pré-extraction)", () => {
     assert.deepEqual([...ORCHESTRATOR_STEP_KEYS], [
       "gmailSync",
       "attachmentRecovery",
       "attachmentDownload",
       "contentFetch",
+      "consultationDetection",
       "extraction",
       "validation",
       "autoDecision",
       "worksiteCreation",
     ])
-    assert.equal(ORCHESTRATOR_STEP_KEYS.length, 8)
+    assert.equal(ORCHESTRATOR_STEP_KEYS.length, 9)
   })
 
   it("4. capability forge → ownership NOT_OWNED → hook legacy jamais invoqué", async () => {

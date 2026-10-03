@@ -113,17 +113,16 @@ export function truncateUtf8Bytes(
 }
 
 /**
- * Normalisation evidence : NFKC, minuscules, CRLF→LF, espaces réduits, trim.
- * Ne retire pas les accents (évite faux positifs agressifs).
+ * Normalisation evidence : NFKC, minuscules, toute suite de blancs (espaces,
+ * tabulations, sauts de ligne CR/LF) → un espace ASCII, trim.
+ * Seule la représentation des blancs est neutralisée : ponctuation, apostrophes
+ * et accents restent littéraux (évite faux positifs agressifs).
  */
 export function normalizeEvidenceText(value: string): string {
   return value
     .normalize("NFKC")
     .toLowerCase()
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .replace(/[ \t\f\v]+/g, " ")
-    .replace(/\n+/g, "\n")
+    .replace(/\s+/g, " ")
     .trim()
 }
 

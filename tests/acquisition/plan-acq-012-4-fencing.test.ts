@@ -44,6 +44,7 @@ import { acquisitionAttachmentRepository } from "@/lib/acquisition/attachments/a
 import { acquisitionContentFetchStateRepository } from "@/lib/acquisition/content/message-content-fetch-state.repository"
 import { acquisitionExtractionCronSelectionRepository } from "@/lib/acquisition/extraction/extraction-cron.selection.repository"
 import { draftExtractionRepository } from "@/lib/acquisition/extraction/extraction.repository"
+import { acquisitionConsultationDetectionSelectionRepository } from "@/lib/acquisition/detection/consultation-detection.selection.repository"
 
 function actor() {
   return { userId: "u1", role: "ADMIN" as const, companyId: "co1" as string | null }
@@ -67,6 +68,9 @@ function createFakeRepo() {
     extractionStartedAt: null,
     contentHashAtExtraction: null,
     extractionSchemaVersion: null,
+    detectionClassification: "CONSULTATION",
+    detectionContentHash: "hash-abc",
+    extractionRetryable: null,
   }
   const content: MessageContentLite = {
     normalizedText: "Chantier : Tour Alpha\nContact: alice@example.com\nRéférence : REF-99",
@@ -214,6 +218,16 @@ function installEmptySiblingWorkers() {
     patchMethod(
       acquisitionContentFetchStateRepository,
       "listCompanyIdsWithEligibleContentFetch",
+      async () => []
+    ),
+    patchMethod(
+      acquisitionConsultationDetectionSelectionRepository,
+      "listCompanyIdsNeedingDetection",
+      async () => []
+    ),
+    patchMethod(
+      acquisitionConsultationDetectionSelectionRepository,
+      "listCandidatesForCompany",
       async () => []
     ),
   ]
@@ -382,7 +396,7 @@ describe("PLAN-ACQ-012-4 fencing", () => {
     it("lease perdue après provider avant persist → aucune persist", async () => {
       const repo = createFakeRepo()
       const { result, lease } = await runAuthenticExtraction({
-        stealAfterAsserts: 8,
+        stealAfterAsserts: 10,
         draftRepo: repo,
       })
       assert.equal(
@@ -399,7 +413,7 @@ describe("PLAN-ACQ-012-4 fencing", () => {
     it("lease perdue après persist avant AUTO → persist conservé, LEASE_STOLEN", async () => {
       const repo = createFakeRepo()
       const { result, lease } = await runAuthenticExtraction({
-        stealAfterAsserts: 9,
+        stealAfterAsserts: 11,
         draftRepo: repo,
       })
       assert.equal(
