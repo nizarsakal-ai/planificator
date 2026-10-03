@@ -14,8 +14,25 @@ export function extractAllowedHeaders(
 }
 
 /**
+ * Headers de SOUS-PARTS conservés pour la seule classification MIME du parser
+ * (ressource inline embarquée vs pièce jointe). Structure temporaire : jamais persistée,
+ * jamais exposée (le modèle canonique ne transporte pas le payload).
+ */
+const ALLOWED_SUBPART_HEADER_NAMES = new Set(["content-disposition", "content-id"])
+
+function extractAllowedSubpartHeaders(
+  headers: { name: string; value: string }[] | undefined
+): { name: string; value: string }[] {
+  if (!headers?.length) return []
+  return headers.filter(
+    (h) => typeof h?.name === "string" && ALLOWED_SUBPART_HEADER_NAMES.has(h.name.toLowerCase())
+  )
+}
+
+/**
  * Retire body.data de la structure MIME avant extraction des métadonnées PJ.
- * Ne conserve que partId, mimeType, filename, body.attachmentId et body.size.
+ * Ne conserve que partId, mimeType, filename, body.attachmentId, body.size et,
+ * sur les sous-parts, uniquement Content-Disposition / Content-ID (classification inline).
  */
 export function sanitizePayloadForMetadata(
   payload: GmailMessagePayload | undefined
@@ -27,6 +44,10 @@ export function sanitizePayloadForMetadata(
       partId: part.partId,
       mimeType: part.mimeType,
       filename: part.filename,
+    }
+    const headers = extractAllowedSubpartHeaders(part.headers)
+    if (headers.length) {
+      sanitized.headers = headers
     }
     if (part.body) {
       sanitized.body = {
