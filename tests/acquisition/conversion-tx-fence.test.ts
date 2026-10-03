@@ -166,6 +166,9 @@ function createFakeDb(seed: { draft: Draft; clients?: Array<{ id: string; compan
   return api
 }
 
+/** Horloge figée : fixture 2026-09-10 → 2026-09-12 reste FUTURE (jamais OBSOLETE selon la date réelle). */
+const CONVERSION_NOW = new Date("2026-09-01T12:00:00.000Z")
+
 describe("LOT-3F — conversion transactional ownership fence", () => {
   const prevAcq = process.env.PLANIFICATOR_ACQUISITION_ENABLED
   const prevConv = process.env.ACQUISITION_CONVERSION_ENABLED
@@ -199,7 +202,10 @@ describe("LOT-3F — conversion transactional ownership fence", () => {
 
   it("A — conversion manuelle sans fence : historique OK", async () => {
     const db = createFakeDb({ draft: baseDraft() })
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({
+      db: db as never,
+      now: () => CONVERSION_NOW,
+    })
     const r = await svc.convertImportDraft(admin, convertBody)
     assert.equal(r.ok, true)
     if (r.ok) assert.equal(r.outcome, "CONVERTED")
@@ -221,7 +227,10 @@ describe("LOT-3F — conversion transactional ownership fence", () => {
       sequence.push("worksite.create")
       return origCreate(args)
     }
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({
+      db: db as never,
+      now: () => CONVERSION_NOW,
+    })
     const r = await svc.convertImportDraft(system, convertBody, {
       transactionalOwnershipFence: fence,
     })
@@ -237,7 +246,10 @@ describe("LOT-3F — conversion transactional ownership fence", () => {
         return "NOT_OWNED"
       },
     }
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({
+      db: db as never,
+      now: () => CONVERSION_NOW,
+    })
     const r = await svc.convertImportDraft(system, convertBody, {
       transactionalOwnershipFence: fence,
     })
@@ -261,7 +273,10 @@ describe("LOT-3F — conversion transactional ownership fence", () => {
         throw new Error("fence boom")
       },
     }
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({
+      db: db as never,
+      now: () => CONVERSION_NOW,
+    })
     const r = await svc.convertImportDraft(system, convertBody, {
       transactionalOwnershipFence: fence,
     })
@@ -279,7 +294,10 @@ describe("LOT-3F — conversion transactional ownership fence", () => {
       findFirstCalls++
       return origFind()
     }
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({
+      db: db as never,
+      now: () => CONVERSION_NOW,
+    })
     const r = await svc.convertImportDraft(system, convertBody)
     assert.equal(r.ok, false)
     if (!r.ok) {
@@ -308,7 +326,10 @@ describe("LOT-3F — conversion transactional ownership fence", () => {
       findFirstCalls++
       return origFind()
     }
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({
+      db: db as never,
+      now: () => CONVERSION_NOW,
+    })
     const r = await svc.convertImportDraft(system, convertBody)
     assert.equal(r.ok, false)
     if (!r.ok) {
@@ -328,7 +349,10 @@ describe("LOT-3F — conversion transactional ownership fence", () => {
       findFirstCalls++
       return origFind()
     }
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({
+      db: db as never,
+      now: () => CONVERSION_NOW,
+    })
     const r = await svc.convertImportDraft(system, convertBody)
     assert.equal(r.ok, false)
     if (!r.ok) {
@@ -352,7 +376,10 @@ describe("LOT-3F — conversion transactional ownership fence", () => {
       sequence.push("worksite")
       return origCreate(args)
     }
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({
+      db: db as never,
+      now: () => CONVERSION_NOW,
+    })
     await svc.convertImportDraft(system, convertBody, {
       transactionalOwnershipFence: fence,
     })
