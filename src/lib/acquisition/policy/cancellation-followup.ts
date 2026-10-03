@@ -15,6 +15,7 @@ import {
   type WorksiteImportDraftStatus,
 } from "@prisma/client"
 import type { TransactionalOwnershipFence } from "@/lib/acquisition/conversion/conversion-ownership-fence.port"
+import { assertAutoDecisionSourceFreshInTransaction } from "@/lib/acquisition/policy/auto-decision-source-freshness"
 import {
   AcquisitionDecisionJournalRepository,
   buildCancellationFollowUpIdempotencyKey,
@@ -27,6 +28,13 @@ export class CancellationLeaseNotOwnedError extends Error {
   readonly code = "LEASE_NOT_OWNED"
   constructor() {
     super("LEASE_NOT_OWNED")
+  }
+}
+
+export class CancellationSourceContentStaleError extends Error {
+  readonly code = "SOURCE_CONTENT_STALE"
+  constructor() {
+    super("SOURCE_CONTENT_STALE")
   }
 }
 
@@ -396,17 +404,38 @@ export async function applyCancellationFollowUpTransactionally(input: {
   reasons?: string[]
   /** LOT-3G — fence orchestrateur (AUTO). Absent = chemin manuel / legacy. */
   transactionalOwnershipFence?: TransactionalOwnershipFence
+  /**
+   * R8 — hash cycle figé ; revalidé dans la TX après fence (AUTO).
+   * Absent = chemin manuel (pas de gate fraîcheur).
+   */
+  requireSourceContentHash?: string
 }): Promise<CancellationFollowUpTransactionalResult> {
   const reasons = input.reasons ?? ["CONSULTATION_CANCELLED"]
   const threadId = input.threadId?.trim() || null
   const fence = input.transactionalOwnershipFence
+  const expectedHash = input.requireSourceContentHash?.trim() || null
+
+  async function assertSourceFreshIfRequired(
+    tx: Prisma.TransactionClient
+  ): Promise<void> {
+    if (!expectedHash) return
+    const fresh = await assertAutoDecisionSourceFreshInTransaction(tx, {
+      companyId: input.companyId,
+      draftId: input.sourceDraftId,
+      expectedContentHash: expectedHash,
+    })
+    if (fresh !== "FRESH") throw new CancellationSourceContentStaleError()
+  }
 
   if (!threadId) {
-    if (fence) {
+    if (fence || expectedHash) {
       try {
         return await input.db.$transaction(async (tx) => {
-          const owned = await fence.assertOwnedAndLock(tx)
-          if (owned !== "OWNED") throw new CancellationLeaseNotOwnedError()
+          if (fence) {
+            const owned = await fence.assertOwnedAndLock(tx)
+            if (owned !== "OWNED") throw new CancellationLeaseNotOwnedError()
+          }
+          await assertSourceFreshIfRequired(tx)
           return appendCancellationJournalOnce({
             db: tx,
             companyId: input.companyId,
@@ -425,6 +454,7 @@ export async function applyCancellationFollowUpTransactionally(input: {
         })
       } catch (error) {
         if (error instanceof CancellationLeaseNotOwnedError) throw error
+        if (error instanceof CancellationSourceContentStaleError) throw error
         throw error
       }
     }
@@ -448,11 +478,12 @@ export async function applyCancellationFollowUpTransactionally(input: {
 
   try {
     return await input.db.$transaction(async (tx) => {
-      // LOT-3G — ordre : lease FOR UPDATE → advisory thread → mutations.
+      // LOT-3G — ordre : lease FOR UPDATE → fraîcheur source → advisory thread → mutations.
       if (fence) {
         const owned = await fence.assertOwnedAndLock(tx)
         if (owned !== "OWNED") throw new CancellationLeaseNotOwnedError()
       }
+      await assertSourceFreshIfRequired(tx)
 
       await acquireCancellationThreadAdvisoryXactLock(
         tx,
@@ -563,6 +594,7 @@ export async function applyCancellationFollowUpTransactionally(input: {
     })
   } catch (error) {
     if (error instanceof CancellationLeaseNotOwnedError) throw error
+    if (error instanceof CancellationSourceContentStaleError) throw error
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"

@@ -856,10 +856,22 @@ async function processCandidate(input: {
     actorUserId: actor.actorUserId,
   })
 
+  const requiredSourceContentHash = draft2.contentHashAtExtraction
+  if (!requiredSourceContentHash) {
+    stats.staleApproval++
+    log("CONVERT_SOURCE_CONTENT_STALE", {
+      draftId: draft2.id,
+      code: "SOURCE_CONTENT_STALE",
+      reason: "content_hash_at_extraction_missing",
+    })
+    return
+  }
+
   const result = await conversion.convertImportDraft(actor, convertInput, {
     ...(input.transactionalOwnershipFence
       ? { transactionalOwnershipFence: input.transactionalOwnershipFence }
       : {}),
+    requireSourceContentHash: requiredSourceContentHash,
   })
 
   if (!result.ok && result.code === "LEASE_NOT_OWNED") {
@@ -869,6 +881,28 @@ async function processCandidate(input: {
       code: result.code,
     })
     return { leaseStolen: true }
+  }
+
+  // R10 — contenu source obsolète : fail-closed, pas d’erreur générique.
+  if (!result.ok && result.code === "SOURCE_CONTENT_STALE") {
+    stats.staleApproval++
+    log("CONVERT_SOURCE_CONTENT_STALE", {
+      draftId: draft2.id,
+      code: result.code,
+      contentHashAtExtraction: draft2.contentHashAtExtraction,
+    })
+    return
+  }
+
+  // START_ONLY — refus déterministe côté conversion SYSTEM : reste APPROVED,
+  // conversion humaine requise (pas une erreur technique).
+  if (!result.ok && result.code === "START_ONLY_REQUIRES_HUMAN_CONVERSION") {
+    stats.skipped++
+    log("CONVERT_SKIPPED_START_ONLY", {
+      draftId: draft2.id,
+      code: result.code,
+    })
+    return
   }
 
   const decision = mapConvertResultToWorksiteCreationDecision(result)

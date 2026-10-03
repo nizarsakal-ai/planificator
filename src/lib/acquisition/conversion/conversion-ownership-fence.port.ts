@@ -23,4 +23,9 @@ export type TransactionalOwnershipFence = ConversionTransactionalOwnershipFence
 
 export type ConvertImportDraftOptions = {
   transactionalOwnershipFence?: ConversionTransactionalOwnershipFence
+  /**
+   * PLAN-ACQ-DETECTION-001-R8 — si présent (AUTO), revalide le hash source
+   * courant dans la TX après fence, avant mutation.
+   */
+  requireSourceContentHash?: string
 }

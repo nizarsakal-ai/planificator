@@ -5,6 +5,7 @@ import assert from "node:assert/strict"
 import { ImportDraftReviewService } from "@/lib/acquisition/review/import-draft-review.service"
 import type { ReviewActorContext } from "@/lib/acquisition/review/import-draft-review.types"
 import { catalogWarning } from "@/lib/acquisition/extraction/extraction.schema"
+import { evaluateAutoDecision } from "@/lib/acquisition/policy/auto-decision.policy"
 
 type DraftRow = {
   id: string
@@ -142,6 +143,14 @@ function baseDraft(over: Partial<DraftRow> = {}): DraftRow {
   }
 }
 
+function createService(db: unknown) {
+  return new ImportDraftReviewService({
+    db: db as never,
+    now: () => new Date("2026-09-06T12:00:00.000Z"),
+  })
+}
+
+
 describe("ImportDraftReviewService", () => {
   const env = { ...process.env }
 
@@ -239,7 +248,7 @@ describe("ImportDraftReviewService", () => {
 
   it("approve valide sans clientName", async () => {
     const db = createFakeDb(baseDraft({ proposedClientName: null }))
-    const svc = new ImportDraftReviewService({ db: db as never })
+    const svc = createService(db)
     const r = await svc.approveImportDraft(admin, { draftId: "d1", expectedVersion: 1 })
     assert.equal(r.ok, true)
     if (r.ok) assert.equal(r.outcome, "APPROVED")
@@ -256,13 +265,21 @@ describe("ImportDraftReviewService", () => {
     if (!r.ok) assert.equal(r.outcome, "VALIDATION_ERROR")
   })
 
-  it("approve sans dates (partielle) → MISSING_DATES", async () => {
+  it("approve NULL/DATE → MISSING_DATES", async () => {
     const db = createFakeDb(baseDraft({ proposedStartDate: null }))
     const svc = new ImportDraftReviewService({ db: db as never })
     const r = await svc.approveImportDraft(admin, { draftId: "d1", expectedVersion: 1 })
     assert.equal(r.ok, false)
     if (!r.ok) assert.equal(r.code, "MISSING_DATES")
   })
+  it("approve START/NULL → admissible", async () => {
+    const db = createFakeDb(baseDraft({ proposedEndDate: null }))
+    const svc = new ImportDraftReviewService({ db: db as never })
+    const r = await svc.approveImportDraft(admin, { draftId: "d1", expectedVersion: 1 })
+    assert.equal(r.ok, true)
+    assert.equal(r.outcome, "APPROVED")
+  })
+
 
   it("approve NULL/NULL → admissible", async () => {
     const db = createFakeDb(
@@ -291,7 +308,7 @@ describe("ImportDraftReviewService", () => {
     const db = createFakeDb(
       baseDraft({ warningData: [catalogWarning("CONTENT_INSUFFICIENT", { source: "SERVICE" })] })
     )
-    const svc = new ImportDraftReviewService({ db: db as never })
+    const svc = createService(db)
     const r = await svc.approveImportDraft(admin, { draftId: "d1", expectedVersion: 1 })
     assert.equal(r.ok, false)
     if (!r.ok) assert.equal(r.outcome, "BLOCKING_WARNINGS")
@@ -303,7 +320,7 @@ describe("ImportDraftReviewService", () => {
         warningData: [{ code: "CUSTOM_UNKNOWN", blocking: true, message: "raw" }],
       })
     )
-    const svc = new ImportDraftReviewService({ db: db as never })
+    const svc = createService(db)
     const r = await svc.approveImportDraft(admin, { draftId: "d1", expectedVersion: 1 })
     assert.equal(r.ok, false)
     if (!r.ok) assert.equal(r.outcome, "BLOCKING_WARNINGS")
@@ -451,5 +468,117 @@ describe("ImportDraftReviewService", () => {
     const r = await svc.approveImportDraft(admin, { draftId: "d1", expectedVersion: 1 })
     assert.equal(r.ok, false)
     if (!r.ok) assert.equal(r.outcome, "INVALID_STATE")
+  })
+})
+
+describe("START_ONLY — revérification SYSTEM à l’approbation", () => {
+  const env = { ...process.env }
+
+  beforeEach(() => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+  })
+
+  afterEach(() => {
+    process.env = { ...env }
+  })
+
+  const system: ReviewActorContext = {
+    actorUserId: "u-sys",
+    actorRole: "SYSTEM",
+    companyId: "co1",
+  }
+  const ownedFence = { assertOwnedAndLock: async () => "OWNED" as const }
+  // J = 06/09/2026 Europe/Paris ; J+1 = 07/09/2026 Europe/Paris.
+  const DAY_J = new Date("2026-09-06T12:00:00.000Z")
+  const DAY_J1 = new Date("2026-09-07T08:00:00.000Z")
+
+  function startOnlyDraft(): DraftRow {
+    return baseDraft({
+      proposedStartDate: new Date("2026-09-06T00:00:00.000Z"),
+      proposedEndDate: null,
+    })
+  }
+
+  function withTransaction(db: ReturnType<typeof createFakeDb>) {
+    return Object.assign(db, {
+      async $transaction<T>(fn: (tx: typeof db) => Promise<T>): Promise<T> {
+        return fn(db)
+      },
+    })
+  }
+
+  it("intent démontrable à J puis approbation SYSTEM à J+1 → WORK_PERIOD_NOT_DEMONSTRABLE, aucune mutation", async () => {
+    const decisionAtJ = evaluateAutoDecision({
+      worksiteName: "Tour Alpha",
+      startDate: new Date("2026-09-06T00:00:00.000Z"),
+      endDate: null,
+      referenceInstant: DAY_J,
+      address: "1 rue A",
+      city: "Lyon",
+      clientName: "Client",
+      clientEmail: null,
+      confidenceData: { worksiteName: 0.9 },
+      warningData: [],
+      autoApproveEnabled: true,
+      autoConvertEnabled: true,
+      minConfidence: 0.7,
+    })
+    assert.equal(decisionAtJ.code, "AUTO_APPROVE_ONLY")
+
+    const db = withTransaction(createFakeDb(startOnlyDraft()))
+    const svc = new ImportDraftReviewService({ db: db as never, now: () => DAY_J1 })
+    const r = await svc.approveImportDraft(
+      system,
+      { draftId: "d1", expectedVersion: 1 },
+      { transactionalOwnershipFence: ownedFence }
+    )
+    assert.equal(r.ok, false)
+    if (!r.ok) {
+      assert.equal(r.outcome, "VALIDATION_ERROR")
+      assert.equal(r.code, "WORK_PERIOD_NOT_DEMONSTRABLE")
+    }
+    assert.equal(db.draft.status, "PENDING_REVIEW")
+    assert.equal(db.draft.version, 1)
+    assert.equal(db.draft.reviewedByUserId, null)
+    assert.equal(db.draft.reviewedAt, null)
+  })
+
+  it("SYSTEM START_ONLY encore démontrable (début = jour Paris) → APPROVED", async () => {
+    const db = withTransaction(createFakeDb(startOnlyDraft()))
+    const svc = new ImportDraftReviewService({ db: db as never, now: () => DAY_J })
+    const r = await svc.approveImportDraft(
+      system,
+      { draftId: "d1", expectedVersion: 1 },
+      { transactionalOwnershipFence: ownedFence }
+    )
+    assert.equal(r.ok, true)
+    assert.equal(db.draft.status, "APPROVED")
+  })
+
+  it("approbation humaine ADMIN équivalente à J+1 → non bloquée par la règle SYSTEM", async () => {
+    const db = createFakeDb(startOnlyDraft())
+    const svc = new ImportDraftReviewService({ db: db as never, now: () => DAY_J1 })
+    const r = await svc.approveImportDraft(admin, { draftId: "d1", expectedVersion: 1 })
+    assert.equal(r.ok, true)
+    assert.equal(db.draft.status, "APPROVED")
+  })
+
+  it("SYSTEM START_END futur valide → comportement inchangé (APPROVED)", async () => {
+    const db = withTransaction(
+      createFakeDb(
+        baseDraft({
+          proposedStartDate: new Date("2026-10-01T00:00:00.000Z"),
+          proposedEndDate: new Date("2026-10-15T00:00:00.000Z"),
+        })
+      )
+    )
+    const svc = new ImportDraftReviewService({ db: db as never, now: () => DAY_J1 })
+    const r = await svc.approveImportDraft(
+      system,
+      { draftId: "d1", expectedVersion: 1 },
+      { transactionalOwnershipFence: ownedFence }
+    )
+    assert.equal(r.ok, true)
+    assert.equal(db.draft.status, "APPROVED")
   })
 })

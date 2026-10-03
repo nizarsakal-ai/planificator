@@ -5,7 +5,10 @@
 import type { Prisma, PrismaClient, Role, WorksiteImportDraftStatus } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
-import { classifyWorkPeriod } from "@/lib/acquisition/policy/work-period-classification"
+import {
+  classifyWorkPeriod,
+  isStartOnlyWorkPeriodDemonstrable,
+} from "@/lib/acquisition/policy/work-period-classification"
 import type { TransactionalOwnershipFence } from "@/lib/acquisition/conversion/conversion-ownership-fence.port"
 import {
   approveImportDraftSchema,
@@ -22,6 +25,7 @@ import type {
   SaveCorrectionsOutcome,
 } from "@/lib/acquisition/review/import-draft-review.types"
 import { hasBlockingWarnings } from "@/lib/acquisition/review/consultation-ui"
+import { assertAutoDecisionSourceFreshInTransaction } from "@/lib/acquisition/policy/auto-decision-source-freshness"
 
 const LOG_PREFIX = "[acquisition-review]"
 const ALLOWED_ROLES = new Set<Role>(["ADMIN", "SUPER_ADMIN"])
@@ -29,12 +33,43 @@ const EDITABLE_STATUSES: WorksiteImportDraftStatus[] = ["PENDING_REVIEW", "FAILE
 
 export type ReviewMutationOptions = {
   transactionalOwnershipFence?: TransactionalOwnershipFence
+  /**
+   * PLAN-ACQ-DETECTION-001-R8 — si présent (AUTO), revalide le hash source
+   * courant dans la TX après fence, avant mutation.
+   */
+  requireSourceContentHash?: string
 }
 
 class ReviewLeaseNotOwnedError extends Error {
   readonly code = "LEASE_NOT_OWNED"
   constructor() {
     super("LEASE_NOT_OWNED")
+  }
+}
+
+class ReviewSourceContentStaleError extends Error {
+  readonly code = "SOURCE_CONTENT_STALE"
+  constructor() {
+    super("SOURCE_CONTENT_STALE")
+    this.name = "ReviewSourceContentStaleError"
+  }
+}
+
+function sourceContentStaleApprove(): ApproveOutcome {
+  return {
+    ok: false,
+    outcome: "STATE_CHANGED",
+    code: "SOURCE_CONTENT_STALE",
+    message: "Contenu source modifié depuis l'extraction",
+  }
+}
+
+function sourceContentStaleReject(): RejectOutcome {
+  return {
+    ok: false,
+    outcome: "STATE_CHANGED",
+    code: "SOURCE_CONTENT_STALE",
+    message: "Contenu source modifié depuis l'extraction",
   }
 }
 
@@ -264,6 +299,14 @@ export class ImportDraftReviewService {
         return await this.db.$transaction(async (tx) => {
           const owned = await fence.assertOwnedAndLock(tx)
           if (owned !== "OWNED") throw new ReviewLeaseNotOwnedError()
+          if (options?.requireSourceContentHash) {
+            const fresh = await assertAutoDecisionSourceFreshInTransaction(tx, {
+              companyId: ctx.companyId,
+              draftId: input.draftId,
+              expectedContentHash: options.requireSourceContentHash,
+            })
+            if (fresh !== "FRESH") throw new ReviewSourceContentStaleError()
+          }
           return this.executeApprove(tx, ctx, input)
         })
       } catch (err) {
@@ -275,6 +318,14 @@ export class ImportDraftReviewService {
             code: "LEASE_NOT_OWNED",
           })
           return leaseNotOwnedApprove()
+        }
+        if (err instanceof ReviewSourceContentStaleError) {
+          this.log("APPROVE_SOURCE_CONTENT_STALE", {
+            companyId: ctx.companyId,
+            draftId: input.draftId,
+            code: "SOURCE_CONTENT_STALE",
+          })
+          return sourceContentStaleApprove()
         }
         throw err
       }
@@ -334,15 +385,15 @@ export class ImportDraftReviewService {
         message: "Le nom du chantier est obligatoire",
       }
     }
-    // PROVIDENCE-DATES-002 — null/null admissible ; partielle / inversée refusée.
+    // START-ONLY — null/null et START/null admissibles ; null/END et plage inversée refusés.
     const hasStart = draft.proposedStartDate != null
     const hasEnd = draft.proposedEndDate != null
-    if (hasStart !== hasEnd) {
+    if (!hasStart && hasEnd) {
       return {
         ok: false,
         outcome: "VALIDATION_ERROR",
         code: "MISSING_DATES",
-        message: "Les dates de début et de fin doivent être toutes deux renseignées ou toutes deux absentes",
+        message: "La date de début est obligatoire lorsqu’une date de fin est renseignée",
       }
     }
     if (
@@ -357,18 +408,37 @@ export class ImportDraftReviewService {
         message: "La date de fin doit être postérieure ou égale au début",
       }
     }
-    if (
-      classifyWorkPeriod(
-        draft.proposedStartDate,
-        draft.proposedEndDate,
-        this.now()
-      ) === "OBSOLETE"
-    ) {
+    const approvalInstant = this.now()
+    const workPeriod = classifyWorkPeriod(
+      draft.proposedStartDate,
+      draft.proposedEndDate,
+      approvalInstant
+    )
+    if (workPeriod === "OBSOLETE") {
       return {
         ok: false,
         outcome: "VALIDATION_ERROR",
         code: "WORK_PERIOD_OBSOLETE",
         message: "La période de prestation est terminée — consultation obsolète",
+      }
+    }
+    // START_ONLY — SYSTEM revérifie la démontrabilité à l’instant de l’approbation
+    // (intent gelé avant le passage de la date). Approbation humaine inchangée.
+    if (
+      ctx.actorRole === "SYSTEM" &&
+      workPeriod === "START_ONLY" &&
+      !isStartOnlyWorkPeriodDemonstrable(
+        draft.proposedStartDate,
+        draft.proposedEndDate,
+        approvalInstant
+      )
+    ) {
+      return {
+        ok: false,
+        outcome: "VALIDATION_ERROR",
+        code: "WORK_PERIOD_NOT_DEMONSTRABLE",
+        message:
+          "Début passé sans date de fin — pertinence non démontrable, revue humaine requise",
       }
     }
     if (hasBlockingWarnings(draft.warningData)) {
@@ -480,6 +550,14 @@ export class ImportDraftReviewService {
         return await this.db.$transaction(async (tx) => {
           const owned = await fence.assertOwnedAndLock(tx)
           if (owned !== "OWNED") throw new ReviewLeaseNotOwnedError()
+          if (options?.requireSourceContentHash) {
+            const fresh = await assertAutoDecisionSourceFreshInTransaction(tx, {
+              companyId: ctx.companyId,
+              draftId: input.draftId,
+              expectedContentHash: options.requireSourceContentHash,
+            })
+            if (fresh !== "FRESH") throw new ReviewSourceContentStaleError()
+          }
           return this.executeReject(tx, ctx, input)
         })
       } catch (err) {
@@ -491,6 +569,14 @@ export class ImportDraftReviewService {
             code: "LEASE_NOT_OWNED",
           })
           return leaseNotOwnedReject()
+        }
+        if (err instanceof ReviewSourceContentStaleError) {
+          this.log("REJECT_SOURCE_CONTENT_STALE", {
+            companyId: ctx.companyId,
+            draftId: input.draftId,
+            code: "SOURCE_CONTENT_STALE",
+          })
+          return sourceContentStaleReject()
         }
         throw err
       }

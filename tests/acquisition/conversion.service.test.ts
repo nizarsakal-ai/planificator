@@ -676,7 +676,7 @@ describe("ImportDraftConversionService", () => {
     assert.ok(Date.now() - before < 60_000)
   })
 
-  it("PROVIDENCE-DATES — date partielle refusée", async () => {
+  it("START-ONLY — START/NULL → Worksite avec endDate null", async () => {
     const db = createFakeDb({
       draft: baseDraft({
         proposedStartDate: new Date("2026-10-01T00:00:00.000Z"),
@@ -684,12 +684,30 @@ describe("ImportDraftConversionService", () => {
       }),
       clients: [{ id: "c1", companyId: "co1" }],
     })
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({
+      db: db as never,
+      now: () => new Date("2026-09-06T12:00:00.000Z"),
+    })
     const r = await svc.convertImportDraft(admin, {
       draftId: "d1",
       expectedVersion: 2,
       clientMode: "EXISTING",
       existingClientId: "c1",
+    })
+    assert.equal(r.ok, true)
+    assert.equal(db.worksites.length, 1)
+    assert.equal(db.worksites[0]!.startDate?.toISOString(), "2026-10-01T00:00:00.000Z")
+    assert.equal(db.worksites[0]!.endDate, null)
+  })
+
+  it("START-ONLY — NULL/END reste refusé", async () => {
+    const db = createFakeDb({
+      draft: baseDraft({ proposedStartDate: null, proposedEndDate: new Date("2026-10-01T00:00:00.000Z") }),
+      clients: [{ id: "c1", companyId: "co1" }],
+    })
+    const svc = new ImportDraftConversionService({ db: db as never })
+    const r = await svc.convertImportDraft(admin, {
+      draftId: "d1", expectedVersion: 2, clientMode: "EXISTING", existingClientId: "c1",
     })
     assert.equal(r.ok, false)
     if (!r.ok) assert.equal(r.outcome, "VALIDATION_ERROR")
@@ -764,5 +782,78 @@ describe("ImportDraftConversionService", () => {
     assert.equal(r.ok, false)
     if (!r.ok) assert.equal(r.code, "WORK_PERIOD_OBSOLETE")
     assert.equal(db.worksites.length, 0)
+  })
+})
+
+describe("START_ONLY — conversion SYSTEM refusée (aucun Worksite START/null)", () => {
+  const env = { ...process.env }
+  const system: ConversionActorContext = {
+    actorUserId: "sys",
+    actorRole: "SYSTEM",
+    companyId: "co1",
+  }
+  const fenceOpts = {
+    transactionalOwnershipFence: {
+      assertOwnedAndLock: async () => "OWNED" as const,
+    },
+  }
+  const NOW = new Date("2026-09-06T12:00:00.000Z") // Europe/Paris = 06/09/2026
+
+  beforeEach(() => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_CONVERSION_ENABLED = "true"
+  })
+
+  afterEach(() => {
+    process.env = { ...env }
+  })
+
+  for (const [label, start] of [
+    ["futur", "2026-10-01T00:00:00.000Z"],
+    ["aujourd’hui Paris", "2026-09-06T00:00:00.000Z"],
+    ["passé", "2026-09-01T00:00:00.000Z"],
+  ] as const) {
+    it(`SYSTEM START_ONLY ${label} → START_ONLY_REQUIRES_HUMAN_CONVERSION, aucun Worksite`, async () => {
+      const db = createFakeDb({
+        draft: baseDraft({ proposedStartDate: new Date(start), proposedEndDate: null }),
+        clients: [{ id: "c1", companyId: "co1" }],
+      })
+      const svc = new ImportDraftConversionService({ db: db as never, now: () => NOW })
+      const r = await svc.convertImportDraft(
+        system,
+        { draftId: "d1", expectedVersion: 2, clientMode: "EXISTING", existingClientId: "c1" },
+        fenceOpts
+      )
+      assert.equal(r.ok, false)
+      if (!r.ok) {
+        assert.equal(r.outcome, "VALIDATION_ERROR")
+        assert.equal(r.code, "START_ONLY_REQUIRES_HUMAN_CONVERSION")
+      }
+      assert.equal(db.worksites.length, 0)
+      assert.equal(db.lastWorksiteCreateData, null)
+      assert.equal(db.draft.status, "APPROVED")
+      assert.equal(db.draft.version, 2)
+      assert.equal(db.draft.createdWorksiteId, null)
+    })
+  }
+
+  it("SYSTEM START_END futur valide → comportement inchangé (CONVERTED)", async () => {
+    const db = createFakeDb({
+      draft: baseDraft({
+        proposedStartDate: new Date("2026-10-01T00:00:00.000Z"),
+        proposedEndDate: new Date("2026-10-15T00:00:00.000Z"),
+      }),
+      clients: [{ id: "c1", companyId: "co1" }],
+    })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => NOW })
+    const r = await svc.convertImportDraft(
+      system,
+      { draftId: "d1", expectedVersion: 2, clientMode: "EXISTING", existingClientId: "c1" },
+      fenceOpts
+    )
+    assert.equal(r.ok, true)
+    if (r.ok) assert.equal(r.outcome, "CONVERTED")
+    assert.equal(db.worksites.length, 1)
+    assert.equal(db.worksites[0]!.endDate?.toISOString(), "2026-10-15T00:00:00.000Z")
   })
 })

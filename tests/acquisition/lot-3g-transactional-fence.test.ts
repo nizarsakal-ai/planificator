@@ -34,6 +34,9 @@ function walkTs(dir: string, out: string[] = []): string[] {
   return out
 }
 
+/** Horloge figée : fixture 2026-10-01/02 = période FUTURE (jamais OBSOLETE selon la date réelle). */
+const REVIEW_NOW = new Date("2026-09-15T12:00:00.000Z")
+
 describe("LOT-3G — review SYSTEM / ADMIN fence", () => {
   const prev = process.env.PLANIFICATOR_ACQUISITION_ENABLED
   beforeEach(() => {
@@ -77,7 +80,7 @@ describe("LOT-3G — review SYSTEM / ADMIN fence", () => {
 
   it("3 — SYSTEM approve sans fence → LEASE_NOT_OWNED, zéro DB read", async () => {
     const db = makeReviewDb()
-    const svc = new ImportDraftReviewService({ db: db as never })
+    const svc = new ImportDraftReviewService({ db: db as never, now: () => REVIEW_NOW })
     const r = await svc.approveImportDraft(
       { actorUserId: "sys", actorRole: "SYSTEM", companyId: "co1" },
       { draftId: "d1", expectedVersion: 1 }
@@ -90,7 +93,7 @@ describe("LOT-3G — review SYSTEM / ADMIN fence", () => {
 
   it("4 — SYSTEM reject sans fence → LEASE_NOT_OWNED, zéro DB read", async () => {
     const db = makeReviewDb()
-    const svc = new ImportDraftReviewService({ db: db as never })
+    const svc = new ImportDraftReviewService({ db: db as never, now: () => REVIEW_NOW })
     const r = await svc.rejectImportDraft(
       { actorUserId: "sys", actorRole: "SYSTEM", companyId: "co1" },
       { draftId: "d1", expectedVersion: 1, rejectionReason: "Annulé suite client" }
@@ -103,7 +106,7 @@ describe("LOT-3G — review SYSTEM / ADMIN fence", () => {
 
   it("5 — SYSTEM approve fence OWNED → APPROVED", async () => {
     const db = makeReviewDb()
-    const svc = new ImportDraftReviewService({ db: db as never })
+    const svc = new ImportDraftReviewService({ db: db as never, now: () => REVIEW_NOW })
     const r = await svc.approveImportDraft(
       { actorUserId: "sys", actorRole: "SYSTEM", companyId: "co1" },
       { draftId: "d1", expectedVersion: 1 },
@@ -119,7 +122,7 @@ describe("LOT-3G — review SYSTEM / ADMIN fence", () => {
       db.mutated = true
       return { count: 1 }
     }
-    const svc = new ImportDraftReviewService({ db: db as never })
+    const svc = new ImportDraftReviewService({ db: db as never, now: () => REVIEW_NOW })
     const r = await svc.rejectImportDraft(
       { actorUserId: "sys", actorRole: "SYSTEM", companyId: "co1" },
       { draftId: "d1", expectedVersion: 1, rejectionReason: "Annulé suite client" },
@@ -131,7 +134,7 @@ describe("LOT-3G — review SYSTEM / ADMIN fence", () => {
 
   it("7 — ADMIN approve sans fence → historique OK", async () => {
     const db = makeReviewDb()
-    const svc = new ImportDraftReviewService({ db: db as never })
+    const svc = new ImportDraftReviewService({ db: db as never, now: () => REVIEW_NOW })
     const r = await svc.approveImportDraft(
       { actorUserId: "admin", actorRole: "ADMIN", companyId: "co1" },
       { draftId: "d1", expectedVersion: 1 }
@@ -142,7 +145,7 @@ describe("LOT-3G — review SYSTEM / ADMIN fence", () => {
 
   it("SYSTEM approve fence NOT_OWNED → zéro mutation", async () => {
     const db = makeReviewDb()
-    const svc = new ImportDraftReviewService({ db: db as never })
+    const svc = new ImportDraftReviewService({ db: db as never, now: () => REVIEW_NOW })
     const r = await svc.approveImportDraft(
       { actorUserId: "sys", actorRole: "SYSTEM", companyId: "co1" },
       { draftId: "d1", expectedVersion: 1 },

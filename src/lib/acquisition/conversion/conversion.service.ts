@@ -24,6 +24,7 @@ import {
   type ConvertImportDraftResult,
 } from "@/lib/acquisition/conversion/conversion.types"
 import type { ConvertImportDraftOptions } from "@/lib/acquisition/conversion/conversion-ownership-fence.port"
+import { assertAutoDecisionSourceFreshInTransaction } from "@/lib/acquisition/policy/auto-decision-source-freshness"
 import { defaultGeocodePort, type GeocodePort } from "@/lib/geo/geocode.port"
 import {
   findDuplicateWorksite,
@@ -206,6 +207,18 @@ export class ImportDraftConversionService {
             throw new ConversionLeaseNotOwnedError()
           }
         }
+        if (options?.requireSourceContentHash) {
+          const fresh = await assertAutoDecisionSourceFreshInTransaction(tx, {
+            companyId: ctx.companyId,
+            draftId: input.draftId,
+            expectedContentHash: options.requireSourceContentHash,
+          })
+          if (fresh !== "FRESH") {
+            throw Object.assign(new Error("SOURCE_CONTENT_STALE"), {
+              code: "SOURCE_CONTENT_STALE",
+            })
+          }
+        }
 
         const draft = await tx.worksiteImportDraft.findFirst({
           where: { id: input.draftId, companyId: ctx.companyId },
@@ -245,10 +258,10 @@ export class ImportDraftConversionService {
             code: "VALIDATION_ERROR",
           })
         }
-        // PROVIDENCE-DATES-002 — null/null → Worksite sans dates ; partielle/inversée refusée.
+        // START-ONLY — null/null et START/null autorisés ; null/END et plage inversée refusés.
         const hasStart = draft.proposedStartDate != null
         const hasEnd = draft.proposedEndDate != null
-        if (hasStart !== hasEnd) {
+        if (!hasStart && hasEnd) {
           throw Object.assign(new Error("MISSING_DATES"), { code: "VALIDATION_ERROR" })
         }
         if (
@@ -272,6 +285,14 @@ export class ImportDraftConversionService {
         if (workPeriod === "INVALID") {
           throw Object.assign(new Error("DATE_RANGE_INVALID"), {
             code: "DATE_RANGE_INVALID",
+          })
+        }
+        // START_ONLY — SYSTEM ne crée jamais de Worksite START/null (forme refusée par
+        // l’édition chantier standard, invisible au Gantt), même début futur.
+        // Aucune endDate inventée ; conversion humaine inchangée.
+        if (ctx.actorRole === "SYSTEM" && workPeriod === "START_ONLY") {
+          throw Object.assign(new Error("START_ONLY_REQUIRES_HUMAN_CONVERSION"), {
+            code: "START_ONLY_REQUIRES_HUMAN_CONVERSION",
           })
         }
 
@@ -460,6 +481,18 @@ export class ImportDraftConversionService {
       if (code === "NOT_FOUND") {
         return fail("NOT_FOUND", "NOT_FOUND", "Consultation introuvable")
       }
+      if (code === "SOURCE_CONTENT_STALE") {
+        this.log("CONVERT_SOURCE_CONTENT_STALE", {
+          companyId: ctx.companyId,
+          draftId: input.draftId,
+          code: "SOURCE_CONTENT_STALE",
+        })
+        return fail(
+          "STATE_CHANGED",
+          "SOURCE_CONTENT_STALE",
+          "Contenu source modifié depuis l'extraction"
+        )
+      }
       if (code === "INVALID_STATE") {
         return fail(
           "INVALID_STATE",
@@ -484,7 +517,7 @@ export class ImportDraftConversionService {
           ...(existingWorksiteId ? { existingWorksiteId } : {}),
         }
       }
-      if (code === "VALIDATION_ERROR" || code === "MISSING_WORKSITE_NAME" || code === "MISSING_DATES" || code === "DATE_RANGE_INVALID" || code === "WORK_PERIOD_OBSOLETE") {
+      if (code === "VALIDATION_ERROR" || code === "MISSING_WORKSITE_NAME" || code === "MISSING_DATES" || code === "DATE_RANGE_INVALID" || code === "WORK_PERIOD_OBSOLETE" || code === "START_ONLY_REQUIRES_HUMAN_CONVERSION") {
         return fail("VALIDATION_ERROR", code || "VALIDATION_ERROR", "Données de conversion invalides")
       }
 
