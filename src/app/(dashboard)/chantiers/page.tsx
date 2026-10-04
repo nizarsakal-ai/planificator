@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { HardHat } from "lucide-react"
 import { NouveauChantierDialog } from "@/components/chantiers/NouveauChantierDialog"
 import { ChantiersView } from "@/components/chantiers/ChantiersView"
+import { buildClientOptions, buildPersonnelIndex, matchesState } from "@/lib/chantiers/chantiers-view-filters"
 
 export const metadata: Metadata = { title: "Chantiers" }
 
@@ -34,7 +35,7 @@ export default async function ChantiersPage() {
     ? { companyId, assignments: { some: { employeeAssignments: { some: { employeeId } } } } }
     : { companyId }
 
-  const [chantiers, clients] = await Promise.all([
+  const [chantiers, clients, employeeAssignmentRows] = await Promise.all([
     prisma.worksite.findMany({
       where: worksiteWhere,
       include: {
@@ -65,10 +66,37 @@ export default async function ChantiersPage() {
           orderBy: { name: "asc" },
         })
       : Promise.resolve([]),
+    // Filtre « Personnel affecté » (admin uniquement) — double scope tenant : chantier ET employé.
+    // Sélection étroite ; dédupliquée côté serveur avant envoi au client.
+    isAdmin
+      ? prisma.employeeAssignment.findMany({
+          where: {
+            employee: { companyId },
+            assignment: { worksite: { companyId } },
+          },
+          select: {
+            employeeId: true,
+            employee: { select: { companyId: true, firstName: true, lastName: true } },
+            assignment: { select: { worksiteId: true } },
+          },
+        })
+      : Promise.resolve([]),
   ])
 
-  const enCours   = chantiers.filter((c) => c.status === "IN_PROGRESS").length
-  const planifies = chantiers.filter((c) => c.status === "PLANNED").length
+  const { employeeIdsByWorksite, personnelOptions } = buildPersonnelIndex(
+    employeeAssignmentRows,
+    companyId,
+    new Set(chantiers.map((c) => c.id))
+  )
+  const chantiersForView = chantiers.map((c) => ({
+    ...c,
+    employeeIds: employeeIdsByWorksite.get(c.id) ?? [],
+  }))
+  const clientOptions = buildClientOptions(chantiers)
+
+  // Mêmes catégories que les onglets : en cours = IN_PROGRESS + EXTENDED, planifiés = PLANNED + DELAYED.
+  const enCours   = chantiers.filter((c) => matchesState(c, "active")).length
+  const planifies = chantiers.filter((c) => matchesState(c, "planned")).length
 
   return (
     <div className="space-y-6">
@@ -97,7 +125,11 @@ export default async function ChantiersPage() {
           </CardContent>
         </Card>
       ) : (
-        <ChantiersView chantiers={chantiers} />
+        <ChantiersView
+          chantiers={chantiersForView}
+          clientOptions={clientOptions}
+          personnelOptions={personnelOptions}
+        />
       )}
     </div>
   )
