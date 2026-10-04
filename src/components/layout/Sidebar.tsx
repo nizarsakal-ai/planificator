@@ -31,6 +31,7 @@ import { cn, getInitials } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { PlanificatorLogo } from "@/components/brand/PlanificatorLogo"
 import type { Role } from "@prisma/client"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -185,19 +186,7 @@ export function Sidebar({ user }: { user: SidebarUser }) {
     <aside className="hidden md:flex w-64 shrink-0 bg-[#0f3460] flex-col h-screen">
       {/* Logo */}
       <div className="px-5 py-5 border-b border-white/10">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-white text-[#0f3460] flex items-center justify-center font-bold text-sm shrink-0">
-            P
-          </div>
-          <div className="min-w-0">
-            <p className="text-white font-bold text-sm leading-tight">
-              Planificator
-            </p>
-            <p className="text-slate-400 text-[11px] truncate">
-              Planning d&apos;équipes
-            </p>
-          </div>
-        </div>
+        <PlanificatorLogo subtitle="Planning d'équipes" />
       </div>
 
       {/* Navigation */}
