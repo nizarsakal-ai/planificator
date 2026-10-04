@@ -5,7 +5,11 @@ import type {
   GmailMessagesListResponse,
   GmailProfileResponse,
 } from "@/lib/acquisition/connector/gmail-api.types"
-import { GmailProviderError, mapHttpStatusToGmailError } from "@/lib/acquisition/connector/gmail.errors"
+import {
+  GmailProviderError,
+  mapHttpStatusToGmailError,
+  readGoogleErrorDiagnostics,
+} from "@/lib/acquisition/connector/gmail.errors"
 
 const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
 
@@ -33,7 +37,7 @@ export interface GmailApiClient {
 
 async function readGmailJson<T>(res: Response, context: "list" | "history" | "message" | "profile"): Promise<T> {
   if (!res.ok) {
-    throw mapHttpStatusToGmailError(res.status, context)
+    throw mapHttpStatusToGmailError(res.status, context, undefined, await readGoogleErrorDiagnostics(res))
   }
   return (await res.json()) as T
 }
@@ -89,7 +93,7 @@ export class FetchGmailApiClient implements GmailApiClient {
       headers: { Authorization: `Bearer ${accessToken}` },
     })
     if (!res.ok) {
-      throw mapHttpStatusToGmailError(res.status, "message", messageId)
+      throw mapHttpStatusToGmailError(res.status, "message", messageId, await readGoogleErrorDiagnostics(res))
     }
     return (await res.json()) as GmailMessageResource
   }
@@ -104,7 +108,7 @@ export class FetchGmailApiClient implements GmailApiClient {
       { headers: { Authorization: `Bearer ${accessToken}` } }
     )
     if (!res.ok) {
-      throw mapHttpStatusToGmailError(res.status, "message", messageId)
+      throw mapHttpStatusToGmailError(res.status, "message", messageId, await readGoogleErrorDiagnostics(res))
     }
     return (await res.json()) as GmailAttachmentResource
   }
