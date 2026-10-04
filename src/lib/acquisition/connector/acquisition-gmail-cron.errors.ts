@@ -44,8 +44,26 @@ export function mapCompanySyncStatusToPublicError(
   return undefined
 }
 
-/** Code technique pour logs internes — sans message brut ni secret. */
+/** Codes déterministes (GMAIL_*, CURSOR_*, Prisma P2002…) — jamais de texte libre. */
+const SAFE_CODE_RE = /^[A-Z][A-Z0-9_]{1,63}$/
+const SAFE_NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
+
+/**
+ * Code technique pour logs internes — sans message brut ni secret.
+ * Priorité : `error.code` s'il respecte le format code → `error.name` → UNKNOWN_ERROR.
+ */
 export function safeInternalErrorCode(error: unknown): string {
-  if (error instanceof Error && error.name) return error.name
+  if (error && typeof error === "object") {
+    const code = (error as { code?: unknown }).code
+    if (typeof code === "string" && SAFE_CODE_RE.test(code)) return code
+  }
+  if (error instanceof Error && error.name && SAFE_NAME_RE.test(error.name)) return error.name
   return "UNKNOWN_ERROR"
+}
+
+/** Filtre un code déjà produit en interne avant journalisation. */
+export function sanitizeInternalCode(code: unknown): string | undefined {
+  return typeof code === "string" && (SAFE_CODE_RE.test(code) || SAFE_NAME_RE.test(code))
+    ? code
+    : undefined
 }

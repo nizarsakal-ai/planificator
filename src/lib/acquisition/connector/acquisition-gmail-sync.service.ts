@@ -13,6 +13,39 @@ import {
   type MailShadowRunContext,
 } from "@/lib/acquisition/connector/mail-shadow-hook"
 import type { MailShadowRunStats } from "@/lib/integration/connectors/mail-bridge/mail-shadow-run-stats"
+import { safeInternalErrorCode } from "@/lib/acquisition/connector/acquisition-gmail-cron.errors"
+
+/**
+ * Télémétrie d'échec BEST-EFFORT : une panne de persistance du compteur
+ * ne doit jamais masquer l'erreur Gmail/curseur d'origine.
+ */
+async function recordFailureBestEffort(
+  cursorRepository: AcquisitionScanCursorRepositoryPort,
+  args: {
+    companyId: string
+    source: MailProviderPort["source"]
+    errorCode: string
+    occurredAt: Date
+    mailboxKey: string
+  }
+): Promise<void> {
+  try {
+    await cursorRepository.recordFailure(
+      args.companyId,
+      args.source,
+      args.errorCode,
+      args.occurredAt,
+      args.mailboxKey
+    )
+  } catch (telemetryError) {
+    console.warn("[acquisition-gmail-sync] RECORD_FAILURE_FAILED", {
+      companyId: args.companyId,
+      mailboxKey: args.mailboxKey,
+      errorCode: args.errorCode,
+      internalCode: safeInternalErrorCode(telemetryError),
+    })
+  }
+}
 
 function withShadow<T extends object>(
   result: T,
@@ -103,17 +136,22 @@ export async function syncAcquisitionMailForCompany(
     cursorRecord = await cursorRepository.getOrCreate(companyId, provider.source, mailboxKey)
   } catch (e) {
     const message = e instanceof Error ? e.message : "CURSOR_LOAD_FAILED"
-    await cursorRepository.recordFailure(
+    await recordFailureBestEffort(cursorRepository, {
       companyId,
-      provider.source,
-      "CURSOR_LOAD_FAILED",
-      now(),
-      mailboxKey
-    )
+      source: provider.source,
+      errorCode: "CURSOR_LOAD_FAILED",
+      occurredAt: now(),
+      mailboxKey,
+    })
     return {
       ...base,
       status: "FAILED",
-      error: { code: "CURSOR_LOAD_FAILED", message, retryable: true },
+      error: {
+        code: "CURSOR_LOAD_FAILED",
+        message,
+        retryable: true,
+        internalCode: safeInternalErrorCode(e),
+      },
     }
   }
 
@@ -200,19 +238,24 @@ export async function syncAcquisitionMailForCompany(
         }
       }
       const message = e instanceof Error ? e.message : "PROVIDER_LIST_FAILED"
-      await cursorRepository.recordFailure(
+      await recordFailureBestEffort(cursorRepository, {
         companyId,
-        provider.source,
-        "PROVIDER_LIST_FAILED",
-        now(),
-        mailboxKey
-      )
+        source: provider.source,
+        errorCode: "PROVIDER_LIST_FAILED",
+        occurredAt: now(),
+        mailboxKey,
+      })
       return withShadow({
         ...base,
         status: "FAILED",
         stats: { ...base.stats },
         nextHistoryId: finalHistoryId,
-        error: { code: "PROVIDER_LIST_FAILED", message, retryable: true },
+        error: {
+          code: "PROVIDER_LIST_FAILED",
+          message,
+          retryable: true,
+          internalCode: safeInternalErrorCode(e),
+        },
       }, mailShadowCtx)
     }
 

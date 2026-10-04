@@ -8,6 +8,7 @@ import {
 import {
   mapCompanySyncStatusToPublicError,
   safeInternalErrorCode,
+  sanitizeInternalCode,
   toPublicCronError,
   type PublicCronError,
 } from "@/lib/acquisition/connector/acquisition-gmail-cron.errors"
@@ -232,6 +233,9 @@ export async function runAcquisitionGmailSyncDriver(
     mergeStats(globalStats, result.stats)
 
     const publicError = mapCompanySyncStatusToPublicError(result.status)
+    // Diagnostic interne : codes uniquement — jamais result.error.message.
+    const syncCode = sanitizeInternalCode(result.error?.code)
+    const internalCode = sanitizeInternalCode(result.error?.internalCode)
 
     companies.push({
       companyId,
@@ -254,6 +258,8 @@ export async function runAcquisitionGmailSyncDriver(
       ...(result.status === "SUCCESS" || result.status === "PARTIAL" ? { stats: result.stats } : {}),
       ...(result.skipReason ? { skipReason: result.skipReason } : {}),
       ...(publicError ? { code: publicError.code } : {}),
+      ...(syncCode ? { syncCode } : {}),
+      ...(internalCode ? { internalCode } : {}),
     })
 
     if (result.status === "SKIPPED") companiesSkipped++
