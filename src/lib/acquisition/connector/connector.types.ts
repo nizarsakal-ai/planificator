@@ -59,6 +59,8 @@ export interface MailSyncError {
   retryable: boolean
   /** Cause technique déterministe (ex. GMAIL_TOKEN_REFRESH_FAILED, P1001) — logs internes uniquement. */
   internalCode?: string
+  /** Statut HTTP + reason/status Google validés — logs internes uniquement. */
+  gmailDiagnostics?: import("@/lib/acquisition/connector/gmail.errors").GmailHttpDiagnostics
 }
 
 export type MailSyncPartialReason =

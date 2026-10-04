@@ -14,6 +14,7 @@ import {
 } from "@/lib/acquisition/connector/mail-shadow-hook"
 import type { MailShadowRunStats } from "@/lib/integration/connectors/mail-bridge/mail-shadow-run-stats"
 import { safeInternalErrorCode } from "@/lib/acquisition/connector/acquisition-gmail-cron.errors"
+import { safeGmailDiagnostics } from "@/lib/acquisition/connector/gmail.errors"
 
 /**
  * Télémétrie d'échec BEST-EFFORT : une panne de persistance du compteur
@@ -245,6 +246,7 @@ export async function syncAcquisitionMailForCompany(
         occurredAt: now(),
         mailboxKey,
       })
+      const gmailDiagnostics = safeGmailDiagnostics(e)
       return withShadow({
         ...base,
         status: "FAILED",
@@ -255,6 +257,7 @@ export async function syncAcquisitionMailForCompany(
           message,
           retryable: true,
           internalCode: safeInternalErrorCode(e),
+          ...(gmailDiagnostics ? { gmailDiagnostics } : {}),
         },
       }, mailShadowCtx)
     }

@@ -12,6 +12,7 @@ import {
   toPublicCronError,
   type PublicCronError,
 } from "@/lib/acquisition/connector/acquisition-gmail-cron.errors"
+import { safeGmailDiagnostics, sanitizeGmailDiagnostics } from "@/lib/acquisition/connector/gmail.errors"
 
 const LOG_PREFIX = "[acquisition-gmail-cron]"
 
@@ -215,6 +216,7 @@ export async function runAcquisitionGmailSyncDriver(
         durationMs,
         code: publicError.code,
         internalCode: safeInternalErrorCode(error),
+        ...(safeGmailDiagnostics(error) ?? {}),
       })
       companies.push({
         companyId,
@@ -236,6 +238,7 @@ export async function runAcquisitionGmailSyncDriver(
     // Diagnostic interne : codes uniquement — jamais result.error.message.
     const syncCode = sanitizeInternalCode(result.error?.code)
     const internalCode = sanitizeInternalCode(result.error?.internalCode)
+    const gmailDiagnostics = sanitizeGmailDiagnostics(result.error?.gmailDiagnostics)
 
     companies.push({
       companyId,
@@ -260,6 +263,7 @@ export async function runAcquisitionGmailSyncDriver(
       ...(publicError ? { code: publicError.code } : {}),
       ...(syncCode ? { syncCode } : {}),
       ...(internalCode ? { internalCode } : {}),
+      ...(gmailDiagnostics ?? {}),
     })
 
     if (result.status === "SKIPPED") companiesSkipped++
