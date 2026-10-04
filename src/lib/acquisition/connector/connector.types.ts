@@ -57,6 +57,8 @@ export interface MailSyncError {
   code: string
   message: string
   retryable: boolean
+  /** Cause technique déterministe (ex. GMAIL_TOKEN_REFRESH_FAILED, P1001) — logs internes uniquement. */
+  internalCode?: string
 }
 
 export type MailSyncPartialReason =

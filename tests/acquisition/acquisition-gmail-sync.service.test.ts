@@ -589,6 +589,214 @@ describe("syncAcquisitionMailForCompany", () => {
   })
 })
 
+describe("syncAcquisitionMailForCompany — recordFailure best-effort (incident e619b7e)", () => {
+  function failingTelemetryRepo(options: { getOrCreateFails: boolean }) {
+    let recordFailureCalls = 0
+    const repo: AcquisitionScanCursorRepositoryPort = {
+      getOrCreate: async () => {
+        if (options.getOrCreateFails) {
+          const err = new Error("connect ECONNREFUSED postgres://user:pw@db") as Error & {
+            code: string
+          }
+          err.name = "PrismaClientKnownRequestError"
+          err.code = "P1001"
+          throw err
+        }
+        return makeCursor()
+      },
+      saveSuccessfulPage: async () => {
+        throw new Error("not expected")
+      },
+      recordFailure: async () => {
+        recordFailureCalls++
+        throw new Error("recordFailure DB down")
+      },
+    }
+    return { repo, getRecordFailureCalls: () => recordFailureCalls }
+  }
+
+  it("A — getOrCreate échoue + recordFailure échoue → FAILED CURSOR_LOAD_FAILED sans exception", async () => {
+    const { ingestion } = mockIngestion({})
+    const { repo, getRecordFailureCalls } = failingTelemetryRepo({ getOrCreateFails: true })
+    const { provider, calls } = mockProvider([])
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      connectionId: "conn-1",
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+      mailShadow: false,
+    })
+
+    assert.equal(result.status, "FAILED")
+    assert.equal(result.error?.code, "CURSOR_LOAD_FAILED")
+    assert.equal(result.error?.internalCode, "P1001")
+    assert.equal(getRecordFailureCalls(), 1)
+    assert.equal(calls.length, 0)
+  })
+
+  it("B — listMessagesPage échoue + recordFailure échoue → FAILED PROVIDER_LIST_FAILED sans exception", async () => {
+    const { ingestion } = mockIngestion({})
+    const { repo, getRecordFailureCalls } = failingTelemetryRepo({ getOrCreateFails: false })
+    const provider: MailProviderPort = {
+      source: "GMAIL",
+      listMessagesPage: async () => {
+        throw new GmailProviderError({
+          code: "GMAIL_TOKEN_REFRESH_FAILED",
+          message: "Token has been expired or revoked.",
+          retryable: false,
+          global: true,
+        })
+      },
+    }
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      connectionId: "conn-1",
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+      mailShadow: false,
+    })
+
+    assert.equal(result.status, "FAILED")
+    assert.equal(result.error?.code, "PROVIDER_LIST_FAILED")
+    assert.equal(result.error?.internalCode, "GMAIL_TOKEN_REFRESH_FAILED")
+    assert.equal(getRecordFailureCalls(), 1)
+  })
+
+  it("C — erreur Gmail typée → internalCode sûr, jamais le message ni un token", async () => {
+    const { ingestion } = mockIngestion({})
+    const { repo } = mockRepository()
+    const provider: MailProviderPort = {
+      source: "GMAIL",
+      listMessagesPage: async () => {
+        const err = new GmailProviderError({
+          code: "GMAIL_UNAUTHORIZED",
+          message: "Bearer ya29.secret-access-token rejected",
+          retryable: false,
+          global: true,
+        })
+        throw err
+      },
+    }
+
+    const result = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      connectionId: "conn-1",
+      provider,
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+      mailShadow: false,
+    })
+
+    assert.equal(result.error?.code, "PROVIDER_LIST_FAILED")
+    assert.equal(result.error?.internalCode, "GMAIL_UNAUTHORIZED")
+    assert.ok(!result.error?.internalCode?.includes("ya29"))
+  })
+})
+
+describe("syncAcquisitionMailForCompany — multi-mailbox même company", () => {
+  it("D — deux connectionId d'une même company → curseurs mailboxKey strictement isolés", async () => {
+    const cursors = new Map<string, AcquisitionScanCursorRecord>()
+    const touchedKeys: (string | undefined)[] = []
+    const failureKeys: (string | undefined)[] = []
+    const repo: AcquisitionScanCursorRepositoryPort = {
+      getOrCreate: async (companyId, source, mailboxKey) => {
+        touchedKeys.push(mailboxKey)
+        const key = mailboxKey ?? ""
+        const existing = cursors.get(key)
+        if (existing) return { ...existing }
+        const created = makeCursor({ companyId, mailboxKey: key, lastHistoryId: null })
+        cursors.set(key, created)
+        return { ...created }
+      },
+      saveSuccessfulPage: async (companyId, source, nextHistoryId, syncedAt, mailboxKey) => {
+        touchedKeys.push(mailboxKey)
+        const key = mailboxKey ?? ""
+        const next = { ...cursors.get(key)!, lastHistoryId: nextHistoryId, lastSyncedAt: syncedAt }
+        cursors.set(key, next)
+        return next
+      },
+      recordFailure: async (companyId, source, errorCode, occurredAt, mailboxKey) => {
+        failureKeys.push(mailboxKey)
+        const key = mailboxKey ?? ""
+        const next = {
+          ...cursors.get(key)!,
+          consecutiveFailures: (cursors.get(key)?.consecutiveFailures ?? 0) + 1,
+          lastErrorCode: errorCode,
+        }
+        cursors.set(key, next)
+        return next
+      },
+    }
+    const registered: { connectionId: string; sourceMailboxKey?: string }[] = []
+    const ingestion: AcquisitionIngestionPort = {
+      isEnabled: () => true,
+      registerIncomingMessage: async (input) => {
+        registered.push({
+          connectionId: input.externalMessageId.split(":")[0],
+          sourceMailboxKey: input.sourceMailboxKey,
+        })
+        return { created: true, outcome: "DRAFT_CREATED", messageId: "m", draftId: "d" }
+      },
+    }
+    const providerFor = (connectionId: string, fail = false): MailProviderPort => ({
+      source: "GMAIL",
+      listMessagesPage: async (input) => {
+        assert.equal(input.connectionId, connectionId)
+        if (fail) throw new GmailProviderError({
+          code: "GMAIL_TOKEN_REFRESH_FAILED",
+          message: "x",
+          retryable: false,
+          global: true,
+        })
+        return emptyPage({
+          messages: [mail({ externalMessageId: `${connectionId}:msg` })],
+          nextHistoryId: `${connectionId}-hist`,
+        })
+      },
+    })
+
+    const ra = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      connectionId: "cmtrhm5890003acntqx2iy304",
+      provider: providerFor("cmtrhm5890003acntqx2iy304"),
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+      mailShadow: false,
+    })
+    const rb = await syncAcquisitionMailForCompany({
+      companyId: COMPANY,
+      connectionId: "cmtrhlboo0001acntc9bufkls",
+      provider: providerFor("cmtrhlboo0001acntc9bufkls", true),
+      ingestion,
+      cursorRepository: repo,
+      now: () => NOW,
+      mailShadow: false,
+    })
+
+    assert.equal(ra.status, "SUCCESS")
+    assert.equal(rb.status, "FAILED")
+    assert.equal(cursors.get("cmtrhm5890003acntqx2iy304")?.lastHistoryId, "cmtrhm5890003acntqx2iy304-hist")
+    assert.equal(cursors.get("cmtrhm5890003acntqx2iy304")?.consecutiveFailures, 0)
+    assert.equal(cursors.get("cmtrhlboo0001acntc9bufkls")?.lastHistoryId, null)
+    assert.equal(cursors.get("cmtrhlboo0001acntc9bufkls")?.consecutiveFailures, 1)
+    assert.deepEqual(failureKeys, ["cmtrhlboo0001acntc9bufkls"])
+    // Aucun accès au curseur legacy "" ni clé absente
+    assert.ok(!cursors.has(""))
+    assert.ok(touchedKeys.every((k) => k === "cmtrhm5890003acntqx2iy304" || k === "cmtrhlboo0001acntc9bufkls"))
+    assert.deepEqual(registered, [
+      { connectionId: "cmtrhm5890003acntqx2iy304", sourceMailboxKey: "cmtrhm5890003acntqx2iy304" },
+    ])
+  })
+})
+
 describe("syncAcquisitionMailForCompany — isolation tenant curseur", () => {
   it("deux tenants utilisent des curseurs distincts", async () => {
     const repoA = mockRepository(makeCursor({ companyId: "tenant-a", lastHistoryId: "a-0" }))
