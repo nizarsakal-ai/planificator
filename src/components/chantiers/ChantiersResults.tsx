@@ -7,6 +7,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { HardHat, MapPin, Calendar, Users, ChevronRight } from "lucide-react"
 import {
   isUnassigned,
+  mapEmptyStateMessage,
+  shouldShowMapEmptyState,
   shouldShowStatusBadge,
   type ChantierStateFilter,
 } from "@/lib/chantiers/chantiers-view-filters"
@@ -128,16 +130,46 @@ function StatusBadge({
   return <Badge variant={s.variant} className={className}>{s.label}</Badge>
 }
 
+/** État vide contextuel de la carte — aucune écriture, aucun appel réseau : change seulement d'onglet. */
+export function MapEmptyState({
+  state,
+  count,
+  onShowAll,
+}: {
+  state: ChantierStateFilter
+  count: number
+  onShowAll: () => void
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-1 h-64 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 px-4 text-center">
+      <MapPin className="h-10 w-10 text-slate-300 mb-2" aria-hidden="true" />
+      <p className="text-sm text-slate-600">{mapEmptyStateMessage(state, count)}</p>
+      <button
+        type="button"
+        onClick={onShowAll}
+        className="mt-2 rounded-md text-sm font-medium text-slate-700 underline underline-offset-2 hover:text-slate-900 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
+        Voir tous les chantiers sur la carte
+      </button>
+    </div>
+  )
+}
+
 interface ChantiersResultsProps {
   chantiers: ChantierCardData[]
   view: ChantierViewMode
   state: ChantierStateFilter
   /** Change quand l'ensemble filtré change — la carte Leaflet n'initialise ses marqueurs qu'au montage. */
   mapKey: string
+  /** Mécanisme existant de sélection d'onglet (setState de ChantiersView). */
+  onSelectState: (state: ChantierStateFilter) => void
 }
 
-export function ChantiersResults({ chantiers, view, state, mapKey }: ChantiersResultsProps) {
+export function ChantiersResults({ chantiers, view, state, mapKey, onSelectState }: ChantiersResultsProps) {
   if (view === "map") {
+    if (shouldShowMapEmptyState(chantiers, state)) {
+      return <MapEmptyState state={state} count={chantiers.length} onShowAll={() => onSelectState("all")} />
+    }
     return <ChantiersMap key={mapKey} chantiers={chantiers} />
   }
 
