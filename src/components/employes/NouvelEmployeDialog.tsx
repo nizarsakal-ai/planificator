@@ -22,7 +22,7 @@ export function NouvelEmployeDialog() {
         className="bg-[#0f3460] hover:bg-[#0a2540] gap-2"
       >
         <Plus className="h-4 w-4" />
-        Nouvel employé
+        Créer un employé
       </Button>
 
       {/* Modal simple sans dépendance Radix Dialog */}
