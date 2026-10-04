@@ -227,6 +227,37 @@ export function applyChantierView<T extends FilterableChantier>(
   return { items, counts }
 }
 
+/** Même règle que ChantiersMap (`c.latitude && c.longitude`) — lecture seule, aucune déduction. */
+export function hasMapCoordinates(c: { latitude: number | null; longitude: number | null }): boolean {
+  return Boolean(c.latitude && c.longitude)
+}
+
+/**
+ * Carte d'un onglet filtré dont aucun chantier n'est géolocalisé → état vide contextuel.
+ * « Tous » garde l'état vide natif de la carte ; un onglet vide garde l'état vide de la vue.
+ */
+export function shouldShowMapEmptyState(
+  chantiers: readonly { latitude: number | null; longitude: number | null }[],
+  state: ChantierStateFilter
+): boolean {
+  return state !== "all" && chantiers.length > 0 && !chantiers.some(hasMapCoordinates)
+}
+
+const STATE_NOUNS: Record<ChantierStateFilter, { one: string; many: string }> = {
+  active: { one: "chantier actif", many: "chantiers actifs" },
+  unassigned: { one: "chantier à affecter", many: "chantiers à affecter" },
+  planned: { one: "chantier planifié", many: "chantiers planifiés" },
+  done: { one: "chantier terminé", many: "chantiers terminés" },
+  all: { one: "chantier", many: "chantiers" },
+}
+
+export function mapEmptyStateMessage(state: ChantierStateFilter, count: number): string {
+  const nouns = STATE_NOUNS[state]
+  return count === 1
+    ? `Aucun chantier géolocalisé : le ${nouns.one} n'a pas de coordonnées.`
+    : `Aucun chantier géolocalisé parmi les ${count} ${nouns.many}.`
+}
+
 /**
  * Clé d'identité de l'ENSEMBLE affiché (indépendante de l'ordre) :
  * un changement de tri seul ne recrée pas la carte ; un changement d'ensemble, si.

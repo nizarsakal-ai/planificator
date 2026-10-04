@@ -98,7 +98,13 @@ export function ChantiersView({ chantiers, clientOptions, personnelOptions }: Ch
           </CardContent>
         </Card>
       ) : (
-        <ChantiersResults chantiers={items} view={view} state={state} mapKey={mapKey} />
+        <ChantiersResults
+          chantiers={items}
+          view={view}
+          state={state}
+          mapKey={mapKey}
+          onSelectState={setState}
+        />
       )}
     </div>
   )

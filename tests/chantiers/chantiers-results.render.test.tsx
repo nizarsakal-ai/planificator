@@ -48,7 +48,9 @@ const items: ChantierCardData[] = [
 ]
 
 function render(view: "grid" | "mosaic" | "list", state: "all" | "done" = "all") {
-  return renderToStaticMarkup(createElement(ChantiersResults, { chantiers: items, view, state, mapKey: "k" }))
+  return renderToStaticMarkup(
+    createElement(ChantiersResults, { chantiers: items, view, state, mapKey: "k", onSelectState: () => {} })
+  )
 }
 
 describe("ChantiersResults — L. les vues existantes continuent à fonctionner", () => {
