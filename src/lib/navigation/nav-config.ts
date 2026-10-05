@@ -121,11 +121,26 @@ export function getNavItems(role: Role): NavItem[] {
 }
 
 /**
- * Règle de lien actif — reprise à l'identique (PR1).
- * Collisions connues conservées volontairement (/planning/*, /pointages) : corrigées en PR2.
+ * Un href correspond au pathname : exactement, ou en parent sur une frontière de segment.
+ * Dashboard : correspondance exacte uniquement. « /pointage » ne correspond jamais à « /pointages ».
  */
-export function isNavItemActive(href: string, pathname: string): boolean {
-  return href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href)
+function matchesNavHref(href: string, pathname: string): boolean {
+  if (href === "/dashboard") return pathname === "/dashboard"
+  return pathname === href || pathname.startsWith(href + "/")
+}
+
+/**
+ * Href de l'unique élément actif : parmi les correspondances valides, la plus spécifique (la plus longue).
+ * Au plus un élément actif ; null si aucune entrée ne correspond.
+ */
+export function getActiveNavHref(items: readonly NavItem[], pathname: string): string | null {
+  let active: string | null = null
+  for (const item of items) {
+    if (matchesNavHref(item.href, pathname) && (active === null || item.href.length > active.length)) {
+      active = item.href
+    }
+  }
+  return active
 }
 
 export const ROLE_LABELS: Record<Role, string> = {

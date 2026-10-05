@@ -10,7 +10,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, it } from "node:test"
 import * as lucide from "lucide-react"
-import { getNavItems, isNavItemActive, ROLE_LABELS } from "@/lib/navigation/nav-config"
+import { getActiveNavHref, getNavItems, ROLE_LABELS } from "@/lib/navigation/nav-config"
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..")
 const read = (p: string) => readFileSync(join(ROOT, p), "utf8")
@@ -145,34 +145,99 @@ describe("nav-config — parité stricte par rôle", () => {
   })
 })
 
-describe("nav-config — règle de lien actif identique à l'historique (collisions conservées)", () => {
-  const legacy = (href: string, p: string) => (href === "/dashboard" ? p === "/dashboard" : p.startsWith(href))
+describe("nav-config — élément actif unique (PR2 : frontière de segment + plus spécifique)", () => {
+  /** Libellés actifs tels que rendus par Sidebar / MobileNav (item.href === activeHref). */
+  const activeLabels = (role: keyof typeof GOLDEN, p: string) => {
+    const items = getNavItems(role)
+    const activeHref = getActiveNavHref(items, p)
+    return items.filter((i) => i.href === activeHref).map((i) => i.label)
+  }
+
   const PATHS = [
-    "/", "/dashboard", "/dashboard/x", "/planning", "/planning/gantt", "/planning/calendrier",
-    "/planning/personnel", "/planning/moi", "/planning/equipe", "/pointages", "/pointage",
-    "/employes", "/employes/abc", "/chantiers/xyz", "/rapports/mensuel", "/mes-absences",
-    "/absences", "/notes-de-frais", "/mes-notes-de-frais", "/profil", "/super-admin/entreprises",
+    "/", "/dashboard", "/dashboard/x", "/planning", "/planning/", "/planning/gantt", "/planning/gantt/2026",
+    "/planning/calendrier", "/planning/calendrier/semaine", "/planning/personnel", "/planning/personnel/2026-10-05",
+    "/planning/moi", "/planning/moi/x", "/planning/equipe", "/planning/equipe/x", "/pointages", "/pointages/abc",
+    "/pointage", "/pointage/abc", "/pointagesx", "/employes", "/employes/abc", "/chantiers", "/chantiers/xyz",
+    "/rapports", "/rapports/mensuel", "/mes-absences", "/absences", "/absences/x", "/notes-de-frais",
+    "/mes-notes-de-frais", "/profil", "/super-admin/entreprises", "/super-admin/entreprises/x", "/parametres",
+    "/articles", "/factures", "/consultations/abc", "/logements", "/inconnu",
   ]
 
-  it("équivalence exhaustive avec l'ancienne règle pour tous les rôles et chemins", () => {
+  it("invariant : au plus UN élément actif pour chaque rôle et chaque pathname", () => {
     for (const role of ROLES) {
-      for (const item of getNavItems(role)) {
-        for (const p of PATHS) assert.equal(isNavItemActive(item.href, p), legacy(item.href, p), `${role} ${item.href} @ ${p}`)
+      for (const p of PATHS) {
+        assert.ok(activeLabels(role, p).length <= 1, `${role} @ ${p} → ${activeLabels(role, p).join(" + ")}`)
       }
     }
   })
 
-  it("Dashboard : correspondance exacte uniquement", () => {
-    assert.equal(isNavItemActive("/dashboard", "/dashboard"), true)
-    assert.equal(isNavItemActive("/dashboard", "/dashboard/x"), false)
+  it("chaque entrée du menu est active sur sa propre route (aucune entrée inatteignable)", () => {
+    for (const role of ROLES) {
+      for (const item of getNavItems(role)) assert.deepEqual(activeLabels(role, item.href), [item.label], `${role} ${item.href}`)
+    }
   })
 
-  it("collisions connues CONSERVÉES en PR1 (corrigées en PR2)", () => {
-    const activeLabels = (role: keyof typeof GOLDEN, p: string) =>
-      getNavItems(role).filter((i) => isNavItemActive(i.href, p)).map((i) => i.label)
-    assert.deepEqual(activeLabels("ADMIN", "/planning/gantt"), ["Planning", "Gantt"])
-    assert.deepEqual(activeLabels("SUPER_ADMIN", "/planning/personnel"), ["Planning", "Personnel"])
-    assert.deepEqual(activeLabels("TEAM_LEADER", "/pointages"), ["Pointages équipe", "Mon pointage"])
+  for (const role of ["ADMIN", "SUPER_ADMIN"] as const) {
+    it(`${role} : collisions Planning corrigées`, () => {
+      assert.deepEqual(activeLabels(role, "/planning"), ["Planning"])
+      assert.deepEqual(activeLabels(role, "/planning/"), ["Planning"])
+      assert.deepEqual(activeLabels(role, "/pointagesx"), [])
+      assert.deepEqual(activeLabels(role, "/planning/gantt"), ["Gantt"])
+      assert.deepEqual(activeLabels(role, "/planning/gantt/2026"), ["Gantt"])
+      assert.deepEqual(activeLabels(role, "/planning/calendrier"), ["Calendrier"])
+      assert.deepEqual(activeLabels(role, "/planning/calendrier/semaine"), ["Calendrier"])
+      assert.deepEqual(activeLabels(role, "/planning/personnel"), ["Personnel"])
+      assert.deepEqual(activeLabels(role, "/planning/personnel/2026-10-05"), ["Personnel"])
+    })
+  }
+
+  it("TEAM_LEADER : /pointage et /pointages ne s'activent jamais mutuellement", () => {
+    assert.deepEqual(activeLabels("TEAM_LEADER", "/pointages"), ["Pointages équipe"])
+    assert.deepEqual(activeLabels("TEAM_LEADER", "/pointages/abc"), ["Pointages équipe"])
+    assert.deepEqual(activeLabels("TEAM_LEADER", "/pointage"), ["Mon pointage"])
+    assert.deepEqual(activeLabels("TEAM_LEADER", "/pointage/abc"), ["Mon pointage"])
+    assert.deepEqual(activeLabels("TEAM_LEADER", "/pointagesx"), [])
+  })
+
+  it("EMPLOYEE : « Pointage » (/pointage) n'est plus activé à tort par /pointages", () => {
+    assert.deepEqual(activeLabels("EMPLOYEE", "/pointage"), ["Pointage"])
+    assert.deepEqual(activeLabels("EMPLOYEE", "/pointages"), [])
+  })
+
+  it("TEAM_LEADER : sous-routes planning sans entrée Planning parente", () => {
+    assert.deepEqual(activeLabels("TEAM_LEADER", "/planning/gantt"), ["Gantt"])
+    assert.deepEqual(activeLabels("TEAM_LEADER", "/planning/equipe"), ["Mon équipe"])
+    assert.deepEqual(activeLabels("TEAM_LEADER", "/planning/moi"), ["Mon planning"])
+    assert.deepEqual(activeLabels("TEAM_LEADER", "/planning"), [])
+  })
+
+  it("Dashboard : correspondance exacte uniquement", () => {
+    for (const role of ROLES) {
+      assert.deepEqual(activeLabels(role, "/dashboard"), ["Dashboard"])
+      assert.deepEqual(activeLabels(role, "/dashboard/x"), [])
+    }
+  })
+
+  it("routes de détail : le parent reste actif (comportement existant préservé)", () => {
+    assert.deepEqual(activeLabels("ADMIN", "/employes/abc"), ["Employés"])
+    assert.deepEqual(activeLabels("ADMIN", "/chantiers/xyz"), ["Chantiers"])
+    assert.deepEqual(activeLabels("EMPLOYEE", "/chantiers/xyz"), ["Mes chantiers"])
+    assert.deepEqual(activeLabels("ADMIN", "/rapports/mensuel"), ["Rapports"])
+    assert.deepEqual(activeLabels("ADMIN", "/consultations/abc"), ["Consultations"])
+    assert.deepEqual(activeLabels("SUPER_ADMIN", "/super-admin/entreprises/x"), ["Administration"])
+  })
+
+  it("aucune correspondance → aucun actif (pas de faux positif)", () => {
+    assert.equal(getActiveNavHref(getNavItems("ADMIN"), "/"), null)
+    assert.equal(getActiveNavHref(getNavItems("ADMIN"), "/inconnu"), null)
+    assert.equal(getActiveNavHref([], "/planning"), null)
+  })
+
+  it("href uniques par rôle (aucune égalité possible entre candidats)", () => {
+    for (const role of ROLES) {
+      const hrefs = getNavItems(role).map((i) => i.href)
+      assert.equal(new Set(hrefs).size, hrefs.length, role)
+    }
   })
 })
 
@@ -182,7 +247,8 @@ describe("nav-config — source unique Sidebar / MobileNav", () => {
       const src = read(file)
       assert.match(src, /from "@\/lib\/navigation\/nav-config"/)
       assert.match(src, /getNavItems\(user\.role\)/)
-      assert.match(src, /isNavItemActive\(item\.href, pathname\)/)
+      assert.match(src, /const activeHref = getActiveNavHref\(navItems, pathname\)/)
+      assert.match(src, /item\.href === activeHref/)
       assert.match(src, /ROLE_LABELS\[user\.role\]/)
       assert.doesNotMatch(src, /function getNavItems/)
       assert.doesNotMatch(src, /startsWith\(/)
