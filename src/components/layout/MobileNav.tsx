@@ -4,42 +4,12 @@ import { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { signOut } from "next-auth/react"
-import {
-  Menu,
-  X,
-  LayoutDashboard,
-  Building2,
-  Users,
-  Layers,
-  UserCheck,
-  HardHat,
-  Calendar,
-  CalendarOff,
-  Settings,
-  LogOut,
-  ChevronRight,
-  User,
-  GanttChart,
-  ClipboardList,
-  Receipt,
-  MapPin,
-  CalendarDays,
-  BedDouble,
-  Library,
-  FileText,
-  Truck,
-  Mail,
-} from "lucide-react"
+import { Menu, X, LogOut, ChevronRight } from "lucide-react"
 import { cn, getInitials } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { PlanificatorLogo } from "@/components/brand/PlanificatorLogo"
+import { getNavItems, isNavItemActive, ROLE_LABELS } from "@/lib/navigation/nav-config"
 import type { Role } from "@prisma/client"
-
-interface NavItem {
-  label: string
-  href: string
-  icon: React.ElementType
-}
 
 interface MobileNavUser {
   id: string
@@ -47,94 +17,6 @@ interface MobileNavUser {
   email?: string | null
   image?: string | null
   role: Role
-}
-
-function getNavItems(role: Role): NavItem[] {
-  switch (role) {
-    case "SUPER_ADMIN":
-      return [
-        { label: "Dashboard",      href: "/dashboard",                icon: LayoutDashboard },
-        { label: "Administration", href: "/super-admin/entreprises",  icon: Building2 },
-        { label: "Employés",       href: "/employes",                 icon: Users },
-        { label: "Équipes",        href: "/equipes",                  icon: Layers },
-        { label: "Véhicules",      href: "/vehicules",                icon: Truck },
-        { label: "Clients",        href: "/clients",                  icon: UserCheck },
-        { label: "Chantiers",      href: "/chantiers",                icon: HardHat },
-        { label: "Consultations",  href: "/consultations",            icon: Mail },
-        { label: "Logements",      href: "/logements",                icon: BedDouble },
-        { label: "Bibliothèque",   href: "/articles",                 icon: Library },
-        { label: "Factures",       href: "/factures",                 icon: FileText },
-        { label: "Planning",       href: "/planning",                 icon: Calendar },
-        { label: "Gantt",          href: "/planning/gantt",           icon: GanttChart },
-        { label: "Calendrier",     href: "/planning/calendrier",      icon: CalendarDays },
-        { label: "Personnel",      href: "/planning/personnel",       icon: Users },
-        { label: "Absences",       href: "/absences",                 icon: CalendarOff },
-        { label: "Notes de frais", href: "/notes-de-frais",           icon: Receipt },
-        { label: "Pointages",      href: "/pointages",                icon: MapPin },
-        { label: "Rapports",       href: "/rapports",                 icon: ClipboardList },
-        { label: "Mon profil",     href: "/profil",                   icon: User },
-        { label: "Paramètres",     href: "/parametres",               icon: Settings },
-      ]
-    case "ADMIN":
-      return [
-        { label: "Dashboard",      href: "/dashboard",       icon: LayoutDashboard },
-        { label: "Employés",       href: "/employes",        icon: Users },
-        { label: "Équipes",        href: "/equipes",         icon: Layers },
-        { label: "Véhicules",      href: "/vehicules",       icon: Truck },
-        { label: "Clients",        href: "/clients",         icon: UserCheck },
-        { label: "Chantiers",      href: "/chantiers",       icon: HardHat },
-        { label: "Consultations",  href: "/consultations",   icon: Mail },
-        { label: "Logements",      href: "/logements",       icon: BedDouble },
-        { label: "Bibliothèque",   href: "/articles",        icon: Library },
-        { label: "Factures",       href: "/factures",        icon: FileText },
-        { label: "Planning",       href: "/planning",              icon: Calendar },
-        { label: "Gantt",          href: "/planning/gantt",        icon: GanttChart },
-        { label: "Calendrier",     href: "/planning/calendrier",   icon: CalendarDays },
-        { label: "Personnel",      href: "/planning/personnel",    icon: Users },
-        { label: "Absences",       href: "/absences",        icon: CalendarOff },
-        { label: "Notes de frais", href: "/notes-de-frais",  icon: Receipt },
-        { label: "Pointages",      href: "/pointages",       icon: MapPin },
-        { label: "Rapports",       href: "/rapports",        icon: ClipboardList },
-        { label: "Mon profil",     href: "/profil",          icon: User },
-        { label: "Paramètres",     href: "/parametres",      icon: Settings },
-      ]
-    case "TEAM_LEADER":
-      return [
-        { label: "Dashboard",          href: "/dashboard",              icon: LayoutDashboard },
-        { label: "Mon équipe",         href: "/planning/equipe",        icon: ClipboardList },
-        { label: "Mes chantiers",      href: "/chantiers",              icon: HardHat },
-        { label: "Mon planning",       href: "/planning/moi",           icon: Calendar },
-        { label: "Calendrier",         href: "/planning/calendrier",    icon: CalendarDays },
-        { label: "Personnel",          href: "/planning/personnel",     icon: Users },
-        { label: "Gantt",              href: "/planning/gantt",         icon: GanttChart },
-        { label: "Absences équipe",    href: "/absences",               icon: CalendarOff },
-        { label: "Pointages équipe",   href: "/pointages",              icon: MapPin },
-        { label: "Mes absences",       href: "/mes-absences",           icon: CalendarOff },
-        { label: "Notes de frais",     href: "/mes-notes-de-frais",     icon: Receipt },
-        { label: "Mon pointage",       href: "/pointage",               icon: MapPin },
-        { label: "Mon profil",         href: "/profil",                 icon: User },
-      ]
-    case "EMPLOYEE":
-      return [
-        { label: "Dashboard",      href: "/dashboard",          icon: LayoutDashboard },
-        { label: "Mon planning",   href: "/planning/moi",       icon: Calendar },
-        { label: "Mes chantiers",  href: "/chantiers",          icon: HardHat },
-        { label: "Mes absences",   href: "/mes-absences",       icon: CalendarOff },
-        { label: "Notes de frais", href: "/mes-notes-de-frais", icon: Receipt },
-        { label: "Pointage",       href: "/pointage",           icon: MapPin },
-        { label: "Mon profil",     href: "/profil",             icon: User },
-      ]
-    default:
-      return []
-  }
-}
-
-const roleLabel: Record<Role, string> = {
-  SUPER_ADMIN: "Super Admin",
-  ADMIN: "Administrateur",
-  TEAM_LEADER: "Chef d'équipe",
-  EMPLOYEE: "Employé",
-  CLIENT: "Client",
 }
 
 export function MobileNav({ user }: { user: MobileNavUser }) {
@@ -182,9 +64,7 @@ export function MobileNav({ user }: { user: MobileNavUser }) {
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {navItems.map((item) => {
-            const active = item.href === "/dashboard"
-              ? pathname === "/dashboard"
-              : pathname.startsWith(item.href)
+            const active = isNavItemActive(item.href, pathname)
             return (
               <Link
                 key={item.href}
@@ -216,7 +96,7 @@ export function MobileNav({ user }: { user: MobileNavUser }) {
             </Avatar>
             <div className="min-w-0 flex-1">
               <p className="text-white text-xs font-medium truncate">{user.name ?? user.email}</p>
-              <p className="text-slate-400 text-[11px]">{roleLabel[user.role]}</p>
+              <p className="text-slate-400 text-[11px]">{ROLE_LABELS[user.role]}</p>
             </div>
           </div>
           <button
