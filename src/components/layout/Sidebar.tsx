@@ -11,7 +11,7 @@ import { Separator } from "@/components/ui/separator"
 import { PlanificatorLogo } from "@/components/brand/PlanificatorLogo"
 import {
   getNavItems,
-  isNavItemActive,
+  getActiveNavHref,
   ROLE_LABELS,
   type NavItem,
 } from "@/lib/navigation/nav-config"
@@ -63,6 +63,7 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 export function Sidebar({ user }: { user: SidebarUser }) {
   const pathname = usePathname()
   const navItems = getNavItems(user.role)
+  const activeHref = getActiveNavHref(navItems, pathname)
 
   return (
     <aside className="hidden md:flex w-64 shrink-0 bg-[#0f3460] flex-col h-screen">
@@ -77,7 +78,7 @@ export function Sidebar({ user }: { user: SidebarUser }) {
           <NavLink
             key={item.href}
             item={item}
-            active={isNavItemActive(item.href, pathname)}
+            active={item.href === activeHref}
           />
         ))}
       </nav>

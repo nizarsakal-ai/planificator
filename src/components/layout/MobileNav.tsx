@@ -8,7 +8,7 @@ import { Menu, X, LogOut, ChevronRight } from "lucide-react"
 import { cn, getInitials } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { PlanificatorLogo } from "@/components/brand/PlanificatorLogo"
-import { getNavItems, isNavItemActive, ROLE_LABELS } from "@/lib/navigation/nav-config"
+import { getActiveNavHref, getNavItems, ROLE_LABELS } from "@/lib/navigation/nav-config"
 import type { Role } from "@prisma/client"
 
 interface MobileNavUser {
@@ -23,6 +23,7 @@ export function MobileNav({ user }: { user: MobileNavUser }) {
   const [open, setOpen] = useState(false)
   const pathname = usePathname()
   const navItems = getNavItems(user.role)
+  const activeHref = getActiveNavHref(navItems, pathname)
 
   return (
     <>
@@ -64,7 +65,7 @@ export function MobileNav({ user }: { user: MobileNavUser }) {
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {navItems.map((item) => {
-            const active = isNavItemActive(item.href, pathname)
+            const active = item.href === activeHref
             return (
               <Link
                 key={item.href}
