@@ -1,10 +1,8 @@
 "use client"
 
-import { useState } from "react"
-import { toast } from "sonner"
 import { UserX, UserCheck, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { toggleEmployeActive, deleteEmploye } from "@/lib/actions/employe.actions"
+import { useEmployeActions } from "@/components/employes/useEmployeActions"
 
 interface EmployeActionsProps {
   employeeId: string
@@ -12,37 +10,14 @@ interface EmployeActionsProps {
 }
 
 export function EmployeActions({ employeeId, active }: EmployeActionsProps) {
-  const [loading, setLoading] = useState(false)
-
-  const handleToggle = async () => {
-    setLoading(true)
-    const result = await toggleEmployeActive(employeeId, !active)
-    setLoading(false)
-    if (result?.error) {
-      toast.error(result.error)
-    } else {
-      toast.success(active ? "Employe desactive." : "Employe reactive.")
-    }
-  }
-
-  const handleDelete = async () => {
-    if (!confirm("Supprimer definitivement cet employe ? Cette action est irreversible.")) return
-    setLoading(true)
-    const result = await deleteEmploye(employeeId)
-    setLoading(false)
-    if (result?.error) {
-      toast.error(result.error)
-    } else {
-      toast.success("Employe supprime.")
-    }
-  }
+  const { loading, toggleActive, remove } = useEmployeActions(employeeId, active)
 
   return (
     <div className="flex flex-col gap-1">
       <Button
         variant="ghost"
         size="sm"
-        onClick={handleToggle}
+        onClick={toggleActive}
         disabled={loading}
         className={active ? "text-red-500 hover:text-red-700 hover:bg-red-50" : "text-green-600 hover:text-green-800 hover:bg-green-50"}
       >
@@ -55,7 +30,7 @@ export function EmployeActions({ employeeId, active }: EmployeActionsProps) {
       <Button
         variant="ghost"
         size="sm"
-        onClick={handleDelete}
+        onClick={remove}
         disabled={loading}
         className="text-red-600 hover:text-red-800 hover:bg-red-50"
       >

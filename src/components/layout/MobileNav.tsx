@@ -32,6 +32,7 @@ import {
 } from "lucide-react"
 import { cn, getInitials } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { PlanificatorLogo } from "@/components/brand/PlanificatorLogo"
 import type { Role } from "@prisma/client"
 
 interface NavItem {
@@ -169,12 +170,7 @@ export function MobileNav({ user }: { user: MobileNavUser }) {
       >
         {/* Header */}
         <div className="px-5 py-5 border-b border-white/10 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-white text-[#0f3460] flex items-center justify-center font-bold text-sm shrink-0">
-              P
-            </div>
-            <p className="text-white font-bold text-sm">Planificator</p>
-          </div>
+          <PlanificatorLogo />
           <button
             onClick={() => setOpen(false)}
             className="text-slate-400 hover:text-white p-1 transition-colors"
