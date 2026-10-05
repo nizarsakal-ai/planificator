@@ -49,11 +49,11 @@ function EmployeCard({ e }: { e: EmployeeViewItem }) {
     <div className={`relative group ${e.active ? "" : "opacity-70"}`}>
       <Link href={`/employes/${e.id}`} className="absolute inset-0 z-0 rounded-xl" aria-label={`Voir ${fullName}`} />
       <Card className="h-full border border-slate-100 transition-all hover:border-[#0f3460]/30 hover:shadow-md">
-        <CardContent className="relative flex flex-col items-center gap-2 p-3 pt-4 text-center">
+        <CardContent className="relative flex flex-col items-center gap-1.5 p-2.5 pt-3 text-center">
           <div className="absolute right-1.5 top-1.5 z-10">
             <EmployeActionsMenu employeeId={e.id} fullName={fullName} active={e.active} />
           </div>
-          <EmployeAvatar e={e} className="h-12 w-12" />
+          <EmployeAvatar e={e} className="h-10 w-10" />
           <div className="w-full min-w-0 space-y-0.5">
             <p className="truncate text-sm font-semibold leading-tight text-slate-900 transition-colors group-hover:text-[#0f3460]">
               {fullName}
@@ -126,7 +126,7 @@ export function EmployeGroupSection({ group, view, collapsed, onToggle }: Employ
       {!collapsed && (
         <div id={contentId}>
           {view === "grid" ? (
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
               {group.items.map((e) => (
                 <EmployeCard key={e.id} e={e} />
               ))}

@@ -51,7 +51,7 @@ export default async function EmployesPage() {
   return (
     <div className="space-y-6">
       {/* Bandeau — image décorative ; le texte reste du vrai HTML */}
-      <section className="relative isolate h-44 overflow-hidden rounded-xl bg-[#0f3460] sm:h-52 lg:h-60">
+      <section className="relative isolate h-28 overflow-hidden rounded-xl bg-[#0f3460] sm:h-32 lg:h-36">
         <div aria-hidden="true" className="absolute inset-0 -z-10">
           <Image
             src="/images/employees/employees-hero.jpg"
@@ -59,13 +59,13 @@ export default async function EmployesPage() {
             fill
             priority
             sizes="(min-width: 768px) calc(100vw - 16rem), 100vw"
-            className="object-cover object-[78%_30%]"
+            className="object-cover object-[78%_35%]"
           />
           <div className="absolute inset-0 bg-gradient-to-r from-[#0f3460]/95 via-[#0f3460]/75 to-[#0f3460]/10 sm:via-[#0f3460]/60 sm:to-transparent" />
         </div>
         <div className="flex h-full max-w-xl flex-col justify-center px-5 sm:px-8">
-          <h1 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">Employés</h1>
-          <p className="mt-2 text-sm text-white/85 sm:text-base">
+          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Employés</h1>
+          <p className="mt-1 text-sm text-white/85">
             Vos équipes, au service de vos chantiers
           </p>
         </div>
