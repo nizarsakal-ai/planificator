@@ -348,6 +348,8 @@ model Company {
   integrationConnections      IntegrationConnection[]
   inboundEnvelopes            InboundEnvelope[]
   normalizedInbounds          NormalizedInbound[]
+  trucks                      Truck[]
+  truckAssignments            TruckAssignment[]
 
   @@map("companies")
 }
@@ -1259,15 +1261,20 @@ model PendingAccommodation {
 }
 
 model Truck {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   matricule   String
   marque      String?
   companyId   String
-  teamId      String?  @unique
+  teamId      String?   @unique
   chauffeurId String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  // Archivage (V1A : schéma seulement). CHECK SQL : un véhicule archivé n'a ni équipe ni chauffeur.
+  active      Boolean   @default(true)
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
+  // Restrict : supprimer une entreprise ne doit jamais effacer silencieusement ses véhicules.
+  company     Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
   team        Team?             @relation(fields: [teamId], references: [id], onDelete: SetNull)
   chauffeur   Employee?         @relation("TruckChauffeur", fields: [chauffeurId], references: [id], onDelete: SetNull)
   assignments TruckAssignment[]
@@ -1658,19 +1665,38 @@ model AcquisitionOrchestratorLease {
   @@map("acquisition_orchestrator_leases")
 }
 
+// Motif d'ouverture d'une période TruckAssignment (renseigné à partir de V1B).
+enum TruckAssignmentReason {
+  CREATED
+  REASSIGNED
+  DISPLACED
+  ARCHIVED
+  RESTORED
+  BACKFILL
+}
+
 // Historique des affectations camion : qui conduisait quel camion, dans
 // quelle équipe, sur quelle période. Une ligne ouverte (endedAt null) =
 // affectation en cours. Permet de retrouver le chauffeur d'un camion à
 // une date donnée (amendes, infractions, accidents).
 model TruckAssignment {
-  id          String    @id @default(cuid())
-  truckId     String
-  chauffeurId String?
-  teamId      String?
-  companyId   String
-  startedAt   DateTime  @default(now())
-  endedAt     DateTime?
+  id             String                 @id @default(cuid())
+  truckId        String
+  chauffeurId    String?
+  teamId         String?
+  companyId      String
+  startedAt      DateTime               @default(now())
+  endedAt        DateTime?
+  /// Motif de la période (V1B). NULL pour les lignes antérieures à V1.
+  reason         TruckAssignmentReason?
+  /// = truckId tant que la période est ouverte (endedAt IS NULL), sinon NULL.
+  /// Maintenu exclusivement par le trigger SQL truck_assignments_v1a_open_for_truck_id
+  /// (migration 20261006120000_vehicles_v1a_foundation) ; ne jamais l'écrire depuis l'application.
+  /// L'unicité garantit au plus une période ouverte par véhicule.
+  openForTruckId String?                @unique
 
+  // Restrict : l'historique d'une entreprise n'est jamais supprimé implicitement.
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
   truck     Truck     @relation(fields: [truckId], references: [id], onDelete: Cascade)
   chauffeur Employee? @relation("TruckAssignmentChauffeur", fields: [chauffeurId], references: [id], onDelete: SetNull)
   team      Team?     @relation("TruckAssignmentTeam", fields: [teamId], references: [id], onDelete: SetNull)
