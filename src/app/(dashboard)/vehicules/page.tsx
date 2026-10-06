@@ -46,6 +46,8 @@ export default async function VehiculesPage() {
         id: t.id,
         matricule: t.matricule,
         marque: t.marque,
+        active: t.active,
+        archivedAt: t.archivedAt?.toISOString() ?? null,
         team: t.team,
         chauffeur: t.chauffeur,
         history: t.assignments.map((a) => ({

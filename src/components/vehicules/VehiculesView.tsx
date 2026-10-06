@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Truck, Plus, Pencil, Trash2, User, Layers, History } from "lucide-react"
+import { Truck, Plus, Pencil, Archive, ArchiveRestore, User, Layers, History, ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -28,6 +28,8 @@ interface TruckItem {
   id: string
   matricule: string
   marque: string | null
+  active: boolean
+  archivedAt: string | null
   team: { id: string; name: string; color: string | null } | null
   chauffeur: { id: string; firstName: string; lastName: string } | null
   history: HistoryEntry[]
@@ -53,6 +55,9 @@ export function VehiculesView({ trucks, teams, employees }: Props) {
   const [showAdd, setShowAdd] = useState(false)
   const [editId, setEditId] = useState<string | null>(null)
   const [historyId, setHistoryId] = useState<string | null>(null)
+  const [showArchived, setShowArchived] = useState(false)
+  const activeTrucks = trucks.filter((t) => t.active)
+  const archivedTrucks = trucks.filter((t) => !t.active)
   const [matricule, setMatricule] = useState("")
   const [marque, setMarque] = useState("")
 
@@ -113,12 +118,19 @@ export function VehiculesView({ trucks, teams, employees }: Props) {
     }
   }
 
-  const deleteTruck = async (t: TruckItem) => {
-    if (!confirm(`Supprimer le véhicule ${t.matricule} ?`)) return
+  // Archivage / restauration : jamais de suppression physique, l'historique est conservé.
+  const setArchived = async (t: TruckItem, archive: boolean) => {
+    if (
+      archive &&
+      !confirm(
+        `Archiver le véhicule ${t.matricule} ?\nIl sera retiré de son équipe et de son chauffeur. L'historique est conservé.`
+      )
+    )
+      return
     setLoading(true)
-    const res = await fetch("/api/trucks/" + t.id, { method: "DELETE" })
+    const res = await fetch(`/api/trucks/${t.id}/${archive ? "archive" : "restore"}`, { method: "POST" })
     if (res.ok) {
-      toast.success("Véhicule supprimé")
+      toast.success(archive ? "Véhicule archivé" : "Véhicule restauré")
     } else {
       const err = await res.json().catch(() => ({}))
       toast.error(err.error ?? "Erreur")
@@ -134,7 +146,8 @@ export function VehiculesView({ trucks, teams, employees }: Props) {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Véhicules</h1>
           <p className="text-sm text-slate-500 mt-1">
-            {trucks.length} véhicule{trucks.length > 1 ? "s" : ""} dans le parc
+            {activeTrucks.length} véhicule{activeTrucks.length > 1 ? "s" : ""} dans le parc
+            {archivedTrucks.length > 0 && ` · ${archivedTrucks.length} archivé${archivedTrucks.length > 1 ? "s" : ""}`}
           </p>
         </div>
         <Button
@@ -147,11 +160,13 @@ export function VehiculesView({ trucks, teams, employees }: Props) {
       </div>
 
       {/* Liste */}
-      {trucks.length === 0 ? (
+      {activeTrucks.length === 0 ? (
         <Card>
           <CardContent className="py-16 text-center">
             <Truck className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-            <p className="text-slate-400 font-medium">Aucun véhicule pour le moment.</p>
+            <p className="text-slate-400 font-medium">
+              {archivedTrucks.length > 0 ? "Aucun véhicule actif." : "Aucun véhicule pour le moment."}
+            </p>
             <p className="text-slate-400 text-sm mt-1">
               Cliquez sur &quot;Nouveau véhicule&quot; pour commencer.
             </p>
@@ -159,7 +174,7 @@ export function VehiculesView({ trucks, teams, employees }: Props) {
         </Card>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {trucks.map((t) => (
+          {activeTrucks.map((t) => (
             <Card key={t.id} className="overflow-hidden hover:shadow-md transition-shadow">
               <div
                 className="h-1.5 w-full"
@@ -202,12 +217,13 @@ export function VehiculesView({ trucks, teams, employees }: Props) {
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
                     <button
-                      onClick={() => deleteTruck(t)}
+                      onClick={() => setArchived(t, true)}
                       disabled={loading}
-                      title="Supprimer le véhicule"
-                      className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-red-400 hover:text-red-500 transition-colors"
+                      title="Archiver le véhicule"
+                      aria-label={`Archiver le véhicule ${t.matricule}`}
+                      className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-amber-400 hover:text-amber-600 transition-colors"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Archive className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 </div>
@@ -222,6 +238,10 @@ export function VehiculesView({ trucks, teams, employees }: Props) {
                     className="flex-1 text-sm border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Aucune équipe</option>
+                    {/* Équipe actuelle archivée (legacy) : affichée telle quelle, jamais réécrite sans action. */}
+                    {t.team && !teams.some((team) => team.id === t.team!.id) && (
+                      <option value={t.team.id}>{t.team.name} (archivée)</option>
+                    )}
                     {teams.map((team) => (
                       <option key={team.id} value={team.id}>{team.name}</option>
                     ))}
@@ -238,6 +258,12 @@ export function VehiculesView({ trucks, teams, employees }: Props) {
                     className="flex-1 text-sm border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Aucun chauffeur</option>
+                    {/* Chauffeur actuel inactif (legacy) : affiché tel quel, jamais réécrit sans action. */}
+                    {t.chauffeur && !employees.some((e) => e.id === t.chauffeur!.id) && (
+                      <option value={t.chauffeur.id}>
+                        {t.chauffeur.firstName} {t.chauffeur.lastName} (inactif)
+                      </option>
+                    )}
                     {employees.map((e) => (
                       <option key={e.id} value={e.id}>
                         {e.firstName} {e.lastName}
@@ -290,6 +316,75 @@ export function VehiculesView({ trucks, teams, employees }: Props) {
               </CardContent>
             </Card>
           ))}
+        </div>
+      )}
+
+      {/* Véhicules archivés : consultation de l'historique et restauration */}
+      {archivedTrucks.length > 0 && (
+        <div className="space-y-3">
+          <button
+            type="button"
+            onClick={() => setShowArchived((v) => !v)}
+            aria-expanded={showArchived}
+            className="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900"
+          >
+            <ChevronDown className={`h-4 w-4 transition-transform ${showArchived ? "" : "-rotate-90"}`} />
+            Véhicules archivés ({archivedTrucks.length})
+          </button>
+          {showArchived && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {archivedTrucks.map((t) => (
+                <Card key={t.id} className="border-slate-200 bg-slate-50/60">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-slate-700">{t.matricule}</p>
+                        <p className="text-xs text-slate-400">
+                          {t.marque ?? "Marque non renseignée"}
+                          {t.archivedAt && ` · archivé le ${new Date(t.archivedAt).toLocaleDateString("fr-FR")}`}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <button
+                          onClick={() => setHistoryId(historyId === t.id ? null : t.id)}
+                          title="Historique des affectations"
+                          className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-blue-400 hover:text-blue-500 transition-colors"
+                        >
+                          <History className="h-3.5 w-3.5" />
+                        </button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={loading}
+                          onClick={() => setArchived(t, false)}
+                          className="gap-1.5"
+                        >
+                          <ArchiveRestore className="h-3.5 w-3.5" />
+                          Restaurer
+                        </Button>
+                      </div>
+                    </div>
+                    {historyId === t.id && (
+                      <div className="mt-3 space-y-1.5 border-t border-slate-200 pt-3">
+                        {t.history.length === 0 ? (
+                          <p className="text-xs italic text-slate-400">Aucun historique.</p>
+                        ) : (
+                          t.history.map((h) => (
+                            <p key={h.id} className="text-xs text-slate-500">
+                              {h.chauffeurName ?? "Aucun chauffeur"}
+                              {h.teamName && <span className="text-slate-400"> · équipe {h.teamName}</span>}
+                              {" — "}
+                              {fmtDate(h.startedAt)} → {h.endedAt ? fmtDate(h.endedAt) : "en cours"}
+                            </p>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

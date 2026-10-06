@@ -86,9 +86,9 @@ export default async function EquipesPage() {
       orderBy: { firstName: "asc" },
       select: { id: true, firstName: true, lastName: true, jobTitle: true },
     }),
-    // Pour TruckSelector (inchangé) : véhicules du tenant.
+    // Pour TruckSelector : véhicules actifs du tenant (un véhicule archivé n'est jamais proposé).
     prisma.truck.findMany({
-      where: { companyId },
+      where: { companyId, active: true },
       orderBy: { matricule: "asc" },
       select: { id: true, matricule: true, marque: true, chauffeurId: true, teamId: true },
     }),

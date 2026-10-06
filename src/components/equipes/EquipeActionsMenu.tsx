@@ -139,7 +139,10 @@ export function EquipeActionsMenu({ team, trucks, canManage }: EquipeActionsMenu
                 team.truck ? (trucks.find((t) => t.id === team.truck!.id) ?? { ...team.truck, teamId: team.id }) : null
               }
               allTrucks={trucks}
-              members={team.members.map((m) => ({ id: m.id, name: `${m.firstName} ${m.lastName}` }))}
+              // Chauffeurs proposables : membres actifs ; le chauffeur actuel reste affiché même s'il est inactif (legacy).
+              members={team.members
+                .filter((m) => m.active || m.id === trucks.find((t) => t.id === team.truck?.id)?.chauffeurId)
+                .map((m) => ({ id: m.id, name: `${m.firstName} ${m.lastName}` }))}
             />
           </DialogContent>
         </Dialog>

@@ -42,21 +42,31 @@ export function TruckSelector({ teamId, currentTruck, allTrucks, members }: Prop
     return res
   }
 
-  const assign = async (truckId: string) => {
+  /** Affiche l'erreur serveur (ex. équipe archivée, chauffeur inactif, véhicule archivé). */
+  const reportFailure = async (res: Response): Promise<boolean> => {
+    if (res.ok) return true
+    const err = await res.json().catch(() => ({}))
+    toast.error(err.error ?? "Erreur")
+    return false
+  }
+
+  const assign = async (truckId: string): Promise<boolean> => {
     setLoading(true)
+    let ok = true
     if (truckId) {
-      await patchTruck(truckId, { teamId })
+      ok = await reportFailure(await patchTruck(truckId, { teamId }))
     } else if (currentTruck) {
-      await patchTruck(currentTruck.id, { teamId: null })
+      ok = await reportFailure(await patchTruck(currentTruck.id, { teamId: null }))
     }
     router.refresh()
     setLoading(false)
+    return ok
   }
 
   const setChauffeur = async (chauffeurId: string) => {
     if (!currentTruck) return
     setLoading(true)
-    await patchTruck(currentTruck.id, { chauffeurId: chauffeurId || null })
+    await reportFailure(await patchTruck(currentTruck.id, { chauffeurId: chauffeurId || null }))
     router.refresh()
     setLoading(false)
   }
@@ -71,8 +81,7 @@ export function TruckSelector({ teamId, currentTruck, allTrucks, members }: Prop
     })
     const truck = await res.json()
     if (truck.id) {
-      await assign(truck.id)
-      toast.success("Camion ajouté")
+      if (await assign(truck.id)) toast.success("Camion ajouté")
     } else {
       toast.error(truck.error ?? "Erreur")
       setLoading(false)
