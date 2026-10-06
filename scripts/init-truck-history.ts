@@ -28,6 +28,7 @@ async function main() {
         chauffeurId: t.chauffeurId,
         teamId: t.teamId,
         companyId: t.companyId,
+        reason: "BACKFILL",
       },
     })
     created++
