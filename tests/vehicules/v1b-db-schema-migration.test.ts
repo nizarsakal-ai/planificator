@@ -41,7 +41,7 @@ describe("V1B-db — schéma Prisma", () => {
   })
 
   it("migration V1B-db présente et postérieure à V1A", () => {
-    const names = readdirSync("prisma/migrations").filter((n) => /^\d{14}_/.test(n)).sort()
+    const names = readdirSync("prisma/migrations").filter((n) => /^\d{14}_/.test(n) && !n.endsWith("_vehicles_v1c_modele")).sort()
     assert.equal(names[names.length - 1], MIGRATION_NAME)
   })
 })

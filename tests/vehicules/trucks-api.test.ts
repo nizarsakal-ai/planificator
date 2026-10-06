@@ -19,6 +19,7 @@ interface TruckRow {
   id: string
   matricule: string
   marque: string | null
+  modele?: string | null
   companyId: string
   teamId: string | null
   chauffeurId: string | null
@@ -114,7 +115,7 @@ class FakeDb {
       const t = this.state.trucks.find((r) => matches(r as never, args.where))
       return t ? { ...t } : null
     },
-    create: async (args: { data: Pick<TruckRow, "matricule" | "marque" | "companyId"> }) => {
+    create: async (args: { data: Pick<TruckRow, "matricule" | "marque" | "modele" | "companyId"> }) => {
       this.hit("truck.create", args)
       const row: TruckRow = {
         id: `tr-new-${++this.seq}`,
@@ -517,7 +518,7 @@ describe("V0 — longueurs : aucune limite au-delà de la DB historique (colonne
   it("le schéma de validation ne contient aucune longueur maximale pour matricule / marque", async () => {
     const { readFileSync } = await import("node:fs")
     const src = readFileSync("src/lib/vehicules/trucks-api.ts", "utf8")
-    const block = src.slice(src.indexOf("const matriculeSchema"), src.indexOf("const optionalIdSchema"))
+    const block = src.slice(src.indexOf("const matriculeSchema"), src.indexOf("/**\n * Modèle (V1C)"))
     assert.doesNotMatch(block, /\.max\(/)
   })
 })
@@ -986,13 +987,108 @@ describe("V1B — adaptation UI existante (garde-fous statiques)", () => {
     const view = readFileSync("src/components/vehicules/VehiculesView.tsx", "utf8")
     assert.doesNotMatch(view, /method: "DELETE"/)
     assert.match(view, /\/api\/trucks\/\$\{t\.id\}\/\$\{archive \? "archive" : "restore"\}/)
-    assert.match(view, /Véhicules archivés/)
+    assert.match(readFileSync("src/lib/vehicules/vehicules-view.ts", "utf8"), /archived: "Archivés"/)
     const selector = readFileSync("src/components/equipes/TruckSelector.tsx", "utf8")
     assert.match(selector, /reportFailure\(await patchTruck\(/)
     assert.match(selector, /if \(await assign\(truck\.id\)\) toast\.success\("Camion ajouté"\)/)
-    assert.match(view, /\(inactif\)/)
-    assert.match(view, /\(archivée\)/)
+    const card = readFileSync("src/components/vehicules/VehiculeCard.tsx", "utf8")
+    assert.match(card, /\(inactif\)/)
+    assert.match(card, /\(archivée\)/)
     const menu = readFileSync("src/components/equipes/EquipeActionsMenu.tsx", "utf8")
     assert.match(menu, /\.filter\(\(m\) => m\.active \|\| m\.id ===/)
+  })
+})
+
+// ─── V1C — identité : modèle ─────────────────────────────────────────────────
+
+describe("V1C — modele (identité véhicule)", () => {
+  const row = (id: string) => db.state.trucks.find((t) => t.id === id)!
+
+  it("POST : modele enregistré, trimé ; marque inchangée", async () => {
+    const r = await post({ matricule: "V1C-001", marque: "Volkswagen", modele: "  Crafter  " })
+    assert.equal(r.status, 200)
+    assert.equal(r.body.marque, "Volkswagen")
+    assert.equal(r.body.modele, "Crafter")
+  })
+
+  it("POST : modele absent, vide ou blanc → null ; payloads historiques (sans modele) toujours acceptés", async () => {
+    assert.equal((await post({ matricule: "V1C-002", marque: "VW Crafter" })).body.modele, null)
+    assert.equal((await post({ matricule: "V1C-003", modele: "" })).body.modele, null)
+    assert.equal((await post({ matricule: "V1C-004", modele: "   " })).body.modele, null)
+    assert.equal((await post({ matricule: "V1C-005", modele: null })).body.modele, null)
+  })
+
+  it("aucune transformation de casse (modele) ; matricule toujours en majuscules", async () => {
+    const r = await post({ matricule: "v1c-006", modele: "Crafter l3H2" })
+    assert.equal(r.body.modele, "Crafter l3H2")
+    assert.equal(r.body.matricule, "V1C-006")
+  })
+
+  it("PATCH : modification de modele, puis effacement (vide → null) ; marque jamais touchée", async () => {
+    assert.equal((await patch("tr-1", { modele: " L3H2 " })).status, 200)
+    assert.equal(row("tr-1").modele, "L3H2")
+    assert.equal(row("tr-1").marque, "Crafter")
+    assert.equal((await patch("tr-1", { modele: "" })).status, 200)
+    assert.equal(row("tr-1").modele, null)
+    assert.equal(row("tr-1").marque, "Crafter")
+  })
+
+  it("PATCH sans modele : la valeur existante n'est pas réécrite", async () => {
+    await patch("tr-1", { modele: "Crafter" })
+    await patch("tr-1", { marque: "Volkswagen" })
+    assert.equal(row("tr-1").modele, "Crafter")
+  })
+
+  it("longueur : 100 caractères acceptés, 101 → 400 (POST et PATCH), rien n'est écrit", async () => {
+    assert.equal((await post({ matricule: "V1C-100", modele: "m".repeat(100) })).status, 200)
+    const trucksBefore = db.state.trucks.length
+    const p = await post({ matricule: "V1C-101", modele: "m".repeat(101) })
+    assert.equal(p.status, 400)
+    assert.equal(p.body.code, "INVALID_PAYLOAD")
+    const u = await patch("tr-1", { modele: "m".repeat(101) })
+    assert.equal(u.status, 400)
+    assert.equal(db.state.trucks.length, trucksBefore)
+    assert.equal(row("tr-1").modele ?? null, null)
+  })
+
+  it("le trim précède la limite : 100 caractères entourés d'espaces acceptés", async () => {
+    assert.equal((await post({ matricule: "V1C-TRIM", modele: ` ${"m".repeat(100)} ` })).status, 200)
+  })
+
+  it("types invalides et clés inconnues toujours refusés (strict)", async () => {
+    assert.equal((await post({ matricule: "V1C-T1", modele: 42 })).status, 400)
+    assert.equal((await patch("tr-1", { modele: ["x"] })).status, 400)
+    assert.equal((await post({ matricule: "V1C-T2", model: "Crafter" })).status, 400)
+    assert.equal((await patch("tr-1", { companyId: "x", modele: "A" })).status, 400)
+  })
+
+  it("modification d'identité seule (matricule / marque / modele) : aucune nouvelle période", async () => {
+    const before = db.state.assignments.length
+    assert.equal((await patch("tr-1", { matricule: "AB-123-CF", marque: "Volkswagen", modele: "Crafter" })).status, 200)
+    assert.equal(db.state.assignments.length, before)
+    assert.equal(openRows("tr-1").length, 1)
+    assert.equal((await patch("tr-2", { modele: "Master" })).status, 200)
+    assert.equal(db.state.assignments.length, before)
+  })
+
+  it("modele ne contourne ni RBAC, ni tenant", async () => {
+    assert.equal((await patch("tr-1", { modele: "X" }, "EMPLOYEE")).status, 403)
+    assert.equal((await post({ matricule: "V1C-RB", modele: "X" }, "CLIENT")).status, 403)
+    assert.equal((await patch("tr-x", { modele: "Hack" })).status, 404)
+    assert.equal(row("tr-x").modele ?? null, null)
+  })
+
+  it("véhicule archivé : modele modifiable (identité) sans réaffectation ; période inchangée", async () => {
+    await del("tr-1")
+    const before = db.state.assignments.length
+    assert.equal((await patch("tr-1", { modele: "Crafter" })).status, 200)
+    assert.equal(db.state.assignments.length, before)
+    assert.equal(row("tr-1").active, false)
+    assert.equal(row("tr-1").teamId, null)
+  })
+
+  it("payloads des écrans V1C (Véhicules, TruckSelector) acceptés", async () => {
+    assert.equal((await post({ matricule: "V1C-UI", marque: "", modele: "" })).status, 200)
+    assert.equal((await patch("tr-2", { matricule: "EF-456-GH", marque: "Renault", modele: "Master" })).status, 200)
   })
 })

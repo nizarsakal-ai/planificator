@@ -78,7 +78,7 @@ describe("V1A — migration SQL", () => {
   it("nom de migration postérieur au dernier existant avant V1B-db", async () => {
     const { readdirSync } = await import("node:fs")
     const names = readdirSync("prisma/migrations")
-      .filter((n) => /^\d{14}_/.test(n) && !n.endsWith("_vehicles_v1b_db_integrity"))
+      .filter((n) => /^\d{14}_/.test(n) && !n.endsWith("_vehicles_v1b_db_integrity") && !n.endsWith("_vehicles_v1c_modele"))
       .sort()
     assert.equal(names.at(-1), MIGRATION_NAME)
   })

@@ -1264,6 +1264,8 @@ model Truck {
   id          String    @id @default(cuid())
   matricule   String
   marque      String?
+  // V1C : modèle du véhicule (optionnel). `marque` est conservée telle quelle (anciennes valeurs « marque modèle » intactes).
+  modele      String?
   companyId   String
   teamId      String?   @unique
   chauffeurId String?

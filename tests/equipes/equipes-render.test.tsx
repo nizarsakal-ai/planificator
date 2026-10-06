@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime"
 import { EquipesView } from "@/components/equipes/EquipesView"
 import { EquipeStats } from "@/components/equipes/EquipeStats"
+import { VehicleLabel } from "@/components/equipes/EquipeCard"
 import type { EquipeViewItem } from "@/lib/equipes/equipes-view"
 
 // tsconfig "jsx": "preserve" → sous tsx, runtime JSX classique.
@@ -142,5 +143,15 @@ describe("Équipes — onglet initial et état vide", () => {
   it("aucune équipe : invitation à créer", () => {
     const t = text(render({ teams: [] }))
     assert.ok(t.includes("Aucune équipe pour le moment."))
+  })
+})
+
+describe("VehicleLabel — identité V1C", () => {
+  it("matricule · marque modèle ; marque legacy seule ; matricule seul ; sans véhicule", () => {
+    const label = (truck: Parameters<typeof VehicleLabel>[0]["truck"]) => renderToStaticMarkup(createElement(VehicleLabel, { truck }))
+    assert.match(label({ id: "1", matricule: "AB-123-CD", marque: "Volkswagen", modele: "Crafter" }), /AB-123-CD<span[^>]*> · Volkswagen Crafter<\/span>/)
+    assert.match(label({ id: "1", matricule: "AB-123-CD", marque: "VW Crafter", modele: null }), /· VW Crafter/)
+    assert.doesNotMatch(label({ id: "1", matricule: "AB-123-CD", marque: null, modele: null }), /·/)
+    assert.match(label(null), /Sans véhicule/)
   })
 })

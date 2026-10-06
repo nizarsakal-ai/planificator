@@ -58,6 +58,7 @@ export interface EquipeTruck {
   id: string
   matricule: string
   marque: string | null
+  modele?: string | null
 }
 
 export interface EquipeViewItem {
@@ -148,7 +149,7 @@ export function toEquipeViewItems(
         })),
       truck:
         r.truck && r.truck.companyId === companyId
-          ? { id: r.truck.id, matricule: r.truck.matricule, marque: r.truck.marque }
+          ? { id: r.truck.id, matricule: r.truck.matricule, marque: r.truck.marque, modele: r.truck.modele ?? null }
           : null,
       currentWorksite: worksiteByTeam.get(r.id) ?? null,
     })

@@ -179,6 +179,18 @@ const marqueSchema = z
   .nullable()
   .transform((v) => (v ? v : null))
 
+/**
+ * Modèle (V1C) : chaîne ou null, trim, vide → null, 100 caractères maximum, aucune transformation de casse.
+ * Contrairement à `marque` (colonne historique sans limite), ce champ est neuf : la limite est applicative uniquement.
+ */
+export const MODELE_MAX_LENGTH = 100
+const modeleSchema = z
+  .string({ invalid_type_error: "modele doit être une chaîne" })
+  .trim()
+  .max(MODELE_MAX_LENGTH, `modele : ${MODELE_MAX_LENGTH} caractères maximum`)
+  .nullable()
+  .transform((v) => (v ? v : null))
+
 /** Identifiant optionnel : "" ou null → null (désaffectation, comportement actuel). */
 const optionalIdSchema = (field: string) =>
   z
@@ -192,6 +204,7 @@ export const createTruckSchema = z
   .object({
     matricule: matriculeSchema,
     marque: marqueSchema.optional(),
+    modele: modeleSchema.optional(),
   })
   .strict()
 
@@ -199,6 +212,7 @@ export const updateTruckSchema = z
   .object({
     matricule: matriculeSchema.optional(),
     marque: marqueSchema.optional(),
+    modele: modeleSchema.optional(),
     teamId: optionalIdSchema("teamId").optional(),
     chauffeurId: optionalIdSchema("chauffeurId").optional(),
   })
@@ -338,6 +352,7 @@ export async function handleTrucksPost(req: Request, deps: TrucksApiDeps): Promi
         data: {
           matricule: body.data.matricule,
           marque: body.data.marque ?? null,
+          modele: body.data.modele ?? null,
           companyId,
         },
       })
@@ -378,7 +393,7 @@ export async function handleTruckPatch(req: Request, id: string, deps: TrucksApi
   const { companyId } = access
   const body = await parseBody(req, updateTruckSchema)
   if (!body.ok) return body.response
-  const { teamId, matricule, marque, chauffeurId } = body.data
+  const { teamId, matricule, marque, modele, chauffeurId } = body.data
 
   try {
     const target = await deps.db.truck.findFirst({ where: { id, companyId }, select: { id: true } })
@@ -450,6 +465,7 @@ export async function handleTruckPatch(req: Request, id: string, deps: TrucksApi
         data: {
           ...(matricule !== undefined && { matricule }),
           ...(marque !== undefined && { marque }),
+          ...(modele !== undefined && { modele }),
           ...(chauffeurId !== undefined && { chauffeurId }),
           ...(teamId !== undefined && { teamId }),
         },

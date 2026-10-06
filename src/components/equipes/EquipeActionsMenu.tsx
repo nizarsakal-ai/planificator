@@ -22,6 +22,7 @@ export interface EquipeTruckOption {
   id: string
   matricule: string
   marque?: string | null
+  modele?: string | null
   chauffeurId?: string | null
   teamId: string | null
   teamName?: string | null

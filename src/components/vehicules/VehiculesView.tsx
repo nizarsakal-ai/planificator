@@ -1,65 +1,66 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Truck, Plus, Pencil, Archive, ArchiveRestore, User, Layers, History, ChevronDown } from "lucide-react"
+import { Truck, Plus, SearchX } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import { VehicleForm } from "@/components/vehicules/VehicleForm"
+import { VehiculeCard, type VehicleEmployeeOption, type VehicleTeamOption } from "@/components/vehicules/VehiculeCard"
+import { VehiculesStats } from "@/components/vehicules/VehiculesStats"
+import { VehiculesToolbar, type VehiculeViewMode } from "@/components/vehicules/VehiculesToolbar"
+import {
+  DEFAULT_VEHICLE_FILTERS,
+  DEFAULT_VEHICLE_QUERY,
+  applyVehicleView,
+  computeVehicleStats,
+  countActiveFilters,
+  driverFilterOptions,
+  teamFilterOptions,
+  toTruckPayload,
+  vehicleToFormValues,
+  type VehicleFilters,
+  type VehicleFormValues,
+  type VehicleSort,
+  type VehicleTab,
+  type VehicleViewItem,
+} from "@/lib/vehicules/vehicules-view"
 
-interface TeamOption {
-  id: string
-  name: string
-}
-interface EmployeeOption {
-  id: string
-  firstName: string
-  lastName: string
-}
-interface HistoryEntry {
-  id: string
-  chauffeurName: string | null
-  teamName: string | null
-  startedAt: string
-  endedAt: string | null
-}
-interface TruckItem {
-  id: string
-  matricule: string
-  marque: string | null
-  active: boolean
-  archivedAt: string | null
-  team: { id: string; name: string; color: string | null } | null
-  chauffeur: { id: string; firstName: string; lastName: string } | null
-  history: HistoryEntry[]
-}
-
-const fmtDate = (iso: string) =>
-  new Date(iso).toLocaleDateString("fr-FR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
 interface Props {
-  trucks: TruckItem[]
-  teams: TeamOption[]
-  employees: EmployeeOption[]
+  trucks: VehicleViewItem[]
+  teams: VehicleTeamOption[]
+  employees: VehicleEmployeeOption[]
 }
+
+type Dialog = { mode: "create" } | { mode: "edit"; id: string } | null
 
 export function VehiculesView({ trucks, teams, employees }: Props) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
-  const [showAdd, setShowAdd] = useState(false)
-  const [editId, setEditId] = useState<string | null>(null)
+  const [dialog, setDialog] = useState<Dialog>(null)
   const [historyId, setHistoryId] = useState<string | null>(null)
-  const [showArchived, setShowArchived] = useState(false)
-  const activeTrucks = trucks.filter((t) => t.active)
-  const archivedTrucks = trucks.filter((t) => !t.active)
-  const [matricule, setMatricule] = useState("")
-  const [marque, setMarque] = useState("")
+  const [tab, setTab] = useState<VehicleTab>(DEFAULT_VEHICLE_QUERY.tab)
+  const [search, setSearch] = useState("")
+  const [filters, setFilters] = useState<VehicleFilters>(DEFAULT_VEHICLE_FILTERS)
+  const [sort, setSort] = useState<VehicleSort>(DEFAULT_VEHICLE_QUERY.sort)
+  const [view, setView] = useState<VehiculeViewMode>("grid")
+
+  const stats = useMemo(() => computeVehicleStats(trucks), [trucks])
+  const teamOptions = useMemo(() => teamFilterOptions(trucks), [trucks])
+  const driverOptions = useMemo(() => driverFilterOptions(trucks), [trucks])
+  const { items, counts } = useMemo(
+    () => applyVehicleView(trucks, { tab, search, filters, sort }),
+    [trucks, tab, search, filters, sort]
+  )
+  const activeFilterCount = countActiveFilters(filters)
+  const hasCriteria = search.trim() !== "" || activeFilterCount > 0
+  const editing = dialog?.mode === "edit" ? trucks.find((t) => t.id === dialog.id) ?? null : null
+
+  const resetFilters = () => {
+    setSearch("")
+    setFilters(DEFAULT_VEHICLE_FILTERS)
+  }
 
   const patchTruck = async (truckId: string, body: Record<string, unknown>) => {
     setLoading(true)
@@ -77,20 +78,17 @@ export function VehiculesView({ trucks, teams, employees }: Props) {
     return res.ok
   }
 
-  const addTruck = async () => {
-    if (!matricule.trim()) return
+  const addTruck = async (values: VehicleFormValues) => {
     setLoading(true)
     const res = await fetch("/api/trucks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ matricule: matricule.trim(), marque: marque.trim() }),
+      body: JSON.stringify(toTruckPayload(values)),
     })
     const data = await res.json().catch(() => ({}))
     if (res.ok) {
       toast.success("Véhicule ajouté")
-      setShowAdd(false)
-      setMatricule("")
-      setMarque("")
+      setDialog(null)
       router.refresh()
     } else {
       toast.error(data.error ?? "Erreur")
@@ -98,28 +96,17 @@ export function VehiculesView({ trucks, teams, employees }: Props) {
     setLoading(false)
   }
 
-  const openEdit = (t: TruckItem) => {
-    setEditId(t.id)
-    setMatricule(t.matricule)
-    setMarque(t.marque ?? "")
-  }
-
-  const saveEdit = async () => {
-    if (!editId || !matricule.trim()) return
-    const ok = await patchTruck(editId, {
-      matricule: matricule.trim(),
-      marque: marque.trim(),
-    })
+  const saveEdit = async (values: VehicleFormValues) => {
+    if (!editing) return
+    const ok = await patchTruck(editing.id, toTruckPayload(values))
     if (ok) {
       toast.success("Véhicule modifié")
-      setEditId(null)
-      setMatricule("")
-      setMarque("")
+      setDialog(null)
     }
   }
 
   // Archivage / restauration : jamais de suppression physique, l'historique est conservé.
-  const setArchived = async (t: TruckItem, archive: boolean) => {
+  const setArchived = async (t: VehicleViewItem, archive: boolean) => {
     if (
       archive &&
       !confirm(
@@ -142,302 +129,118 @@ export function VehiculesView({ trucks, teams, employees }: Props) {
   return (
     <div className="space-y-6">
       {/* En-tête */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Véhicules</h1>
           <p className="text-sm text-slate-500 mt-1">
-            {activeTrucks.length} véhicule{activeTrucks.length > 1 ? "s" : ""} dans le parc
-            {archivedTrucks.length > 0 && ` · ${archivedTrucks.length} archivé${archivedTrucks.length > 1 ? "s" : ""}`}
+            Gérez votre parc : identité, affectations aux équipes et aux chauffeurs, historique.
           </p>
         </div>
-        <Button
-          onClick={() => { setShowAdd(true); setEditId(null); setMatricule(""); setMarque("") }}
-          className="bg-[#0f3460] hover:bg-[#0a2540] gap-2"
-        >
+        <Button onClick={() => setDialog({ mode: "create" })} className="bg-[#0f3460] hover:bg-[#0a2540] gap-2 shrink-0">
           <Plus className="h-4 w-4" />
           Nouveau véhicule
         </Button>
       </div>
 
-      {/* Liste */}
-      {activeTrucks.length === 0 ? (
+      {trucks.length === 0 ? (
         <Card>
           <CardContent className="py-16 text-center">
             <Truck className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-            <p className="text-slate-400 font-medium">
-              {archivedTrucks.length > 0 ? "Aucun véhicule actif." : "Aucun véhicule pour le moment."}
-            </p>
-            <p className="text-slate-400 text-sm mt-1">
-              Cliquez sur &quot;Nouveau véhicule&quot; pour commencer.
-            </p>
+            <p className="text-slate-400 font-medium">Aucun véhicule pour le moment.</p>
+            <p className="text-slate-400 text-sm mt-1">Cliquez sur &quot;Nouveau véhicule&quot; pour commencer.</p>
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {activeTrucks.map((t) => (
-            <Card key={t.id} className="overflow-hidden hover:shadow-md transition-shadow">
-              <div
-                className="h-1.5 w-full"
-                style={{ backgroundColor: t.team?.color ?? "#94a3b8" }}
-              />
-              <CardContent className="p-5">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center shrink-0">
-                      <Truck className="h-5 w-5 text-slate-500" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-slate-900">{t.matricule}</h3>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        {t.marque ?? "Marque non renseignée"}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <Badge variant={t.team ? "default" : "secondary"}>
-                      {t.team ? t.team.name : "Non affecté"}
-                    </Badge>
-                    <button
-                      onClick={() => setHistoryId(historyId === t.id ? null : t.id)}
-                      title="Historique des affectations"
-                      className={`p-1.5 rounded-lg border transition-colors ${
-                        historyId === t.id
-                          ? "border-blue-400 text-blue-500 bg-blue-50"
-                          : "border-slate-200 text-slate-500 hover:border-blue-400 hover:text-blue-500"
-                      }`}
-                    >
-                      <History className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={() => openEdit(t)}
-                      disabled={loading}
-                      title="Modifier le véhicule"
-                      className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-blue-400 hover:text-blue-500 transition-colors"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={() => setArchived(t, true)}
-                      disabled={loading}
-                      title="Archiver le véhicule"
-                      aria-label={`Archiver le véhicule ${t.matricule}`}
-                      className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-amber-400 hover:text-amber-600 transition-colors"
-                    >
-                      <Archive className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
+        <>
+          <VehiculesStats stats={stats} />
+          <VehiculesToolbar
+            tab={tab}
+            counts={counts}
+            onTabChange={setTab}
+            search={search}
+            onSearchChange={setSearch}
+            filters={filters}
+            onFiltersChange={setFilters}
+            activeFilterCount={activeFilterCount}
+            onReset={resetFilters}
+            teamOptions={teamOptions}
+            driverOptions={driverOptions}
+            sort={sort}
+            onSortChange={setSort}
+            view={view}
+            onViewChange={setView}
+          />
 
-                {/* Affectation équipe */}
-                <div className="flex items-center gap-2 mb-2">
-                  <Layers className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                  <select
-                    disabled={loading}
-                    value={t.team?.id ?? ""}
-                    onChange={(e) => patchTruck(t.id, { teamId: e.target.value || null })}
-                    className="flex-1 text-sm border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Aucune équipe</option>
-                    {/* Équipe actuelle archivée (legacy) : affichée telle quelle, jamais réécrite sans action. */}
-                    {t.team && !teams.some((team) => team.id === t.team!.id) && (
-                      <option value={t.team.id}>{t.team.name} (archivée)</option>
-                    )}
-                    {teams.map((team) => (
-                      <option key={team.id} value={team.id}>{team.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Affectation chauffeur */}
-                <div className="flex items-center gap-2">
-                  <User className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                  <select
-                    disabled={loading}
-                    value={t.chauffeur?.id ?? ""}
-                    onChange={(e) => patchTruck(t.id, { chauffeurId: e.target.value || null })}
-                    className="flex-1 text-sm border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Aucun chauffeur</option>
-                    {/* Chauffeur actuel inactif (legacy) : affiché tel quel, jamais réécrit sans action. */}
-                    {t.chauffeur && !employees.some((e) => e.id === t.chauffeur!.id) && (
-                      <option value={t.chauffeur.id}>
-                        {t.chauffeur.firstName} {t.chauffeur.lastName} (inactif)
-                      </option>
-                    )}
-                    {employees.map((e) => (
-                      <option key={e.id} value={e.id}>
-                        {e.firstName} {e.lastName}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Historique des affectations */}
-                {historyId === t.id && (
-                  <div className="mt-3 pt-3 border-t border-slate-100">
-                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
-                      <History className="h-3.5 w-3.5" />
-                      Historique des affectations
-                    </p>
-                    {t.history.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic py-1">
-                        Aucun historique pour le moment. Les prochains changements
-                        de chauffeur ou d&apos;équipe seront enregistrés ici.
-                      </p>
-                    ) : (
-                      <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                        {t.history.map((h) => (
-                          <div
-                            key={h.id}
-                            className="text-xs bg-slate-50 rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2"
-                          >
-                            <div className="min-w-0">
-                              <p className="font-medium text-slate-700 truncate">
-                                {h.chauffeurName ?? "Aucun chauffeur"}
-                                {h.teamName && (
-                                  <span className="text-slate-400 font-normal"> · équipe {h.teamName}</span>
-                                )}
-                              </p>
-                              <p className="text-slate-400">
-                                {fmtDate(h.startedAt)} → {h.endedAt ? fmtDate(h.endedAt) : "en cours"}
-                              </p>
-                            </div>
-                            {!h.endedAt && (
-                              <span className="shrink-0 text-[10px] font-medium text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">
-                                Actuel
-                              </span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+          {items.length === 0 ? (
+            <Card>
+              <CardContent className="py-14 text-center">
+                <SearchX className="h-9 w-9 text-slate-200 mx-auto mb-3" />
+                <p className="text-slate-500 font-medium">
+                  {hasCriteria
+                    ? "Aucun véhicule ne correspond à votre recherche."
+                    : tab === "archived"
+                      ? "Aucun véhicule archivé."
+                      : "Aucun véhicule actif."}
+                </p>
+                {hasCriteria && (
+                  <Button variant="outline" size="sm" className="mt-3" onClick={resetFilters}>
+                    Effacer la recherche et les filtres
+                  </Button>
                 )}
               </CardContent>
             </Card>
-          ))}
-        </div>
-      )}
-
-      {/* Véhicules archivés : consultation de l'historique et restauration */}
-      {archivedTrucks.length > 0 && (
-        <div className="space-y-3">
-          <button
-            type="button"
-            onClick={() => setShowArchived((v) => !v)}
-            aria-expanded={showArchived}
-            className="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900"
-          >
-            <ChevronDown className={`h-4 w-4 transition-transform ${showArchived ? "" : "-rotate-90"}`} />
-            Véhicules archivés ({archivedTrucks.length})
-          </button>
-          {showArchived && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-              {archivedTrucks.map((t) => (
-                <Card key={t.id} className="border-slate-200 bg-slate-50/60">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="font-semibold text-slate-700">{t.matricule}</p>
-                        <p className="text-xs text-slate-400">
-                          {t.marque ?? "Marque non renseignée"}
-                          {t.archivedAt && ` · archivé le ${new Date(t.archivedAt).toLocaleDateString("fr-FR")}`}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1.5">
-                        <button
-                          onClick={() => setHistoryId(historyId === t.id ? null : t.id)}
-                          title="Historique des affectations"
-                          className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-blue-400 hover:text-blue-500 transition-colors"
-                        >
-                          <History className="h-3.5 w-3.5" />
-                        </button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={loading}
-                          onClick={() => setArchived(t, false)}
-                          className="gap-1.5"
-                        >
-                          <ArchiveRestore className="h-3.5 w-3.5" />
-                          Restaurer
-                        </Button>
-                      </div>
-                    </div>
-                    {historyId === t.id && (
-                      <div className="mt-3 space-y-1.5 border-t border-slate-200 pt-3">
-                        {t.history.length === 0 ? (
-                          <p className="text-xs italic text-slate-400">Aucun historique.</p>
-                        ) : (
-                          t.history.map((h) => (
-                            <p key={h.id} className="text-xs text-slate-500">
-                              {h.chauffeurName ?? "Aucun chauffeur"}
-                              {h.teamName && <span className="text-slate-400"> · équipe {h.teamName}</span>}
-                              {" — "}
-                              {fmtDate(h.startedAt)} → {h.endedAt ? fmtDate(h.endedAt) : "en cours"}
-                            </p>
-                          ))
-                        )}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+          ) : (
+            <div className={view === "grid" ? "grid grid-cols-1 lg:grid-cols-2 gap-5" : "space-y-3"}>
+              {items.map((t) => (
+                <VehiculeCard
+                  key={t.id}
+                  truck={t}
+                  teams={teams}
+                  employees={employees}
+                  layout={view}
+                  loading={loading}
+                  historyOpen={historyId === t.id}
+                  onToggleHistory={() => setHistoryId(historyId === t.id ? null : t.id)}
+                  onEdit={() => setDialog({ mode: "edit", id: t.id })}
+                  onArchive={() => setArchived(t, true)}
+                  onRestore={() => setArchived(t, false)}
+                  onAssign={(body) => patchTruck(t.id, body)}
+                />
               ))}
             </div>
           )}
-        </div>
+        </>
       )}
 
-      {/* Dialog ajout / modification */}
-      {(showAdd || editId) && (
+      {/* Dialog ajout / modification (formulaire partagé) */}
+      {(dialog?.mode === "create" || editing) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setDialog(null)} />
           <div
-            className="absolute inset-0 bg-black/50"
-            onClick={() => { setShowAdd(false); setEditId(null) }}
-          />
-          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6 z-10">
+            role="dialog"
+            aria-modal="true"
+            aria-label={editing ? "Modifier le véhicule" : "Nouveau véhicule"}
+            className="relative bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6 z-10"
+          >
             <div className="mb-5">
               <h2 className="text-lg font-semibold text-slate-900">
-                {editId ? "Modifier le véhicule" : "Nouveau véhicule"}
+                {editing ? "Modifier le véhicule" : "Nouveau véhicule"}
               </h2>
-              <p className="text-sm text-slate-500 mt-1">
-                Immatriculation et marque du véhicule.
-              </p>
+              <p className="text-sm text-slate-500 mt-1">Immatriculation, marque et modèle du véhicule.</p>
             </div>
-            <div className="space-y-3">
-              <input
-                type="text"
-                placeholder="Immatriculation (ex: AB-123-CD)"
-                value={matricule}
-                onChange={(e) => setMatricule(e.target.value.toUpperCase())}
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <input
-                type="text"
-                placeholder="Marque / modèle (ex: VW Crafter)"
-                value={marque}
-                onChange={(e) => setMarque(e.target.value)}
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <div className="flex gap-2 pt-1">
-                <Button
-                  onClick={editId ? saveEdit : addTruck}
-                  disabled={loading || !matricule.trim()}
-                  className="bg-[#0f3460] hover:bg-[#0a2540]"
-                >
-                  {editId ? "Enregistrer" : "Ajouter"}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => { setShowAdd(false); setEditId(null) }}
-                  disabled={loading}
-                >
-                  Annuler
-                </Button>
-              </div>
-            </div>
+            <VehicleForm
+              key={editing?.id ?? "create"}
+              idPrefix="vehicules"
+              initialValues={editing ? vehicleToFormValues(editing) : undefined}
+              submitLabel={editing ? "Enregistrer" : "Ajouter"}
+              submitting={loading}
+              onSubmit={editing ? saveEdit : addTruck}
+              onCancel={() => setDialog(null)}
+            />
             <button
-              onClick={() => { setShowAdd(false); setEditId(null) }}
+              type="button"
+              onClick={() => setDialog(null)}
+              aria-label="Fermer"
               className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 text-xl leading-none"
             >
               ×
