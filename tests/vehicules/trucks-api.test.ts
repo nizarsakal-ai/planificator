@@ -3,7 +3,9 @@ import { beforeEach, describe, it } from "node:test"
 import {
   classifyUniqueConflict,
   classifyVanishedReference,
+  handleTruckArchive,
   handleTruckDelete,
+  handleTruckRestore,
   handleTruckPatch,
   handleTrucksGet,
   handleTrucksPost,
@@ -11,7 +13,7 @@ import {
   type TrucksDb,
 } from "@/lib/vehicules/trucks-api"
 
-// ─── Base en mémoire (contraintes d'unicité, cascade, rollback de transaction) ─
+// ─── Base en mémoire (contraintes V1A, verrous, cascade, rollback de transaction) ─
 
 interface TruckRow {
   id: string
@@ -20,6 +22,9 @@ interface TruckRow {
   companyId: string
   teamId: string | null
   chauffeurId: string | null
+  active: boolean
+  archivedAt: Date | null
+  createdAt: Date
 }
 interface AssignmentRow {
   id: string
@@ -29,6 +34,7 @@ interface AssignmentRow {
   companyId: string
   startedAt: Date
   endedAt: Date | null
+  reason?: string | null
 }
 interface State {
   trucks: TruckRow[]
@@ -47,12 +53,15 @@ function matches(row: Record<string, unknown>, where: Where): boolean {
 }
 
 const p2002 = (target: string[]) => Object.assign(new Error("Unique constraint failed"), { code: "P2002", meta: { target } })
+const checkViolation = (name: string) => Object.assign(new Error(`check ${name}`), { code: "23514", name: "CheckViolation" })
 
 class FakeDb {
   state: State
   calls: { op: string; args: unknown }[] = []
   failOn: string | null = null
   failWith: unknown = null
+  /** Simule une écriture concurrente juste avant l'ouverture de la transaction. */
+  beforeTransaction: ((state: State) => void) | null = null
   private seq = 0
 
   constructor(state: State) {
@@ -64,10 +73,35 @@ class FakeDb {
     if (this.failOn === op) throw this.failWith
   }
 
-  private checkUnique(t: TruckRow) {
+  /** Contraintes réelles : unicités (matricule, équipe) + CHECK V1A sur trucks. */
+  private checkTruck(t: TruckRow) {
     if (this.state.trucks.some((o) => o.id !== t.id && o.companyId === t.companyId && o.matricule === t.matricule))
       throw p2002(["matricule", "companyId"])
     if (t.teamId && this.state.trucks.some((o) => o.id !== t.id && o.teamId === t.teamId)) throw p2002(["teamId"])
+    if (!t.active && (t.teamId || t.chauffeurId)) throw checkViolation("trucks_v1a_archived_unassigned_check")
+    if (t.active !== (t.archivedAt === null)) throw checkViolation("archive consistency")
+  }
+
+  /** Index unique openForTruckId (trigger V1A) : au plus une période ouverte par véhicule. */
+  private checkOpen(a: AssignmentRow) {
+    if (a.endedAt === null && this.state.assignments.some((o) => o.id !== a.id && o.truckId === a.truckId && o.endedAt === null))
+      throw p2002(["openForTruckId"])
+  }
+
+  /** Verrous : trucks FOR UPDATE (liste d'ids) ; teams / employees FOR SHARE (relecture de l'activité). */
+  $queryRaw = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const sql = strings.join("?")
+    this.hit("$queryRaw", { sql, values })
+    if (/FROM "teams"/.test(sql) || /FROM "employees"/.test(sql)) {
+      const [id, companyId] = values as [string, string]
+      const rows = /FROM "teams"/.test(sql) ? this.state.teams : this.state.employees
+      return rows.filter((r) => r.id === id && r.companyId === companyId).map((r) => ({ active: r.active }))
+    }
+    const [ids, companyId] = values as [string[], string]
+    return this.state.trucks
+      .filter((t) => ids.includes(t.id) && t.companyId === companyId)
+      .map((t) => ({ id: t.id }))
+      .sort((a, b) => a.id.localeCompare(b.id))
   }
 
   truck = {
@@ -80,10 +114,18 @@ class FakeDb {
       const t = this.state.trucks.find((r) => matches(r as never, args.where))
       return t ? { ...t } : null
     },
-    create: async (args: { data: Omit<TruckRow, "id" | "teamId" | "chauffeurId"> }) => {
+    create: async (args: { data: Pick<TruckRow, "matricule" | "marque" | "companyId"> }) => {
       this.hit("truck.create", args)
-      const row: TruckRow = { id: `tr-new-${++this.seq}`, teamId: null, chauffeurId: null, ...args.data }
-      this.checkUnique(row)
+      const row: TruckRow = {
+        id: `tr-new-${++this.seq}`,
+        teamId: null,
+        chauffeurId: null,
+        active: true,
+        archivedAt: null,
+        createdAt: new Date(),
+        ...args.data,
+      }
+      this.checkTruck(row)
       this.state.trucks.push(row)
       return { ...row }
     },
@@ -92,7 +134,7 @@ class FakeDb {
       const i = this.state.trucks.findIndex((t) => t.id === args.where.id)
       if (i < 0) throw Object.assign(new Error("not found"), { code: "P2025" })
       const next = { ...this.state.trucks[i], ...args.data }
-      this.checkUnique(next)
+      this.checkTruck(next)
       this.state.trucks[i] = next
       return { ...next }
     },
@@ -109,7 +151,7 @@ class FakeDb {
     findFirst: async (args: { where: Where }) => {
       this.hit("team.findFirst", args)
       const t = this.state.teams.find((r) => matches(r as never, args.where))
-      return t ? { id: t.id } : null
+      return t ? { id: t.id, active: t.active } : null
     },
   }
 
@@ -117,11 +159,24 @@ class FakeDb {
     findFirst: async (args: { where: Where }) => {
       this.hit("employee.findFirst", args)
       const e = this.state.employees.find((r) => matches(r as never, args.where))
-      return e ? { id: e.id } : null
+      return e ? { id: e.id, active: e.active } : null
     },
   }
 
   truckAssignment = {
+    findFirst: async (args: { where: Where }) => {
+      this.hit("truckAssignment.findFirst", args)
+      const a = this.state.assignments.find((r) => matches(r as never, args.where))
+      return a ? { ...a } : null
+    },
+    update: async (args: { where: { id: string }; data: Partial<AssignmentRow> }) => {
+      this.hit("truckAssignment.update", args)
+      const a = this.state.assignments.find((r) => r.id === args.where.id)
+      if (!a) throw Object.assign(new Error("not found"), { code: "P2025" })
+      Object.assign(a, args.data)
+      this.checkOpen(a)
+      return { ...a }
+    },
     updateMany: async (args: { where: Where; data: { endedAt: Date } }) => {
       this.hit("truckAssignment.updateMany", args)
       let count = 0
@@ -135,13 +190,15 @@ class FakeDb {
     },
     create: async (args: { data: Omit<AssignmentRow, "id" | "endedAt"> }) => {
       this.hit("truckAssignment.create", args)
-      const row: AssignmentRow = { id: `as-${++this.seq}`, endedAt: null, ...args.data }
+      const row: AssignmentRow = { id: `as-${++this.seq}`, endedAt: null, reason: null, ...args.data }
+      this.checkOpen(row)
       this.state.assignments.push(row)
       return { ...row }
     },
   }
 
   $transaction = async <T>(fn: (tx: FakeDb) => Promise<T>): Promise<T> => {
+    this.beforeTransaction?.(this.state)
     const snapshot = structuredClone(this.state)
     try {
       return await fn(this)
@@ -154,8 +211,10 @@ class FakeDb {
   opsWithoutCompany(): string[] {
     return this.calls
       .filter((c) => {
-        const a = c.args as { where?: Where; data?: Record<string, unknown> }
-        if (c.op === "truck.update" || c.op === "truckAssignment.updateMany") return false // ciblage par id déjà vérifié dans le tenant
+        const a = c.args as { where?: Where; data?: Record<string, unknown>; values?: unknown[] }
+        // Écritures ciblées par id, toujours après vérification / verrou dans le tenant.
+        if (c.op === "truck.update" || c.op === "truckAssignment.updateMany" || c.op === "truckAssignment.update") return false
+        if (c.op === "$queryRaw") return !(a.values && typeof a.values[1] === "string")
         if (c.op === "truck.create" || c.op === "truckAssignment.create") return !a.data?.companyId
         return !a.where || !("companyId" in a.where)
       })
@@ -169,12 +228,17 @@ const CO = "co-A"
 const OTHER = "co-B"
 const T0 = new Date("2026-01-01T08:00:00Z")
 
+/** Véhicule actif (V1A : active = true, archivedAt = null par défaut). */
+function truck(row: Pick<TruckRow, "id" | "matricule" | "marque" | "companyId" | "teamId" | "chauffeurId">): TruckRow {
+  return { active: true, archivedAt: null, createdAt: T0, ...row }
+}
+
 function seed(): State {
   return {
     trucks: [
-      { id: "tr-1", matricule: "AB-123-CD", marque: "Crafter", companyId: CO, teamId: "team-1", chauffeurId: "emp-1" },
-      { id: "tr-2", matricule: "EF-456-GH", marque: null, companyId: CO, teamId: null, chauffeurId: null },
-      { id: "tr-x", matricule: "ZZ-999-ZZ", marque: "Master", companyId: OTHER, teamId: "team-x", chauffeurId: "emp-x" },
+      truck({ id: "tr-1", matricule: "AB-123-CD", marque: "Crafter", companyId: CO, teamId: "team-1", chauffeurId: "emp-1" }),
+      truck({ id: "tr-2", matricule: "EF-456-GH", marque: null, companyId: CO, teamId: null, chauffeurId: null }),
+      truck({ id: "tr-x", matricule: "ZZ-999-ZZ", marque: "Master", companyId: OTHER, teamId: "team-x", chauffeurId: "emp-x" }),
     ],
     teams: [
       { id: "team-1", companyId: CO, active: true },
@@ -435,7 +499,7 @@ describe("V0 — longueurs : aucune limite au-delà de la DB historique (colonne
   })
 
   it("véhicule existant à valeurs longues : l'édition renvoyée par les écrans reste acceptée", async () => {
-    db.state.trucks.push({ id: "tr-long", matricule: "L".repeat(300), marque: "x".repeat(1000), companyId: CO, teamId: null, chauffeurId: null })
+    db.state.trucks.push(truck({ id: "tr-long", matricule: "L".repeat(300), marque: "x".repeat(1000), companyId: CO, teamId: null, chauffeurId: null }))
     const r = await patch("tr-long", { matricule: "L".repeat(300), marque: "x".repeat(1000) + " v2" })
     assert.equal(r.status, 200)
     assert.equal(r.body.marque.length, 1003)
@@ -467,7 +531,7 @@ describe("V0 — espaces en bordure", () => {
   })
 
   it("ligne historique avec espaces : une modification sans matricule ne touche pas l'immatriculation", async () => {
-    db.state.trucks.push({ id: "tr-sp", matricule: "QR-222-ST ", marque: null, companyId: CO, teamId: null, chauffeurId: null })
+    db.state.trucks.push(truck({ id: "tr-sp", matricule: "QR-222-ST ", marque: null, companyId: CO, teamId: null, chauffeurId: null }))
     const r = await patch("tr-sp", { marque: "Ducato" })
     assert.equal(r.status, 200)
     assert.equal(db.state.trucks.find((t) => t.id === "tr-sp")!.matricule, "QR-222-ST ")
@@ -477,8 +541,8 @@ describe("V0 — espaces en bordure", () => {
   it("aucune collision nouvelle : les écrans envoyaient déjà l'immatriculation trimée", async () => {
     // Cas historique « AB-1 » et « AB-1 » (espace final) dans le même tenant.
     db.state.trucks.push(
-      { id: "tr-e1", matricule: "UV-333-WX", marque: null, companyId: CO, teamId: null, chauffeurId: null },
-      { id: "tr-e2", matricule: "UV-333-WX ", marque: null, companyId: CO, teamId: null, chauffeurId: null }
+      truck({ id: "tr-e1", matricule: "UV-333-WX", marque: null, companyId: CO, teamId: null, chauffeurId: null }),
+      truck({ id: "tr-e2", matricule: "UV-333-WX ", marque: null, companyId: CO, teamId: null, chauffeurId: null })
     )
     // VehiculesView / TruckSelector envoient `matricule.trim()` : la collision existait déjà avant V0
     // (même valeur envoyée au serveur) ; V0 la signale par un 409 explicite au lieu d'un faux message générique.
@@ -563,7 +627,7 @@ describe("V0 — véhicule inexistant et erreurs inattendues", () => {
     ["GET", "truck.findMany", () => get("ADMIN")],
     ["POST", "truck.create", () => post({ matricule: "BOOM-1" })],
     ["PATCH", "truck.update", () => patch("tr-2", { marque: "boom" })],
-    ["DELETE", "truck.deleteMany", () => del("tr-2")],
+    ["DELETE", "truck.update", () => del("tr-2")], // V1B : DELETE = archivage
   ] as const) {
     it(`${label} : erreur inattendue → 500 générique, sans détail interne`, async () => {
       db.failOn = op
@@ -640,16 +704,24 @@ describe("V0 — historique TruckAssignment inchangé", () => {
     assert.deepEqual(db.state, before)
   })
 
-  it("POST ne crée pas de ligne d'historique (comportement actuel conservé)", async () => {
+  it("V1B : POST ouvre une période CREATED (sans équipe ni chauffeur)", async () => {
     const before = db.state.assignments.length
-    await post({ matricule: "HS-000-AA" })
-    assert.equal(db.state.assignments.length, before)
+    const r = await post({ matricule: "HS-000-AA" })
+    assert.equal(db.state.assignments.length, before + 1)
+    assert.deepEqual(
+      openRows(r.body.id).map((a) => [a.reason, a.teamId, a.chauffeurId]),
+      [["CREATED", null, null]]
+    )
   })
 
-  it("DELETE (ADMIN) : suppression physique conservée, historique en cascade (comportement actuel)", async () => {
-    await del("tr-1")
-    assert.ok(!db.state.trucks.some((t) => t.id === "tr-1"))
-    assert.equal(db.state.assignments.filter((a) => a.truckId === "tr-1").length, 0)
+  it("V1B : DELETE (ADMIN) archive au lieu de supprimer — historique intégralement conservé", async () => {
+    const historyBefore = db.state.assignments.filter((a) => a.truckId === "tr-1").length
+    const r = await del("tr-1")
+    assert.equal(r.status, 200)
+    assert.equal(r.body.archived, true)
+    const t = db.state.trucks.find((x) => x.id === "tr-1")!
+    assert.deepEqual([t.active, t.teamId, t.chauffeurId], [false, null, null])
+    assert.equal(db.state.assignments.filter((a) => a.truckId === "tr-1").length, historyBefore + 1)
     assert.equal(db.state.assignments.filter((a) => a.truckId === "tr-x").length, 1)
   })
 })
@@ -669,5 +741,258 @@ describe("V0 — routes Next.js", () => {
       assert.doesNotMatch(src, /companyId/)
       assert.doesNotMatch(src, /prisma\.truck/)
     }
+  })
+})
+
+// ─── V1B : archivage, restauration, historique fiable ───────────────────────
+
+const archive = (id: string, role = "ADMIN", companyId: string | null = CO) => call(handleTruckArchive(id, deps(role, companyId)))
+const restore = (id: string, role = "ADMIN", companyId: string | null = CO) => call(handleTruckRestore(id, deps(role, companyId)))
+const periodsOf = (truckId: string) =>
+  db.state.assignments.filter((a) => a.truckId === truckId).sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())
+
+/** État (équipe, chauffeur, raison) d'un véhicule à la date D, reconstruit depuis l'historique. */
+function stateAt(truckId: string, at: Date) {
+  const p = periodsOf(truckId).find((a) => a.startedAt.getTime() <= at.getTime() && (a.endedAt === null || at.getTime() < a.endedAt.getTime()))
+  return p ? { teamId: p.teamId, chauffeurId: p.chauffeurId, reason: p.reason ?? null } : null
+}
+
+describe("V1B — archivage atomique", () => {
+  it("désaffecte équipe + chauffeur, clôt la période ouverte, ouvre une période ARCHIVED, conserve l'historique", async () => {
+    const r = await archive("tr-1")
+    assert.equal(r.status, 200)
+    assert.deepEqual([r.body.archived, r.body.alreadyArchived], [true, false])
+    const t = db.state.trucks.find((x) => x.id === "tr-1")!
+    assert.deepEqual([t.active, t.teamId, t.chauffeurId], [false, null, null])
+    assert.ok(t.archivedAt instanceof Date)
+    const periods = periodsOf("tr-1")
+    assert.equal(periods.length, 2)
+    assert.ok(periods[0].endedAt instanceof Date)
+    assert.deepEqual([periods[0].teamId, periods[0].chauffeurId], ["team-1", "emp-1"]) // période historique intacte
+    assert.deepEqual(openRows("tr-1").map((a) => [a.reason, a.teamId, a.chauffeurId]), [["ARCHIVED", null, null]])
+  })
+
+  it("double archivage idempotent : 200, aucune écriture", async () => {
+    await archive("tr-1")
+    const before = structuredClone(db.state)
+    const r = await archive("tr-1")
+    assert.equal(r.status, 200)
+    assert.equal(r.body.alreadyArchived, true)
+    assert.deepEqual(db.state, before)
+  })
+
+  it("DELETE = archivage (idempotent, même RBAC)", async () => {
+    assert.equal((await del("tr-1")).body.archived, true)
+    assert.equal((await del("tr-1")).body.alreadyArchived, true)
+    assert.ok(db.state.trucks.some((t) => t.id === "tr-1"))
+  })
+
+  it("véhicule legacy sans période ouverte : archivage possible, une période ARCHIVED est créée", async () => {
+    assert.equal(openRows("tr-2").length, 0)
+    assert.equal((await archive("tr-2")).status, 200)
+    assert.deepEqual(openRows("tr-2").map((a) => a.reason), ["ARCHIVED"])
+  })
+})
+
+describe("V1B — restauration", () => {
+  it("réactive sans réaffectation implicite ; période RESTORED ; idempotente", async () => {
+    await archive("tr-1")
+    const r = await restore("tr-1")
+    assert.equal(r.status, 200)
+    assert.equal(r.body.alreadyActive, false)
+    const t = db.state.trucks.find((x) => x.id === "tr-1")!
+    assert.deepEqual([t.active, t.archivedAt, t.teamId, t.chauffeurId], [true, null, null, null])
+    assert.deepEqual(periodsOf("tr-1").map((a) => a.reason ?? null), [null, "ARCHIVED", "RESTORED"])
+    const before = structuredClone(db.state)
+    assert.equal((await restore("tr-1")).body.alreadyActive, true)
+    assert.deepEqual(db.state, before)
+  })
+
+  it("après restauration, le véhicule peut être réaffecté (REASSIGNED)", async () => {
+    await archive("tr-1")
+    await restore("tr-1")
+    assert.equal((await patch("tr-1", { teamId: "team-2" })).status, 200)
+    assert.deepEqual(openRows("tr-1").map((a) => [a.reason, a.teamId]), [["REASSIGNED", "team-2"]])
+  })
+})
+
+describe("V1B — RBAC et tenant archive / restore", () => {
+  it("archive / restore : SUPER_ADMIN et ADMIN seulement", async () => {
+    for (const role of ["TEAM_LEADER", "EMPLOYEE", "CLIENT"]) {
+      assert.equal((await archive("tr-2", role)).status, 403, `archive ${role}`)
+      assert.equal((await restore("tr-2", role)).status, 403, `restore ${role}`)
+    }
+    assert.equal((await archive("tr-2", "SUPER_ADMIN")).status, 200)
+    assert.equal((await restore("tr-2", "SUPER_ADMIN")).status, 200)
+  })
+
+  it("véhicule d'une autre entreprise ou inexistant → 404, rien n'est modifié ; companyId absent → 403", async () => {
+    const before = structuredClone(db.state)
+    assert.equal((await archive("tr-x")).body.code, "TRUCK_NOT_FOUND")
+    assert.equal((await restore("tr-x")).body.code, "TRUCK_NOT_FOUND")
+    assert.equal((await archive("tr-404")).status, 404)
+    assert.equal((await archive("tr-1", "ADMIN", null)).body.code, "NO_COMPANY")
+    assert.deepEqual(db.state, before)
+  })
+})
+
+describe("V1B — historique fiable (raisons, chronologie, verrous)", () => {
+  it("POST : période CREATED ; doublon d'un véhicule archivé → 409 TRUCK_ARCHIVED_EXISTS", async () => {
+    await archive("tr-2")
+    const r = await post({ matricule: "ef-456-gh" })
+    assert.equal(r.status, 409)
+    assert.equal(r.body.code, "TRUCK_ARCHIVED_EXISTS")
+    assert.equal((await post({ matricule: "AB-123-CD" })).body.code, "MATRICULE_CONFLICT") // doublon d'un actif
+  })
+
+  it("changement d'équipe → REASSIGNED ; équipe déjà équipée → DISPLACED pour l'autre véhicule", async () => {
+    await patch("tr-2", { teamId: "team-1" })
+    assert.deepEqual(openRows("tr-2").map((a) => [a.reason, a.teamId]), [["REASSIGNED", "team-1"]])
+    assert.deepEqual(openRows("tr-1").map((a) => [a.reason, a.teamId, a.chauffeurId]), [["DISPLACED", null, "emp-1"]])
+  })
+
+  it("équipe archivée, chauffeur inactif, véhicule archivé : nouvelles affectations refusées (409), rien n'est écrit", async () => {
+    db.state.teams.push({ id: "team-old", companyId: CO, active: false })
+    db.state.employees.push({ id: "emp-old", companyId: CO, active: false })
+    const before = structuredClone(db.state)
+    assert.equal((await patch("tr-2", { teamId: "team-old" })).body.code, "TEAM_INACTIVE")
+    assert.equal((await patch("tr-2", { chauffeurId: "emp-old" })).body.code, "DRIVER_INACTIVE")
+    assert.deepEqual(db.state, before)
+    await archive("tr-2")
+    const archivedState = structuredClone(db.state)
+    assert.equal((await patch("tr-2", { teamId: "team-2" })).body.code, "TRUCK_ARCHIVED")
+    assert.equal((await patch("tr-2", { chauffeurId: "emp-2" })).body.code, "TRUCK_ARCHIVED")
+    assert.deepEqual(db.state, archivedState)
+  })
+
+  it("relations legacy inactives : jamais réécrites, valeur inchangée acceptée, renommage possible", async () => {
+    db.state.employees.find((e) => e.id === "emp-1")!.active = false // chauffeur devenu inactif (cas staging/prod)
+    const r = await patch("tr-1", { chauffeurId: "emp-1", teamId: "team-1", marque: "Crafter L3" })
+    assert.equal(r.status, 200)
+    const t = db.state.trucks.find((x) => x.id === "tr-1")!
+    assert.deepEqual([t.chauffeurId, t.teamId, t.marque], ["emp-1", "team-1", "Crafter L3"])
+    assert.deepEqual(periodsOf("tr-1").map((a) => a.id), ["as-open-1"]) // aucun mouvement d'historique
+  })
+
+  it("chronologie : une période n'est jamais close avant son début (horloge applicative en retard)", async () => {
+    const future = new Date(Date.now() + 60 * 60 * 1000)
+    db.state.assignments.find((a) => a.id === "as-open-1")!.startedAt = future
+    await patch("tr-1", { chauffeurId: "emp-2" })
+    for (const a of periodsOf("tr-1")) if (a.endedAt) assert.ok(a.endedAt.getTime() >= a.startedAt.getTime(), a.id)
+    assert.equal(openRows("tr-1")[0].startedAt.getTime(), future.getTime())
+  })
+
+  it("verrou : véhicule cible et véhicule déplacé verrouillés dans l'ordre des ids, dans le tenant", async () => {
+    await patch("tr-2", { teamId: "team-1" })
+    const lock = db.calls.find((c) => c.op === "$queryRaw" && /FROM "trucks"/.test((c.args as { sql: string }).sql))!.args as {
+      sql: string
+      values: unknown[]
+    }
+    assert.match(lock.sql, /FOR UPDATE/)
+    assert.deepEqual(lock.values, [["tr-1", "tr-2"], CO])
+  })
+
+  it("concurrence : équipe prise par un autre véhicule après la lecture → 409 CONCURRENT_UPDATE, rien n'est écrit", async () => {
+    db.beforeTransaction = (state) => {
+      // Entre la lecture préalable et la transaction, un autre véhicule prend team-2.
+      const other = state.trucks.find((t) => t.id === "tr-1")!
+      if (other.teamId === "team-1") other.teamId = "team-2"
+    }
+    const before = structuredClone(db.state)
+    before.trucks.find((t) => t.id === "tr-1")!.teamId = "team-2"
+    const r = await patch("tr-2", { teamId: "team-2" })
+    assert.equal(r.status, 409)
+    assert.equal(r.body.code, "CONCURRENT_UPDATE")
+    assert.deepEqual(db.state, before)
+  })
+
+  it("activité relue sous verrou : équipe archivée / chauffeur désactivé juste avant la transaction → refus", async () => {
+    db.beforeTransaction = (state) => {
+      state.teams.find((t) => t.id === "team-2")!.active = false
+      state.employees.find((e) => e.id === "emp-2")!.active = false
+    }
+    assert.equal((await patch("tr-2", { teamId: "team-2" })).body.code, "TEAM_INACTIVE")
+    assert.equal((await patch("tr-2", { chauffeurId: "emp-2" })).body.code, "DRIVER_INACTIVE")
+    const shares = db.calls.filter((c) => c.op === "$queryRaw" && /FOR SHARE/.test((c.args as { sql: string }).sql))
+    assert.equal(shares.length, 2)
+    assert.equal(openRows("tr-2").length, 0) // rien n'a été écrit
+  })
+
+  it("transaction expirée (P2028) ou interblocage PostgreSQL (40P01) → 409 CONCURRENT_UPDATE", async () => {
+    for (const failWith of [
+      Object.assign(new Error("Transaction already closed"), { code: "P2028" }),
+      Object.assign(new Error("deadlock detected"), { code: "P2010", meta: { code: "40P01" } }),
+    ]) {
+      db.failOn = "$queryRaw"
+      db.failWith = failWith
+      const r = await patch("tr-2", { teamId: "team-2" })
+      assert.equal(r.status, 409)
+      assert.equal(r.body.code, "CONCURRENT_UPDATE")
+    }
+    assert.equal(logged.length, 0)
+  })
+
+  it("conflit sur la période ouverte (index openForTruckId) → 409 PERIOD_CONFLICT, jamais 500", async () => {
+    db.failOn = "truckAssignment.create"
+    db.failWith = p2002(["openForTruckId"])
+    const r = await patch("tr-2", { teamId: "team-2" })
+    assert.equal(r.status, 409)
+    assert.equal(r.body.code, "PERIOD_CONFLICT")
+    assert.equal(classifyUniqueConflict({ code: "P2002", meta: { target: "truck_assignments_openForTruckId_key" } }), "PERIOD_CONFLICT")
+  })
+
+  it("au plus une période ouverte par véhicule après toute séquence d'opérations", async () => {
+    await patch("tr-2", { teamId: "team-1" })
+    await patch("tr-1", { teamId: "team-2", chauffeurId: "emp-2" })
+    await archive("tr-2")
+    await restore("tr-2")
+    await patch("tr-2", { teamId: "team-1" })
+    for (const id of ["tr-1", "tr-2"]) assert.ok(openRows(id).length <= 1, id)
+    for (const t of db.state.trucks.filter((x) => x.active && x.companyId === CO)) {
+      const open = openRows(t.id)[0]
+      assert.deepEqual([open.teamId, open.chauffeurId], [t.teamId, t.chauffeurId], t.id) // état courant = période ouverte
+    }
+  })
+
+  it("reconstruction : à une date donnée, le véhicule avait telle équipe et tel chauffeur", async () => {
+    const t1 = new Date()
+    await new Promise((r) => setTimeout(r, 5))
+    await patch("tr-1", { teamId: "team-2" })
+    const t2 = new Date()
+    await new Promise((r) => setTimeout(r, 5))
+    await archive("tr-1")
+    assert.deepEqual(stateAt("tr-1", t1), { teamId: "team-1", chauffeurId: "emp-1", reason: null })
+    assert.deepEqual(stateAt("tr-1", t2), { teamId: "team-2", chauffeurId: "emp-1", reason: "REASSIGNED" })
+    assert.deepEqual(stateAt("tr-1", new Date(Date.now() + 1000)), { teamId: null, chauffeurId: null, reason: "ARCHIVED" })
+  })
+})
+
+describe("V1B — routes archive / restore", () => {
+  it("routes POST dédiées : simples adaptateurs, sans companyId client", async () => {
+    const { readFileSync } = await import("node:fs")
+    const a = readFileSync("src/app/api/trucks/[id]/archive/route.ts", "utf8")
+    const r = readFileSync("src/app/api/trucks/[id]/restore/route.ts", "utf8")
+    assert.match(a, /export async function POST[\s\S]*handleTruckArchive\(\(await context\.params\)\.id, \{ auth, db: prisma \}\)/)
+    assert.match(r, /export async function POST[\s\S]*handleTruckRestore\(\(await context\.params\)\.id, \{ auth, db: prisma \}\)/)
+    for (const src of [a, r]) assert.doesNotMatch(src, /companyId|prisma\.truck/)
+  })
+})
+
+describe("V1B — adaptation UI existante (garde-fous statiques)", () => {
+  it("/equipes ne propose que les véhicules actifs ; VehiculesView archive / restaure sans DELETE ; TruckSelector remonte les erreurs", async () => {
+    const { readFileSync } = await import("node:fs")
+    const equipes = readFileSync("src/app/(dashboard)/equipes/page.tsx", "utf8")
+    assert.match(equipes, /prisma\.truck\.findMany\(\{\s*where: \{ companyId, active: true \}/)
+    const view = readFileSync("src/components/vehicules/VehiculesView.tsx", "utf8")
+    assert.doesNotMatch(view, /method: "DELETE"/)
+    assert.match(view, /\/api\/trucks\/\$\{t\.id\}\/\$\{archive \? "archive" : "restore"\}/)
+    assert.match(view, /Véhicules archivés/)
+    const selector = readFileSync("src/components/equipes/TruckSelector.tsx", "utf8")
+    assert.match(selector, /reportFailure\(await patchTruck\(/)
+    assert.match(selector, /if \(await assign\(truck\.id\)\) toast\.success\("Camion ajouté"\)/)
+    assert.match(view, /\(inactif\)/)
+    assert.match(view, /\(archivée\)/)
+    const menu = readFileSync("src/components/equipes/EquipeActionsMenu.tsx", "utf8")
+    assert.match(menu, /\.filter\(\(m\) => m\.active \|\| m\.id ===/)
   })
 })
