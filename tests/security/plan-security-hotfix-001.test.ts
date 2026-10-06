@@ -64,10 +64,9 @@ describe("deleteEmployeImpl — tenant-safe", () => {
         if (args.id !== employee.id || args.companyId !== companyId) return null
         return employee
       },
-      deleteAssignments: async (id) => {
+      hasVehicleHistory: async () => false,
+      deleteEmployeeRecords: async (id) => {
         calls.deleteAssignments.push(id)
-      },
-      deleteEmployee: async (id) => {
         calls.deleteEmployee.push(id)
       },
       deleteUser: async (id) => {
@@ -151,7 +150,6 @@ describe("invitations — rôles", () => {
         email: "inviteur@test.fr",
       }),
       findExistingUser: async () => null,
-      deleteUser: async () => {},
       deletePendingInvitations: async () => {},
       findCompanyName: async () => "Co",
       createInvitation: async (data) => {

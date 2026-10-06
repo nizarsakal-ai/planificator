@@ -26,6 +26,35 @@ export function rolesAllowedForInviter(
   return []
 }
 
+export const INVITE_ACCOUNT_AMBIGUOUS = "INVITE_ACCOUNT_AMBIGUOUS"
+
+export const INVITE_ACCOUNT_AMBIGUOUS_MESSAGE =
+  "Ce compte existe déjà dans un état qui ne permet pas de le réinviter automatiquement. Contactez le support."
+
+export type ExistingMember = {
+  id: string
+  active: boolean
+  role: string
+  companyId: string | null
+  employeeProfile: { id: string; active: boolean; companyId: string } | null
+}
+
+/**
+ * Identité archivée réactivable sans ambiguïté : même User et même Employee, tous deux de l'entreprise
+ * d'invitation et tous deux désactivés (état produit par toggleEmployeActive), rôle EMPLOYEE ou TEAM_LEADER (jamais d'écrasement d'un ADMIN). Tout autre état est refusé.
+ */
+export function isReactivableArchivedMember(existing: ExistingMember, companyId: string): boolean {
+  const p = existing.employeeProfile
+  return (
+    existing.companyId === companyId &&
+    (existing.role === "EMPLOYEE" || existing.role === "TEAM_LEADER") &&
+    !existing.active &&
+    p !== null &&
+    p.companyId === companyId &&
+    !p.active
+  )
+}
+
 export type InviterMembreDeps = {
   requireSession: () => Promise<{
     id: string
@@ -37,11 +66,7 @@ export type InviterMembreDeps = {
   findExistingUser: (
     email: string,
     companyId: string
-  ) => Promise<{
-    id: string
-    employeeProfile: { id: string; active: boolean } | null
-  } | null>
-  deleteUser: (id: string) => Promise<unknown>
+  ) => Promise<ExistingMember | null>
   deletePendingInvitations: (email: string) => Promise<unknown>
   findCompanyName: (companyId: string) => Promise<string | null>
   createInvitation: (data: {
@@ -92,7 +117,11 @@ export async function inviterMembreImpl(
     if (existing.employeeProfile?.active) {
       return { error: "Cet employé fait déjà partie de votre entreprise." }
     }
-    await deps.deleteUser(existing.id)
+    // Jamais de suppression : une identité archivée est réactivée à l'acceptation (mêmes User/Employee,
+    // historique véhicule préservé). Tout état incohérent est refusé sans réparation automatique.
+    if (!isReactivableArchivedMember(existing, user.companyId)) {
+      return { error: INVITE_ACCOUNT_AMBIGUOUS_MESSAGE, code: INVITE_ACCOUNT_AMBIGUOUS }
+    }
   }
 
   await deps.deletePendingInvitations(parsed.data.email)

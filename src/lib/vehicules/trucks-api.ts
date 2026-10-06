@@ -115,6 +115,27 @@ export function classifyVanishedReference(err: unknown): "TRUCK_NOT_FOUND" | "TE
   return null
 }
 
+/**
+ * Violation de la CHECK chronologique (V1B-db : endedAt >= startedAt), reconnue uniquement par le nom de la
+ * contrainte dans l'erreur Prisma (P2004) ou PostgreSQL (23514). Toute autre erreur reste inchangée (500).
+ */
+export function classifyCheckViolation(err: unknown): "PERIOD_CONFLICT" | null {
+  if (!err || typeof err !== "object") return null
+  const { code, message, meta } = err as {
+    code?: unknown
+    message?: unknown
+    meta?: { code?: unknown; database_error?: unknown; message?: unknown; constraint?: unknown }
+  }
+  const known = code === "P2004" || code === "23514" || meta?.code === "23514"
+  // Prisma peut remonter une CHECK sans code : le nom de la contrainte ET la formulation PostgreSQL sont alors exigés.
+  const bare = code === undefined && typeof message === "string" && /violates check constraint/i.test(message)
+  if (!known && !bare) return null
+  const texts = [message, meta?.database_error, meta?.message, meta?.constraint].filter(
+    (v): v is string => typeof v === "string"
+  )
+  return texts.some((t) => t.includes("truck_assignments_v1b_chronology_check")) ? "PERIOD_CONFLICT" : null
+}
+
 function errorDetails(err: unknown): Record<string, string | undefined> {
   if (!err || typeof err !== "object") return { kind: typeof err }
   const e = err as { name?: unknown; code?: unknown }
@@ -283,7 +304,7 @@ function handleFailure(deps: TrucksApiDeps, context: string, err: unknown): Resp
   const code = err && typeof err === "object" ? (err as { code?: unknown; meta?: { code?: unknown } }) : null
   if (code && (code.code === "P2028" || code.code === "40P01" || code.meta?.code === "40P01"))
     return trucksError("CONCURRENT_UPDATE")
-  const conflict = classifyUniqueConflict(err) ?? classifyVanishedReference(err)
+  const conflict = classifyUniqueConflict(err) ?? classifyCheckViolation(err) ?? classifyVanishedReference(err)
   if (conflict) return trucksError(conflict)
   ;(deps.logError ?? defaultLogError)(context, errorDetails(err))
   return trucksError("SERVER_ERROR")

@@ -5,8 +5,8 @@ import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
 import { sendInvitationEmail } from "@/lib/email"
 import bcrypt from "bcryptjs"
-import { z } from "zod"
 import { inviterMembreImpl } from "@/lib/actions/invitation-invite.core"
+import { acceptInvitationImpl, type AcceptableInvitation } from "@/lib/actions/invitation-accept.core"
 
 async function requireAdmin() {
   const session = await auth()
@@ -25,9 +25,14 @@ export async function inviterMembre(formData: FormData) {
     findExistingUser: (email, companyId) =>
       prisma.user.findFirst({
         where: { email, companyId },
-        include: { employeeProfile: { select: { id: true, active: true } } },
+        select: {
+          id: true,
+          active: true,
+          role: true,
+          companyId: true,
+          employeeProfile: { select: { id: true, active: true, companyId: true } },
+        },
       }),
-    deleteUser: (id) => prisma.user.delete({ where: { id } }),
     deletePendingInvitations: (email) =>
       prisma.invitation.deleteMany({
         where: { email, status: "PENDING" },
@@ -69,67 +74,78 @@ export async function getInvitation(token: string) {
   return invitation
 }
 
-const acceptSchema = z.object({
-  token: z.string().min(1),
-  name: z.string().min(1, "Le nom est requis"),
-  password: z.string().min(8, "8 caractères minimum"),
-})
-
 export async function acceptInvitation(formData: FormData) {
-  const raw = {
-    token: formData.get("token") as string,
-    name: formData.get("name") as string,
-    password: formData.get("password") as string,
-  }
+  return acceptInvitationImpl(formData, {
+    findInvitation: async (token) => {
+      const invitation = await prisma.invitation.findFirst({
+        where: { token, status: "PENDING", expiresAt: { gt: new Date() } },
+      })
+      return invitation as AcceptableInvitation | null
+    },
+    findUserByEmail: (email) =>
+      prisma.user.findUnique({
+        where: { email },
+        select: {
+          id: true,
+          active: true,
+          role: true,
+          companyId: true,
+          employeeProfile: { select: { id: true, active: true, companyId: true } },
+        },
+      }),
+    hashPassword: (password) => bcrypt.hash(password, 12),
+    createMember: ({ invitation, name, password }) =>
+      prisma.$transaction(async (tx) => {
+        const newUser = await tx.user.create({
+          data: {
+            email: invitation.email,
+            name,
+            password,
+            role: invitation.role,
+            companyId: invitation.companyId,
+          },
+        })
 
-  const parsed = acceptSchema.safeParse(raw)
-  if (!parsed.success) return { error: parsed.error.errors[0].message }
+        // Créer automatiquement le profil employé si rôle EMPLOYEE ou TEAM_LEADER
+        if (["EMPLOYEE", "TEAM_LEADER"].includes(invitation.role)) {
+          const [firstName, ...rest] = name.split(" ")
+          await tx.employee.create({
+            data: {
+              userId: newUser.id,
+              companyId: invitation.companyId,
+              firstName: firstName || name,
+              lastName: rest.join(" ") || "",
+            },
+          })
+        }
 
-  const invitation = await prisma.invitation.findFirst({
-    where: {
-      token: parsed.data.token,
-      status: "PENDING",
-      expiresAt: { gt: new Date() },
+        await tx.invitation.update({
+          where: { id: invitation.id },
+          data: { status: "ACCEPTED" },
+        })
+      }),
+    reactivateMember: async ({ invitationId, userId, employeeId, companyId, role, name, password }) => {
+      try {
+        await prisma.$transaction(async (tx) => {
+          // Gardés par l'état attendu : si l'identité a changé entre la lecture et l'écriture, rien n'est écrit.
+          const u = await tx.user.updateMany({
+            where: { id: userId, companyId, active: false },
+            data: { name, password, role, active: true },
+          })
+          const e = await tx.employee.updateMany({
+            where: { id: employeeId, userId, companyId, active: false },
+            data: { active: true },
+          })
+          if (u.count !== 1 || e.count !== 1) throw new IdentityStateChanged()
+          await tx.invitation.update({ where: { id: invitationId }, data: { status: "ACCEPTED" } })
+        })
+        return true
+      } catch (err) {
+        if (err instanceof IdentityStateChanged) return false
+        throw err
+      }
     },
   })
-  if (!invitation) return { error: "Invitation invalide ou expirée." }
-
-  const existingUser = await prisma.user.findUnique({
-    where: { email: invitation.email },
-  })
-  if (existingUser) return { error: "Un compte existe déjà avec cet email." }
-
-  const hashed = await bcrypt.hash(parsed.data.password, 12)
-
-  await prisma.$transaction(async (tx) => {
-    const newUser = await tx.user.create({
-      data: {
-        email: invitation.email,
-        name: parsed.data.name,
-        password: hashed,
-        role: invitation.role,
-        companyId: invitation.companyId,
-      },
-    })
-
-    // Créer automatiquement le profil employé si rôle EMPLOYEE ou TEAM_LEADER
-    if (["EMPLOYEE", "TEAM_LEADER"].includes(invitation.role)) {
-      const [firstName, ...rest] = parsed.data.name.split(" ")
-      await tx.employee.create({
-        data: {
-          userId: newUser.id,
-          companyId: invitation.companyId,
-          firstName: firstName || parsed.data.name,
-          lastName: rest.join(" ") || "",
-        },
-      })
-    }
-
-    await tx.invitation.update({
-      where: { id: invitation.id },
-      data: { status: "ACCEPTED" },
-    })
-  })
-
-  return { success: true }
 }
+
+class IdentityStateChanged extends Error {}

@@ -261,9 +261,18 @@ export async function deleteEmploye(employeeId: string) {
         where,
         select: { id: true, userId: true },
       }),
-    deleteAssignments: (id) =>
-      prisma.employeeAssignment.deleteMany({ where: { employeeId: id } }),
-    deleteEmployee: (id) => prisma.employee.delete({ where: { id } }),
+    hasVehicleHistory: async ({ employeeId: id, companyId }) => {
+      const [history, current] = await Promise.all([
+        prisma.truckAssignment.count({ where: { chauffeurId: id, companyId } }),
+        prisma.truck.count({ where: { chauffeurId: id, companyId } }),
+      ])
+      return history + current > 0
+    },
+    deleteEmployeeRecords: (id) =>
+      prisma.$transaction([
+        prisma.employeeAssignment.deleteMany({ where: { employeeId: id } }),
+        prisma.employee.delete({ where: { id } }),
+      ]),
     deleteUser: (id) => prisma.user.delete({ where: { id } }),
     revalidate: () => revalidatePath("/employes"),
   })

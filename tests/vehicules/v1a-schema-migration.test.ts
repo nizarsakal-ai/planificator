@@ -58,12 +58,12 @@ describe("V1A — schéma Prisma", () => {
     assert.match(company, /^\s+truckAssignments\s+TruckAssignment\[\]$/m)
   })
 
-  it("relations existantes inchangées (team / chauffeur SetNull, truck Cascade)", () => {
+  it("relations existantes (Truck.team / chauffeur SetNull ; historique passé en Restrict par V1B-db)", () => {
     assert.match(field(truck, "team"), /onDelete: SetNull\)$/)
     assert.match(field(truck, "chauffeur"), /onDelete: SetNull\)$/)
-    assert.match(field(ta, "truck"), /onDelete: Cascade\)$/)
-    assert.match(field(ta, "chauffeur"), /onDelete: SetNull\)$/)
-    assert.match(field(ta, "team"), /onDelete: SetNull\)$/)
+    assert.match(field(ta, "truck"), /onDelete: Restrict\)$/)
+    assert.match(field(ta, "chauffeur"), /onDelete: Restrict\)$/)
+    assert.match(field(ta, "team"), /onDelete: Restrict\)$/)
   })
 
   it("hors périmètre absent : pas de brand/model/vehicleModel, pas de @@unique([id, companyId])", () => {
@@ -75,9 +75,11 @@ describe("V1A — schéma Prisma", () => {
 })
 
 describe("V1A — migration SQL", () => {
-  it("nom de migration postérieur au dernier existant", async () => {
+  it("nom de migration postérieur au dernier existant avant V1B-db", async () => {
     const { readdirSync } = await import("node:fs")
-    const names = readdirSync("prisma/migrations").filter((n) => /^\d{14}_/.test(n)).sort()
+    const names = readdirSync("prisma/migrations")
+      .filter((n) => /^\d{14}_/.test(n) && !n.endsWith("_vehicles_v1b_db_integrity"))
+      .sort()
     assert.equal(names.at(-1), MIGRATION_NAME)
   })
 

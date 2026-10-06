@@ -1687,7 +1687,8 @@ model TruckAssignment {
   companyId      String
   startedAt      DateTime               @default(now())
   endedAt        DateTime?
-  /// Motif de la période (V1B). NULL pour les lignes antérieures à V1.
+  /// Motif de la période (V1B). Jamais NULL en base après V1B-db (CHECK truck_assignments_v1b_reason_required_check) ;
+  /// les lignes antérieures à V1B valent BACKFILL.
   reason         TruckAssignmentReason?
   /// = truckId tant que la période est ouverte (endedAt IS NULL), sinon NULL.
   /// Maintenu exclusivement par le trigger SQL truck_assignments_v1a_open_for_truck_id
@@ -1695,11 +1696,13 @@ model TruckAssignment {
   /// L'unicité garantit au plus une période ouverte par véhicule.
   openForTruckId String?                @unique
 
-  // Restrict : l'historique d'une entreprise n'est jamais supprimé implicitement.
+  // Restrict (V1B-db) : une référence historique non NULL n'est jamais effacée silencieusement
+  // par la suppression de son entreprise, de son véhicule, de son chauffeur ou de son équipe.
+  // chauffeurId / teamId restent nullables : NULL = période sans chauffeur / sans équipe.
   company   Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  truck     Truck     @relation(fields: [truckId], references: [id], onDelete: Cascade)
-  chauffeur Employee? @relation("TruckAssignmentChauffeur", fields: [chauffeurId], references: [id], onDelete: SetNull)
-  team      Team?     @relation("TruckAssignmentTeam", fields: [teamId], references: [id], onDelete: SetNull)
+  truck     Truck     @relation(fields: [truckId], references: [id], onDelete: Restrict)
+  chauffeur Employee? @relation("TruckAssignmentChauffeur", fields: [chauffeurId], references: [id], onDelete: Restrict)
+  team      Team?     @relation("TruckAssignmentTeam", fields: [teamId], references: [id], onDelete: Restrict)
 
   @@index([truckId, startedAt])
   @@index([chauffeurId])
