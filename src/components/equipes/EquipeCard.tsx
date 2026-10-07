@@ -5,6 +5,7 @@ import { Crown, HardHat, Truck, Users } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { getInitials } from "@/lib/utils"
+import { formatVehicleIdentity } from "@/lib/vehicules/vehicules-view"
 import { splitAvatars, teamSizeHint, type EquipeMember, type EquipeViewItem } from "@/lib/equipes/equipes-view"
 import { EquipeActionsMenu, type EquipeTruckOption } from "./EquipeActionsMenu"
 
@@ -68,7 +69,9 @@ export function VehicleLabel({ truck }: { truck: EquipeViewItem["truck"] }) {
   return (
     <span className="truncate text-slate-700">
       {truck.matricule}
-      {truck.marque && <span className="text-slate-400"> · {truck.marque}</span>}
+      {formatVehicleIdentity(truck.marque, truck.modele) && (
+        <span className="text-slate-400"> · {formatVehicleIdentity(truck.marque, truck.modele)}</span>
+      )}
     </span>
   )
 }

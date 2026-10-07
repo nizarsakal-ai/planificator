@@ -52,7 +52,7 @@ export default async function EquipesPage() {
           orderBy: { joinedAt: "asc" },
           select: { employee: { select: { ...PERSON_SELECT, avatarUrl: true, active: true } } },
         },
-        truck: { select: { id: true, matricule: true, marque: true, companyId: true } },
+        truck: { select: { id: true, matricule: true, marque: true, modele: true, companyId: true } },
       },
       orderBy: { name: "asc" },
     }),
@@ -90,7 +90,7 @@ export default async function EquipesPage() {
     prisma.truck.findMany({
       where: { companyId, active: true },
       orderBy: { matricule: "asc" },
-      select: { id: true, matricule: true, marque: true, chauffeurId: true, teamId: true },
+      select: { id: true, matricule: true, marque: true, modele: true, chauffeurId: true, teamId: true },
     }),
   ])
 
@@ -106,6 +106,7 @@ export default async function EquipesPage() {
     id: t.id,
     matricule: t.matricule,
     marque: t.marque,
+    modele: t.modele,
     chauffeurId: t.chauffeurId,
     teamId: t.teamId,
     teamName: t.teamId ? (teamNames.get(t.teamId) ?? null) : null,

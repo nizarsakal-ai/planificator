@@ -3,11 +3,14 @@ import { useState } from "react"
 import { Truck, Pencil, User } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+import { VehicleForm } from "@/components/vehicules/VehicleForm"
+import { toTruckPayload, vehicleOptionLabel, vehicleToFormValues, type VehicleFormValues } from "@/lib/vehicules/vehicules-view"
 
 interface TruckData {
   id: string
   matricule: string
   marque?: string | null
+  modele?: string | null
   chauffeurId?: string | null
   teamId: string | null
   teamName?: string | null
@@ -20,18 +23,14 @@ interface Props {
   members: Member[]
 }
 
-const truckLabel = (t: TruckData) =>
-  t.marque ? `${t.matricule} — ${t.marque}` : t.matricule
+/** « AB-123-CD — VW Crafter » : marque + modèle ; une ancienne marque seule (« VW Crafter ») reste affichée telle quelle. */
+const truckLabel = (t: TruckData) => vehicleOptionLabel(t)
 
 export function TruckSelector({ teamId, currentTruck, allTrucks, members }: Props) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
-  const [newMatricule, setNewMatricule] = useState("")
-  const [newMarque, setNewMarque] = useState("")
-  const [editMatricule, setEditMatricule] = useState("")
-  const [editMarque, setEditMarque] = useState("")
 
   const patchTruck = async (truckId: string, body: Record<string, unknown>) => {
     const res = await fetch("/api/trucks/" + truckId, {
@@ -71,13 +70,12 @@ export function TruckSelector({ teamId, currentTruck, allTrucks, members }: Prop
     setLoading(false)
   }
 
-  const addTruck = async () => {
-    if (!newMatricule.trim()) return
+  const addTruck = async (values: VehicleFormValues) => {
     setLoading(true)
     const res = await fetch("/api/trucks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ matricule: newMatricule.trim(), marque: newMarque.trim() }),
+      body: JSON.stringify(toTruckPayload(values)),
     })
     const truck = await res.json()
     if (truck.id) {
@@ -86,25 +84,18 @@ export function TruckSelector({ teamId, currentTruck, allTrucks, members }: Prop
       toast.error(truck.error ?? "Erreur")
       setLoading(false)
     }
-    setNewMatricule("")
-    setNewMarque("")
     setShowAdd(false)
   }
 
   const openEdit = () => {
     if (!currentTruck) return
-    setEditMatricule(currentTruck.matricule)
-    setEditMarque(currentTruck.marque ?? "")
     setShowEdit(true)
   }
 
-  const saveEdit = async () => {
-    if (!currentTruck || !editMatricule.trim()) return
+  const saveEdit = async (values: VehicleFormValues) => {
+    if (!currentTruck) return
     setLoading(true)
-    const res = await patchTruck(currentTruck.id, {
-      matricule: editMatricule.trim(),
-      marque: editMarque.trim(),
-    })
+    const res = await patchTruck(currentTruck.id, toTruckPayload(values))
     if (res.ok) {
       toast.success("Camion modifié")
       setShowEdit(false)
@@ -175,77 +166,35 @@ export function TruckSelector({ teamId, currentTruck, allTrucks, members }: Prop
         </div>
       )}
 
-      {/* Formulaire modification camion existant */}
+      {/* Formulaire modification camion existant (formulaire partagé) */}
       {showEdit && currentTruck && (
-        <div className="mt-2 space-y-2">
-          <input
-            type="text"
-            placeholder="Immatriculation (ex: AB-123-CD)"
-            value={editMatricule}
-            onChange={(e) => setEditMatricule(e.target.value.toUpperCase())}
-            className="w-full text-sm border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        <div className="mt-2">
+          <VehicleForm
+            key={currentTruck.id}
+            idPrefix={`team-${teamId}-edit`}
+            initialValues={vehicleToFormValues({
+              matricule: currentTruck.matricule,
+              marque: currentTruck.marque ?? null,
+              modele: currentTruck.modele ?? null,
+            })}
+            submitLabel="Enregistrer"
+            submitting={loading}
+            onSubmit={saveEdit}
+            onCancel={() => setShowEdit(false)}
           />
-          <input
-            type="text"
-            placeholder="Marque / modèle (ex: VW Crafter)"
-            value={editMarque}
-            onChange={(e) => setEditMarque(e.target.value)}
-            className="w-full text-sm border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <div className="flex gap-2">
-            <button
-              onClick={saveEdit}
-              disabled={loading || !editMatricule.trim()}
-              className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-            >
-              Enregistrer
-            </button>
-            <button
-              onClick={() => setShowEdit(false)}
-              disabled={loading}
-              className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
-            >
-              Annuler
-            </button>
-          </div>
         </div>
       )}
 
-      {/* Formulaire ajout nouveau camion */}
+      {/* Formulaire ajout nouveau camion (formulaire partagé) */}
       {showAdd && (
-        <div className="mt-2 space-y-2">
-          <input
-            type="text"
-            placeholder="Immatriculation (ex: AB-123-CD)"
-            value={newMatricule}
-            onChange={(e) => setNewMatricule(e.target.value.toUpperCase())}
-            className="w-full text-sm border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            onKeyDown={(e) => e.key === "Enter" && addTruck()}
+        <div className="mt-2">
+          <VehicleForm
+            idPrefix={`team-${teamId}-add`}
+            submitLabel="Ajouter"
+            submitting={loading}
+            onSubmit={addTruck}
+            onCancel={() => setShowAdd(false)}
           />
-          <input
-            type="text"
-            placeholder="Marque / modèle (ex: VW Crafter)"
-            value={newMarque}
-            onChange={(e) => setNewMarque(e.target.value)}
-            className="w-full text-sm border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            onKeyDown={(e) => e.key === "Enter" && addTruck()}
-          />
-          <div className="flex gap-2">
-            <button
-              onClick={addTruck}
-              disabled={loading || !newMatricule.trim()}
-              className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-            >
-              Ajouter
-            </button>
-            <button
-              onClick={() => setShowAdd(false)}
-              disabled={loading}
-              className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
-            >
-              Annuler
-            </button>
-          </div>
         </div>
       )}
     </div>
