@@ -15,4 +15,4 @@ Statut : procédure **VÉRIFIÉE** dans `docs/acquisition-ops-v2-staging-activat
 
 ## Interdits pour un agent
 
-Exécuter `migrate deploy` ou activer un flag sans demande explicite ; toucher à une base dont l'hôte n'est pas confirmé comme staging.
+Exécuter `migrate deploy` ou activer un flag **sans autorisation explicite** (l'autorisation n'étend jamais au-delà de l'environnement nommé) ; toucher à une base dont l'hôte n'est pas confirmé comme staging.

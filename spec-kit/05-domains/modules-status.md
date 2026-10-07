@@ -26,7 +26,7 @@ Vehicles
 | Navigation | `63bc6d4`, `d2695fd` | oui | — | travail en cours hors main |
 | Acquisition | nombreux lots | très nombreux | `docs/plan-acq-012-*` | état des lots à confirmer |
 | Booking | oui | oui (dont pg) | `BOOKING-INVARIANTS.md` | |
-| Integration platform | lots **1A, 1B, 1B2, 1C** ; **LOT-2 : spec seule** (`0dfc0ca`), implémentation (`6400e4e`, `814c3f6`) non mergée | oui (dont pg) | `docs/integration-platform-001*` | pas de code de routage dans `src/lib/integration/` |
+| Integration platform | lots **1A, 1B, 1B2, 1C** ; **LOT-2 : spec seule** (`0dfc0ca`), implémentation (`6400e4e`, `814c3f6`) non mergée | oui (dont pg) | `docs/integration-platform-001*` | pas de routeur dans `src/lib/integration/` (seuls des contrats et types du LOT-1A, ex. `contracts/routing-decision.ts`) |
 | Planning | existant | **aucun dossier `tests/planning/`** ; seul `tests/chantiers/assignment-ui-policy.test.ts` touche aux affectations | aucune | à auditer en priorité |
 | Finance | existant | **aucun** | aucune | à auditer en priorité |
 | Absences / Pointage / Logements | existant | `tests/absences/create-absence-formdata.test.ts` ; pas de dossier dédié pointage/logements (la création d'`Accommodation` est couverte indirectement par `tests/booking/*`) | aucune | à auditer |

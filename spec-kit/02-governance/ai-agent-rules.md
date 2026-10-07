@@ -36,7 +36,7 @@ UTILISATEUR → SPEC KIT → ORCHESTRATEUR
 | Orchestrateur | Lire le kit, découper, déléguer, agréger les preuves | Écrire en production, merger, approuver sa propre délégation |
 | Architect | Proposer ADR/spec | Implémenter |
 | Implementer | Coder, tester localement | S'auto-relire, élargir le périmètre |
-| DB / Security | Auditer en lecture seule, rédiger un plan de migration | Exécuter une migration en staging/production |
+| DB / Security | Auditer en lecture seule, rédiger un plan de migration | Exécuter une migration en staging/production **sans autorisation explicite** ; jamais `db push` / `migrate reset` / `migrate dev` sur base non jetable |
 | Reviewer indépendant | Lire diff + spec + tests, rendre un verdict motivé | Corriger à la place de l'implémenteur sans rendre un nouveau verdict |
 
 ## Contrat de délégation (à inclure dans chaque tâche confiée à un sous-agent)

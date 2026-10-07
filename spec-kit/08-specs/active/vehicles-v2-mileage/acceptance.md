@@ -19,6 +19,7 @@ Statut : **tableau de traçabilité vide** — rien n'est implémenté. Chaque l
 ## Critères globaux
 
 - [ ] Décisions D1–D6 tranchées et ADR accepté.
+- [ ] **Prérequis levé avant merge** : confirmer si `main` déploie automatiquement en production.
 - [ ] Lot V2-0 (extraction sans changement de comportement) prouvé par `test:vehicules` inchangé.
 - [ ] Impacts E1 (chantier SET NULL) et E2 (suppression d'employé) testés.
 - [ ] **PRR complète** (nouvelle table + nouvelle API) : GO avant production.

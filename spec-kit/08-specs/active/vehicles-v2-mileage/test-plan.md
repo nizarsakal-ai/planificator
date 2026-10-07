@@ -15,7 +15,7 @@ Statut : plan (aucun test écrit). Outillage : `node --import tsx --test` ; ajou
 | V2-MIL-008 | recherche statique : aucun import de géocodage/latitude dans le module ; test qu'une distance ne dépend jamais d'un chantier | unitaire |
 | V2-MIL-P02/P04 | deux POST concurrents : un seul passe ou 409 ; courant jamais en régression | **pg** (concurrence réelle) |
 | V2-MIL-P01 | plafond et entier ≥ 0 : valeurs limites, décimale, négatif, chaîne | unitaire |
-| V2-MIL-P03 | trajet sur véhicule archivé → `TRUCK_ARCHIVED` | unitaire |
+| V2-MIL-P03 | ouverture d'un trajet sur véhicule archivé → `TRUCK_ARCHIVED` ; clôture d'un trajet ouvert avant archivage → acceptée | unitaire |
 | V2-MIL-P05 | chevauchement de trajets du même véhicule (si accepté) | unitaire + pg |
 | Impact E1 | suppression d'un chantier : le trajet **survit** avec `worksiteId = NULL` | **pg** |
 | Impact E2 | suppression d'un employé ayant des trajets : refusée proprement (pas de 500) | unitaire (`employe-delete`) + **pg** |
@@ -25,7 +25,7 @@ Statut : plan (aucun test écrit). Outillage : `node --import tsx --test` ; ajou
 
 ## Environnement
 
-Tests PostgreSQL uniquement sur base jetable. **Le test pg V2 doit appeler explicitement la garde** (`require-pg-env` / `assertSafeDisposableTestDatabaseUrl`) : elle n'est **pas** universelle dans le dépôt (voir `06-quality/testing-strategy.md`). Prévoir un script dédié (ex. `test:vehicules:pg`) qui l'enchaîne, et **ne jamais** lancer `migrate deploy` sur une URL non gardée. Jamais sur une base partagée.
+Tests PostgreSQL uniquement sur base jetable. **Le test pg V2 doit appeler explicitement la garde** (`require-pg-env` / `assertSafeDisposableTestDatabaseUrl`) : elle n'est **pas** universelle dans le dépôt (voir `06-quality/testing-strategy.md`). La base jetable est construite par **`prisma migrate deploy`** (jamais `db push`, qui ne crée ni triggers ni CHECK ; ne pas suivre la reco de `docs/assistant-consultations-fondation.md` l. 100). Prévoir un script dédié (ex. `test:vehicules:pg`) qui enchaîne la garde puis les tests, et **ne jamais** lancer `migrate deploy` sur une URL non gardée. Jamais sur une base partagée.
 
 ## Preuves attendues
 

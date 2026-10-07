@@ -50,7 +50,7 @@ Raison constatée : `db push` ne rejoue ni les triggers ni les CHECK ni les back
 
 ## Interdits pour un agent
 
-Exécuter une migration en staging ou production ; lancer `migrate resolve` ; corriger des données de production ; modifier une migration déjà appliquée (créer une nouvelle migration).
+Exécuter une migration en staging ou production **sans autorisation explicite** ; lancer `migrate resolve` sans diagnostic écrit et autorisation explicite ; corriger des données de production ; modifier une migration déjà appliquée (créer une nouvelle migration).
 
 ## Scripts à risque
 

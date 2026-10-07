@@ -32,8 +32,8 @@ Chaque exigence doit être reliée à **implémentation → test → preuve** da
 | ID | Proposition | Raison |
 |----|-------------|--------|
 | V2-MIL-P01 | Kilométrage entier ≥ 0 en km, avec plafond de plausibilité | Éviter les saisies aberrantes |
-| V2-MIL-P02 | Le kilométrage courant ne régresse pas (409) | Cohérence d'un odomètre |
-| V2-MIL-P03 | Saisie refusée sur un véhicule archivé (`TRUCK_ARCHIVED`, code existant) | Cohérence avec V1B |
+| V2-MIL-P02 | Tout relevé < kilométrage courant est refusé (409 `MILEAGE_REGRESSION`) ; le courant ne diminue donc jamais | Cohérence d'un odomètre |
+| V2-MIL-P03 | **Ouverture** d'un trajet refusée sur un véhicule archivé (`TRUCK_ARCHIVED`, code existant) ; clôture d'un trajet déjà ouvert permise | Cohérence avec V1B sans bloquer un trajet commencé avant l'archivage |
 | V2-MIL-P04 | Mise à jour du courant et du trajet sous verrou véhicule (`lockTrucks`) | Concurrence (voir `04-database/concurrency.md`) |
 | V2-MIL-P05 | Un trajet ne peut pas se chevaucher avec un autre trajet **du même véhicule** | À débattre (peut être trop strict) |
 

@@ -16,7 +16,7 @@ Lecture du kilométrage courant : champ `currentMileageKm` ajouté à la répons
 
 ## Validation (Zod strict)
 
-`startMileageKm`, `endMileageKm` : entiers ≥ 0, plafond de plausibilité (D6) ; `worksiteId`, `chauffeurId` : cuid facultatifs ; champs inconnus refusés.
+`startMileageKm`, `endMileageKm` : entiers ≥ 0, plafond de plausibilité (D6) ; `worksiteId`, `chauffeurId` : identifiants facultatifs validés comme `optionalIdSchema` de V0 (chaîne, `trim`, longueur max 128, **sans contrôle de format cuid**) ; champs inconnus refusés.
 
 ## Erreurs
 
@@ -25,13 +25,13 @@ Lecture du kilométrage courant : champ `currentMileageKm` ajouté à la répons
 | `UNAUTHENTICATED` / `FORBIDDEN` / `NO_COMPANY` | 401 / 403 / 403 | existants |
 | `INVALID_PAYLOAD` | 400 | validation (dont `arrivée < départ`, V2-MIL-005) |
 | `TRUCK_NOT_FOUND` | 404 | véhicule absent **ou d'une autre entreprise** |
-| `TRUCK_ARCHIVED` | 409 | saisie sur véhicule archivé (existant) |
+| `TRUCK_ARCHIVED` | 409 | **ouverture** d'un nouveau trajet sur un véhicule archivé (existant). La **clôture** d'un trajet déjà ouvert reste permise ; l'archivage V1B ne clôt pas les trajets (V0–V1C inchangés) |
 | `DRIVER_NOT_FOUND` | 404 | chauffeur absent ou d'une autre entreprise (code existant) |
 | `WORKSITE_NOT_FOUND` *(nouveau)* | 404 | chantier absent ou d'une autre entreprise |
 | `DRIVER_INACTIVE` | 409 | **nouveau trajet refusé** pour un chauffeur inactif (code existant, même règle que V1B) |
 | `TRIP_NOT_FOUND` *(nouveau)* | 404 | |
 | `TRIP_ALREADY_CLOSED` *(nouveau)* | 409 | |
-| `MILEAGE_REGRESSION` *(nouveau, D3)* | 409 | kilométrage courant qui diminuerait |
+| `MILEAGE_REGRESSION` *(nouveau, D3)* | 409 | relevé (départ ou arrivée) **inférieur** au kilométrage courant du véhicule |
 | `CONCURRENT_UPDATE` | 409 | existant |
 
 **Violation d'un CHECK de trajet** (`truck_trips_v2_*`, erreur Prisma P2004) → `INVALID_PAYLOAD` (400), **pas** `PERIOD_CONFLICT` (réservé à l'historique d'affectation V1B).

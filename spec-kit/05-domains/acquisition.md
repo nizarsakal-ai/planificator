@@ -19,7 +19,7 @@ Pipeline « e-mail entrant (Gmail) → `AcquisitionMessage` (idempotent) → con
 ## Exploitation
 
 - Cron production : `/api/cron/acquisition-orchestrator`, toutes les heures (`vercel.json`). Autres crons d'acquisition présents dans `src/app/api/cron/` (noms exacts des dossiers) : `acquisition-gmail-sync`, `acquisition-content-fetch`, `acquisition-extraction`, `acquisition-attachment-download`, `acquisition-attachment-recovery`.
-- **Doc existante divergente** : le runbook `docs/acquisition-ops-v2-staging-activation.md` (l. 88) et un commentaire du handler disent l'orchestrateur « hors `vercel.json`, intervalle 5–15 min » ; `vercel.json` le programme **toutes les heures** (commit `e619b7e`). À mettre à jour par un lot de doc dédié.
+- **Doc existante divergente** : le runbook `docs/acquisition-ops-v2-staging-activation.md` (l. 88) dit l'orchestrateur « hors `vercel.json`, intervalle 5–15 min » et le commentaire de `src/app/api/cron/acquisition-orchestrator/route.ts` (l. 5) « non déclaré dans vercel.json (scheduler externe) » ; `vercel.json` le programme **toutes les heures** (commit `e619b7e`). À mettre à jour par un lot de doc dédié.
 - Docs : `docs/acquisition-ops-*.md`, `docs/RB-PLAN-ACQ-001-activation-flags.md`, `docs/acquisition-partner-registry-cutover.md`, `docs/plan-acq-012-*.spec.md`, `docs/assistant-consultations-fondation.md`.
 - Tests : `npm run test:acquisition` (très large liste de fichiers), `test:acquisition:flags`, `test:acquisition:conversion:pg` (PostgreSQL).
 

@@ -7,7 +7,7 @@ Statut : **VÉRIFIÉ** (`.gitignore`, `git ls-files`, `src/lib/encryption.ts`). 
 ## Constats
 
 - `.env`, `.env.local`, `.env.development.local`, `.env.test.local`, `.env.production.local` et le motif général `.env*` sont ignorés par Git (`.gitignore`) ; `git ls-files` ne liste **aucun** fichier `.env` suivi.
-- Des fichiers `.env*` existent localement dans le dossier de travail principal (dont des variantes `.env.vercel*`, `.env.production.local`). Ils ne doivent jamais être copiés dans un dépôt, un ADR, un rapport d'agent ou un journal.
+- Des fichiers `.env*` locaux existent dans le dossier de travail principal (leur liste n'est pas reproduite ici). Ils ne doivent jamais être copiés dans un dépôt, un ADR, un rapport d'agent ou un journal.
 - Les jetons Gmail sont chiffrés en AES-256-GCM (`src/lib/encryption.ts`, clé dérivée de `GMAIL_TOKEN_ENCRYPTION_KEY`, échec explicite si la variable est absente).
 - La plateforme d'intégration interdit les secrets en clair dans `IntegrationConnection`.
 

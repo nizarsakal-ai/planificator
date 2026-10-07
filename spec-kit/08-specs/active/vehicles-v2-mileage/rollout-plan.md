@@ -4,6 +4,7 @@
 
 Statut : plan. Suit `07-deployment/*` et le workflow du kit.
 
+0. **Prérequis avant tout merge** : lever le doute « Vercel déploie-t-il la production automatiquement depuis `main` ? » (voir `02-governance/change-management.md`). Si oui, le code V2 partirait en production **avant** `migrate deploy` (code incompatible avec l'ancienne base, `migration-plan.md`) et avant la PRR : il faut alors désactiver ce déploiement automatique ou protéger la production pour ce lot.
 1. Spec validée par l'utilisateur ; ADR (entité trajet) accepté ; décisions D1–D6 tranchées.
 2. Implémentation sur branche dédiée depuis `origin/main` ; tests unitaires + pg verts ; V0–V1C non régressés.
 3. **Revue indépendante** (autre instance que l'implémenteur) ; corrections.

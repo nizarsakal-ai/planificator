@@ -47,7 +47,7 @@ Les capacités à effet externe sont inactives par défaut (`PLANIFICATOR_ACQUIS
 ## Crons
 
 - Authentification fail-closed (`assertCronBearerAuth`).
-- Le cron `acquisition-orchestrator` tourne toutes les heures en production (`vercel.json`, commit `e619b7e`). **Doc existante divergente** : `docs/acquisition-ops-v2-staging-activation.md` et un commentaire du handler le disent « hors `vercel.json`, intervalle 5–15 min » — à mettre à jour ; les workers utilisent un bail (`AcquisitionOrchestratorLease`) et des mécanismes de fencing (`docs/acquisition-ops-v2-fencing-workers.md`).
+- Le cron `acquisition-orchestrator` tourne toutes les heures en production (`vercel.json`, commit `e619b7e`). **Doc existante divergente** : `docs/acquisition-ops-v2-staging-activation.md` dit « hors `vercel.json`, intervalle 5–15 min » (l. 88) et le commentaire de `src/app/api/cron/acquisition-orchestrator/route.ts` (l. 5) dit « non déclaré dans vercel.json (scheduler externe) » — à mettre à jour ; les workers utilisent un bail (`AcquisitionOrchestratorLease`) et des mécanismes de fencing (`docs/acquisition-ops-v2-fencing-workers.md`).
 - Un cron temporaire de test ne se commit pas en production (historique : commit « temporary staging orchestrator trigger » revert).
 
 ## Après chaque mise en production

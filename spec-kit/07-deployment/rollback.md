@@ -12,7 +12,7 @@ Re-déployer le déploiement précédent depuis Vercel **si le code précédent 
 
 - **Échec d'une migration** (transaction annulée) : lire le diagnostic `RAISE EXCEPTION` ; corriger les données **explicitement** ; `prisma migrate resolve --rolled-back <migration>` ; relancer `migrate deploy`. **Sans autorisation explicite de l'utilisateur : ne pas exécuter.**
 - **Rollback manuel après commit** : compensation écrite dans l'en-tête (ex. V1B-db : recréer les trois FK d'origine et supprimer les deux CHECK ; le BACKFILL n'est pas réversible mais inoffensif. V1C : `DROP COLUMN "modele"` perd les modèles saisis depuis).
-- **Interdit sans exception** : `migrate reset`, `db push`, `migrate dev`, suppression de données de production pour « réparer ».
+- **Interdit sans exception sur toute base non jetable** : `migrate reset`, `db push`, `migrate dev`, suppression de données de production pour « réparer ».
 
 ## Flags
 

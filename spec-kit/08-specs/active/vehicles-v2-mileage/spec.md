@@ -8,7 +8,7 @@
 | **État ES-001** | **PROPOSED** — spec rédigée à partir du besoin de l'utilisateur ; **non validée** |
 | **Base** | `origin/main` e707381 (Vehicles V1C mergé) |
 | **Prérequis verrouillés** | V0, V1A, V1B, V1B-db, V1C : **ne pas modifier** leur comportement, **sauf les deux changements encadrés listés dans « Impacts sur l'existant »** |
-| **ADR requis** | Oui : introduction d'une nouvelle entité (trajet) = changement de persistance (`docs/adr/ADR-PLAN-NNN-*`) — à créer après validation |
+| **ADR requis** | Oui : introduction d'une nouvelle entité (trajet) = changement de persistance (`docs/adr/ADR-PLAN-NNN-*`) — **à rédiger avant la validation de la SPECIFICATION** (ARCHITECTURE précède SPECIFICATION) |
 
 ## Objectif
 
@@ -26,11 +26,11 @@ Exigences `V2-MIL-001` à `V2-MIL-008` (voir `requirements.md`) et les exigences
 
 ## Impacts sur l'existant (VÉRIFIÉS lors de la revue indépendante)
 
-| # | Constat | Traitement dans cette spec |
-|---|---------|----------------------------|
-| E1 | `deleteChantier` (`src/lib/actions/chantier.actions.ts:472`) fait `prisma.worksite.delete` **sans gérer P2003** : une FK `RESTRICT` depuis un trajet bloquerait la suppression d'un chantier | FK `truck_trips.worksiteId` en **`ON DELETE SET NULL`** (le chantier n'est qu'un **contexte**, V2-MIL-007) : aucun changement de `deleteChantier` |
-| E2 | `employe-delete.core.ts` (V1B-db) : `hasVehicleHistory` ne compte que `truckAssignment` et `truck`, et sa regex P2003 est `/truck_assignments\|trucks_chauffeurId/` : elle ne reconnaîtrait pas `truck_trips_*_fkey` | **Changement encadré n°2** : étendre `hasVehicleHistory` et la regex pour couvrir `truck_trips`, avec tests (suppression d'un employé ayant des trajets refusée proprement) |
-| E3 | `lockTrucks`, `requireAccess`, `TrucksApiError` ne sont **pas exportés** de `trucks-api.ts`; `TrucksErrorCode` est une union fermée | **Changement encadré n°1 (lot V2-0)** : extraction **sans changement de comportement** vers un module partagé, prouvée par `npm run test:vehicules` inchangé et vert. Les nouveaux codes sont dans un `TripsErrorCode` **séparé** (le contrat V0 n'est pas modifié) |
+| # | Constat | Traitement dans cette spec | Changement de code V0–V1C |
+|---|---------|----------------------------|---------------------------|
+| E1 | `deleteChantier` (`src/lib/actions/chantier.actions.ts:472`) fait `prisma.worksite.delete` **sans gérer P2003** : une FK `RESTRICT` depuis un trajet bloquerait la suppression d'un chantier | FK `truck_trips.worksiteId` en **`ON DELETE SET NULL`** (le chantier n'est qu'un **contexte**, V2-MIL-007) : aucun changement de `deleteChantier` | **non** |
+| E2 | `employe-delete.core.ts` (V1B-db) : `hasVehicleHistory` ne compte que `truckAssignment` et `truck`, et sa regex P2003 est `/truck_assignments\|trucks_chauffeurId/` : elle ne reconnaîtrait pas `truck_trips_*_fkey` | **Changement encadré n°2** : étendre `hasVehicleHistory` et la regex pour couvrir `truck_trips`, avec tests (suppression d'un employé ayant des trajets refusée proprement) | **oui** (changement encadré n°2) |
+| E3 | `lockTrucks`, `requireAccess`, `TrucksApiError` ne sont **pas exportés** de `trucks-api.ts`; `TrucksErrorCode` est une union fermée | **Changement encadré n°1 (lot V2-0)** : extraction **sans changement de comportement** vers un module partagé, prouvée par `npm run test:vehicules` inchangé et vert. Les nouveaux codes sont dans un `TripsErrorCode` **séparé** (le contrat V0 n'est pas modifié) | **oui** (changement encadré n°1, sans effet de comportement) |
 
 ## Hors périmètre (explicite — ne pas ajouter)
 
@@ -44,8 +44,8 @@ Exigences `V2-MIL-001` à `V2-MIL-008` (voir `requirements.md`) et les exigences
 | # | Décision | Options |
 |---|----------|---------|
 | D1 | Entité trajet : nom, cardinalité | `TruckTrip` (table `truck_trips`), un trajet = un véhicule, un chauffeur optionnel, un chantier optionnel |
-| D2 | Lien kilométrage courant ↔ trajets | **Recommandé (a)** : tout relevé de trajet (départ ou arrivée) met à jour le courant dans la **même transaction**, sous verrou véhicule, avec `courant = max(courant, relevé)` ; si le courant est NULL, le premier relevé l'initialise. (b) relevé indépendant : écarté (deuxième source de vérité) |
-| D3 | Régression du kilométrage courant | **Recommandé : refuser** (409 `MILEAGE_REGRESSION`). Une correction d'erreur de saisie = lot ultérieur avec motif tracé |
+| D2 | Lien kilométrage courant ↔ trajets | **Recommandé (a)** : tout relevé de trajet (départ ou arrivée) doit être **≥ au courant** ; s'il l'est, il devient le nouveau courant dans la **même transaction**, sous verrou véhicule ; si le courant est NULL, le premier relevé l'initialise. **Un relevé < courant est refusé** (409 `MILEAGE_REGRESSION`) : pas de saisie rétroactive en V2. (b) relevé indépendant : écarté (deuxième source de vérité) |
+| D3 | Régression / relevé rétroactif | **Recommandé : refuser** tout relevé < courant (409 `MILEAGE_REGRESSION`), y compris un départ inférieur au courant. Correction d'une erreur de saisie ou saisie rétroactive = lot ultérieur avec motif tracé |
 | D4 | Rôles | **Recommandé** : écriture = SUPER_ADMIN / ADMIN ; lecture = + TEAM_LEADER **limité au véhicule de son équipe** ; EMPLOYEE / CLIENT : aucun accès (saisie par le chauffeur = lot ultérieur). **Ne pas reproduire** l'écart TEAM_LEADER non restreint de V0–V1C (`03-security/rbac.md`) |
 | D5 | Politique de FK du trajet | **Recommandé** : `Company`, `Truck`, `Employee` (chauffeur) en **RESTRICT** (cohérent V1B-db : historique jamais effacé silencieusement) ; `Worksite` en **SET NULL** (contexte seulement, voir E1) |
 | D6 | Unité et type | entier en **kilomètres** (pas de décimales) ; plafond de plausibilité |
