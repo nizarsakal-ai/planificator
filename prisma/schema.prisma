@@ -364,6 +364,8 @@ model Company {
   normalizedInbounds          NormalizedInbound[]
   trucks                      Truck[]
   truckAssignments            TruckAssignment[]
+  mileageEntries              MileageEntry[]
+  mileageTrips                MileageTrip[]
   tasks                       Task[]
 
   @@map("companies")
@@ -576,6 +578,7 @@ model User {
   historyLogs     HistoryLog[]    @relation("HistoryActor")
   reviewedImportDrafts WorksiteImportDraft[] @relation("ImportDraftReviewer")
   acquisitionAttachmentAccessLogs AcquisitionAttachmentAccessLog[]
+  mileageEntries MileageEntry[] @relation("MileageAuthor")
 
   @@index([companyId])
   @@index([email])
@@ -615,8 +618,10 @@ model Employee {
   signatures          Signature[]
   drivenTrucks        Truck[]              @relation("TruckChauffeur")
   truckAssignments    TruckAssignment[]    @relation("TruckAssignmentChauffeur")
+  mileageTrips        MileageTrip[]        @relation("MileageDriver")
   assignedTasks       Task[]               @relation("TaskAssignee")
 
+  @@unique([id, companyId])
   @@index([companyId])
   @@index([userId])
   @@map("employees")
@@ -646,7 +651,9 @@ model Team {
   accommodations Accommodation[]
   truck          Truck?
   truckHistory   TruckAssignment[] @relation("TruckAssignmentTeam")
+  mileageTrips   MileageTrip[]     @relation("MileageTeam")
 
+  @@unique([id, companyId])
   @@unique([name, companyId]) // pas de doublon de nom d'équipe dans la même entreprise
   @@index([companyId])
   @@index([leaderId])
@@ -753,8 +760,10 @@ model Worksite {
   quotes       Quote[]
   invoices     Invoice[]
   importDrafts WorksiteImportDraft[]
+  mileageTrips MileageTrip[] @relation("MileageWorksite")
   tasks        Task[]
 
+  @@unique([id, companyId])
   @@index([companyId])
   @@index([clientId])
   @@index([status])
@@ -1298,10 +1307,102 @@ model Truck {
   chauffeur   Employee?         @relation("TruckChauffeur", fields: [chauffeurId], references: [id], onDelete: SetNull)
   assignments TruckAssignment[]
 
+  // V2 : projection reconstruisible du journal. NULL = compteur inconnu, jamais zéro implicite.
+  currentMileage        Int?
+  currentMileageEntryId String?
+  mileageRevision       Int     @default(0)
+  mileageEntries        MileageEntry[] @relation("TruckMileageEntries")
+  mileageTrips          MileageTrip[]  @relation("TruckMileageTrips")
+  currentMileageEntry   MileageEntry? @relation("TruckCurrentMileage", fields: [currentMileageEntryId, id, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "trucks_current_mileage_entry_fkey")
+
+  @@unique([id, companyId])
+  @@unique([currentMileageEntryId, id, companyId], map: "trucks_current_mileage_entry_truck_company_key")
   @@unique([matricule, companyId])
   @@index([companyId])
   @@index([chauffeurId])
   @@map("trucks")
+}
+
+enum MileageEntryKind {
+  READING
+  DEPARTURE
+  ARRIVAL
+  CORRECTION
+}
+
+// V2 : journal immuable (SQL refuse UPDATE/DELETE). Une correction garde la date
+// et le contexte de sa racine ; seul le kilométrage effectif change.
+model MileageEntry {
+  id                    String           @id @default(cuid())
+  companyId             String
+  truckId               String
+  kind                  MileageEntryKind
+  mileage               Int
+  revision              Int
+  occurredAt            DateTime?        @db.Timestamptz(3)
+  recordedAt            DateTime         @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  createdById           String
+  createdByNameSnapshot String
+  rootEntryId           String?
+  supersedesEntryId     String?
+  correctionReason      String?          @db.Text
+  idempotencyKey        String           @db.Uuid
+  requestHash           String           @db.Char(64)
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  truck     Truck   @relation("TruckMileageEntries", fields: [truckId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  createdBy User    @relation("MileageAuthor", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  rootEntry       MileageEntry?  @relation("MileageRoot", fields: [rootEntryId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "mileage_entries_root_truck_company_fkey")
+  corrections     MileageEntry[] @relation("MileageRoot")
+  supersedesEntry MileageEntry?  @relation("MileageCorrectionChain", fields: [supersedesEntryId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "mileage_entries_supersedes_truck_company_fkey")
+  successor       MileageEntry?  @relation("MileageCorrectionChain")
+
+  tripStarted     MileageTrip? @relation("MileageTripStart")
+  tripEnded       MileageTrip? @relation("MileageTripEnd")
+  currentForTruck Truck?       @relation("TruckCurrentMileage")
+
+  @@unique([id, truckId, companyId], map: "mileage_entries_id_truck_company_key")
+  @@unique([supersedesEntryId, truckId, companyId], map: "mileage_entries_supersedes_truck_company_key")
+  @@unique([companyId, truckId, revision], map: "mileage_entries_company_truck_revision_key")
+  @@unique([companyId, truckId, idempotencyKey], map: "mileage_entries_company_truck_idempotency_key")
+  @@index([companyId, truckId, occurredAt], map: "mileage_entries_company_truck_occurred_idx")
+  @@index([rootEntryId, truckId, companyId], map: "mileage_entries_root_truck_company_idx")
+  @@index([createdById])
+  @@map("mileage_entries")
+}
+
+// V2 : contexte figé AU DÉPART. Ouvert = endEntryId NULL ; distance calculée
+// depuis les valeurs effectives des deux racines. Aucun statut/distance redondant.
+model MileageTrip {
+  id                    String  @id @default(cuid())
+  companyId             String
+  truckId               String
+  startEntryId          String
+  endEntryId            String?
+  worksiteId            String?
+  teamId                String?
+  chauffeurId           String?
+  worksiteNameSnapshot  String?
+  teamNameSnapshot      String?
+  chauffeurNameSnapshot String?
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  truck     Truck   @relation("TruckMileageTrips", fields: [truckId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  startEntry MileageEntry  @relation("MileageTripStart", fields: [startEntryId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "mileage_trips_start_truck_company_fkey")
+  endEntry   MileageEntry? @relation("MileageTripEnd", fields: [endEntryId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "mileage_trips_end_truck_company_fkey")
+  worksite   Worksite? @relation("MileageWorksite", fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  team       Team?     @relation("MileageTeam", fields: [teamId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  chauffeur  Employee? @relation("MileageDriver", fields: [chauffeurId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([startEntryId, truckId, companyId], map: "mileage_trips_start_truck_company_key")
+  @@unique([endEntryId, truckId, companyId], map: "mileage_trips_end_truck_company_key")
+  // Un seul trajet ouvert : index partiel SQL mileage_trips_v2_open_truck_key.
+  @@index([companyId, truckId])
+  @@index([worksiteId, companyId])
+  @@index([teamId, companyId])
+  @@index([chauffeurId, companyId])
+  @@map("mileage_trips")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -165,11 +165,11 @@ describe("Tâches — migration SQL", () => {
     }
   })
 
-  it("migration tâches postérieure à la dernière migration véhicules", () => {
+  it("migration tâches postérieure à la dernière migration véhicules existante à son ajout (V1C)", () => {
+    // Des lots véhicules ultérieurs (V2…) peuvent suivre : seule la devancière historique est figée.
     const names = readdirSync("prisma/migrations").filter((n) => /^\d{14}_/.test(n)).sort()
-    const lastVehicle = names.filter((n) => n.includes("vehicles")).at(-1)!
-    assert.ok(MIGRATION_NAME > lastVehicle, `${MIGRATION_NAME} doit suivre ${lastVehicle}`)
     assert.ok(names.includes(MIGRATION_NAME))
+    assert.equal(names[names.indexOf(MIGRATION_NAME) - 1], "20261006220000_vehicles_v1c_modele")
   })
 
   it("migrations véhicules intactes (non modifiées par ce lot)", () => {

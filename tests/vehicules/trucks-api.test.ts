@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { beforeEach, describe, it } from "node:test"
 import {
+  classifyCheckViolation,
   classifyUniqueConflict,
   classifyVanishedReference,
   handleTruckArchive,
@@ -26,6 +27,10 @@ interface TruckRow {
   active: boolean
   archivedAt: Date | null
   createdAt: Date
+  updatedAt: Date
+  currentMileage: number | null
+  currentMileageEntryId: string | null
+  mileageRevision: number
 }
 interface AssignmentRow {
   id: string
@@ -42,6 +47,7 @@ interface State {
   teams: { id: string; companyId: string; active: boolean }[]
   employees: { id: string; companyId: string; active: boolean }[]
   assignments: AssignmentRow[]
+  mileageTrips: { id: string; truckId: string; companyId: string; endEntryId: string | null }[]
 }
 
 type Where = Record<string, unknown>
@@ -124,6 +130,10 @@ class FakeDb {
         active: true,
         archivedAt: null,
         createdAt: new Date(),
+        updatedAt: new Date(),
+        currentMileage: null,
+        currentMileageEntryId: null,
+        mileageRevision: 0,
         ...args.data,
       }
       this.checkTruck(row)
@@ -198,7 +208,18 @@ class FakeDb {
     },
   }
 
-  $transaction = async <T>(fn: (tx: FakeDb) => Promise<T>): Promise<T> => {
+  mileageTrip = {
+    findFirst: async (args: { where: Where; select?: Record<string, boolean> }) => {
+      this.hit("mileageTrip.findFirst", args)
+      const trip = this.state.mileageTrips.find((r) => matches(r, args.where))
+      return trip ? { ...trip } : null
+    },
+  }
+
+  transactionOptions: unknown[] = []
+
+  $transaction = async <T>(fn: (tx: FakeDb) => Promise<T>, options?: unknown): Promise<T> => {
+    this.transactionOptions.push(options)
     this.beforeTransaction?.(this.state)
     const snapshot = structuredClone(this.state)
     try {
@@ -231,7 +252,10 @@ const T0 = new Date("2026-01-01T08:00:00Z")
 
 /** Véhicule actif (V1A : active = true, archivedAt = null par défaut). */
 function truck(row: Pick<TruckRow, "id" | "matricule" | "marque" | "companyId" | "teamId" | "chauffeurId">): TruckRow {
-  return { active: true, archivedAt: null, createdAt: T0, ...row }
+  return {
+    active: true, archivedAt: null, createdAt: T0, updatedAt: T0, modele: null,
+    currentMileage: null, currentMileageEntryId: null, mileageRevision: 0, ...row,
+  }
 }
 
 function seed(): State {
@@ -255,6 +279,7 @@ function seed(): State {
       { id: "as-open-1", truckId: "tr-1", chauffeurId: "emp-1", teamId: "team-1", companyId: CO, startedAt: T0, endedAt: null },
       { id: "as-open-x", truckId: "tr-x", chauffeurId: "emp-x", teamId: "team-x", companyId: OTHER, startedAt: T0, endedAt: null },
     ],
+    mileageTrips: [],
   }
 }
 
@@ -814,6 +839,164 @@ describe("V1B — restauration", () => {
     await restore("tr-1")
     assert.equal((await patch("tr-1", { teamId: "team-2" })).status, 200)
     assert.deepEqual(openRows("tr-1").map((a) => [a.reason, a.teamId]), [["REASSIGNED", "team-2"]])
+  })
+})
+
+describe("V2 — archivage et projection kilométrique", () => {
+  it("trajet ouvert : archive et DELETE refusés sans modifier le véhicule, les périodes ni le trajet", async () => {
+    db.state.mileageTrips.push({ id: "trip-1", truckId: "tr-1", companyId: CO, endEntryId: null })
+    const before = structuredClone(db.state)
+    for (const action of [archive, del]) {
+      const r = await action("tr-1")
+      assert.equal(r.status, 409)
+      assert.equal(r.body.code, "TRUCK_HAS_OPEN_TRIP")
+      assert.deepEqual(db.state, before)
+    }
+    assert.ok(!db.calls.some((c) => ["truck.update", "truckAssignment.update", "truckAssignment.create"].includes(c.op)))
+    assert.equal(logged.length, 0)
+  })
+
+  it("l'archivage qui lit MileageTrip impose ReadCommitted ; création, modification et restauration restent au défaut V1", async () => {
+    assert.equal((await post({ matricule: "ISO-1" })).status, 200)
+    assert.equal((await patch("tr-1", { marque: "Iso" })).status, 200)
+    assert.equal((await archive("tr-1")).status, 200)
+    assert.equal((await del("tr-2")).status, 200)
+    assert.equal((await restore("tr-1")).status, 200)
+    assert.deepEqual(db.transactionOptions, [
+      undefined,
+      undefined,
+      { isolationLevel: "ReadCommitted" },
+      { isolationLevel: "ReadCommitted" },
+      undefined,
+    ])
+  })
+
+  it("le trajet est contrôlé après verrou et relecture, dans le tenant, avant toute période", async () => {
+    const r = await archive("tr-1")
+    assert.equal(r.status, 200)
+    const operations = db.calls.map((c) => c.op)
+    const check = operations.indexOf("mileageTrip.findFirst")
+    assert.ok(operations.indexOf("$queryRaw") < check)
+    assert.ok(operations.indexOf("truck.findFirst") < check)
+    assert.ok(check < operations.indexOf("truckAssignment.findFirst"))
+    assert.deepEqual(db.calls[check].args, {
+      where: { truckId: "tr-1", companyId: CO, endEntryId: null },
+      select: { id: true },
+    })
+    assert.deepEqual(db.opsWithoutCompany(), [])
+  })
+
+  it("un départ commité avant la prise du verrou bloque l'archivage", async () => {
+    const trip = { id: "trip-race", truckId: "tr-1", companyId: CO, endEntryId: null }
+    const before = structuredClone(db.state)
+    before.mileageTrips.push(trip)
+    db.beforeTransaction = (state) => state.mileageTrips.push(trip)
+    assert.equal((await archive("tr-1")).body.code, "TRUCK_HAS_OPEN_TRIP")
+    assert.deepEqual(db.state, before)
+  })
+
+  it("un trajet fermé ou celui d'un autre véhicule/tenant ne bloque pas l'archivage", async () => {
+    db.state.mileageTrips.push(
+      { id: "trip-closed", truckId: "tr-1", companyId: CO, endEntryId: "arrival-1" },
+      { id: "trip-other", truckId: "tr-2", companyId: CO, endEntryId: null },
+      { id: "trip-foreign", truckId: "tr-x", companyId: OTHER, endEntryId: null }
+    )
+    const trips = structuredClone(db.state.mileageTrips)
+    assert.equal((await archive("tr-1")).status, 200)
+    assert.deepEqual(db.state.mileageTrips, trips)
+  })
+
+  it("l'échec de lecture des trajets ferme l'accès : aucun archivage ni période partielle", async () => {
+    db.failOn = "mileageTrip.findFirst"
+    db.failWith = new Error("Trip storage unavailable")
+    const before = structuredClone(db.state)
+    assert.equal((await archive("tr-1")).status, 500)
+    assert.deepEqual(db.state, before)
+  })
+
+  it("le garde SQL nommé retourne 409 et annule une rotation déjà commencée", async () => {
+    const constraint = "trucks_v2_no_open_mileage_trip_check"
+    for (const err of [
+      checkViolation(constraint),
+      { code: "P2004", meta: { database_error: `violates check constraint "${constraint}"` } },
+      { code: "P2010", meta: { code: "23514", message: constraint } },
+    ]) {
+      db.failOn = "truck.update"
+      db.failWith = err
+      const before = structuredClone(db.state)
+      const r = await archive("tr-1")
+      assert.equal(r.status, 409)
+      assert.equal(r.body.code, "TRUCK_HAS_OPEN_TRIP")
+      assert.deepEqual(db.state, before)
+      assert.equal(classifyCheckViolation(err), "TRUCK_HAS_OPEN_TRIP")
+    }
+    assert.equal(logged.length, 0)
+    assert.equal(classifyCheckViolation({ code: "23514", meta: { constraint: "unrelated_check" } }), null)
+    assert.equal(classifyCheckViolation({ code: "P2003", message: constraint }), null)
+    assert.equal(classifyCheckViolation(new Error(constraint)), null)
+  })
+
+  it("archive puis restore conservent compteur, entrée effective, révision et trajets", async () => {
+    const target = db.state.trucks.find((t) => t.id === "tr-1")!
+    Object.assign(target, { currentMileage: 83187, currentMileageEntryId: "reading-current", mileageRevision: 3 })
+    db.state.mileageTrips.push({ id: "trip-closed", truckId: target.id, companyId: CO, endEntryId: "arrival-1" })
+    const trips = structuredClone(db.state.mileageTrips)
+    for (const action of [archive, restore, restore]) {
+      assert.equal((await action(target.id)).status, 200)
+      const stored = db.state.trucks.find((t) => t.id === target.id)!
+      assert.deepEqual([stored.currentMileage, stored.currentMileageEntryId, stored.mileageRevision], [83187, "reading-current", 3])
+      assert.deepEqual(db.state.mileageTrips, trips)
+    }
+    const writes = db.calls.filter((c) => c.op === "truck.update")
+    for (const { args } of writes) {
+      const data = (args as { data: Record<string, unknown> }).data
+      for (const field of ["currentMileage", "currentMileageEntryId", "mileageRevision"]) assert.ok(!(field in data))
+    }
+  })
+})
+
+describe("V2 — DTO Vehicles historiques", () => {
+  it("aucune réponse GET/CREATE/PATCH/ARCHIVE/RESTORE/DELETE n'expose les nouvelles colonnes", async () => {
+    Object.assign(db.state.trucks[0], {
+      currentMileage: 83187, currentMileageEntryId: "reading-private", mileageRevision: 3,
+      futurePrivateField: "do not expose",
+    })
+    const expectedKeys = [
+      "id", "matricule", "marque", "modele", "companyId", "teamId", "chauffeurId",
+      "active", "archivedAt", "createdAt", "updatedAt",
+    ].sort()
+    const assertDto = (dto: Record<string, unknown>) => {
+      assert.deepEqual(Object.keys(dto).sort(), expectedKeys)
+      assert.equal(typeof dto.id, "string")
+      assert.equal(typeof dto.createdAt, "string")
+      assert.equal(typeof dto.updatedAt, "string")
+    }
+    for (const role of ["SUPER_ADMIN", "ADMIN", "TEAM_LEADER"]) {
+      const response = await get(role)
+      assert.equal(response.status, 200)
+      response.body.forEach(assertDto)
+    }
+    const created = await post({ matricule: "DTO-001" }, "TEAM_LEADER")
+    assert.equal(created.status, 200)
+    assertDto(created.body)
+    assert.equal(db.state.trucks.find((t) => t.id === created.body.id)!.mileageRevision, 0)
+    const patched = await patch("tr-1", { marque: "Nouvelle marque" }, "TEAM_LEADER")
+    assert.equal(patched.status, 200)
+    assertDto(patched.body)
+    for (const action of [archive, archive, restore, restore, del, del]) {
+      const response = await action("tr-1")
+      assert.equal(response.status, 200)
+      assertDto(response.body.truck)
+    }
+  })
+
+  it("CREATE/PATCH historiques refusent toute écriture directe de la projection", async () => {
+    const before = structuredClone(db.state)
+    for (const field of ["currentMileage", "currentMileageEntryId", "mileageRevision"]) {
+      assert.equal((await post({ matricule: "NO-PROJECTION", [field]: 1 })).body.code, "INVALID_PAYLOAD")
+      assert.equal((await patch("tr-1", { [field]: 1 })).body.code, "INVALID_PAYLOAD")
+    }
+    assert.deepEqual(db.state, before)
   })
 })
 

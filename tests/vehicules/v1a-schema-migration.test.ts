@@ -66,29 +66,23 @@ describe("V1A — schéma Prisma", () => {
     assert.match(field(ta, "team"), /onDelete: Restrict\)$/)
   })
 
-  it("hors périmètre absent : pas de brand/model/vehicleModel, pas de @@unique([id, companyId])", () => {
+  it("identité V1 conservée ; l'unique tenant ajouté en V2 ne remplace pas l'unique matricule", () => {
     for (const name of ["brand", "model", "vehicleModel"]) assert.equal(field(truck, name), "", name)
-    assert.doesNotMatch(truck, /@@unique\(\[id, companyId\]\)/)
     assert.match(field(truck, "marque"), /^marque\s+String\?$/)
     assert.match(truck, /@@unique\(\[matricule, companyId\]\)/)
   })
 })
 
 describe("V1A — migration SQL", () => {
-  it("nom de migration postérieur au dernier existant avant V1B-db", async () => {
+  it("migration V1A présente ; les lots suivants peuvent ajouter des migrations", async () => {
     const { readdirSync } = await import("node:fs")
-    // On exclut les migrations postérieures à V1A (V1B/V1C véhicules, puis le module Tâches)
-    // afin de vérifier que V1A était bien la plus récente du socle existant au moment de son ajout.
+    // V1A était la plus récente du socle existant au moment de son ajout : sa devancière
+    // reste fixe, quelles que soient les migrations ajoutées ensuite (V1B/V1C, Tâches, V2…).
     const names = readdirSync("prisma/migrations")
-      .filter(
-        (n) =>
-          /^\d{14}_/.test(n) &&
-          !n.endsWith("_vehicles_v1b_db_integrity") &&
-          !n.endsWith("_vehicles_v1c_modele") &&
-          !n.endsWith("_tasks_v1")
-      )
+      .filter((n) => /^\d{14}_/.test(n) && n <= MIGRATION_NAME)
       .sort()
     assert.equal(names.at(-1), MIGRATION_NAME)
+    assert.equal(names.at(-2), "20260913230000_acq_consultation_detection")
   })
 
   it("transaction explicite BEGIN … COMMIT et lock_timeout local", () => {
