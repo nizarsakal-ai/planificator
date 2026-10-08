@@ -66,19 +66,18 @@ describe("V1A — schéma Prisma", () => {
     assert.match(field(ta, "team"), /onDelete: Restrict\)$/)
   })
 
-  it("hors périmètre absent : pas de brand/model/vehicleModel, pas de @@unique([id, companyId])", () => {
+  it("identité V1 conservée ; l'unique tenant ajouté en V2 ne remplace pas l'unique matricule", () => {
     for (const name of ["brand", "model", "vehicleModel"]) assert.equal(field(truck, name), "", name)
-    assert.doesNotMatch(truck, /@@unique\(\[id, companyId\]\)/)
     assert.match(field(truck, "marque"), /^marque\s+String\?$/)
     assert.match(truck, /@@unique\(\[matricule, companyId\]\)/)
   })
 })
 
 describe("V1A — migration SQL", () => {
-  it("nom de migration postérieur au dernier existant avant V1B-db", async () => {
+  it("migration V1A présente ; les lots suivants peuvent ajouter des migrations", async () => {
     const { readdirSync } = await import("node:fs")
     const names = readdirSync("prisma/migrations")
-      .filter((n) => /^\d{14}_/.test(n) && !n.endsWith("_vehicles_v1b_db_integrity") && !n.endsWith("_vehicles_v1c_modele"))
+      .filter((n) => /^\d{14}_/.test(n) && n <= MIGRATION_NAME)
       .sort()
     assert.equal(names.at(-1), MIGRATION_NAME)
   })
