@@ -76,10 +76,13 @@ describe("V1A — schéma Prisma", () => {
 describe("V1A — migration SQL", () => {
   it("migration V1A présente ; les lots suivants peuvent ajouter des migrations", async () => {
     const { readdirSync } = await import("node:fs")
+    // V1A était la plus récente du socle existant au moment de son ajout : sa devancière
+    // reste fixe, quelles que soient les migrations ajoutées ensuite (V1B/V1C, Tâches, V2…).
     const names = readdirSync("prisma/migrations")
       .filter((n) => /^\d{14}_/.test(n) && n <= MIGRATION_NAME)
       .sort()
     assert.equal(names.at(-1), MIGRATION_NAME)
+    assert.equal(names.at(-2), "20260913230000_acq_consultation_detection")
   })
 
   it("transaction explicite BEGIN … COMMIT et lock_timeout local", () => {

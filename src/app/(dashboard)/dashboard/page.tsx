@@ -28,6 +28,7 @@ import {
 import { formatDate } from "@/lib/utils"
 import { AssignmentsChart } from "@/components/dashboard/AssignmentsChart"
 import { WorksiteStatusChart } from "@/components/dashboard/WorksiteStatusChart"
+import { NouvelleTacheDialog } from "@/components/tasks/NouvelleTacheDialog"
 
 export const metadata: Metadata = { title: "Dashboard" }
 
@@ -130,6 +131,7 @@ async function AdminDashboard({ companyId }: { companyId: string }) {
     employeesCount, teamsCount, clientsCount,
     worksitesByStatus, recentAssignments, pendingAbsences,
     dailyReportsCount, _signaturesCount, hoursResult, activeWorksites,
+    taskEmployees, taskWorksites,
   ] = await Promise.all([
     prisma.employee.count({ where: { companyId, active: true } }),
     prisma.team.count({ where: { companyId, active: true } }),
@@ -156,6 +158,17 @@ async function AdminDashboard({ companyId }: { companyId: string }) {
     }),
     prisma.worksite.count({
       where: { companyId, status: { in: ["IN_PROGRESS", "EXTENDED"] } },
+    }),
+    // Options du formulaire « Nouvelle tâche » — strictement filtrées par tenant.
+    prisma.employee.findMany({
+      where: { companyId, active: true },
+      select: { id: true, firstName: true, lastName: true },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+    }),
+    prisma.worksite.findMany({
+      where: { companyId },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
     }),
   ])
 
@@ -190,6 +203,11 @@ async function AdminDashboard({ companyId }: { companyId: string }) {
 
   return (
     <div className="space-y-6">
+      {/* Barre d'actions de gestion */}
+      <div className="flex items-center justify-end">
+        <NouvelleTacheDialog employees={taskEmployees} worksites={taskWorksites} />
+      </div>
+
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard title="Employés"          value={employeesCount} icon={Users}    description="Actifs"                              color="blue"   />

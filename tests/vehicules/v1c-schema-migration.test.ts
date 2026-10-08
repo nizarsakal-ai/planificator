@@ -68,9 +68,10 @@ describe("V1C — schéma Prisma", () => {
   })
 
   it("migration V1C présente et postérieure à V1B-db", () => {
+    // V1C suit immédiatement V1B-db : les migrations ultérieures (Tâches, V2…) ne s'intercalent pas.
     const names = readdirSync("prisma/migrations").filter((n) => /^\d{14}_/.test(n)).sort()
     assert.ok(names.includes(MIGRATION_NAME))
-    assert.ok(names.indexOf(MIGRATION_NAME) > names.indexOf("20261006180000_vehicles_v1b_db_integrity"))
+    assert.equal(names[names.indexOf(MIGRATION_NAME) - 1], "20261006180000_vehicles_v1b_db_integrity")
   })
 })
 
