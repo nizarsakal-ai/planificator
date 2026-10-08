@@ -77,8 +77,16 @@ describe("V1A — schéma Prisma", () => {
 describe("V1A — migration SQL", () => {
   it("nom de migration postérieur au dernier existant avant V1B-db", async () => {
     const { readdirSync } = await import("node:fs")
+    // On exclut les migrations postérieures à V1A (V1B/V1C véhicules, puis le module Tâches)
+    // afin de vérifier que V1A était bien la plus récente du socle existant au moment de son ajout.
     const names = readdirSync("prisma/migrations")
-      .filter((n) => /^\d{14}_/.test(n) && !n.endsWith("_vehicles_v1b_db_integrity") && !n.endsWith("_vehicles_v1c_modele"))
+      .filter(
+        (n) =>
+          /^\d{14}_/.test(n) &&
+          !n.endsWith("_vehicles_v1b_db_integrity") &&
+          !n.endsWith("_vehicles_v1c_modele") &&
+          !n.endsWith("_tasks_v1")
+      )
       .sort()
     assert.equal(names.at(-1), MIGRATION_NAME)
   })

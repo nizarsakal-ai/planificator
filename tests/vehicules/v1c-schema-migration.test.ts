@@ -41,8 +41,12 @@ describe("V1C — schéma Prisma", () => {
     }
   })
 
-  it("migration V1C est la plus récente", () => {
-    const names = readdirSync("prisma/migrations").filter((n) => /^\d{14}_/.test(n)).sort()
+  it("migration V1C est la plus récente des migrations véhicules", () => {
+    // Des modules ultérieurs (ex. Tâches) peuvent ajouter des migrations plus récentes :
+    // on vérifie uniquement que V1C reste la dernière migration du périmètre véhicules.
+    const names = readdirSync("prisma/migrations")
+      .filter((n) => /^\d{14}_/.test(n) && n.includes("vehicles"))
+      .sort()
     assert.equal(names[names.length - 1], MIGRATION_NAME)
   })
 })
