@@ -67,7 +67,7 @@ export type InviterMembreDeps = {
     email: string,
     companyId: string
   ) => Promise<ExistingMember | null>
-  deletePendingInvitations: (email: string) => Promise<unknown>
+  deletePendingInvitations: (email: string, companyId: string) => Promise<unknown>
   findCompanyName: (companyId: string) => Promise<string | null>
   createInvitation: (data: {
     email: string
@@ -124,7 +124,7 @@ export async function inviterMembreImpl(
     }
   }
 
-  await deps.deletePendingInvitations(parsed.data.email)
+  await deps.deletePendingInvitations(parsed.data.email, user.companyId)
 
   const companyName = await deps.findCompanyName(user.companyId)
   const token =
