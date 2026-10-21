@@ -33,9 +33,10 @@ export async function inviterMembre(formData: FormData) {
           employeeProfile: { select: { id: true, active: true, companyId: true } },
         },
       }),
-    deletePendingInvitations: (email) =>
+    // T2bis — ne supprime que les invitations en attente de CETTE entreprise.
+    deletePendingInvitations: (email, companyId) =>
       prisma.invitation.deleteMany({
-        where: { email, status: "PENDING" },
+        where: { email, companyId, status: "PENDING" },
       }),
     findCompanyName: async (companyId) => {
       const company = await prisma.company.findUnique({

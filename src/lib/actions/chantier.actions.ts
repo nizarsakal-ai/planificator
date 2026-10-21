@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
+import { addEmployeeToBlockCore } from "@/lib/actions/chantier-block.core"
 import {
   createChantierSchema,
   updateChantierSchema,
@@ -579,67 +580,25 @@ export async function addEmployeeToBlock(
   endDate: string,
   employeeId: string,
 ) {
-  const session = await auth()
-  if (!session?.user || !["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) {
-    return { error: "Non autorisé" }
-  }
-
-  const isSuperAdmin = session.user.role === "SUPER_ADMIN"
-
-  const worksite = await prisma.worksite.findFirst({
-    where: {
-      id: worksiteId,
-      ...(isSuperAdmin ? {} : { companyId: session.user.companyId! }),
-    },
-    select: { id: true },
-  })
-  if (!worksite) return { error: "Chantier introuvable" }
-
-  const assignments = await prisma.assignment.findMany({
-    where: {
-      worksiteId,
-      teamId,
-      date: { gte: new Date(startDate), lte: new Date(endDate) },
-    },
-    select: { id: true, date: true },
-  })
-
-  // Créer les EmployeeAssignment un par un en ignorant les conflits (employé déjà affecté ce jour-là)
-  let added = 0
-  const skippedDates: Date[] = []
-  for (const assignment of assignments) {
-    try {
-      await prisma.employeeAssignment.create({
-        data: { assignmentId: assignment.id, employeeId, date: assignment.date },
-      })
-      added++
-    } catch {
-      // Conflit unique (employé déjà sur un autre chantier ce jour) — on note la date
-      skippedDates.push(assignment.date)
+  // T2bis (F4) : logique et règles d'isolation dans chantier-block.core.ts.
+  return addEmployeeToBlockCore(
+    { worksiteId, teamId, startDate, endDate, employeeId },
+    {
+      auth,
+      findWorksite: (where) => prisma.worksite.findFirst({ where, select: { id: true, companyId: true } }),
+      findEmployee: (where) => prisma.employee.findFirst({ where, select: { id: true } }),
+      findAssignments: (where) => prisma.assignment.findMany({ where, select: { id: true, date: true } }),
+      createEmployeeAssignment: (data) => prisma.employeeAssignment.create({ data }),
+      findConflicts: (where) =>
+        prisma.employeeAssignment.findMany({
+          where,
+          select: {
+            date: true,
+            assignment: { select: { worksite: { select: { name: true } }, team: { select: { name: true } } } },
+          },
+          orderBy: { date: "asc" },
+        }),
+      revalidate: revalidatePath,
     }
-  }
-
-  // Pour les jours ignorés, retrouver OÙ l'employé est déjà affecté (chantier + équipe)
-  const conflicts: { iso: string; date: string; worksiteName: string; teamName: string }[] = []
-  if (skippedDates.length > 0) {
-    const existing = await prisma.employeeAssignment.findMany({
-      where: { employeeId, date: { in: skippedDates } },
-      include: {
-        assignment: { select: { worksite: { select: { name: true } }, team: { select: { name: true } } } },
-      },
-      orderBy: { date: "asc" },
-    })
-    for (const ea of existing) {
-      conflicts.push({
-        iso: ea.date.toISOString().slice(0, 10),
-        date: new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(ea.date),
-        worksiteName: ea.assignment.worksite.name,
-        teamName: ea.assignment.team.name,
-      })
-    }
-  }
-
-  revalidatePath(`/chantiers/${worksiteId}`)
-  revalidatePath("/planning")
-  return { success: true, added, skipped: skippedDates.length, conflicts }
+  )
 }

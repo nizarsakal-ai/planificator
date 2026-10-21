@@ -31,8 +31,9 @@ export async function markAsRead(notificationId: string) {
   const session = await auth()
   if (!session?.user) return
 
-  await prisma.notification.update({
-    where: { id: notificationId },
+  // T2bis — seule une notification de l'utilisateur courant peut être marquée lue.
+  await prisma.notification.updateMany({
+    where: { id: notificationId, userId: session.user.id },
     data:  { read: true, readAt: new Date() },
   })
 }
