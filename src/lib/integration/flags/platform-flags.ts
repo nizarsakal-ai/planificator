@@ -4,8 +4,11 @@
  */
 
 import {
+  DEFAULT_AGENT_GATEWAY_RPM,
   DEFAULT_MAIL_SHADOW_RUN_BUDGET_MS,
+  MAX_AGENT_GATEWAY_RPM,
   MAX_MAIL_SHADOW_RUN_BUDGET_MS,
+  MIN_AGENT_GATEWAY_RPM,
   PLATFORM_FLAG_NAMES,
 } from "@/lib/integration/flags/platform-flag-names"
 
@@ -86,4 +89,51 @@ export function getMailShadowRunBudgetMs(env: PlatformFlagEnv = process.env): nu
   return parseMailShadowRunBudgetMs(
     readRaw(env, PLATFORM_FLAG_NAMES.MAIL_SHADOW_RUN_BUDGET_MS)
   )
+}
+
+// ─── PLAN-AGENT-GATEWAY-001 — LOT-1A ────────────────────────────────────────
+// Même discipline que mail-shadow : activation strictement `=== "true"`, parse défensif.
+
+export function isAgentGatewayEnabled(env: PlatformFlagEnv = process.env): boolean {
+  return isExactTrue(readRaw(env, PLATFORM_FLAG_NAMES.AGENT_GATEWAY_ENABLED))
+}
+
+export function isCompanyAllowedForAgentGateway(
+  companyId: string,
+  env: PlatformFlagEnv = process.env
+): boolean {
+  if (!companyId) return false
+  const allow = parseCompanyAllowlist(
+    readRaw(env, PLATFORM_FLAG_NAMES.AGENT_GATEWAY_COMPANY_ALLOWLIST)
+  )
+  return allow.has(companyId)
+}
+
+/**
+ * Requêtes/min par principal : entier dans [MIN, MAX] ; absent ou invalide → défaut sûr.
+ * Au-dessus de MAX → MAX ; en dessous de MIN (0, négatif) → défaut (jamais 0 : un quota nul
+ * serait un déni de service silencieux, pas un réglage).
+ */
+export function parseAgentGatewayRpm(raw: string | undefined): number {
+  if (raw === undefined || raw.trim().length === 0) return DEFAULT_AGENT_GATEWAY_RPM
+  const n = Number(raw)
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < MIN_AGENT_GATEWAY_RPM) {
+    return DEFAULT_AGENT_GATEWAY_RPM
+  }
+  return Math.min(n, MAX_AGENT_GATEWAY_RPM)
+}
+
+export function getAgentGatewayRpm(env: PlatformFlagEnv = process.env): number {
+  return parseAgentGatewayRpm(readRaw(env, PLATFORM_FLAG_NAMES.AGENT_GATEWAY_RPM))
+}
+
+/**
+ * Fail-closed : flag structurel ∧ allowlist. Les autres gardes (contrôle en base,
+ * principal, scopes) relèvent de l'enveloppe transactionnelle (lots suivants).
+ */
+export function isAgentGatewayActiveForCompany(
+  companyId: string,
+  env: PlatformFlagEnv = process.env
+): boolean {
+  return isAgentGatewayEnabled(env) && isCompanyAllowedForAgentGateway(companyId, env)
 }

@@ -365,6 +365,8 @@ model Company {
   trucks                      Truck[]
   truckAssignments            TruckAssignment[]
   tasks                       Task[]
+  /// PLAN-AGENT-GATEWAY-001 — LOT-1A (relation inverse, sans effet SQL sur companies)
+  agentPrincipals             AgentPrincipal[]
 
   @@map("companies")
 }
@@ -576,6 +578,8 @@ model User {
   historyLogs     HistoryLog[]    @relation("HistoryActor")
   reviewedImportDrafts WorksiteImportDraft[] @relation("ImportDraftReviewer")
   acquisitionAttachmentAccessLogs AcquisitionAttachmentAccessLog[]
+  /// PLAN-AGENT-GATEWAY-001 — LOT-1A (relation inverse, sans effet SQL sur users)
+  createdAgentPrincipals AgentPrincipal[] @relation("AgentPrincipalCreatedBy")
 
   @@index([companyId])
   @@index([email])
@@ -1859,4 +1863,126 @@ model Task {
   @@index([assigneeId])
   @@index([worksiteId])
   @@map("tasks")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AGENT GATEWAY — PLAN-AGENT-GATEWAY-001 / LOT-1A (ADR-PLAN-001, SPEC §4)
+// Migration expand uniquement. Aucune table métier existante modifiée.
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum AgentPrincipalStatus {
+  ACTIVE
+  REVOKED
+}
+
+/// Issue d'une requête de la passerelle (journal, SPEC §4.2).
+enum AgentAccessOutcome {
+  OK
+  BAD_REQUEST
+  UNAUTHORIZED
+  FORBIDDEN
+  NOT_FOUND
+  RATE_LIMITED
+  DISABLED
+  BUSY
+  TIMEOUT
+  ERROR
+}
+
+/// Scopes v1 — lecture seule par construction : aucun scope d'écriture n'existe.
+/// Correspondance avec les chaînes du contrat (`worksites:read`…) : src/lib/agent-gateway/scopes.ts
+enum AgentScope {
+  WORKSITES_READ
+  EMPLOYEES_READ
+  ASSIGNMENTS_READ
+  ABSENCES_READ
+}
+
+/// Principal agent : identité mono-entreprise d'un agent IA externe. Jamais un User.
+model AgentPrincipal {
+  id              String               @id @default(cuid())
+  companyId       String
+  name            String
+  tokenHash       String               @unique // SHA-256 hex du jeton complet
+  tokenPrefix     String // `plag_` + 7 caractères, identification humaine, non secret
+  scopes          AgentScope[]
+  status          AgentPrincipalStatus @default(ACTIVE)
+  createdByUserId String
+  createdAt       DateTime             @default(now())
+  expiresAt       DateTime?
+  lastUsedAt      DateTime?
+  revokedAt       DateTime?
+
+  // Relations — Restrict : la suppression d'une entreprise ou d'un utilisateur
+  // exige la révocation/archivage préalable des principaux (SPEC §13.2).
+  company     Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  createdBy   User              @relation("AgentPrincipalCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  accessLogs  AgentAccessLog[]
+  rateWindows AgentRateWindow[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+  @@map("agent_principals")
+}
+
+/// Journal d'accès : lignes unitaires (principal dans le quota) et lignes agrégées
+/// par minute/issue (`aggregateKey`) pour les anonymes et les dépassements de quota.
+/// principalId/companyId nullables, aucune cascade : le journal survit au principal.
+model AgentAccessLog {
+  id                   String             @id @default(cuid())
+  principalId          String?
+  companyId            String? // dénormalisé, volontairement sans FK
+  presentedTokenDigest String? // HMAC du jeton présenté — principal résolu uniquement
+  aggregateKey         String?            @unique // anon:<minute>:<outcome> | principal:<id>:<minute>:<outcome>
+  count                Int                @default(1)
+  tool                 String
+  paramsDigest         String?
+  outcome              AgentAccessOutcome
+  httpStatus           Int
+  latencyMs            Int
+  correlationId        String
+  createdAt            DateTime           @default(now())
+
+  principal AgentPrincipal? @relation(fields: [principalId], references: [id], onDelete: SetNull)
+
+  @@index([principalId, createdAt])
+  @@index([companyId, createdAt])
+  @@index([presentedTokenDigest, createdAt])
+  @@index([createdAt])
+  @@map("agent_access_logs")
+}
+
+/// Compteur de débit par principal et par minute (SPEC §9). Éphémère : cascade.
+model AgentRateWindow {
+  principalId String
+  windowStart DateTime
+  count       Int      @default(0)
+
+  principal AgentPrincipal @relation(fields: [principalId], references: [id], onDelete: Cascade)
+
+  @@id([principalId, windowStart])
+  @@index([windowStart])
+  @@map("agent_rate_windows")
+}
+
+/// Compteur des tentatives anonymes : clés `all` et `ip:<HMAC>` uniquement —
+/// jamais dérivé d'un jeton (état borné, SPEC §9 S2).
+model AgentAnonRateWindow {
+  keyDigest   String
+  windowStart DateTime
+  count       Int      @default(0)
+
+  @@id([keyDigest, windowStart])
+  @@index([windowStart])
+  @@map("agent_anon_rate_windows")
+}
+
+/// Kill-switch sans déploiement : ligne unique `singleton`. Absente ⇒ désactivé.
+model AgentGatewayControl {
+  id              String   @id // valeur fixe "singleton"
+  enabled         Boolean  @default(false)
+  updatedAt       DateTime @updatedAt
+  updatedByUserId String?
+
+  @@map("agent_gateway_control")
 }
