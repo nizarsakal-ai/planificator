@@ -1,22 +1,11 @@
 "use server"
 
-import { prisma } from "@/lib/prisma"
-import { auth } from "@/auth"
+import { checkTeamConflictCore } from "@/lib/actions/assignment-team-conflict.core"
 
+/**
+ * Ticket #77 : lecture bornée à l'entreprise de la session (équipe ET chantier),
+ * refus sans `companyId`. Logique et tests dans `assignment-team-conflict.core.ts`.
+ */
 export async function checkTeamConflict(teamId: string, date: string, excludeWorksiteId?: string) {
-  const session = await auth()
-  if (!session?.user) return null
-
-  const existing = await prisma.assignment.findFirst({
-    where: {
-      teamId,
-      date: new Date(date),
-      ...(excludeWorksiteId ? { worksiteId: { not: excludeWorksiteId } } : {}),
-    },
-    include: {
-      worksite: { select: { name: true } },
-    },
-  })
-
-  return existing ? { worksiteName: existing.worksite.name } : null
+  return checkTeamConflictCore(teamId, date, excludeWorksiteId)
 }
