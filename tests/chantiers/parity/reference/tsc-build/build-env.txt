@@ -1,0 +1,7 @@
+# Variables d'environnement FACTICES utilisées pour `npm run build` (aucun secret réel)
+DATABASE_URL=postgresql://dummy:dummy@localhost:5432/dummy
+NEXTAUTH_SECRET=dummy-build-secret-not-a-real-secret
+AUTH_SECRET=dummy-build-secret-not-a-real-secret
+NEXTAUTH_URL=http://localhost:3000
+RESEND_API_KEY=re_test_dummy
+NEXT_TELEMETRY_DISABLED=1

@@ -1,0 +1,28 @@
+{
+  "id": "assign-missing-worksiteid",
+  "action": "affecterEquipe",
+  "title": "worksiteId manquant ⇒ « Informations manquantes. »",
+  "input": {
+    "session": "admin",
+    "form": {
+      "worksiteId": "",
+      "teamId": "team-1",
+      "dateFrom": "2026-11-03",
+      "dateTo": "2026-11-05"
+    },
+    "geocode": null,
+    "email": "resolve",
+    "dbScriptKeys": []
+  },
+  "result": {
+    "returned": {
+      "error": "Informations manquantes."
+    }
+  },
+  "trace": [
+    {
+      "kind": "auth",
+      "session": "admin"
+    }
+  ]
+}

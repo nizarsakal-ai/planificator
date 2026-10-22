@@ -1,0 +1,28 @@
+{
+  "id": "assign-dateto-before-datefrom",
+  "action": "affecterEquipe",
+  "title": "dateTo < dateFrom",
+  "input": {
+    "session": "admin",
+    "form": {
+      "worksiteId": "worksite-1",
+      "teamId": "team-1",
+      "dateFrom": "2026-11-05",
+      "dateTo": "2026-11-03"
+    },
+    "geocode": null,
+    "email": "resolve",
+    "dbScriptKeys": []
+  },
+  "result": {
+    "returned": {
+      "error": "La date de fin doit être après la date de début."
+    }
+  },
+  "trace": [
+    {
+      "kind": "auth",
+      "session": "admin"
+    }
+  ]
+}

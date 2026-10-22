@@ -1,0 +1,724 @@
+{
+  "lot": "LOT-1W-1a",
+  "BASE_SHA": "a84c73fe7e89c04943e356df99679fe0aca83ed1",
+  "frozenClock": "2026-11-02T08:00:00Z",
+  "moduleMocking": "node:test mock.module (drapeau --experimental-test-module-mocks), chargement TypeScript par tsx (--import tsx), fichiers .ts traités en CommonJS",
+  "doubledModules": [
+    "@/auth",
+    "@/lib/prisma",
+    "@/lib/geo/geocode.port",
+    "@/lib/email",
+    "next/cache"
+  ],
+  "importGraphFingerprints": {
+    "src/auth.config.ts": "522d447f33c674f4189aabd89c8f25ba91671a07c98336830243ed3392ec4d3f",
+    "src/auth.ts": "6ac7cab44bef4883799a00b0e93bc025314d426ed575481252eed3f9e18133ea",
+    "src/lib/actions/chantier-block.core.ts": "2ce3290ec7648e7ed1dd0a05c3052c64a8e2052093f27235ee47c0b56bf50456",
+    "src/lib/actions/chantier.actions.ts": "763299196c5c3087a79818b64b20aa45af07d4540eadbe360a01f4bd252fe20c",
+    "src/lib/email.ts": "a567289f10b459fe893b7c4b5b8ba6cadfdbfa08c91107a1c91cf02c0532b792",
+    "src/lib/geo/geocode.port.ts": "95bf53db8baf43454fdb793dc464af5c44ec373d73b3c543013d7093faea6c69",
+    "src/lib/prisma.ts": "bd96f7df1a56540e55e10b8b8bea1073c9ff11e589f4811fd2f2a3ad2add90eb",
+    "src/lib/validations/chantier.ts": "39f4907aa7b68c0df17dd03c8d1307d7387708cf983e794619ee1bcb9ad4f609",
+    "tsconfig.json": "1105489e1aa28d3e6758f68cd26eb627a731b680a7865dbe36373df54fb7dd89"
+  },
+  "captures": {
+    "UTC": {
+      "generatedAt": "2026-10-22T22:12:56.702Z",
+      "node": "v22.23.4",
+      "platform": "darwin",
+      "arch": "arm64",
+      "tz": "UTC",
+      "resolvedTimeZone": "UTC",
+      "gitRef": "HEAD",
+      "command": "TZ=UTC node --import tsx --experimental-test-module-mocks tests/chantiers/parity/record-reference.ts",
+      "caseCount": 56,
+      "cases": [
+        {
+          "id": "create-valid-geocode-ok",
+          "action": "createChantier",
+          "file": "create-valid-geocode-ok.utc.json",
+          "sha256": "9f42bb1eb65446202fb7e252f847a187e5f4a9bdac0d6f780ed62dc441075c92"
+        },
+        {
+          "id": "create-valid-geocode-null",
+          "action": "createChantier",
+          "file": "create-valid-geocode-null.utc.json",
+          "sha256": "319c419abd399d6426b5bc08bb9b14db01304c8e329c4279ecc53fb51c8ce703"
+        },
+        {
+          "id": "create-valid-no-address",
+          "action": "createChantier",
+          "file": "create-valid-no-address.utc.json",
+          "sha256": "d48b0e303e21b05b0ff45fdd94ec65f062a5b24a759a8205dbf1f3c1a9708c2a"
+        },
+        {
+          "id": "create-valid-dailyhours-fraction",
+          "action": "createChantier",
+          "file": "create-valid-dailyhours-fraction.utc.json",
+          "sha256": "257f420c3560635986d765e7dd4bd2f81fdc09fcd7af60f3fc441da8b728d2fb"
+        },
+        {
+          "id": "create-valid-same-day",
+          "action": "createChantier",
+          "file": "create-valid-same-day.utc.json",
+          "sha256": "ff21ed1bfedd39af885414a98548ae33a5d039217e94d67437d7ba06f2a434d2"
+        },
+        {
+          "id": "create-geocode-throws",
+          "action": "createChantier",
+          "file": "create-geocode-throws.utc.json",
+          "sha256": "c1d8121e9ad982063ba94fdeb19be5319f982c6b6bbf1581ba4af716b50780d2"
+        },
+        {
+          "id": "create-worksite-create-throws",
+          "action": "createChantier",
+          "file": "create-worksite-create-throws.utc.json",
+          "sha256": "c20ae86f205f386485a1aaa170feb3b29df0cf6c32865a762645f2661f0a9318"
+        },
+        {
+          "id": "create-client-not-found",
+          "action": "createChantier",
+          "file": "create-client-not-found.utc.json",
+          "sha256": "504af98519bf5c1e868f79ad3d2182e5c5f4db12d67babf18e1ba710ac132767"
+        },
+        {
+          "id": "create-zod-name-empty",
+          "action": "createChantier",
+          "file": "create-zod-name-empty.utc.json",
+          "sha256": "fd37ff0f2ff87241b5ba483464d508fb90c513623e177f4b0de3da16e2c8675c"
+        },
+        {
+          "id": "create-zod-name-too-long",
+          "action": "createChantier",
+          "file": "create-zod-name-too-long.utc.json",
+          "sha256": "984086599ada844c24dbbd2886cee476aa8fee6715d839d4dba7ef482e1949f2"
+        },
+        {
+          "id": "create-zod-description-absent",
+          "action": "createChantier",
+          "file": "create-zod-description-absent.utc.json",
+          "sha256": "da3923f65f9db6e523a22cad218748fe67ed0be705226beb681c4aa48651d12e"
+        },
+        {
+          "id": "create-zod-client-empty",
+          "action": "createChantier",
+          "file": "create-zod-client-empty.utc.json",
+          "sha256": "cdfc5d0f3df4d0eddd62ab70b3212371d3e9f13e659e2b3e48176765e13a47ad"
+        },
+        {
+          "id": "create-zod-startdate-empty",
+          "action": "createChantier",
+          "file": "create-zod-startdate-empty.utc.json",
+          "sha256": "1592189fa909da73b56b197824e4c2b202234a1cfea9d5811f9f9703b4208a5e"
+        },
+        {
+          "id": "create-zod-enddate-empty",
+          "action": "createChantier",
+          "file": "create-zod-enddate-empty.utc.json",
+          "sha256": "dbca8200a3a69c2b66b751bfdbeeeaaab61f1857f69ec7133f384baeefbd7262"
+        },
+        {
+          "id": "create-zod-enddate-before-startdate",
+          "action": "createChantier",
+          "file": "create-zod-enddate-before-startdate.utc.json",
+          "sha256": "09b05ee88155f8a3c8aa129835669b1003836d816f8aa16707517104354f0de6"
+        },
+        {
+          "id": "create-zod-dailyhours-below-min",
+          "action": "createChantier",
+          "file": "create-zod-dailyhours-below-min.utc.json",
+          "sha256": "b0d1006fd32f4e9478c2d484150a6793e929e571905deb5dcb3582c542dac0d4"
+        },
+        {
+          "id": "create-zod-dailyhours-above-max",
+          "action": "createChantier",
+          "file": "create-zod-dailyhours-above-max.utc.json",
+          "sha256": "33966862f176578e97458a3ba04466611fe6cd292315be90233fe9467ee6dbe4"
+        },
+        {
+          "id": "create-zod-dailyhours-empty",
+          "action": "createChantier",
+          "file": "create-zod-dailyhours-empty.utc.json",
+          "sha256": "662bdda6c350287a9e7743986469da54eb3c93ade36d265125643993fad03eb4"
+        },
+        {
+          "id": "create-zod-dailyhours-nan",
+          "action": "createChantier",
+          "file": "create-zod-dailyhours-nan.utc.json",
+          "sha256": "669d6b6e547e6f852c3f22cf879358d975082968811a063df408ca4e7aaab3b2"
+        },
+        {
+          "id": "create-zod-startdate-invalid",
+          "action": "createChantier",
+          "file": "create-zod-startdate-invalid.utc.json",
+          "sha256": "086c231a3b6b5e94e15ff7decf35357355bf705aa62eaf0376ffe8f55b1a60aa"
+        },
+        {
+          "id": "create-auth-session-absent",
+          "action": "createChantier",
+          "file": "create-auth-session-absent.utc.json",
+          "sha256": "2b02350cf313b9b903578244e406a0386884052c71785b356958e11f7463514c"
+        },
+        {
+          "id": "create-auth-role-employee",
+          "action": "createChantier",
+          "file": "create-auth-role-employee.utc.json",
+          "sha256": "e33637ac1a6836921a51c43b0b2b7789da707f24226745b08f7c894b0ee63cc9"
+        },
+        {
+          "id": "create-auth-no-company",
+          "action": "createChantier",
+          "file": "create-auth-no-company.utc.json",
+          "sha256": "fe64715d050cc1e5417ca05eeaca393c11c76aa2fa5fae02abf271174d93f5e2"
+        },
+        {
+          "id": "assign-one-day",
+          "action": "affecterEquipe",
+          "file": "assign-one-day.utc.json",
+          "sha256": "4c5595fcd2310d987cfabf2d93d03ec1bcacc9ffccad9fa0c44726a5a62b1981"
+        },
+        {
+          "id": "assign-multi-day",
+          "action": "affecterEquipe",
+          "file": "assign-multi-day.utc.json",
+          "sha256": "7d4ab4ab9fe4a4a51fd7ff6baaf73589d954362d9a769e9ecb2ad42d65453c80"
+        },
+        {
+          "id": "assign-multi-day-month-boundary",
+          "action": "affecterEquipe",
+          "file": "assign-multi-day-month-boundary.utc.json",
+          "sha256": "ae4910c17e93ee0721f391d699f8c0b7e9ba0dbdc910d8e4a46bd459dc28ef81"
+        },
+        {
+          "id": "assign-range-across-dst",
+          "action": "affecterEquipe",
+          "file": "assign-range-across-dst.utc.json",
+          "sha256": "0b3400b8c1b6d548c69ae78d938526eec17a1b9e4c5ee7e1b3a9b4f0964377db"
+        },
+        {
+          "id": "assign-datefrom-with-time",
+          "action": "affecterEquipe",
+          "file": "assign-datefrom-with-time.utc.json",
+          "sha256": "c7cc19afae8bc484da02de854ae767432f0f13f8376816517cce631bdfc63165"
+        },
+        {
+          "id": "assign-dateto-absent",
+          "action": "affecterEquipe",
+          "file": "assign-dateto-absent.utc.json",
+          "sha256": "73913e3398c689f9bcb988475297a1dfae76690ace832b7229f4eaa3f076a170"
+        },
+        {
+          "id": "assign-dateto-key-missing",
+          "action": "affecterEquipe",
+          "file": "assign-dateto-key-missing.utc.json",
+          "sha256": "92be785ff1322f995a9bdecc4ab6f71c0c21b477b41e6ef2a0b3155f7139fe71"
+        },
+        {
+          "id": "assign-dateto-before-datefrom",
+          "action": "affecterEquipe",
+          "file": "assign-dateto-before-datefrom.utc.json",
+          "sha256": "99a5028c88aecea21213badf9cb3bd5db17d5470381a6f6f473686f05e22abc5"
+        },
+        {
+          "id": "assign-missing-worksiteid",
+          "action": "affecterEquipe",
+          "file": "assign-missing-worksiteid.utc.json",
+          "sha256": "4fe0b7048749d7db363698538a74adc1b1764125a4496e446c92f9305a5fef5a"
+        },
+        {
+          "id": "assign-missing-teamid",
+          "action": "affecterEquipe",
+          "file": "assign-missing-teamid.utc.json",
+          "sha256": "c2253077cc181ab6d8eae131907a83356d17fb23531623146e303cdaed8555fd"
+        },
+        {
+          "id": "assign-missing-datefrom",
+          "action": "affecterEquipe",
+          "file": "assign-missing-datefrom.utc.json",
+          "sha256": "c32beae46b247315b58e9f2cb948a374e94d40cb0c3302065f8963529a41ccf7"
+        },
+        {
+          "id": "assign-worksite-not-found",
+          "action": "affecterEquipe",
+          "file": "assign-worksite-not-found.utc.json",
+          "sha256": "b8dfa6bdb6ef40954d12da694aeea16f61d0d3005b7c916e7160dcfea1810f01"
+        },
+        {
+          "id": "assign-team-not-found",
+          "action": "affecterEquipe",
+          "file": "assign-team-not-found.utc.json",
+          "sha256": "4a8732ba33bce7e008a799ea4f01a98b048aae91c0c1f911201daae4831f8bc7"
+        },
+        {
+          "id": "assign-team-conflict-with-address",
+          "action": "affecterEquipe",
+          "file": "assign-team-conflict-with-address.utc.json",
+          "sha256": "c412ff535a52fa7f1fab5bd842c63aa05ada3853c2fd555e07dfb62ffe076afe"
+        },
+        {
+          "id": "assign-team-conflict-without-address",
+          "action": "affecterEquipe",
+          "file": "assign-team-conflict-without-address.utc.json",
+          "sha256": "5f2afbfe1aa9ebaa3aeaf446b531e349e3517eb0d641eb332930a478f6c288a8"
+        },
+        {
+          "id": "assign-team-conflict-late-evening-date",
+          "action": "affecterEquipe",
+          "file": "assign-team-conflict-late-evening-date.utc.json",
+          "sha256": "80c7350adbbef75f254ae9b3e3501eb1e8c78e999e8dff00fad3e3d8f8f751d7"
+        },
+        {
+          "id": "assign-employee-conflict-one",
+          "action": "affecterEquipe",
+          "file": "assign-employee-conflict-one.utc.json",
+          "sha256": "831125e2a3da21aefce65baae5ca51236925ebbfef4591b1c1f72b8473d7cc17"
+        },
+        {
+          "id": "assign-employee-conflict-many",
+          "action": "affecterEquipe",
+          "file": "assign-employee-conflict-many.utc.json",
+          "sha256": "9322530b415bd933c89ab32d7340fdaa968c91de8b4442b4e7799489dfec1b45"
+        },
+        {
+          "id": "assign-team-without-members",
+          "action": "affecterEquipe",
+          "file": "assign-team-without-members.utc.json",
+          "sha256": "b0fc023c9d338c577ed8b4b569374b5642e2e90ea0598211ce6d547ef0ee1b70"
+        },
+        {
+          "id": "assign-worksite-already-in-progress",
+          "action": "affecterEquipe",
+          "file": "assign-worksite-already-in-progress.utc.json",
+          "sha256": "1d14bb42b0c63eb20ac82197b2f37e0e014445189a2879afbb7c97a6c1888955"
+        },
+        {
+          "id": "assign-leader-without-userid",
+          "action": "affecterEquipe",
+          "file": "assign-leader-without-userid.utc.json",
+          "sha256": "af2d47eb89b9a46faad030126e37916d147e5b37781e99854994de93d117f447"
+        },
+        {
+          "id": "assign-no-leader",
+          "action": "affecterEquipe",
+          "file": "assign-no-leader.utc.json",
+          "sha256": "f060d76af5461c7f5b7aad6c8f4618265e939310e2d09e71a22ccad386f293f3"
+        },
+        {
+          "id": "assign-leader-user-without-email",
+          "action": "affecterEquipe",
+          "file": "assign-leader-user-without-email.utc.json",
+          "sha256": "95b8680e670768125d6d164a7ab9ba62f66bf7c2bdd8476d88f6f0030013ab2d"
+        },
+        {
+          "id": "assign-leader-user-without-name",
+          "action": "affecterEquipe",
+          "file": "assign-leader-user-without-name.utc.json",
+          "sha256": "14b095e4828232ca3c530b9f43e408fcdfef6537be251713c3eee224446b210d"
+        },
+        {
+          "id": "assign-leader-user-not-found",
+          "action": "affecterEquipe",
+          "file": "assign-leader-user-not-found.utc.json",
+          "sha256": "07789fa73b6551e23091c6c6108f1d6ce6131bdfbdf9eccccf3b43aa51444db1"
+        },
+        {
+          "id": "assign-company-not-found",
+          "action": "affecterEquipe",
+          "file": "assign-company-not-found.utc.json",
+          "sha256": "dafc084ca0f369d96535965edb83c866112f85a576e111afeb455d732f00c968"
+        },
+        {
+          "id": "assign-email-rejects",
+          "action": "affecterEquipe",
+          "file": "assign-email-rejects.utc.json",
+          "sha256": "41e51979f161fc3a38026f11795e417c0cd3f36a11d9ee9bde10077a7d61fc94"
+        },
+        {
+          "id": "assign-tx-error-assignment-create",
+          "action": "affecterEquipe",
+          "file": "assign-tx-error-assignment-create.utc.json",
+          "sha256": "e57b2c6362516ba6b1ceebb2f24e51b3e515f13591e4c7136c15384abe269255"
+        },
+        {
+          "id": "assign-tx-error-notification-create",
+          "action": "affecterEquipe",
+          "file": "assign-tx-error-notification-create.utc.json",
+          "sha256": "ca52fa0591a7108d62b2ca6a161af9a3ed517e3bcadca84cf19dbf04e063fcfc"
+        },
+        {
+          "id": "assign-tx-error-non-error-value",
+          "action": "affecterEquipe",
+          "file": "assign-tx-error-non-error-value.utc.json",
+          "sha256": "ba3dcfc9e179e6341212171a34e2959717dfdd52bea84dcc8b48d1d15ee85b0c"
+        },
+        {
+          "id": "assign-auth-session-absent",
+          "action": "affecterEquipe",
+          "file": "assign-auth-session-absent.utc.json",
+          "sha256": "1b94dfa11b2b0643e258b00cd5fe13bea7339359975c72ac9383efdaa11b3bcb"
+        },
+        {
+          "id": "assign-auth-role-employee",
+          "action": "affecterEquipe",
+          "file": "assign-auth-role-employee.utc.json",
+          "sha256": "db8ef41e95c248cac52852aeca5bd0989342320dc9e543ec008ca5a45924ce46"
+        },
+        {
+          "id": "assign-auth-no-company",
+          "action": "affecterEquipe",
+          "file": "assign-auth-no-company.utc.json",
+          "sha256": "3d933f41961ac0ed1bf90747a1cfbcdf1fe5db47b4daf257bae8671f3d74851a"
+        }
+      ]
+    },
+    "Europe/Paris": {
+      "generatedAt": "2026-10-22T22:12:57.230Z",
+      "node": "v22.23.4",
+      "platform": "darwin",
+      "arch": "arm64",
+      "tz": "Europe/Paris",
+      "resolvedTimeZone": "Europe/Paris",
+      "gitRef": "HEAD",
+      "command": "TZ=Europe/Paris node --import tsx --experimental-test-module-mocks tests/chantiers/parity/record-reference.ts",
+      "caseCount": 56,
+      "cases": [
+        {
+          "id": "create-valid-geocode-ok",
+          "action": "createChantier",
+          "file": "create-valid-geocode-ok.europe-paris.json",
+          "sha256": "9f42bb1eb65446202fb7e252f847a187e5f4a9bdac0d6f780ed62dc441075c92"
+        },
+        {
+          "id": "create-valid-geocode-null",
+          "action": "createChantier",
+          "file": "create-valid-geocode-null.europe-paris.json",
+          "sha256": "319c419abd399d6426b5bc08bb9b14db01304c8e329c4279ecc53fb51c8ce703"
+        },
+        {
+          "id": "create-valid-no-address",
+          "action": "createChantier",
+          "file": "create-valid-no-address.europe-paris.json",
+          "sha256": "d48b0e303e21b05b0ff45fdd94ec65f062a5b24a759a8205dbf1f3c1a9708c2a"
+        },
+        {
+          "id": "create-valid-dailyhours-fraction",
+          "action": "createChantier",
+          "file": "create-valid-dailyhours-fraction.europe-paris.json",
+          "sha256": "257f420c3560635986d765e7dd4bd2f81fdc09fcd7af60f3fc441da8b728d2fb"
+        },
+        {
+          "id": "create-valid-same-day",
+          "action": "createChantier",
+          "file": "create-valid-same-day.europe-paris.json",
+          "sha256": "ff21ed1bfedd39af885414a98548ae33a5d039217e94d67437d7ba06f2a434d2"
+        },
+        {
+          "id": "create-geocode-throws",
+          "action": "createChantier",
+          "file": "create-geocode-throws.europe-paris.json",
+          "sha256": "c1d8121e9ad982063ba94fdeb19be5319f982c6b6bbf1581ba4af716b50780d2"
+        },
+        {
+          "id": "create-worksite-create-throws",
+          "action": "createChantier",
+          "file": "create-worksite-create-throws.europe-paris.json",
+          "sha256": "c20ae86f205f386485a1aaa170feb3b29df0cf6c32865a762645f2661f0a9318"
+        },
+        {
+          "id": "create-client-not-found",
+          "action": "createChantier",
+          "file": "create-client-not-found.europe-paris.json",
+          "sha256": "504af98519bf5c1e868f79ad3d2182e5c5f4db12d67babf18e1ba710ac132767"
+        },
+        {
+          "id": "create-zod-name-empty",
+          "action": "createChantier",
+          "file": "create-zod-name-empty.europe-paris.json",
+          "sha256": "fd37ff0f2ff87241b5ba483464d508fb90c513623e177f4b0de3da16e2c8675c"
+        },
+        {
+          "id": "create-zod-name-too-long",
+          "action": "createChantier",
+          "file": "create-zod-name-too-long.europe-paris.json",
+          "sha256": "984086599ada844c24dbbd2886cee476aa8fee6715d839d4dba7ef482e1949f2"
+        },
+        {
+          "id": "create-zod-description-absent",
+          "action": "createChantier",
+          "file": "create-zod-description-absent.europe-paris.json",
+          "sha256": "da3923f65f9db6e523a22cad218748fe67ed0be705226beb681c4aa48651d12e"
+        },
+        {
+          "id": "create-zod-client-empty",
+          "action": "createChantier",
+          "file": "create-zod-client-empty.europe-paris.json",
+          "sha256": "cdfc5d0f3df4d0eddd62ab70b3212371d3e9f13e659e2b3e48176765e13a47ad"
+        },
+        {
+          "id": "create-zod-startdate-empty",
+          "action": "createChantier",
+          "file": "create-zod-startdate-empty.europe-paris.json",
+          "sha256": "1592189fa909da73b56b197824e4c2b202234a1cfea9d5811f9f9703b4208a5e"
+        },
+        {
+          "id": "create-zod-enddate-empty",
+          "action": "createChantier",
+          "file": "create-zod-enddate-empty.europe-paris.json",
+          "sha256": "dbca8200a3a69c2b66b751bfdbeeeaaab61f1857f69ec7133f384baeefbd7262"
+        },
+        {
+          "id": "create-zod-enddate-before-startdate",
+          "action": "createChantier",
+          "file": "create-zod-enddate-before-startdate.europe-paris.json",
+          "sha256": "09b05ee88155f8a3c8aa129835669b1003836d816f8aa16707517104354f0de6"
+        },
+        {
+          "id": "create-zod-dailyhours-below-min",
+          "action": "createChantier",
+          "file": "create-zod-dailyhours-below-min.europe-paris.json",
+          "sha256": "b0d1006fd32f4e9478c2d484150a6793e929e571905deb5dcb3582c542dac0d4"
+        },
+        {
+          "id": "create-zod-dailyhours-above-max",
+          "action": "createChantier",
+          "file": "create-zod-dailyhours-above-max.europe-paris.json",
+          "sha256": "33966862f176578e97458a3ba04466611fe6cd292315be90233fe9467ee6dbe4"
+        },
+        {
+          "id": "create-zod-dailyhours-empty",
+          "action": "createChantier",
+          "file": "create-zod-dailyhours-empty.europe-paris.json",
+          "sha256": "662bdda6c350287a9e7743986469da54eb3c93ade36d265125643993fad03eb4"
+        },
+        {
+          "id": "create-zod-dailyhours-nan",
+          "action": "createChantier",
+          "file": "create-zod-dailyhours-nan.europe-paris.json",
+          "sha256": "669d6b6e547e6f852c3f22cf879358d975082968811a063df408ca4e7aaab3b2"
+        },
+        {
+          "id": "create-zod-startdate-invalid",
+          "action": "createChantier",
+          "file": "create-zod-startdate-invalid.europe-paris.json",
+          "sha256": "086c231a3b6b5e94e15ff7decf35357355bf705aa62eaf0376ffe8f55b1a60aa"
+        },
+        {
+          "id": "create-auth-session-absent",
+          "action": "createChantier",
+          "file": "create-auth-session-absent.europe-paris.json",
+          "sha256": "2b02350cf313b9b903578244e406a0386884052c71785b356958e11f7463514c"
+        },
+        {
+          "id": "create-auth-role-employee",
+          "action": "createChantier",
+          "file": "create-auth-role-employee.europe-paris.json",
+          "sha256": "e33637ac1a6836921a51c43b0b2b7789da707f24226745b08f7c894b0ee63cc9"
+        },
+        {
+          "id": "create-auth-no-company",
+          "action": "createChantier",
+          "file": "create-auth-no-company.europe-paris.json",
+          "sha256": "fe64715d050cc1e5417ca05eeaca393c11c76aa2fa5fae02abf271174d93f5e2"
+        },
+        {
+          "id": "assign-one-day",
+          "action": "affecterEquipe",
+          "file": "assign-one-day.europe-paris.json",
+          "sha256": "87190ef122fe8fffe96895bd369713265c1357bd79a20c37c6c9c0edb9d565d2"
+        },
+        {
+          "id": "assign-multi-day",
+          "action": "affecterEquipe",
+          "file": "assign-multi-day.europe-paris.json",
+          "sha256": "ef7b2af0a7e05a3caba7a39ff6823564e6742a06f58820adf47d71b9040753f6"
+        },
+        {
+          "id": "assign-multi-day-month-boundary",
+          "action": "affecterEquipe",
+          "file": "assign-multi-day-month-boundary.europe-paris.json",
+          "sha256": "29c32e10881847773ca904210eb5445c4f3e5d8b74dd91f7eccb874b59962cd4"
+        },
+        {
+          "id": "assign-range-across-dst",
+          "action": "affecterEquipe",
+          "file": "assign-range-across-dst.europe-paris.json",
+          "sha256": "3a2d2ec620bc15b5b6534564c8a92b347cf62236886f1c72b3ac31b9284844de"
+        },
+        {
+          "id": "assign-datefrom-with-time",
+          "action": "affecterEquipe",
+          "file": "assign-datefrom-with-time.europe-paris.json",
+          "sha256": "f566914af8f792d91900c39e42da92787aeb2420157c08d70b884cad105bc570"
+        },
+        {
+          "id": "assign-dateto-absent",
+          "action": "affecterEquipe",
+          "file": "assign-dateto-absent.europe-paris.json",
+          "sha256": "7ac5c4c390467240713b2537d8127da0b0b61c18f3fc8f34c9c72d183fc20fbd"
+        },
+        {
+          "id": "assign-dateto-key-missing",
+          "action": "affecterEquipe",
+          "file": "assign-dateto-key-missing.europe-paris.json",
+          "sha256": "53e9272beab68e7bd5be94e8cd835bb52dd03a508bbc28ed001a592329057b3b"
+        },
+        {
+          "id": "assign-dateto-before-datefrom",
+          "action": "affecterEquipe",
+          "file": "assign-dateto-before-datefrom.europe-paris.json",
+          "sha256": "99a5028c88aecea21213badf9cb3bd5db17d5470381a6f6f473686f05e22abc5"
+        },
+        {
+          "id": "assign-missing-worksiteid",
+          "action": "affecterEquipe",
+          "file": "assign-missing-worksiteid.europe-paris.json",
+          "sha256": "4fe0b7048749d7db363698538a74adc1b1764125a4496e446c92f9305a5fef5a"
+        },
+        {
+          "id": "assign-missing-teamid",
+          "action": "affecterEquipe",
+          "file": "assign-missing-teamid.europe-paris.json",
+          "sha256": "c2253077cc181ab6d8eae131907a83356d17fb23531623146e303cdaed8555fd"
+        },
+        {
+          "id": "assign-missing-datefrom",
+          "action": "affecterEquipe",
+          "file": "assign-missing-datefrom.europe-paris.json",
+          "sha256": "c32beae46b247315b58e9f2cb948a374e94d40cb0c3302065f8963529a41ccf7"
+        },
+        {
+          "id": "assign-worksite-not-found",
+          "action": "affecterEquipe",
+          "file": "assign-worksite-not-found.europe-paris.json",
+          "sha256": "b8dfa6bdb6ef40954d12da694aeea16f61d0d3005b7c916e7160dcfea1810f01"
+        },
+        {
+          "id": "assign-team-not-found",
+          "action": "affecterEquipe",
+          "file": "assign-team-not-found.europe-paris.json",
+          "sha256": "4a8732ba33bce7e008a799ea4f01a98b048aae91c0c1f911201daae4831f8bc7"
+        },
+        {
+          "id": "assign-team-conflict-with-address",
+          "action": "affecterEquipe",
+          "file": "assign-team-conflict-with-address.europe-paris.json",
+          "sha256": "30c2ee6bec6ef9c8e97f39c8c1ebb577d292c7881b2d0867fba29bbca06902ab"
+        },
+        {
+          "id": "assign-team-conflict-without-address",
+          "action": "affecterEquipe",
+          "file": "assign-team-conflict-without-address.europe-paris.json",
+          "sha256": "0a885df83bcaac6f94631135238595567a67c58d999c812b0e70851bb466887c"
+        },
+        {
+          "id": "assign-team-conflict-late-evening-date",
+          "action": "affecterEquipe",
+          "file": "assign-team-conflict-late-evening-date.europe-paris.json",
+          "sha256": "f24388e3fb23988ade6a0ed34bf2521c9bde28f15158de4af47d6fea66d2acd4"
+        },
+        {
+          "id": "assign-employee-conflict-one",
+          "action": "affecterEquipe",
+          "file": "assign-employee-conflict-one.europe-paris.json",
+          "sha256": "6ea07e705ac8ec176cc33e4daf91bb9361610109eda4ea5b6cc943a253e99d7d"
+        },
+        {
+          "id": "assign-employee-conflict-many",
+          "action": "affecterEquipe",
+          "file": "assign-employee-conflict-many.europe-paris.json",
+          "sha256": "47e2749e2cd6c9bccc40e1d6c805588e525a07ca08c664838461620f3abe2ef1"
+        },
+        {
+          "id": "assign-team-without-members",
+          "action": "affecterEquipe",
+          "file": "assign-team-without-members.europe-paris.json",
+          "sha256": "d5215f09008743b93d2e3dd27bac651129b241f44ff58d4e56d5b10dddea0c10"
+        },
+        {
+          "id": "assign-worksite-already-in-progress",
+          "action": "affecterEquipe",
+          "file": "assign-worksite-already-in-progress.europe-paris.json",
+          "sha256": "a37517ae4781c0ba62a5eb61a8379483eefb72a9eb07b322cd0f7b013b154b17"
+        },
+        {
+          "id": "assign-leader-without-userid",
+          "action": "affecterEquipe",
+          "file": "assign-leader-without-userid.europe-paris.json",
+          "sha256": "b162609ac3860974689bd99221546cbc021f9e153bad1a127d56c69705669f7a"
+        },
+        {
+          "id": "assign-no-leader",
+          "action": "affecterEquipe",
+          "file": "assign-no-leader.europe-paris.json",
+          "sha256": "a96d7f971bf5b612c57b59b12bec9dd959eee40e715db3809cade37f3bd5d2ff"
+        },
+        {
+          "id": "assign-leader-user-without-email",
+          "action": "affecterEquipe",
+          "file": "assign-leader-user-without-email.europe-paris.json",
+          "sha256": "45cb0827dc9e8b52c54149e47ae0669a6529bf1c805cbdcf2d0435a65cc1300b"
+        },
+        {
+          "id": "assign-leader-user-without-name",
+          "action": "affecterEquipe",
+          "file": "assign-leader-user-without-name.europe-paris.json",
+          "sha256": "e52a66245a1906c4e977576bbfb19eab59b9dcb35cbc0fa561dba464b523752f"
+        },
+        {
+          "id": "assign-leader-user-not-found",
+          "action": "affecterEquipe",
+          "file": "assign-leader-user-not-found.europe-paris.json",
+          "sha256": "231f3011acc1d4417db16a1ef7eaa60dfb45136521f13cad2a5d1cd0a8a18246"
+        },
+        {
+          "id": "assign-company-not-found",
+          "action": "affecterEquipe",
+          "file": "assign-company-not-found.europe-paris.json",
+          "sha256": "4b77b18e458263279a09790489a78ca21866f12163620e09a1eeede16ee5cace"
+        },
+        {
+          "id": "assign-email-rejects",
+          "action": "affecterEquipe",
+          "file": "assign-email-rejects.europe-paris.json",
+          "sha256": "27f6797edc5f38b44796ee9f210a67d8808393434be87b03f5fea87b0c3902c3"
+        },
+        {
+          "id": "assign-tx-error-assignment-create",
+          "action": "affecterEquipe",
+          "file": "assign-tx-error-assignment-create.europe-paris.json",
+          "sha256": "6076aa81bce06e92b0158c5479693a4dd43dae3ee8033e6b6f986f0412730fd2"
+        },
+        {
+          "id": "assign-tx-error-notification-create",
+          "action": "affecterEquipe",
+          "file": "assign-tx-error-notification-create.europe-paris.json",
+          "sha256": "bce65904279843b040a2c0c5f1b6d0a1fa23d06a74e30608361f29e61661d02b"
+        },
+        {
+          "id": "assign-tx-error-non-error-value",
+          "action": "affecterEquipe",
+          "file": "assign-tx-error-non-error-value.europe-paris.json",
+          "sha256": "e38446d7c85209de5e4a719694bbc803d7be2d3fe31dae99959c8211a54ce50e"
+        },
+        {
+          "id": "assign-auth-session-absent",
+          "action": "affecterEquipe",
+          "file": "assign-auth-session-absent.europe-paris.json",
+          "sha256": "1b94dfa11b2b0643e258b00cd5fe13bea7339359975c72ac9383efdaa11b3bcb"
+        },
+        {
+          "id": "assign-auth-role-employee",
+          "action": "affecterEquipe",
+          "file": "assign-auth-role-employee.europe-paris.json",
+          "sha256": "db8ef41e95c248cac52852aeca5bd0989342320dc9e543ec008ca5a45924ce46"
+        },
+        {
+          "id": "assign-auth-no-company",
+          "action": "affecterEquipe",
+          "file": "assign-auth-no-company.europe-paris.json",
+          "sha256": "3d933f41961ac0ed1bf90747a1cfbcdf1fe5db47b4daf257bae8671f3d74851a"
+        }
+      ]
+    }
+  }
+}

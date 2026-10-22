@@ -1,0 +1,51 @@
+{
+  "id": "assign-worksite-not-found",
+  "action": "affecterEquipe",
+  "title": "chantier introuvable",
+  "input": {
+    "session": "admin",
+    "form": {
+      "worksiteId": "worksite-1",
+      "teamId": "team-1",
+      "dateFrom": "2026-11-03",
+      "dateTo": "2026-11-05"
+    },
+    "geocode": null,
+    "email": "resolve",
+    "dbScriptKeys": [
+      "worksite.findFirst",
+      "team.findFirst",
+      "assignment.findFirst",
+      "employeeAssignment.findMany",
+      "assignment.create",
+      "employeeAssignment.createMany",
+      "worksite.update",
+      "notification.create",
+      "user.findUnique",
+      "company.findUnique"
+    ]
+  },
+  "result": {
+    "returned": {
+      "error": "Chantier introuvable."
+    }
+  },
+  "trace": [
+    {
+      "kind": "auth",
+      "session": "admin"
+    },
+    {
+      "kind": "prisma",
+      "model": "worksite",
+      "method": "findFirst",
+      "args": {
+        "where": {
+          "id": "worksite-1",
+          "companyId": "company-A"
+        }
+      },
+      "inTx": false
+    }
+  ]
+}

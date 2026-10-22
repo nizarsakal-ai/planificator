@@ -1,0 +1,26 @@
+{
+  "id": "assign-missing-datefrom",
+  "action": "affecterEquipe",
+  "title": "dateFrom manquant ⇒ « Informations manquantes. »",
+  "input": {
+    "session": "admin",
+    "form": {
+      "worksiteId": "worksite-1",
+      "teamId": "team-1"
+    },
+    "geocode": null,
+    "email": "resolve",
+    "dbScriptKeys": []
+  },
+  "result": {
+    "returned": {
+      "error": "Informations manquantes."
+    }
+  },
+  "trace": [
+    {
+      "kind": "auth",
+      "session": "admin"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "id": "assign-auth-no-company",
+  "action": "affecterEquipe",
+  "title": "companyId absent ⇒ exception, trace Prisma vide",
+  "input": {
+    "session": "noCompany",
+    "form": {
+      "worksiteId": "worksite-1",
+      "teamId": "team-1",
+      "dateFrom": "2026-11-03",
+      "dateTo": "2026-11-05"
+    },
+    "geocode": null,
+    "email": "resolve",
+    "dbScriptKeys": []
+  },
+  "result": {
+    "threw": {
+      "name": "Error",
+      "message": "Entreprise introuvable"
+    }
+  },
+  "trace": [
+    {
+      "kind": "auth",
+      "session": "noCompany"
+    }
+  ]
+}

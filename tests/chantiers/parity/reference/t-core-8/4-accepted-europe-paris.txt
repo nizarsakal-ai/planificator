@@ -1,0 +1,6 @@
+[garde a] OK — HEAD = a84c73fe7e89c04943e356df99679fe0aca83ed1
+[garde b] OK — aucune modification suivie hors tests/chantiers/parity/** et package.json (test:chantiers)
+[garde c] OK — aucun fichier non suivi sous src/**, prisma/**, next.config.ts
+[garde d] OK — 9 fichiers du graphe d'import identiques à git show BASE_SHA
+[record-reference] 56 références écrites sous tests/chantiers/parity/reference (TZ=Europe/Paris) ; MANIFEST.json mis à jour
+exit=0

@@ -1,0 +1,32 @@
+{
+  "id": "create-auth-no-company",
+  "action": "createChantier",
+  "title": "companyId absent ⇒ exception, trace Prisma vide",
+  "input": {
+    "session": "noCompany",
+    "form": {
+      "name": "Rénovation toiture",
+      "description": "Réfection complète",
+      "address": "12 rue des Lilas, 75020 Paris",
+      "clientId": "client-1",
+      "startDate": "2026-11-03",
+      "endDate": "2026-11-05",
+      "dailyHours": "8"
+    },
+    "geocode": null,
+    "email": "resolve",
+    "dbScriptKeys": []
+  },
+  "result": {
+    "threw": {
+      "name": "Error",
+      "message": "Entreprise introuvable"
+    }
+  },
+  "trace": [
+    {
+      "kind": "auth",
+      "session": "noCompany"
+    }
+  ]
+}

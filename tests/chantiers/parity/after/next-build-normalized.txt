@@ -1,0 +1,146 @@
+
+> planificator@0.1.0 build
+> prisma generate && next build
+
+Prisma schema loaded from prisma/schema.prisma
+
+✔ Generated Prisma Client (v5.22.0) to ./node_modules/@prisma/client in <T>
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: <ASTUCE PRISMA ALÉATOIRE>
+
+   ▲ Next.js 15.5.18
+   - Experiments (use with caution):
+     · serverActions
+
+   Creating an optimized production build ...
+ ✓ (pwa) Compiling for server...
+ ✓ (pwa) Compiling for server...
+ ✓ (pwa) Compiling for client (static)...
+ ○ (pwa) Service worker: <WORKTREE>/public/sw.js
+ ○ (pwa)   URL: /sw.js
+ ○ (pwa)   Scope: /
+ ⚠ Compiled with warnings in <T>
+
+./node_modules/jose/dist/webapi/lib/deflate.js
+A Node.js API is used (CompressionStream at line: 10) which is not supported in the Edge Runtime.
+Learn more: https://nextjs.org/docs/api-reference/edge-runtime
+
+Import trace for requested module:
+./node_modules/jose/dist/webapi/lib/deflate.js
+./node_modules/jose/dist/webapi/jwe/flattened/decrypt.js
+./node_modules/jose/dist/webapi/index.js
+./node_modules/@auth/core/jwt.js
+./node_modules/@auth/core/lib/init.js
+./node_modules/@auth/core/lib/index.js
+./node_modules/@auth/core/index.js
+./node_modules/next-auth/index.js
+
+./node_modules/jose/dist/webapi/lib/deflate.js
+A Node.js API is used (DecompressionStream at line: 26) which is not supported in the Edge Runtime.
+Learn more: https://nextjs.org/docs/api-reference/edge-runtime
+
+Import trace for requested module:
+./node_modules/jose/dist/webapi/lib/deflate.js
+./node_modules/jose/dist/webapi/jwe/flattened/decrypt.js
+./node_modules/jose/dist/webapi/index.js
+./node_modules/@auth/core/jwt.js
+./node_modules/@auth/core/lib/init.js
+./node_modules/@auth/core/lib/index.js
+./node_modules/@auth/core/index.js
+./node_modules/next-auth/index.js
+
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/59) ...
+   Generating static pages (14/59) 
+   Generating static pages (29/59) 
+   Generating static pages (44/59) 
+ ✓ Generating static pages (59/59)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                       Size  First Load JS
+┌ ƒ /                                            <SIZE>         <SIZE>
+├ ƒ /_not-found                                  <SIZE>         <SIZE>
+├ ƒ /absences                                  <SIZE>         <SIZE>
+├ ƒ /api/acquisition/attachments/[id]            <SIZE>         <SIZE>
+├ ƒ /api/acquisition/gmail/callback              <SIZE>         <SIZE>
+├ ƒ /api/acquisition/gmail/connect               <SIZE>         <SIZE>
+├ ƒ /api/acquisition/messages/[id]/content       <SIZE>         <SIZE>
+├ ƒ /api/acquisition/ops-snapshot                <SIZE>         <SIZE>
+├ ƒ /api/admin/cleanup-past                      <SIZE>         <SIZE>
+├ ƒ /api/auth/[...nextauth]                      <SIZE>         <SIZE>
+├ ƒ /api/auth/gmail                              <SIZE>         <SIZE>
+├ ƒ /api/auth/gmail/callback                     <SIZE>         <SIZE>
+├ ƒ /api/booking/agent                           <SIZE>         <SIZE>
+├ ƒ /api/booking/reservations                    <SIZE>         <SIZE>
+├ ƒ /api/cron/acquisition-attachment-download    <SIZE>         <SIZE>
+├ ƒ /api/cron/acquisition-attachment-recovery    <SIZE>         <SIZE>
+├ ƒ /api/cron/acquisition-content-fetch          <SIZE>         <SIZE>
+├ ƒ /api/cron/acquisition-extraction             <SIZE>         <SIZE>
+├ ƒ /api/cron/acquisition-gmail-sync             <SIZE>         <SIZE>
+├ ƒ /api/cron/acquisition-orchestrator           <SIZE>         <SIZE>
+├ ƒ /api/cron/chantiers                          <SIZE>         <SIZE>
+├ ƒ /api/cron/gmail-scan                         <SIZE>         <SIZE>
+├ ƒ /api/documents/[id]                          <SIZE>         <SIZE>
+├ ƒ /api/export/affectations                     <SIZE>         <SIZE>
+├ ƒ /api/pdf/chantier/[id]                       <SIZE>         <SIZE>
+├ ƒ /api/pdf/mensuel                             <SIZE>         <SIZE>
+├ ƒ /api/pdf/paie                                <SIZE>         <SIZE>
+├ ƒ /api/pdf/presence                            <SIZE>         <SIZE>
+├ ƒ /api/pdf/rapport/[id]                        <SIZE>         <SIZE>
+├ ƒ /api/pdf/signature/[assignmentId]            <SIZE>         <SIZE>
+├ ƒ /api/trucks                                  <SIZE>         <SIZE>
+├ ƒ /api/trucks/[id]                             <SIZE>         <SIZE>
+├ ƒ /api/trucks/[id]/archive                     <SIZE>         <SIZE>
+├ ƒ /api/trucks/[id]/restore                     <SIZE>         <SIZE>
+├ ƒ /articles                                  <SIZE>         <SIZE>
+├ ƒ /chantiers                                 <SIZE>         <SIZE>
+├ ƒ /chantiers/[id]                            <SIZE>         <SIZE>
+├ ƒ /clients                                   <SIZE>         <SIZE>
+├ ƒ /consultations                             <SIZE>         <SIZE>
+├ ƒ /consultations/[id]                        <SIZE>         <SIZE>
+├ ƒ /dashboard                                  <SIZE>         <SIZE>
+├ ƒ /employes                                  <SIZE>         <SIZE>
+├ ƒ /employes/[id]                             <SIZE>         <SIZE>
+├ ƒ /equipes                                   <SIZE>         <SIZE>
+├ ƒ /equipes/[id]                              <SIZE>         <SIZE>
+├ ƒ /factures                                  <SIZE>         <SIZE>
+├ ƒ /inscription                               <SIZE>         <SIZE>
+├ ƒ /invitation                                   <SIZE>         <SIZE>
+├ ƒ /logements                                 <SIZE>         <SIZE>
+├ ƒ /login                                     <SIZE>         <SIZE>
+├ ƒ /mes-absences                              <SIZE>         <SIZE>
+├ ƒ /mes-chantiers                               <SIZE>         <SIZE>
+├ ƒ /mes-chantiers/[id]                          <SIZE>         <SIZE>
+├ ƒ /mes-notes-de-frais                        <SIZE>         <SIZE>
+├ ƒ /mot-de-passe-oublie                       <SIZE>         <SIZE>
+├ ƒ /notes-de-frais                             <SIZE>         <SIZE>
+├ ƒ /onboarding                                <SIZE>         <SIZE>
+├ ƒ /parametres                                <SIZE>         <SIZE>
+├ ƒ /planning                                  <SIZE>         <SIZE>
+├ ƒ /planning/calendrier                       <SIZE>         <SIZE>
+├ ƒ /planning/equipe                           <SIZE>         <SIZE>
+├ ƒ /planning/gantt                            <SIZE>         <SIZE>
+├ ƒ /planning/moi                                <SIZE>         <SIZE>
+├ ƒ /planning/personnel                        <SIZE>         <SIZE>
+├ ƒ /pointage                                  <SIZE>         <SIZE>
+├ ƒ /pointages                                 <SIZE>         <SIZE>
+├ ƒ /profil                                     <SIZE>         <SIZE>
+├ ƒ /rapports                                  <SIZE>         <SIZE>
+├ ƒ /rapports/mensuel                            <SIZE>         <SIZE>
+├ ƒ /reinitialiser                              <SIZE>         <SIZE>
+├ ƒ /super-admin/entreprises                   <SIZE>         <SIZE>
+└ ƒ /vehicules                                 <SIZE>         <SIZE>
++ First Load JS shared by all                   <SIZE>
+  ├ chunks/4696-602e080d9c092deb.js            <SIZE>
+  ├ chunks/4bd1b696-100b9d70ed4e49c1.js        <SIZE>
+  └ other shared chunks (total)                <SIZE>
+
+
+ƒ Middleware                                   <SIZE>
+
+ƒ  (Dynamic)  server-rendered on demand
+

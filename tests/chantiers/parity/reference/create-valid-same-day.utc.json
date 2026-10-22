@@ -1,0 +1,76 @@
+{
+  "id": "create-valid-same-day",
+  "action": "createChantier",
+  "title": "endDate = startDate (refine >= accepte)",
+  "input": {
+    "session": "admin",
+    "form": {
+      "name": "Rénovation toiture",
+      "description": "Réfection complète",
+      "address": "",
+      "clientId": "client-1",
+      "startDate": "2026-11-03",
+      "endDate": "2026-11-03",
+      "dailyHours": "8"
+    },
+    "geocode": null,
+    "email": "resolve",
+    "dbScriptKeys": [
+      "client.findFirst",
+      "worksite.create"
+    ]
+  },
+  "result": {
+    "returned": {
+      "success": true
+    }
+  },
+  "trace": [
+    {
+      "kind": "auth",
+      "session": "admin"
+    },
+    {
+      "kind": "prisma",
+      "model": "client",
+      "method": "findFirst",
+      "args": {
+        "where": {
+          "id": "client-1",
+          "companyId": "company-A"
+        }
+      },
+      "inTx": false
+    },
+    {
+      "kind": "prisma",
+      "model": "worksite",
+      "method": "create",
+      "args": {
+        "data": {
+          "name": "Rénovation toiture",
+          "description": "Réfection complète",
+          "address": null,
+          "clientId": "client-1",
+          "companyId": "company-A",
+          "createdById": "user-admin-1",
+          "startDate": {
+            "$date": "2026-11-03T00:00:00.000Z"
+          },
+          "endDate": {
+            "$date": "2026-11-03T00:00:00.000Z"
+          },
+          "dailyHours": 8,
+          "status": "PLANNED",
+          "latitude": null,
+          "longitude": null
+        }
+      },
+      "inTx": false
+    },
+    {
+      "kind": "revalidatePath",
+      "path": "/chantiers"
+    }
+  ]
+}

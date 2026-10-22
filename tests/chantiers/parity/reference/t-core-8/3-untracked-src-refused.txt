@@ -1,0 +1,6 @@
+[garde a] OK — HEAD = a84c73fe7e89c04943e356df99679fe0aca83ed1
+[garde b] OK — aucune modification suivie hors tests/chantiers/parity/** et package.json (test:chantiers)
+[garde c] REFUS — fichier(s) non suivi(s) interdit(s) : src/x.ts
+[garde d] OK — 9 fichiers du graphe d'import identiques à git show BASE_SHA
+[record-reference] REFUS — intégrité des sources non établie, aucune référence enregistrée
+exit=1

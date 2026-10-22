@@ -1,0 +1,16 @@
+src/lib/actions/assignment-team.core.ts
+src/lib/actions/chantier-create.core.ts
+src/lib/actions/write-actor.ts
+tests/chantiers/assignment-team.core.test.ts
+tests/chantiers/chantier-create.core.test.ts
+tests/chantiers/parity/after/git-diff-base-stat.txt
+tests/chantiers/parity/after/git-ls-files-others.txt
+tests/chantiers/parity/after/next-build-diff.txt
+tests/chantiers/parity/after/next-build-exit.txt
+tests/chantiers/parity/after/next-build-normalized.txt
+tests/chantiers/parity/after/next-build-raw.txt
+tests/chantiers/parity/after/test-chantiers.txt
+tests/chantiers/parity/after/tsc-diff.txt
+tests/chantiers/parity/after/tsc-exit.txt
+tests/chantiers/parity/after/tsc-normalized.txt
+tests/chantiers/parity/after/tsc-raw.txt
