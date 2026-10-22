@@ -1,0 +1,3 @@
+[garde b] REFUS — modification(s) suivie(s) interdite(s) : package.json (lignes hors test:chantiers : "-  \"name\": \"planificator\"," "+  \"name\": \"planifi
+[record-reference] REFUS — intégrité des sources non établie, aucune référence enregistrée
+exit=1

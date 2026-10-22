@@ -1,0 +1,30 @@
+{
+  "id": "create-zod-description-absent",
+  "action": "createChantier",
+  "title": "Zod : champ description absent du FormData (null, pas undefined)",
+  "input": {
+    "session": "admin",
+    "form": {
+      "name": "Rénovation toiture",
+      "address": "12 rue des Lilas, 75020 Paris",
+      "clientId": "client-1",
+      "startDate": "2026-11-03",
+      "endDate": "2026-11-05",
+      "dailyHours": "8"
+    },
+    "geocode": null,
+    "email": "resolve",
+    "dbScriptKeys": []
+  },
+  "result": {
+    "returned": {
+      "error": "Expected string, received null"
+    }
+  },
+  "trace": [
+    {
+      "kind": "auth",
+      "session": "admin"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+[garde a] OK — HEAD = a84c73fe7e89c04943e356df99679fe0aca83ed1
+[garde b] REFUS — modification(s) suivie(s) interdite(s) : M src/lib/actions/chantier.actions.ts
+[garde c] OK — aucun fichier non suivi sous src/**, prisma/**, next.config.ts
+[garde d] REFUS — empreinte(s) différente(s) de BASE_SHA : src/lib/actions/chantier.actions.ts (worktree 0c40d5f5bbd9… ≠ BASE_SHA 763299196c5c…)
+[record-reference] REFUS — intégrité des sources non établie, aucune référence enregistrée
+exit=1

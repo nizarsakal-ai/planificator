@@ -1,0 +1,31 @@
+{
+  "id": "create-zod-dailyhours-empty",
+  "action": "createChantier",
+  "title": "Zod : dailyHours vide (coerce ⇒ 0)",
+  "input": {
+    "session": "admin",
+    "form": {
+      "name": "Rénovation toiture",
+      "description": "Réfection complète",
+      "address": "12 rue des Lilas, 75020 Paris",
+      "clientId": "client-1",
+      "startDate": "2026-11-03",
+      "endDate": "2026-11-05",
+      "dailyHours": ""
+    },
+    "geocode": null,
+    "email": "resolve",
+    "dbScriptKeys": []
+  },
+  "result": {
+    "returned": {
+      "error": "Number must be greater than or equal to 1"
+    }
+  },
+  "trace": [
+    {
+      "kind": "auth",
+      "session": "admin"
+    }
+  ]
+}

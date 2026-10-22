@@ -1,0 +1,327 @@
+{
+  "id": "assign-no-leader",
+  "action": "affecterEquipe",
+  "title": "équipe sans chef : ni notification, ni e-mail",
+  "input": {
+    "session": "admin",
+    "form": {
+      "worksiteId": "worksite-1",
+      "teamId": "team-1",
+      "dateFrom": "2026-11-03",
+      "dateTo": "2026-11-05"
+    },
+    "geocode": null,
+    "email": "resolve",
+    "dbScriptKeys": [
+      "worksite.findFirst",
+      "team.findFirst",
+      "assignment.findFirst",
+      "employeeAssignment.findMany",
+      "assignment.create",
+      "employeeAssignment.createMany",
+      "worksite.update",
+      "notification.create",
+      "user.findUnique",
+      "company.findUnique"
+    ]
+  },
+  "result": {
+    "returned": {
+      "success": true,
+      "count": 3
+    }
+  },
+  "trace": [
+    {
+      "kind": "auth",
+      "session": "admin"
+    },
+    {
+      "kind": "prisma",
+      "model": "worksite",
+      "method": "findFirst",
+      "args": {
+        "where": {
+          "id": "worksite-1",
+          "companyId": "company-A"
+        }
+      },
+      "inTx": false
+    },
+    {
+      "kind": "prisma",
+      "model": "team",
+      "method": "findFirst",
+      "args": {
+        "where": {
+          "id": "team-1",
+          "companyId": "company-A"
+        },
+        "include": {
+          "members": {
+            "where": {
+              "leftAt": null
+            },
+            "select": {
+              "employeeId": true
+            }
+          },
+          "leader": {
+            "select": {
+              "userId": true
+            }
+          }
+        }
+      },
+      "inTx": false
+    },
+    {
+      "kind": "prisma",
+      "model": "assignment",
+      "method": "findFirst",
+      "args": {
+        "where": {
+          "teamId": "team-1",
+          "date": {
+            "in": [
+              {
+                "$date": "2026-11-03T00:00:00.000Z"
+              },
+              {
+                "$date": "2026-11-04T00:00:00.000Z"
+              },
+              {
+                "$date": "2026-11-05T00:00:00.000Z"
+              }
+            ]
+          }
+        },
+        "include": {
+          "worksite": {
+            "select": {
+              "name": true,
+              "address": true
+            }
+          }
+        },
+        "orderBy": {
+          "date": "asc"
+        }
+      },
+      "inTx": false
+    },
+    {
+      "kind": "prisma",
+      "model": "employeeAssignment",
+      "method": "findMany",
+      "args": {
+        "where": {
+          "employeeId": {
+            "in": [
+              "employee-1",
+              "employee-2"
+            ]
+          },
+          "date": {
+            "in": [
+              {
+                "$date": "2026-11-03T00:00:00.000Z"
+              },
+              {
+                "$date": "2026-11-04T00:00:00.000Z"
+              },
+              {
+                "$date": "2026-11-05T00:00:00.000Z"
+              }
+            ]
+          }
+        },
+        "include": {
+          "employee": {
+            "select": {
+              "firstName": true,
+              "lastName": true
+            }
+          },
+          "assignment": {
+            "select": {
+              "worksite": {
+                "select": {
+                  "name": true
+                }
+              },
+              "team": {
+                "select": {
+                  "name": true
+                }
+              }
+            }
+          }
+        },
+        "orderBy": [
+          {
+            "employeeId": "asc"
+          },
+          {
+            "date": "asc"
+          }
+        ]
+      },
+      "inTx": false
+    },
+    {
+      "kind": "tx",
+      "event": "begin"
+    },
+    {
+      "kind": "prisma",
+      "model": "assignment",
+      "method": "create",
+      "args": {
+        "data": {
+          "worksiteId": "worksite-1",
+          "teamId": "team-1",
+          "date": {
+            "$date": "2026-11-03T00:00:00.000Z"
+          },
+          "status": "PENDING"
+        }
+      },
+      "inTx": true
+    },
+    {
+      "kind": "prisma",
+      "model": "employeeAssignment",
+      "method": "createMany",
+      "args": {
+        "data": [
+          {
+            "assignmentId": "assignment-1",
+            "employeeId": "employee-1",
+            "date": {
+              "$date": "2026-11-03T00:00:00.000Z"
+            }
+          },
+          {
+            "assignmentId": "assignment-1",
+            "employeeId": "employee-2",
+            "date": {
+              "$date": "2026-11-03T00:00:00.000Z"
+            }
+          }
+        ]
+      },
+      "inTx": true
+    },
+    {
+      "kind": "prisma",
+      "model": "assignment",
+      "method": "create",
+      "args": {
+        "data": {
+          "worksiteId": "worksite-1",
+          "teamId": "team-1",
+          "date": {
+            "$date": "2026-11-04T00:00:00.000Z"
+          },
+          "status": "PENDING"
+        }
+      },
+      "inTx": true
+    },
+    {
+      "kind": "prisma",
+      "model": "employeeAssignment",
+      "method": "createMany",
+      "args": {
+        "data": [
+          {
+            "assignmentId": "assignment-2",
+            "employeeId": "employee-1",
+            "date": {
+              "$date": "2026-11-04T00:00:00.000Z"
+            }
+          },
+          {
+            "assignmentId": "assignment-2",
+            "employeeId": "employee-2",
+            "date": {
+              "$date": "2026-11-04T00:00:00.000Z"
+            }
+          }
+        ]
+      },
+      "inTx": true
+    },
+    {
+      "kind": "prisma",
+      "model": "assignment",
+      "method": "create",
+      "args": {
+        "data": {
+          "worksiteId": "worksite-1",
+          "teamId": "team-1",
+          "date": {
+            "$date": "2026-11-05T00:00:00.000Z"
+          },
+          "status": "PENDING"
+        }
+      },
+      "inTx": true
+    },
+    {
+      "kind": "prisma",
+      "model": "employeeAssignment",
+      "method": "createMany",
+      "args": {
+        "data": [
+          {
+            "assignmentId": "assignment-3",
+            "employeeId": "employee-1",
+            "date": {
+              "$date": "2026-11-05T00:00:00.000Z"
+            }
+          },
+          {
+            "assignmentId": "assignment-3",
+            "employeeId": "employee-2",
+            "date": {
+              "$date": "2026-11-05T00:00:00.000Z"
+            }
+          }
+        ]
+      },
+      "inTx": true
+    },
+    {
+      "kind": "prisma",
+      "model": "worksite",
+      "method": "update",
+      "args": {
+        "where": {
+          "id": "worksite-1"
+        },
+        "data": {
+          "status": "IN_PROGRESS"
+        }
+      },
+      "inTx": true
+    },
+    {
+      "kind": "tx",
+      "event": "commit"
+    },
+    {
+      "kind": "revalidatePath",
+      "path": "/chantiers"
+    },
+    {
+      "kind": "revalidatePath",
+      "path": "/chantiers/worksite-1"
+    },
+    {
+      "kind": "revalidatePath",
+      "path": "/planning"
+    }
+  ]
+}

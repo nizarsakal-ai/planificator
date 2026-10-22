@@ -1,0 +1,28 @@
+{
+  "id": "assign-missing-teamid",
+  "action": "affecterEquipe",
+  "title": "teamId manquant ⇒ « Informations manquantes. »",
+  "input": {
+    "session": "admin",
+    "form": {
+      "worksiteId": "worksite-1",
+      "teamId": "",
+      "dateFrom": "2026-11-03",
+      "dateTo": "2026-11-05"
+    },
+    "geocode": null,
+    "email": "resolve",
+    "dbScriptKeys": []
+  },
+  "result": {
+    "returned": {
+      "error": "Informations manquantes."
+    }
+  },
+  "trace": [
+    {
+      "kind": "auth",
+      "session": "admin"
+    }
+  ]
+}

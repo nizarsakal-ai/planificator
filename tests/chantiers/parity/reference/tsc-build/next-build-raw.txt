@@ -1,0 +1,146 @@
+
+> planificator@0.1.0 build
+> prisma generate && next build
+
+Prisma schema loaded from prisma/schema.prisma
+
+✔ Generated Prisma Client (v5.22.0) to ./node_modules/@prisma/client in 193ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Want to turn off tips and other hints? https://pris.ly/tip-4-nohints
+
+   ▲ Next.js 15.5.18
+   - Experiments (use with caution):
+     · serverActions
+
+   Creating an optimized production build ...
+ ✓ (pwa) Compiling for server...
+ ✓ (pwa) Compiling for server...
+ ✓ (pwa) Compiling for client (static)...
+ ○ (pwa) Service worker: /Users/nizar/Development/planificator-lot-1w-1a-ref/public/sw.js
+ ○ (pwa)   URL: /sw.js
+ ○ (pwa)   Scope: /
+ ⚠ Compiled with warnings in 10.4s
+
+./node_modules/jose/dist/webapi/lib/deflate.js
+A Node.js API is used (CompressionStream at line: 10) which is not supported in the Edge Runtime.
+Learn more: https://nextjs.org/docs/api-reference/edge-runtime
+
+Import trace for requested module:
+./node_modules/jose/dist/webapi/lib/deflate.js
+./node_modules/jose/dist/webapi/jwe/flattened/decrypt.js
+./node_modules/jose/dist/webapi/index.js
+./node_modules/@auth/core/jwt.js
+./node_modules/@auth/core/lib/init.js
+./node_modules/@auth/core/lib/index.js
+./node_modules/@auth/core/index.js
+./node_modules/next-auth/index.js
+
+./node_modules/jose/dist/webapi/lib/deflate.js
+A Node.js API is used (DecompressionStream at line: 26) which is not supported in the Edge Runtime.
+Learn more: https://nextjs.org/docs/api-reference/edge-runtime
+
+Import trace for requested module:
+./node_modules/jose/dist/webapi/lib/deflate.js
+./node_modules/jose/dist/webapi/jwe/flattened/decrypt.js
+./node_modules/jose/dist/webapi/index.js
+./node_modules/@auth/core/jwt.js
+./node_modules/@auth/core/lib/init.js
+./node_modules/@auth/core/lib/index.js
+./node_modules/@auth/core/index.js
+./node_modules/next-auth/index.js
+
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/59) ...
+   Generating static pages (14/59) 
+   Generating static pages (29/59) 
+   Generating static pages (44/59) 
+ ✓ Generating static pages (59/59)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                       Size  First Load JS
+┌ ƒ /                                            177 B         108 kB
+├ ƒ /_not-found                                  219 B         105 kB
+├ ƒ /absences                                  5.91 kB         164 kB
+├ ƒ /api/acquisition/attachments/[id]            219 B         105 kB
+├ ƒ /api/acquisition/gmail/callback              219 B         105 kB
+├ ƒ /api/acquisition/gmail/connect               219 B         105 kB
+├ ƒ /api/acquisition/messages/[id]/content       219 B         105 kB
+├ ƒ /api/acquisition/ops-snapshot                219 B         105 kB
+├ ƒ /api/admin/cleanup-past                      219 B         105 kB
+├ ƒ /api/auth/[...nextauth]                      219 B         105 kB
+├ ƒ /api/auth/gmail                              219 B         105 kB
+├ ƒ /api/auth/gmail/callback                     219 B         105 kB
+├ ƒ /api/booking/agent                           219 B         105 kB
+├ ƒ /api/booking/reservations                    219 B         105 kB
+├ ƒ /api/cron/acquisition-attachment-download    219 B         105 kB
+├ ƒ /api/cron/acquisition-attachment-recovery    219 B         105 kB
+├ ƒ /api/cron/acquisition-content-fetch          219 B         105 kB
+├ ƒ /api/cron/acquisition-extraction             219 B         105 kB
+├ ƒ /api/cron/acquisition-gmail-sync             219 B         105 kB
+├ ƒ /api/cron/acquisition-orchestrator           219 B         105 kB
+├ ƒ /api/cron/chantiers                          219 B         105 kB
+├ ƒ /api/cron/gmail-scan                         219 B         105 kB
+├ ƒ /api/documents/[id]                          219 B         105 kB
+├ ƒ /api/export/affectations                     219 B         105 kB
+├ ƒ /api/pdf/chantier/[id]                       219 B         105 kB
+├ ƒ /api/pdf/mensuel                             219 B         105 kB
+├ ƒ /api/pdf/paie                                219 B         105 kB
+├ ƒ /api/pdf/presence                            219 B         105 kB
+├ ƒ /api/pdf/rapport/[id]                        219 B         105 kB
+├ ƒ /api/pdf/signature/[assignmentId]            219 B         105 kB
+├ ƒ /api/trucks                                  219 B         105 kB
+├ ƒ /api/trucks/[id]                             219 B         105 kB
+├ ƒ /api/trucks/[id]/archive                     219 B         105 kB
+├ ƒ /api/trucks/[id]/restore                     219 B         105 kB
+├ ƒ /articles                                  3.77 kB         139 kB
+├ ƒ /chantiers                                 11.7 kB         192 kB
+├ ƒ /chantiers/[id]                            10.2 kB         145 kB
+├ ƒ /clients                                   5.11 kB         149 kB
+├ ƒ /consultations                             3.89 kB         132 kB
+├ ƒ /consultations/[id]                        6.75 kB         158 kB
+├ ƒ /dashboard                                  120 kB         281 kB
+├ ƒ /employes                                  13.3 kB         199 kB
+├ ƒ /employes/[id]                             8.03 kB         137 kB
+├ ƒ /equipes                                   16.1 kB         200 kB
+├ ƒ /equipes/[id]                              7.65 kB         132 kB
+├ ƒ /factures                                  4.88 kB         140 kB
+├ ƒ /inscription                               4.46 kB         122 kB
+├ ƒ /invitation                                5.01 kB         139 kB
+├ ƒ /logements                                 9.21 kB         144 kB
+├ ƒ /login                                     4.34 kB         145 kB
+├ ƒ /mes-absences                              2.91 kB         138 kB
+├ ƒ /mes-chantiers                               177 B         108 kB
+├ ƒ /mes-chantiers/[id]                          178 B         113 kB
+├ ƒ /mes-notes-de-frais                        6.87 kB         133 kB
+├ ƒ /mot-de-passe-oublie                        4.5 kB         119 kB
+├ ƒ /notes-de-frais                             4.2 kB         130 kB
+├ ƒ /onboarding                                2.65 kB         118 kB
+├ ƒ /parametres                                3.64 kB         151 kB
+├ ƒ /planning                                  3.93 kB         115 kB
+├ ƒ /planning/calendrier                       2.21 kB         110 kB
+├ ƒ /planning/equipe                           6.66 kB         127 kB
+├ ƒ /planning/gantt                            2.95 kB         108 kB
+├ ƒ /planning/moi                                177 B         108 kB
+├ ƒ /planning/personnel                        5.41 kB         130 kB
+├ ƒ /pointage                                  4.84 kB         126 kB
+├ ƒ /pointages                                 3.33 kB         108 kB
+├ ƒ /profil                                     4.9 kB         149 kB
+├ ƒ /rapports                                  4.14 kB         116 kB
+├ ƒ /rapports/mensuel                            528 B         105 kB
+├ ƒ /reinitialiser                             4.61 kB         139 kB
+├ ƒ /super-admin/entreprises                   3.68 kB         139 kB
+└ ƒ /vehicules                                 8.64 kB         133 kB
++ First Load JS shared by all                   105 kB
+  ├ chunks/4696-602e080d9c092deb.js            48.4 kB
+  ├ chunks/4bd1b696-100b9d70ed4e49c1.js        54.2 kB
+  └ other shared chunks (total)                2.07 kB
+
+
+ƒ Middleware                                   87.5 kB
+
+ƒ  (Dynamic)  server-rendered on demand
+

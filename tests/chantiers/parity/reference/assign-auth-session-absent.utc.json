@@ -1,0 +1,29 @@
+{
+  "id": "assign-auth-session-absent",
+  "action": "affecterEquipe",
+  "title": "session absente ⇒ exception, trace Prisma vide",
+  "input": {
+    "session": "none",
+    "form": {
+      "worksiteId": "worksite-1",
+      "teamId": "team-1",
+      "dateFrom": "2026-11-03",
+      "dateTo": "2026-11-05"
+    },
+    "geocode": null,
+    "email": "resolve",
+    "dbScriptKeys": []
+  },
+  "result": {
+    "threw": {
+      "name": "Error",
+      "message": "Non authentifié"
+    }
+  },
+  "trace": [
+    {
+      "kind": "auth",
+      "session": "none"
+    }
+  ]
+}

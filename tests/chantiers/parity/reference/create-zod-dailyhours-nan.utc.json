@@ -1,0 +1,31 @@
+{
+  "id": "create-zod-dailyhours-nan",
+  "action": "createChantier",
+  "title": "Zod : dailyHours non numérique (coerce ⇒ NaN)",
+  "input": {
+    "session": "admin",
+    "form": {
+      "name": "Rénovation toiture",
+      "description": "Réfection complète",
+      "address": "12 rue des Lilas, 75020 Paris",
+      "clientId": "client-1",
+      "startDate": "2026-11-03",
+      "endDate": "2026-11-05",
+      "dailyHours": "huit"
+    },
+    "geocode": null,
+    "email": "resolve",
+    "dbScriptKeys": []
+  },
+  "result": {
+    "returned": {
+      "error": "Expected number, received nan"
+    }
+  },
+  "trace": [
+    {
+      "kind": "auth",
+      "session": "admin"
+    }
+  ]
+}

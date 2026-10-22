@@ -1,0 +1,2 @@
+[record-reference] REFUS — TZ doit valoir UTC ou Europe/Paris (reçu : "America/New_York")
+exit=2

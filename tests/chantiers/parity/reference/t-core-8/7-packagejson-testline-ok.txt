@@ -1,0 +1,3 @@
+[garde b] OK — aucune modification suivie hors tests/chantiers/parity/** et package.json (test:chantiers)
+[record-reference] REFUS — snapshot(s) déjà présent(s) pour TZ=UTC, jamais régénérés : create-valid-geocode-ok.utc.json, create-val
+exit=1
