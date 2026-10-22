@@ -1,0 +1,12 @@
+112c112
+< ├ ƒ /invitation                                <SIZE>         <SIZE>
+---
+> ├ ƒ /invitation                                   <SIZE>         <SIZE>
+119c119
+< ├ ƒ /mot-de-passe-oublie                        <SIZE>         <SIZE>
+---
+> ├ ƒ /mot-de-passe-oublie                       <SIZE>         <SIZE>
+134c134
+< ├ ƒ /reinitialiser                             <SIZE>         <SIZE>
+---
+> ├ ƒ /reinitialiser                              <SIZE>         <SIZE>

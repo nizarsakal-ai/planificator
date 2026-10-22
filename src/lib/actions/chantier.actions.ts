@@ -4,8 +4,10 @@ import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
 import { addEmployeeToBlockCore } from "@/lib/actions/chantier-block.core"
+import { createWorksiteCore } from "@/lib/actions/chantier-create.core"
+import { assignTeamCore } from "@/lib/actions/assignment-team.core"
+import type { CoreResult, WriteActor } from "@/lib/actions/write-actor"
 import {
-  createChantierSchema,
   updateChantierSchema,
   extendChantierSchema,
   updateDateFieldToDb,
@@ -18,6 +20,18 @@ async function requireAdmin() {
   if (!["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)) throw new Error("Accès refusé")
   if (!session.user.companyId) throw new Error("Entreprise introuvable")
   return session.user
+}
+
+// LOT-1W-1a : acteur d'écriture UI (SPEC §5.1) ; `agent` non renseigné dans ce sous-lot.
+function writeActorOf(user: { id: string; companyId?: string | null }): WriteActor {
+  return { companyId: user.companyId!, actorUserId: user.id }
+}
+
+// LOT-1W-1a : message UI porté par `details.message` (byte-identique à BASE_SHA).
+function coreErrorMessage(result: Extract<CoreResult<unknown>, { ok: false }>): string {
+  const message = result.details?.message
+  if (typeof message !== "string") throw new Error(`[chantier.actions] message UI absent pour le code ${result.code}`)
+  return message
 }
 
 // ─── Créer un chantier ───────────────────────────────────────────────────────
@@ -35,43 +49,17 @@ export async function createChantier(formData: FormData) {
     dailyHours:  formData.get("dailyHours")  as string,
   }
 
-  const parsed = createChantierSchema.safeParse(raw)
-  if (!parsed.success) return { error: parsed.error.errors[0].message }
-
-  // Vérifier que le client appartient à cette entreprise
-  const client = await prisma.client.findFirst({
-    where: { id: parsed.data.clientId, companyId: user.companyId! },
-  })
-  if (!client) return { error: "Client introuvable." }
-
-  // Géocodage de l'adresse via Nominatim (OpenStreetMap)
-  let latitude: number | null = null
-  let longitude: number | null = null
-  if (parsed.data.address) {
-    const { defaultGeocodePort } = await import("@/lib/geo/geocode.port")
-    const geo = await defaultGeocodePort.geocodeAddress(parsed.data.address)
-    if (geo) {
-      latitude = geo.latitude
-      longitude = geo.longitude
-    }
-  }
-
-  await prisma.worksite.create({
-    data: {
-      name:        parsed.data.name,
-      description: parsed.data.description || null,
-      address:     parsed.data.address || null,
-      clientId:    parsed.data.clientId,
-      companyId:   user.companyId!,
-      createdById: user.id,
-      startDate:   new Date(parsed.data.startDate),
-      endDate:     new Date(parsed.data.endDate),
-      dailyHours:  parsed.data.dailyHours,
-      status:      "PLANNED",
-      latitude,
-      longitude,
+  // LOT-1W-1a : logique dans chantier-create.core.ts ; ports à l'identique de BASE_SHA.
+  const result = await createWorksiteCore(raw, writeActorOf(user), {
+    findClient: (args) => prisma.client.findFirst(args),
+    createWorksite: (args) => prisma.worksite.create(args),
+    geocode: async (address) => {
+      // Géocodage de l'adresse via Nominatim (OpenStreetMap)
+      const { defaultGeocodePort } = await import("@/lib/geo/geocode.port")
+      return defaultGeocodePort.geocodeAddress(address)
     },
   })
+  if (!result.ok) return { error: coreErrorMessage(result) }
 
   revalidatePath("/chantiers")
   return { success: true }
@@ -220,144 +208,30 @@ export async function affecterEquipe(formData: FormData) {
   const dateFromStr = formData.get("dateFrom")    as string
   const dateToStr   = formData.get("dateTo")      as string
 
-  if (!worksiteId || !teamId || !dateFromStr) {
-    return { error: "Informations manquantes." }
-  }
-
-  const dateFrom = new Date(dateFromStr); dateFrom.setHours(0, 0, 0, 0)
-  const dateTo   = dateToStr ? new Date(dateToStr) : new Date(dateFrom)
-  dateTo.setHours(0, 0, 0, 0)
-
-  if (dateTo < dateFrom) return { error: "La date de fin doit être après la date de début." }
-
-  // Construire la liste des jours de la plage
-  const dates: Date[] = []
-  const cursor = new Date(dateFrom)
-  while (cursor <= dateTo) {
-    dates.push(new Date(cursor))
-    cursor.setDate(cursor.getDate() + 1)
-  }
-
-  // Vérifier que le chantier appartient à l'entreprise
-  const worksite = await prisma.worksite.findFirst({
-    where: { id: worksiteId, companyId: user.companyId! },
-  })
-  if (!worksite) return { error: "Chantier introuvable." }
-
-  // Vérifier que l'équipe appartient à l'entreprise
-  const team = await prisma.team.findFirst({
-    where: { id: teamId, companyId: user.companyId! },
-    include: {
-      members: { where: { leftAt: null }, select: { employeeId: true } },
-      leader:  { select: { userId: true } },
-    },
-  })
-  if (!team) return { error: "Équipe introuvable." }
-
-  const memberIds = team.members.map((m) => m.employeeId)
-
-  // Vérifier les conflits sur toute la plage
-  const conflitEquipe = await prisma.assignment.findFirst({
-    where: { teamId, date: { in: dates } },
-    include: { worksite: { select: { name: true, address: true } } },
-    orderBy: { date: "asc" },
-  })
-  if (conflitEquipe) {
-    const d = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(conflitEquipe.date)
-    const lieu = conflitEquipe.worksite.address ? ` (${conflitEquipe.worksite.address})` : ""
-    return {
-      error: `Cette équipe est déjà affectée le ${d} au chantier « ${conflitEquipe.worksite.name} »${lieu}. Libérez-la de ce chantier avant de la réaffecter.`,
+  // LOT-1W-1a : logique dans assignment-team.core.ts ; requêtes et transaction à l'identique de BASE_SHA.
+  const result = await assignTeamCore(
+    { worksiteId, teamId, dateFrom: dateFromStr, dateTo: dateToStr },
+    writeActorOf(user),
+    {
+      findWorksite: (args) => prisma.worksite.findFirst(args),
+      findTeam: (args) => prisma.team.findFirst(args),
+      findTeamConflict: (args) => prisma.assignment.findFirst(args),
+      findEmployeeConflicts: (args) => prisma.employeeAssignment.findMany(args),
+      transaction: (fn) => prisma.$transaction(fn),
+      sendAssignmentCreatedEmail,
     }
-  }
-
-  if (memberIds.length > 0) {
-    const conflitsEmployes = await prisma.employeeAssignment.findMany({
-      where: { employeeId: { in: memberIds }, date: { in: dates } },
-      include: {
-        employee:   { select: { firstName: true, lastName: true } },
-        assignment: { select: { worksite: { select: { name: true } }, team: { select: { name: true } } } },
-      },
-      orderBy: [{ employeeId: "asc" }, { date: "asc" }],
-    })
-    if (conflitsEmployes.length > 0) {
-      const fmt = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" })
-      const lignes = conflitsEmployes.map((c) => {
-        const nom = `${c.employee.firstName} ${c.employee.lastName}`
-        return `${nom} est affecté le ${fmt.format(c.date)} au chantier « ${c.assignment.worksite.name} » avec l'équipe ${c.assignment.team.name}.`
-      })
-      return {
-        error: `${lignes.join("\n")}\nDésaffectez-${conflitsEmployes.length > 1 ? "les" : "le"} avant de réaffecter l'équipe.`,
-      }
+  )
+  if (!result.ok) {
+    if (result.code === "TRANSACTION_FAILED") {
+      console.error("[affecterEquipe] transaction error:", result.details?.cause)
     }
-  }
-
-  // Créer une affectation par jour
-  try { await prisma.$transaction(async (tx) => {
-    for (const date of dates) {
-      const assignment = await tx.assignment.create({
-        data: { worksiteId, teamId, date, status: "PENDING" },
-      })
-      if (memberIds.length > 0) {
-        await tx.employeeAssignment.createMany({
-          data: memberIds.map((employeeId) => ({
-            assignmentId: assignment.id,
-            employeeId,
-            date,
-          })),
-        })
-      }
-    }
-
-    // Passer le chantier en IN_PROGRESS si encore PLANNED
-    if (worksite.status === "PLANNED") {
-      await tx.worksite.update({
-        where: { id: worksiteId },
-        data: { status: "IN_PROGRESS" },
-      })
-    }
-
-    // Notifier le chef d'équipe (une seule notification pour toute la plage)
-    if (team.leader?.userId) {
-      const fromLabel = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(dateFrom)
-      const toLabel   = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(dateTo)
-      const rangeLabel = dates.length === 1 ? fromLabel : `du ${fromLabel} au ${toLabel}`
-
-      await tx.notification.create({
-        data: {
-          userId:    team.leader.userId,
-          companyId: user.companyId!,
-          type:      "ASSIGNMENT_CREATED",
-          title:     `Nouvelle affectation — ${worksite.name}`,
-          message:   `Votre équipe est affectée ${rangeLabel}. Confirmez ou refusez.`,
-          link:      `/planning`,
-        },
-      })
-
-      const leaderUser = await tx.user.findUnique({
-        where:  { id: team.leader.userId },
-        select: { email: true, name: true },
-      })
-      if (leaderUser?.email) {
-        const company = await tx.company.findUnique({ where: { id: user.companyId! }, select: { name: true } })
-        sendAssignmentCreatedEmail({
-          to:             leaderUser.email,
-          teamLeaderName: leaderUser.name ?? leaderUser.email,
-          worksiteName:   worksite.name,
-          dateLabel:      rangeLabel,
-          companyName:    company?.name ?? "",
-        }).catch(() => {})
-      }
-    }
-  }) } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error("[affecterEquipe] transaction error:", msg)
-    return { error: "Erreur lors de la création des affectations. Veuillez réessayer." }
+    return { error: coreErrorMessage(result) }
   }
 
   revalidatePath("/chantiers")
   revalidatePath(`/chantiers/${worksiteId}`)
   revalidatePath("/planning")
-  return { success: true, count: dates.length }
+  return { success: true, count: result.data.assignmentIds.length }
 }
 
 // ─── Décaler un chantier ────────────────────────────────────────────────────

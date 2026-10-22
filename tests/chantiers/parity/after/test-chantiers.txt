@@ -1,0 +1,1601 @@
+
+> planificator@0.1.0 test:chantiers
+> node --import tsx --test tests/chantiers/check-team-conflict-isolation.test.ts tests/chantiers/assignment-ui-policy.test.ts tests/chantiers/chantiers-view-filters.test.ts tests/chantiers/chantiers-results.render.test.tsx tests/chantiers/chantiers-map-empty-state.test.tsx && TZ=UTC node --import tsx --experimental-test-module-mocks --test tests/chantiers/parity/scope-guard.test.ts tests/chantiers/chantier-create.core.test.ts tests/chantiers/assignment-team.core.test.ts && TZ=Europe/Paris node --import tsx --experimental-test-module-mocks --test tests/chantiers/chantier-create.core.test.ts tests/chantiers/assignment-team.core.test.ts
+
+TAP version 13
+# Subtest: canShowAffecterEquipeForm
+    # Subtest: SUPER_ADMIN + IN_PROGRESS + endDate passée conceptuelle → visible
+    ok 1 - SUPER_ADMIN + IN_PROGRESS + endDate passée conceptuelle → visible
+      ---
+      duration_ms: 0.49525
+      type: 'test'
+      ...
+    # Subtest: ADMIN + aucune affectation (status PLANNED/IN_PROGRESS) → visible
+    ok 2 - ADMIN + aucune affectation (status PLANNED/IN_PROGRESS) → visible
+      ---
+      duration_ms: 0.052459
+      type: 'test'
+      ...
+    # Subtest: ADMIN + COMPLETED (auto-complete cron / fin dépassée) → visible pour correction
+    ok 3 - ADMIN + COMPLETED (auto-complete cron / fin dépassée) → visible pour correction
+      ---
+      duration_ms: 0.03425
+      type: 'test'
+      ...
+    # Subtest: ARCHIVED → masqué (règle terminale)
+    ok 4 - ARCHIVED → masqué (règle terminale)
+      ---
+      duration_ms: 0.032041
+      type: 'test'
+      ...
+    # Subtest: utilisateur non autorisé → masqué
+    ok 5 - utilisateur non autorisé → masqué
+      ---
+      duration_ms: 0.249459
+      type: 'test'
+      ...
+    # Subtest: EXTENDED et DELAYED restent affectables pour ADMIN
+    ok 6 - EXTENDED et DELAYED restent affectables pour ADMIN
+      ---
+      duration_ms: 0.095292
+      type: 'test'
+      ...
+    1..6
+ok 1 - canShowAffecterEquipeForm
+  ---
+  duration_ms: 1.938584
+  type: 'suite'
+  ...
+# Subtest: groupAssignmentBlocks
+    # Subtest: retourne [] sans affectation (pas de régression message vide)
+    ok 1 - retourne [] sans affectation (pas de régression message vide)
+      ---
+      duration_ms: 0.443042
+      type: 'test'
+      ...
+    # Subtest: regroupe les jours consécutifs d'une même équipe
+    ok 2 - regroupe les jours consécutifs d'une même équipe
+      ---
+      duration_ms: 5.256667
+      type: 'test'
+      ...
+    1..2
+ok 2 - groupAssignmentBlocks
+  ---
+  duration_ms: 5.885334
+  type: 'suite'
+  ...
+# Subtest: Carte Chantiers — état vide contextuel d'un onglet filtré
+    # Subtest: 1. Actifs + zéro coordonnées → état vide contextuel, carte Leaflet non montée
+    ok 1 - 1. Actifs + zéro coordonnées → état vide contextuel, carte Leaflet non montée
+      ---
+      duration_ms: 4.393041
+      type: 'test'
+      ...
+    # Subtest: 2. le nombre de chantiers de l'onglet est exact (pluriel / singulier / autres onglets)
+    ok 2 - 2. le nombre de chantiers de l'onglet est exact (pluriel / singulier / autres onglets)
+      ---
+      duration_ms: 0.125375
+      type: 'test'
+      ...
+    # Subtest: 3. « Voir tous les chantiers sur la carte » sélectionne l'onglet Tous via le mécanisme d'onglet
+    ok 3 - 3. « Voir tous les chantiers sur la carte » sélectionne l'onglet Tous via le mécanisme d'onglet
+      ---
+      duration_ms: 0.685292
+      type: 'test'
+      ...
+    # Subtest: 4. Tous + coordonnées → carte normale (pas d'état vide contextuel)
+    ok 4 - 4. Tous + coordonnées → carte normale (pas d'état vide contextuel)
+      ---
+      duration_ms: 0.305459
+      type: 'test'
+      ...
+    # Subtest: onglet filtré avec au moins une coordonnée → carte normale
+    ok 5 - onglet filtré avec au moins une coordonnée → carte normale
+      ---
+      duration_ms: 0.160208
+      type: 'test'
+      ...
+    # Subtest: Tous sans aucune coordonnée → état vide natif de la carte conservé (pas de bouton circulaire)
+    ok 6 - Tous sans aucune coordonnée → état vide natif de la carte conservé (pas de bouton circulaire)
+      ---
+      duration_ms: 0.034791
+      type: 'test'
+      ...
+    # Subtest: onglet vide → pas d'état vide carte (l'état vide de la vue s'applique)
+    ok 7 - onglet vide → pas d'état vide carte (l'état vide de la vue s'applique)
+      ---
+      duration_ms: 0.027208
+      type: 'test'
+      ...
+    # Subtest: 5. aucun changement du filtrage existant : mêmes ensembles par onglet, données non modifiées
+    ok 8 - 5. aucun changement du filtrage existant : mêmes ensembles par onglet, données non modifiées
+      ---
+      duration_ms: 0.871375
+      type: 'test'
+      ...
+    # Subtest: règle de coordonnées identique à ChantiersMap
+    ok 9 - règle de coordonnées identique à ChantiersMap
+      ---
+      duration_ms: 0.208208
+      type: 'test'
+      ...
+    1..9
+ok 3 - Carte Chantiers — état vide contextuel d'un onglet filtré
+  ---
+  duration_ms: 7.465459
+  type: 'suite'
+  ...
+# Subtest: ChantiersResults — L. les vues existantes continuent à fonctionner
+    # Subtest: vue grid : liens d'ouverture, nom, client, dates
+    ok 1 - vue grid : liens d'ouverture, nom, client, dates
+      ---
+      duration_ms: 22.852958
+      type: 'test'
+      ...
+    # Subtest: vue mosaic : liens d'ouverture, nom, client, dates
+    ok 2 - vue mosaic : liens d'ouverture, nom, client, dates
+      ---
+      duration_ms: 1.499292
+      type: 'test'
+      ...
+    # Subtest: vue list : liens d'ouverture, nom, client, dates
+    ok 3 - vue list : liens d'ouverture, nom, client, dates
+      ---
+      duration_ms: 1.237292
+      type: 'test'
+      ...
+    # Subtest: grille : adresse, affectations et équipe affichées
+    ok 4 - grille : adresse, affectations et équipe affichées
+      ---
+      duration_ms: 1.551167
+      type: 'test'
+      ...
+    # Subtest: Tous : badge Archivé visible ; Terminés : badge Archivé masqué
+    ok 5 - Tous : badge Archivé visible ; Terminés : badge Archivé masqué
+      ---
+      duration_ms: 4.052541
+      type: 'test'
+      ...
+    1..5
+ok 4 - ChantiersResults — L. les vues existantes continuent à fonctionner
+  ---
+  duration_ms: 31.57775
+  type: 'suite'
+  ...
+# Subtest: Chantiers — états (statut persisté uniquement)
+    # Subtest: A — un chantier en cours / prolongé apparaît dans Actifs
+    ok 1 - A — un chantier en cours / prolongé apparaît dans Actifs
+      ---
+      duration_ms: 0.831541
+      type: 'test'
+      ...
+    # Subtest: B — un chantier futur (PLANNED / DELAYED) apparaît dans Planifiés
+    ok 2 - B — un chantier futur (PLANNED / DELAYED) apparaît dans Planifiés
+      ---
+      duration_ms: 0.079958
+      type: 'test'
+      ...
+    # Subtest: C — la vue par défaut est Actifs et n'affiche aucun chantier terminé/archivé
+    ok 3 - C — la vue par défaut est Actifs et n'affiche aucun chantier terminé/archivé
+      ---
+      duration_ms: 0.123959
+      type: 'test'
+      ...
+    # Subtest: D — Terminés retrouve COMPLETED + ARCHIVED
+    ok 4 - D — Terminés retrouve COMPLETED + ARCHIVED
+      ---
+      duration_ms: 0.047958
+      type: 'test'
+      ...
+    # Subtest: E — Tous retrouve actifs + anciens
+    ok 5 - E — Tous retrouve actifs + anciens
+      ---
+      duration_ms: 0.045042
+      type: 'test'
+      ...
+    # Subtest: J — À affecter = règle existante (PLANNED && 0 affectation), DELAYED non inclus
+    ok 6 - J — À affecter = règle existante (PLANNED && 0 affectation), DELAYED non inclus
+      ---
+      duration_ms: 0.056167
+      type: 'test'
+      ...
+    # Subtest: une date de fin dépassée ne rend PAS un chantier « Terminé » (statut seul fait foi)
+    ok 7 - une date de fin dépassée ne rend PAS un chantier « Terminé » (statut seul fait foi)
+      ---
+      duration_ms: 0.0475
+      type: 'test'
+      ...
+    # Subtest: compteurs réels par état
+    ok 8 - compteurs réels par état
+      ---
+      duration_ms: 0.123916
+      type: 'test'
+      ...
+    1..8
+ok 5 - Chantiers — états (statut persisté uniquement)
+  ---
+  duration_ms: 1.865791
+  type: 'suite'
+  ...
+# Subtest: Chantiers — recherche
+    # Subtest: F — par nom (insensible à la casse)
+    ok 1 - F — par nom (insensible à la casse)
+      ---
+      duration_ms: 0.181958
+      type: 'test'
+      ...
+    # Subtest: G — par client
+    ok 2 - G — par client
+      ---
+      duration_ms: 0.164417
+      type: 'test'
+      ...
+    # Subtest: H — par ville / code postal / adresse, insensible aux accents
+    ok 3 - H — par ville / code postal / adresse, insensible aux accents
+      ---
+      duration_ms: 0.112833
+      type: 'test'
+      ...
+    # Subtest: plusieurs termes = ET, sur n'importe quel champ
+    ok 4 - plusieurs termes = ET, sur n'importe quel champ
+      ---
+      duration_ms: 0.036375
+      type: 'test'
+      ...
+    # Subtest: I — combinaison recherche + état
+    ok 5 - I — combinaison recherche + état
+      ---
+      duration_ms: 0.054208
+      type: 'test'
+      ...
+    # Subtest: les compteurs reflètent la recherche
+    ok 6 - les compteurs reflètent la recherche
+      ---
+      duration_ms: 0.12575
+      type: 'test'
+      ...
+    1..6
+ok 6 - Chantiers — recherche
+  ---
+  duration_ms: 1.32975
+  type: 'suite'
+  ...
+# Subtest: Chantiers — tri
+    # Subtest: tri A → Z
+    ok 1 - tri A → Z
+      ---
+      duration_ms: 0.089708
+      type: 'test'
+      ...
+    # Subtest: tri Z → A
+    ok 2 - tri Z → A
+      ---
+      duration_ms: 0.039541
+      type: 'test'
+      ...
+    # Subtest: tri date de début croissant / décroissant — dates inconnues toujours en fin
+    ok 3 - tri date de début croissant / décroissant — dates inconnues toujours en fin
+      ---
+      duration_ms: 0.046833
+      type: 'test'
+      ...
+    # Subtest: tri date de fin croissant / décroissant — dates inconnues toujours en fin
+    ok 4 - tri date de fin croissant / décroissant — dates inconnues toujours en fin
+      ---
+      duration_ms: 0.048166
+      type: 'test'
+      ...
+    # Subtest: ne modifie pas le tableau source
+    ok 5 - ne modifie pas le tableau source
+      ---
+      duration_ms: 0.043125
+      type: 'test'
+      ...
+    1..5
+ok 7 - Chantiers — tri
+  ---
+  duration_ms: 0.326916
+  type: 'suite'
+  ...
+# Subtest: Chantiers — filtres complémentaires
+    # Subtest: filtre client
+    ok 1 - filtre client
+      ---
+      duration_ms: 0.116709
+      type: 'test'
+      ...
+    # Subtest: filtre personnel affecté
+    ok 2 - filtre personnel affecté
+      ---
+      duration_ms: 0.034917
+      type: 'test'
+      ...
+    # Subtest: combinaison état + recherche + filtre + tri
+    ok 3 - combinaison état + recherche + filtre + tri
+      ---
+      duration_ms: 0.058458
+      type: 'test'
+      ...
+    # Subtest: reset des filtres → retour au résultat par défaut
+    ok 4 - reset des filtres → retour au résultat par défaut
+      ---
+      duration_ms: 0.071458
+      type: 'test'
+      ...
+    # Subtest: options client dérivées des chantiers autorisés, dédupliquées et triées
+    ok 5 - options client dérivées des chantiers autorisés, dédupliquées et triées
+      ---
+      duration_ms: 0.087458
+      type: 'test'
+      ...
+    1..5
+ok 8 - Chantiers — filtres complémentaires
+  ---
+  duration_ms: 0.418833
+  type: 'suite'
+  ...
+# Subtest: Chantiers — isolation tenant (K)
+    # Subtest: le sélecteur de personnel n'expose que les employés du tenant courant sur des chantiers autorisés
+    ok 1 - le sélecteur de personnel n'expose que les employés du tenant courant sur des chantiers autorisés
+      ---
+      duration_ms: 0.112625
+      type: 'test'
+      ...
+    # Subtest: aucune donnée injectée : le pipeline ne renvoie que des éléments du tableau fourni
+    ok 2 - aucune donnée injectée : le pipeline ne renvoie que des éléments du tableau fourni
+      ---
+      duration_ms: 0.042167
+      type: 'test'
+      ...
+    1..2
+ok 9 - Chantiers — isolation tenant (K)
+  ---
+  duration_ms: 0.184708
+  type: 'suite'
+  ...
+# Subtest: Chantiers — clé de remontage de la carte
+    # Subtest: un changement de tri seul ne change pas la clé
+    ok 1 - un changement de tri seul ne change pas la clé
+      ---
+      duration_ms: 0.0865
+      type: 'test'
+      ...
+    # Subtest: un changement de l'ensemble affiché change la clé
+    ok 2 - un changement de l'ensemble affiché change la clé
+      ---
+      duration_ms: 0.059292
+      type: 'test'
+      ...
+    1..2
+ok 10 - Chantiers — clé de remontage de la carte
+  ---
+  duration_ms: 0.173959
+  type: 'suite'
+  ...
+# Subtest: Chantiers — compteurs d'en-tête
+    # Subtest: en cours = IN_PROGRESS + EXTENDED ; planifiés = PLANNED + DELAYED (mêmes règles que les onglets)
+    ok 1 - en cours = IN_PROGRESS + EXTENDED ; planifiés = PLANNED + DELAYED (mêmes règles que les onglets)
+      ---
+      duration_ms: 0.060916
+      type: 'test'
+      ...
+    1..1
+ok 11 - Chantiers — compteurs d'en-tête
+  ---
+  duration_ms: 0.082292
+  type: 'suite'
+  ...
+# Subtest: Chantiers — badges de statut
+    # Subtest: le badge n'est affiché que s'il apporte une information
+    ok 1 - le badge n'est affiché que s'il apporte une information
+      ---
+      duration_ms: 0.048459
+      type: 'test'
+      ...
+    1..1
+ok 12 - Chantiers — badges de statut
+  ---
+  duration_ms: 0.067833
+  type: 'suite'
+  ...
+# Subtest: \#77 — checkTeamConflict : isolation par entreprise
+    # Subtest: (1) même entreprise ⇒ le conflit est renvoyé
+    ok 1 - (1) même entreprise ⇒ le conflit est renvoyé
+      ---
+      duration_ms: 16.604
+      type: 'test'
+      ...
+    # Subtest: (2) teamId d'une autre entreprise ⇒ null (aucune fuite du nom de chantier)
+    ok 2 - (2) teamId d'une autre entreprise ⇒ null (aucune fuite du nom de chantier)
+      ---
+      duration_ms: 0.086792
+      type: 'test'
+      ...
+    # Subtest: (3) session sans companyId ⇒ null et AUCUNE requête
+    ok 3 - (3) session sans companyId ⇒ null et AUCUNE requête
+      ---
+      duration_ms: 0.053542
+      type: 'test'
+      ...
+    # Subtest: (3bis) session absente ⇒ null et aucune requête
+    ok 4 - (3bis) session absente ⇒ null et aucune requête
+      ---
+      duration_ms: 0.075458
+      type: 'test'
+      ...
+    # Subtest: (4) affectation incohérente (équipe de A, chantier de B, et l'inverse) ⇒ null pour A ET pour B
+    ok 5 - (4) affectation incohérente (équipe de A, chantier de B, et l'inverse) ⇒ null pour A ET pour B
+      ---
+      duration_ms: 0.061666
+      type: 'test'
+      ...
+    # Subtest: excludeWorksiteId reste appliqué à l'intérieur du périmètre de l'entreprise
+    ok 6 - excludeWorksiteId reste appliqué à l'intérieur du périmètre de l'entreprise
+      ---
+      duration_ms: 0.081417
+      type: 'test'
+      ...
+    # Subtest: la clause where porte toujours les deux filtres d'entreprise, avec ou sans exclusion
+    ok 7 - la clause where porte toujours les deux filtres d'entreprise, avec ou sans exclusion
+      ---
+      duration_ms: 0.079791
+      type: 'test'
+      ...
+    # Subtest: preuve de discrimination : retirer l'un des deux filtres fait fuir une ligne incohérente
+    ok 8 - preuve de discrimination : retirer l'un des deux filtres fait fuir une ligne incohérente
+      ---
+      duration_ms: 0.089708
+      type: 'test'
+      ...
+    1..8
+ok 13 - \#77 — checkTeamConflict : isolation par entreprise
+  ---
+  duration_ms: 17.532041
+  type: 'suite'
+  ...
+1..13
+# tests 60
+# suites 13
+# pass 60
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 301.572833
+TAP version 13
+# Subtest: T-CORE-2/T-CORE-3 — parité affecterEquipe (adaptateur + cœur) vs référence BASE_SHA [TZ=UTC]
+    # Subtest: assign-one-day — plage d'un jour (dateTo = dateFrom)
+    ok 1 - assign-one-day — plage d'un jour (dateTo = dateFrom)
+      ---
+      duration_ms: 10.117
+      type: 'test'
+      ...
+    # Subtest: assign-multi-day — plage de trois jours
+    ok 2 - assign-multi-day — plage de trois jours
+      ---
+      duration_ms: 0.899375
+      type: 'test'
+      ...
+    # Subtest: assign-multi-day-month-boundary — plage à cheval sur deux mois (libellés fr-FR)
+    ok 3 - assign-multi-day-month-boundary — plage à cheval sur deux mois (libellés fr-FR)
+      ---
+      duration_ms: 0.974041
+      type: 'test'
+      ...
+    # Subtest: assign-range-across-dst — plage traversant le changement d'heure Europe/Paris (25 octobre 2026) — T-CORE-7
+    ok 4 - assign-range-across-dst — plage traversant le changement d'heure Europe/Paris (25 octobre 2026) — T-CORE-7
+      ---
+      duration_ms: 0.744
+      type: 'test'
+      ...
+    # Subtest: assign-datefrom-with-time — dateFrom avec heure (setHours(0,0,0,0) dépend du fuseau) — T-CORE-7
+    ok 5 - assign-datefrom-with-time — dateFrom avec heure (setHours(0,0,0,0) dépend du fuseau) — T-CORE-7
+      ---
+      duration_ms: 0.787542
+      type: 'test'
+      ...
+    # Subtest: assign-dateto-absent — dateTo absent (chaîne vide) ⇒ un seul jour
+    ok 6 - assign-dateto-absent — dateTo absent (chaîne vide) ⇒ un seul jour
+      ---
+      duration_ms: 0.644084
+      type: 'test'
+      ...
+    # Subtest: assign-dateto-key-missing — clé dateTo absente du FormData ⇒ un seul jour
+    ok 7 - assign-dateto-key-missing — clé dateTo absente du FormData ⇒ un seul jour
+      ---
+      duration_ms: 0.69225
+      type: 'test'
+      ...
+    # Subtest: assign-dateto-before-datefrom — dateTo < dateFrom
+    ok 8 - assign-dateto-before-datefrom — dateTo < dateFrom
+      ---
+      duration_ms: 1.174
+      type: 'test'
+      ...
+    # Subtest: assign-missing-worksiteid — worksiteId manquant ⇒ « Informations manquantes. »
+    ok 9 - assign-missing-worksiteid — worksiteId manquant ⇒ « Informations manquantes. »
+      ---
+      duration_ms: 0.549667
+      type: 'test'
+      ...
+    # Subtest: assign-missing-teamid — teamId manquant ⇒ « Informations manquantes. »
+    ok 10 - assign-missing-teamid — teamId manquant ⇒ « Informations manquantes. »
+      ---
+      duration_ms: 0.44025
+      type: 'test'
+      ...
+    # Subtest: assign-missing-datefrom — dateFrom manquant ⇒ « Informations manquantes. »
+    ok 11 - assign-missing-datefrom — dateFrom manquant ⇒ « Informations manquantes. »
+      ---
+      duration_ms: 0.354834
+      type: 'test'
+      ...
+    # Subtest: assign-worksite-not-found — chantier introuvable
+    ok 12 - assign-worksite-not-found — chantier introuvable
+      ---
+      duration_ms: 0.349709
+      type: 'test'
+      ...
+    # Subtest: assign-team-not-found — équipe introuvable
+    ok 13 - assign-team-not-found — équipe introuvable
+      ---
+      duration_ms: 0.269334
+      type: 'test'
+      ...
+    # Subtest: assign-team-conflict-with-address — conflit équipe, chantier existant avec adresse
+    ok 14 - assign-team-conflict-with-address — conflit équipe, chantier existant avec adresse
+      ---
+      duration_ms: 0.44175
+      type: 'test'
+      ...
+    # Subtest: assign-team-conflict-without-address — conflit équipe, chantier existant sans adresse
+    ok 15 - assign-team-conflict-without-address — conflit équipe, chantier existant sans adresse
+      ---
+      duration_ms: 0.377084
+      type: 'test'
+      ...
+    # Subtest: assign-team-conflict-late-evening-date — conflit équipe dont la date est 23:30 UTC (libellé dépend du fuseau) — T-CORE-7
+    ok 16 - assign-team-conflict-late-evening-date — conflit équipe dont la date est 23:30 UTC (libellé dépend du fuseau) — T-CORE-7
+      ---
+      duration_ms: 0.380875
+      type: 'test'
+      ...
+    # Subtest: assign-employee-conflict-one — conflit d'un employé (« Désaffectez-le »)
+    ok 17 - assign-employee-conflict-one — conflit d'un employé (« Désaffectez-le »)
+      ---
+      duration_ms: 0.414
+      type: 'test'
+      ...
+    # Subtest: assign-employee-conflict-many — conflits de deux employés (« Désaffectez-les »)
+    ok 18 - assign-employee-conflict-many — conflits de deux employés (« Désaffectez-les »)
+      ---
+      duration_ms: 0.562875
+      type: 'test'
+      ...
+    # Subtest: assign-team-without-members — équipe sans membres : ni requête employés, ni createMany
+    ok 19 - assign-team-without-members — équipe sans membres : ni requête employés, ni createMany
+      ---
+      duration_ms: 0.479375
+      type: 'test'
+      ...
+    # Subtest: assign-worksite-already-in-progress — chantier déjà IN_PROGRESS : pas de mise à jour de statut
+    ok 20 - assign-worksite-already-in-progress — chantier déjà IN_PROGRESS : pas de mise à jour de statut
+      ---
+      duration_ms: 0.5725
+      type: 'test'
+      ...
+    # Subtest: assign-leader-without-userid — chef sans userId : ni notification, ni e-mail
+    ok 21 - assign-leader-without-userid — chef sans userId : ni notification, ni e-mail
+      ---
+      duration_ms: 0.468083
+      type: 'test'
+      ...
+    # Subtest: assign-no-leader — équipe sans chef : ni notification, ni e-mail
+    ok 22 - assign-no-leader — équipe sans chef : ni notification, ni e-mail
+      ---
+      duration_ms: 0.60675
+      type: 'test'
+      ...
+    # Subtest: assign-leader-user-without-email — utilisateur du chef sans e-mail : notification, pas d'e-mail ni de lecture d'entreprise
+    ok 23 - assign-leader-user-without-email — utilisateur du chef sans e-mail : notification, pas d'e-mail ni de lecture d'entreprise
+      ---
+      duration_ms: 0.799917
+      type: 'test'
+      ...
+    # Subtest: assign-leader-user-without-name — utilisateur du chef sans nom : teamLeaderName = e-mail
+    ok 24 - assign-leader-user-without-name — utilisateur du chef sans nom : teamLeaderName = e-mail
+      ---
+      duration_ms: 0.780958
+      type: 'test'
+      ...
+    # Subtest: assign-leader-user-not-found — utilisateur du chef introuvable : pas d'e-mail
+    ok 25 - assign-leader-user-not-found — utilisateur du chef introuvable : pas d'e-mail
+      ---
+      duration_ms: 0.695416
+      type: 'test'
+      ...
+    # Subtest: assign-company-not-found — entreprise introuvable : companyName vide dans l'e-mail
+    ok 26 - assign-company-not-found — entreprise introuvable : companyName vide dans l'e-mail
+      ---
+      duration_ms: 1.201042
+      type: 'test'
+      ...
+    # Subtest: assign-email-rejects — promesse d'e-mail rejetée : absorbée par .catch, succès inchangé
+    ok 27 - assign-email-rejects — promesse d'e-mail rejetée : absorbée par .catch, succès inchangé
+      ---
+      duration_ms: 0.694834
+      type: 'test'
+      ...
+    # Subtest: assign-tx-error-assignment-create — erreur injectée dans assignment.create (2e jour) ⇒ rollback, message générique, console.error
+    ok 28 - assign-tx-error-assignment-create — erreur injectée dans assignment.create (2e jour) ⇒ rollback, message générique, console.error
+      ---
+      duration_ms: 0.556375
+      type: 'test'
+      ...
+    # Subtest: assign-tx-error-notification-create — erreur injectée dans notification.create ⇒ rollback après les créations
+    ok 29 - assign-tx-error-notification-create — erreur injectée dans notification.create ⇒ rollback après les créations
+      ---
+      duration_ms: 0.552875
+      type: 'test'
+      ...
+    # Subtest: assign-tx-error-non-error-value — valeur non-Error levée dans la transaction (String(err))
+    ok 30 - assign-tx-error-non-error-value — valeur non-Error levée dans la transaction (String(err))
+      ---
+      duration_ms: 0.440792
+      type: 'test'
+      ...
+    # Subtest: assign-auth-session-absent — session absente ⇒ exception, trace Prisma vide
+    ok 31 - assign-auth-session-absent — session absente ⇒ exception, trace Prisma vide
+      ---
+      duration_ms: 0.338292
+      type: 'test'
+      ...
+    # Subtest: assign-auth-role-employee — rôle EMPLOYEE ⇒ exception, trace Prisma vide
+    ok 32 - assign-auth-role-employee — rôle EMPLOYEE ⇒ exception, trace Prisma vide
+      ---
+      duration_ms: 0.304959
+      type: 'test'
+      ...
+    # Subtest: assign-auth-no-company — companyId absent ⇒ exception, trace Prisma vide
+    ok 33 - assign-auth-no-company — companyId absent ⇒ exception, trace Prisma vide
+      ---
+      duration_ms: 0.228
+      type: 'test'
+      ...
+    # Subtest: T-CORE-3 (4bis) : session absente / EMPLOYEE / sans companyId ⇒ même exception, aucun appel Prisma, aucun effet (lu dans la référence)
+    ok 34 - T-CORE-3 (4bis) : session absente / EMPLOYEE / sans companyId ⇒ même exception, aucun appel Prisma, aucun effet (lu dans la référence)
+      ---
+      duration_ms: 0.141541
+      type: 'test'
+      ...
+    # Subtest: T-CORE-3 (frontière transactionnelle) : créations, mise à jour, notification, lectures du chef/entreprise et e-mail DANS la transaction ; revalidations après commit (lu dans la référence)
+    ok 35 - T-CORE-3 (frontière transactionnelle) : créations, mise à jour, notification, lectures du chef/entreprise et e-mail DANS la transaction ; revalidations après commit (lu dans la référence)
+      ---
+      duration_ms: 0.088375
+      type: 'test'
+      ...
+    # Subtest: T-CORE-3 (échec de transaction) : rollback simulé ⇒ console.error [affecterEquipe], message générique, aucune revalidation ni e-mail (lu dans la référence)
+    ok 36 - T-CORE-3 (échec de transaction) : rollback simulé ⇒ console.error [affecterEquipe], message générique, aucune revalidation ni e-mail (lu dans la référence)
+      ---
+      duration_ms: 0.184542
+      type: 'test'
+      ...
+    1..36
+ok 1 - T-CORE-2/T-CORE-3 — parité affecterEquipe (adaptateur + cœur) vs référence BASE_SHA [TZ=UTC]
+  ---
+  duration_ms: 54.066375
+  type: 'suite'
+  ...
+# Subtest: T-CORE-6 — where du conflit équipe tel qu'observé sur BASE_SHA (filtre d'entreprise : 1W-1b, T-HARD-1)
+    # Subtest: référence BASE_SHA : { teamId, date: { in } } — aucune clé team.companyId
+    ok 1 - référence BASE_SHA : { teamId, date: { in } } — aucune clé team.companyId
+      ---
+      duration_ms: 0.072667
+      type: 'test'
+      ...
+    # Subtest: cœur refactoré : même where, mêmes clés, même absence de filtre (parité, pas correction)
+    ok 2 - cœur refactoré : même where, mêmes clés, même absence de filtre (parité, pas correction)
+      ---
+      duration_ms: 0.224917
+      type: 'test'
+      ...
+    1..2
+ok 2 - T-CORE-6 — where du conflit équipe tel qu'observé sur BASE_SHA (filtre d'entreprise : 1W-1b, T-HARD-1)
+  ---
+  duration_ms: 0.332
+  type: 'suite'
+  ...
+# Subtest: T-CORE-2 — assignTeamCore (cœur seul, dépendances en mémoire)
+    # Subtest: champs manquants ⇒ VALIDATION « Informations manquantes. », aucun port appelé
+    ok 1 - champs manquants ⇒ VALIDATION « Informations manquantes. », aucun port appelé
+      ---
+      duration_ms: 0.079625
+      type: 'test'
+      ...
+    # Subtest: dateTo < dateFrom ⇒ VALIDATION « La date de fin doit être après la date de début. »
+    ok 2 - dateTo < dateFrom ⇒ VALIDATION « La date de fin doit être après la date de début. »
+      ---
+      duration_ms: 0.03
+      type: 'test'
+      ...
+    # Subtest: chantier introuvable ⇒ WORKSITE_NOT_FOUND ; équipe introuvable ⇒ TEAM_NOT_FOUND (messages identiques)
+    ok 3 - chantier introuvable ⇒ WORKSITE_NOT_FOUND ; équipe introuvable ⇒ TEAM_NOT_FOUND (messages identiques)
+      ---
+      duration_ms: 0.058375
+      type: 'test'
+      ...
+    # Subtest: conflit équipe ⇒ TEAM_CONFLICT, message avec/sans adresse, aucune transaction
+    ok 4 - conflit équipe ⇒ TEAM_CONFLICT, message avec/sans adresse, aucune transaction
+      ---
+      duration_ms: 0.181875
+      type: 'test'
+      ...
+    # Subtest: conflits employés ⇒ EMPLOYEE_CONFLICT, « Désaffectez-le » (1) / « Désaffectez-les » (N)
+    ok 5 - conflits employés ⇒ EMPLOYEE_CONFLICT, « Désaffectez-le » (1) / « Désaffectez-les » (N)
+      ---
+      duration_ms: 0.150375
+      type: 'test'
+      ...
+    # Subtest: équipe sans membres ⇒ pas de requête de conflit employés ni de createMany
+    ok 6 - équipe sans membres ⇒ pas de requête de conflit employés ni de createMany
+      ---
+      duration_ms: 0.154458
+      type: 'test'
+      ...
+    # Subtest: chemin nominal ⇒ ok, data { assignmentIds (N), worksiteStatus IN_PROGRESS, leaderUserId } ; e-mail au même point (dans la transaction)
+    ok 7 - chemin nominal ⇒ ok, data { assignmentIds (N), worksiteStatus IN_PROGRESS, leaderUserId } ; e-mail au même point (dans la transaction)
+      ---
+      duration_ms: 0.202375
+      type: 'test'
+      ...
+    # Subtest: chantier déjà IN_PROGRESS ⇒ pas de worksite.update, worksiteStatus inchangé ; chef sans userId ⇒ ni notification ni e-mail, leaderUserId null
+    ok 8 - chantier déjà IN_PROGRESS ⇒ pas de worksite.update, worksiteStatus inchangé ; chef sans userId ⇒ ni notification ni e-mail, leaderUserId null
+      ---
+      duration_ms: 0.153167
+      type: 'test'
+      ...
+    # Subtest: erreur dans la transaction ⇒ rollback, TRANSACTION_FAILED { message générique, cause } ; aucun e-mail
+    ok 9 - erreur dans la transaction ⇒ rollback, TRANSACTION_FAILED { message générique, cause } ; aucun e-mail
+      ---
+      duration_ms: 0.066791
+      type: 'test'
+      ...
+    # Subtest: erreurs hors transaction (findWorksite) : propagées, non capturées (comme à BASE_SHA)
+    ok 10 - erreurs hors transaction (findWorksite) : propagées, non capturées (comme à BASE_SHA)
+      ---
+      duration_ms: 0.167041
+      type: 'test'
+      ...
+    1..10
+ok 3 - T-CORE-2 — assignTeamCore (cœur seul, dépendances en mémoire)
+  ---
+  duration_ms: 1.305709
+  type: 'suite'
+  ...
+# Subtest: T-CORE-1/T-CORE-3 — parité createChantier (adaptateur + cœur) vs référence BASE_SHA [TZ=UTC]
+    # Subtest: create-valid-geocode-ok — entrée valide avec adresse, géocodage réussi
+    ok 1 - create-valid-geocode-ok — entrée valide avec adresse, géocodage réussi
+      ---
+      duration_ms: 11.094917
+      type: 'test'
+      ...
+    # Subtest: create-valid-geocode-null — entrée valide avec adresse, géocodage sans résultat (null)
+    ok 2 - create-valid-geocode-null — entrée valide avec adresse, géocodage sans résultat (null)
+      ---
+      duration_ms: 1.9365
+      type: 'test'
+      ...
+    # Subtest: create-valid-no-address — entrée valide sans adresse ni description (chaînes vides) : aucun géocodage
+    ok 3 - create-valid-no-address — entrée valide sans adresse ni description (chaînes vides) : aucun géocodage
+      ---
+      duration_ms: 0.749292
+      type: 'test'
+      ...
+    # Subtest: create-valid-dailyhours-fraction — dailyHours fractionnaire accepté par z.coerce.number()
+    ok 4 - create-valid-dailyhours-fraction — dailyHours fractionnaire accepté par z.coerce.number()
+      ---
+      duration_ms: 0.7415
+      type: 'test'
+      ...
+    # Subtest: create-valid-same-day — endDate = startDate (refine >= accepte)
+    ok 5 - create-valid-same-day — endDate = startDate (refine >= accepte)
+      ---
+      duration_ms: 0.576542
+      type: 'test'
+      ...
+    # Subtest: create-geocode-throws — exception du géocodage : traitement observé à BASE_SHA (aucune capture dans l'action)
+    ok 6 - create-geocode-throws — exception du géocodage : traitement observé à BASE_SHA (aucune capture dans l'action)
+      ---
+      duration_ms: 1.36875
+      type: 'test'
+      ...
+    # Subtest: create-worksite-create-throws — erreur de worksite.create : traitement observé à BASE_SHA
+    ok 7 - create-worksite-create-throws — erreur de worksite.create : traitement observé à BASE_SHA
+      ---
+      duration_ms: 0.554166
+      type: 'test'
+      ...
+    # Subtest: create-client-not-found — client introuvable dans l'entreprise
+    ok 8 - create-client-not-found — client introuvable dans l'entreprise
+      ---
+      duration_ms: 0.653084
+      type: 'test'
+      ...
+    # Subtest: create-zod-name-empty — Zod : name vide
+    ok 9 - create-zod-name-empty — Zod : name vide
+      ---
+      duration_ms: 0.790542
+      type: 'test'
+      ...
+    # Subtest: create-zod-name-too-long — Zod : name > 100 caractères
+    ok 10 - create-zod-name-too-long — Zod : name > 100 caractères
+      ---
+      duration_ms: 0.718916
+      type: 'test'
+      ...
+    # Subtest: create-zod-description-absent — Zod : champ description absent du FormData (null, pas undefined)
+    ok 11 - create-zod-description-absent — Zod : champ description absent du FormData (null, pas undefined)
+      ---
+      duration_ms: 0.416166
+      type: 'test'
+      ...
+    # Subtest: create-zod-client-empty — Zod : clientId vide
+    ok 12 - create-zod-client-empty — Zod : clientId vide
+      ---
+      duration_ms: 0.594542
+      type: 'test'
+      ...
+    # Subtest: create-zod-startdate-empty — Zod : startDate vide
+    ok 13 - create-zod-startdate-empty — Zod : startDate vide
+      ---
+      duration_ms: 0.610875
+      type: 'test'
+      ...
+    # Subtest: create-zod-enddate-empty — Zod : endDate vide
+    ok 14 - create-zod-enddate-empty — Zod : endDate vide
+      ---
+      duration_ms: 0.466083
+      type: 'test'
+      ...
+    # Subtest: create-zod-enddate-before-startdate — Zod : endDate < startDate (refine)
+    ok 15 - create-zod-enddate-before-startdate — Zod : endDate < startDate (refine)
+      ---
+      duration_ms: 0.312375
+      type: 'test'
+      ...
+    # Subtest: create-zod-dailyhours-below-min — Zod : dailyHours 0 (< 1)
+    ok 16 - create-zod-dailyhours-below-min — Zod : dailyHours 0 (< 1)
+      ---
+      duration_ms: 0.389459
+      type: 'test'
+      ...
+    # Subtest: create-zod-dailyhours-above-max — Zod : dailyHours 25 (> 24)
+    ok 17 - create-zod-dailyhours-above-max — Zod : dailyHours 25 (> 24)
+      ---
+      duration_ms: 0.36075
+      type: 'test'
+      ...
+    # Subtest: create-zod-dailyhours-empty — Zod : dailyHours vide (coerce ⇒ 0)
+    ok 18 - create-zod-dailyhours-empty — Zod : dailyHours vide (coerce ⇒ 0)
+      ---
+      duration_ms: 0.929584
+      type: 'test'
+      ...
+    # Subtest: create-zod-dailyhours-nan — Zod : dailyHours non numérique (coerce ⇒ NaN)
+    ok 19 - create-zod-dailyhours-nan — Zod : dailyHours non numérique (coerce ⇒ NaN)
+      ---
+      duration_ms: 0.351334
+      type: 'test'
+      ...
+    # Subtest: create-zod-startdate-invalid — Zod : startDate non parsable (refine compare Invalid Date)
+    ok 20 - create-zod-startdate-invalid — Zod : startDate non parsable (refine compare Invalid Date)
+      ---
+      duration_ms: 0.432625
+      type: 'test'
+      ...
+    # Subtest: create-auth-session-absent — session absente ⇒ exception, trace Prisma vide
+    ok 21 - create-auth-session-absent — session absente ⇒ exception, trace Prisma vide
+      ---
+      duration_ms: 0.302875
+      type: 'test'
+      ...
+    # Subtest: create-auth-role-employee — rôle EMPLOYEE ⇒ exception, trace Prisma vide
+    ok 22 - create-auth-role-employee — rôle EMPLOYEE ⇒ exception, trace Prisma vide
+      ---
+      duration_ms: 0.383167
+      type: 'test'
+      ...
+    # Subtest: create-auth-no-company — companyId absent ⇒ exception, trace Prisma vide
+    ok 23 - create-auth-no-company — companyId absent ⇒ exception, trace Prisma vide
+      ---
+      duration_ms: 0.246375
+      type: 'test'
+      ...
+    # Subtest: T-CORE-3 (4bis) : session absente / EMPLOYEE / sans companyId ⇒ même exception, aucun appel Prisma, aucun effet (lu dans la référence)
+    ok 24 - T-CORE-3 (4bis) : session absente / EMPLOYEE / sans companyId ⇒ même exception, aucun appel Prisma, aucun effet (lu dans la référence)
+      ---
+      duration_ms: 0.142583
+      type: 'test'
+      ...
+    # Subtest: T-CORE-3 : exception du géocodage et erreur de worksite.create propagées, aucune revalidation (lu dans la référence)
+    ok 25 - T-CORE-3 : exception du géocodage et erreur de worksite.create propagées, aucune revalidation (lu dans la référence)
+      ---
+      duration_ms: 0.100459
+      type: 'test'
+      ...
+    1..25
+ok 4 - T-CORE-1/T-CORE-3 — parité createChantier (adaptateur + cœur) vs référence BASE_SHA [TZ=UTC]
+  ---
+  duration_ms: 40.875667
+  type: 'suite'
+  ...
+# Subtest: T-CORE-1 — createWorksiteCore (cœur seul, dépendances en mémoire)
+    # Subtest: Zod en échec ⇒ VALIDATION avec le message Zod ; aucun port appelé
+    ok 1 - Zod en échec ⇒ VALIDATION avec le message Zod ; aucun port appelé
+      ---
+      duration_ms: 0.109
+      type: 'test'
+      ...
+    # Subtest: endDate < startDate ⇒ VALIDATION « La date de fin doit être après la date de début »
+    ok 2 - endDate < startDate ⇒ VALIDATION « La date de fin doit être après la date de début »
+      ---
+      duration_ms: 0.05025
+      type: 'test'
+      ...
+    # Subtest: client introuvable ⇒ CLIENT_NOT_FOUND « Client introuvable. » ; ni géocodage ni création
+    ok 3 - client introuvable ⇒ CLIENT_NOT_FOUND « Client introuvable. » ; ni géocodage ni création
+      ---
+      duration_ms: 0.056833
+      type: 'test'
+      ...
+    # Subtest: entrée valide avec adresse ⇒ géocodage puis création avec les mêmes champs ; data.worksiteId
+    ok 4 - entrée valide avec adresse ⇒ géocodage puis création avec les mêmes champs ; data.worksiteId
+      ---
+      duration_ms: 0.084417
+      type: 'test'
+      ...
+    # Subtest: sans adresse ⇒ aucun géocodage, latitude/longitude null ; géocodage null ⇒ idem
+    ok 5 - sans adresse ⇒ aucun géocodage, latitude/longitude null ; géocodage null ⇒ idem
+      ---
+      duration_ms: 0.060708
+      type: 'test'
+      ...
+    # Subtest: exception du géocodage et erreur de création : propagées (aucune nouvelle capture)
+    ok 6 - exception du géocodage et erreur de création : propagées (aucune nouvelle capture)
+      ---
+      duration_ms: 0.2185
+      type: 'test'
+      ...
+    # Subtest: WriteActor : companyId ⇒ where.companyId et data.companyId ; actorUserId ⇒ data.createdById
+    ok 7 - WriteActor : companyId ⇒ where.companyId et data.companyId ; actorUserId ⇒ data.createdById
+      ---
+      duration_ms: 0.041917
+      type: 'test'
+      ...
+    1..7
+ok 5 - T-CORE-1 — createWorksiteCore (cœur seul, dépendances en mémoire)
+  ---
+  duration_ms: 0.677083
+  type: 'suite'
+  ...
+# Subtest: T-CORE-5 — garde de périmètre contre BASE_SHA figé
+    # Subtest: BASE_SHA est un ancêtre (ou égal) de HEAD
+    ok 1 - BASE_SHA est un ancêtre (ou égal) de HEAD
+      ---
+      duration_ms: 10.489042
+      type: 'test'
+      ...
+    # Subtest: git diff --name-only BASE_SHA ne touche que la liste fermée §2
+    ok 2 - git diff --name-only BASE_SHA ne touche que la liste fermée §2
+      ---
+      duration_ms: 0.310875
+      type: 'test'
+      ...
+    # Subtest: aucun fichier non suivi hors liste fermée §2
+    ok 3 - aucun fichier non suivi hors liste fermée §2
+      ---
+      duration_ms: 0.0435
+      type: 'test'
+      ...
+    # Subtest: prisma/schema.prisma et prisma/migrations/ byte-identiques à BASE_SHA, aucun fichier non suivi
+    ok 4 - prisma/schema.prisma et prisma/migrations/ byte-identiques à BASE_SHA, aucun fichier non suivi
+      ---
+      duration_ms: 28.091917
+      type: 'test'
+      ...
+    # Subtest: rien sous src/lib/agent-gateway/, src/app/api/, src/middleware.ts, next.config.ts
+    ok 5 - rien sous src/lib/agent-gateway/, src/app/api/, src/middleware.ts, next.config.ts
+      ---
+      duration_ms: 0.178417
+      type: 'test'
+      ...
+    # Subtest: package.json : seule la ligne test:chantiers diffère ; aucune dépendance ajoutée, retirée ou modifiée
+    ok 6 - package.json : seule la ligne test:chantiers diffère ; aucune dépendance ajoutée, retirée ou modifiée
+      ---
+      duration_ms: 18.004459
+      type: 'test'
+      ...
+    # Subtest: "use server" figure dans chantier.actions.ts et dans aucun fichier du lot (*.core.ts, write-actor.ts)
+    ok 7 - "use server" figure dans chantier.actions.ts et dans aucun fichier du lot (*.core.ts, write-actor.ts)
+      ---
+      duration_ms: 0.505042
+      type: 'test'
+      ...
+    # Subtest: T-CORE-4 : tests préexistants tests/chantiers/* inchangés
+    ok 8 - T-CORE-4 : tests préexistants tests/chantiers/* inchangés
+      ---
+      duration_ms: 8.906375
+      type: 'test'
+      ...
+    # Subtest: MANIFEST.json : références figées sur BASE_SHA, jamais régénérées
+        # Subtest: présent et porteur du BASE_SHA figé
+        ok 1 - présent et porteur du BASE_SHA figé
+          ---
+          duration_ms: 0.802542
+          type: 'test'
+          ...
+        # Subtest: empreintes du graphe d'import égales à git show BASE_SHA:<chemin>
+        ok 2 - empreintes du graphe d'import égales à git show BASE_SHA:<chemin>
+          ---
+          duration_ms: 76.348167
+          type: 'test'
+          ...
+        # Subtest: captures UTC et Europe/Paris présentes, snapshots existants et non altérés (SHA-256)
+        ok 3 - captures UTC et Europe/Paris présentes, snapshots existants et non altérés (SHA-256)
+          ---
+          duration_ms: 7.495416
+          type: 'test'
+          ...
+        # Subtest: aucun snapshot non listé dans le MANIFEST (pas de régénération sauvage)
+        ok 4 - aucun snapshot non listé dans le MANIFEST (pas de régénération sauvage)
+          ---
+          duration_ms: 0.253208
+          type: 'test'
+          ...
+        1..4
+    ok 9 - MANIFEST.json : références figées sur BASE_SHA, jamais régénérées
+      ---
+      duration_ms: 85.052458
+      type: 'suite'
+      ...
+    1..9
+ok 6 - T-CORE-5 — garde de périmètre contre BASE_SHA figé
+  ---
+  duration_ms: 152.060042
+  type: 'suite'
+  ...
+1..6
+# tests 92
+# suites 7
+# pass 92
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 319.146333
+TAP version 13
+# Subtest: T-CORE-2/T-CORE-3 — parité affecterEquipe (adaptateur + cœur) vs référence BASE_SHA [TZ=Europe/Paris]
+    # Subtest: assign-one-day — plage d'un jour (dateTo = dateFrom)
+    ok 1 - assign-one-day — plage d'un jour (dateTo = dateFrom)
+      ---
+      duration_ms: 10.537958
+      type: 'test'
+      ...
+    # Subtest: assign-multi-day — plage de trois jours
+    ok 2 - assign-multi-day — plage de trois jours
+      ---
+      duration_ms: 1.347625
+      type: 'test'
+      ...
+    # Subtest: assign-multi-day-month-boundary — plage à cheval sur deux mois (libellés fr-FR)
+    ok 3 - assign-multi-day-month-boundary — plage à cheval sur deux mois (libellés fr-FR)
+      ---
+      duration_ms: 1.359625
+      type: 'test'
+      ...
+    # Subtest: assign-range-across-dst — plage traversant le changement d'heure Europe/Paris (25 octobre 2026) — T-CORE-7
+    ok 4 - assign-range-across-dst — plage traversant le changement d'heure Europe/Paris (25 octobre 2026) — T-CORE-7
+      ---
+      duration_ms: 0.67225
+      type: 'test'
+      ...
+    # Subtest: assign-datefrom-with-time — dateFrom avec heure (setHours(0,0,0,0) dépend du fuseau) — T-CORE-7
+    ok 5 - assign-datefrom-with-time — dateFrom avec heure (setHours(0,0,0,0) dépend du fuseau) — T-CORE-7
+      ---
+      duration_ms: 0.539042
+      type: 'test'
+      ...
+    # Subtest: assign-dateto-absent — dateTo absent (chaîne vide) ⇒ un seul jour
+    ok 6 - assign-dateto-absent — dateTo absent (chaîne vide) ⇒ un seul jour
+      ---
+      duration_ms: 0.678083
+      type: 'test'
+      ...
+    # Subtest: assign-dateto-key-missing — clé dateTo absente du FormData ⇒ un seul jour
+    ok 7 - assign-dateto-key-missing — clé dateTo absente du FormData ⇒ un seul jour
+      ---
+      duration_ms: 0.757292
+      type: 'test'
+      ...
+    # Subtest: assign-dateto-before-datefrom — dateTo < dateFrom
+    ok 8 - assign-dateto-before-datefrom — dateTo < dateFrom
+      ---
+      duration_ms: 0.356166
+      type: 'test'
+      ...
+    # Subtest: assign-missing-worksiteid — worksiteId manquant ⇒ « Informations manquantes. »
+    ok 9 - assign-missing-worksiteid — worksiteId manquant ⇒ « Informations manquantes. »
+      ---
+      duration_ms: 0.518833
+      type: 'test'
+      ...
+    # Subtest: assign-missing-teamid — teamId manquant ⇒ « Informations manquantes. »
+    ok 10 - assign-missing-teamid — teamId manquant ⇒ « Informations manquantes. »
+      ---
+      duration_ms: 0.528167
+      type: 'test'
+      ...
+    # Subtest: assign-missing-datefrom — dateFrom manquant ⇒ « Informations manquantes. »
+    ok 11 - assign-missing-datefrom — dateFrom manquant ⇒ « Informations manquantes. »
+      ---
+      duration_ms: 0.247208
+      type: 'test'
+      ...
+    # Subtest: assign-worksite-not-found — chantier introuvable
+    ok 12 - assign-worksite-not-found — chantier introuvable
+      ---
+      duration_ms: 0.298583
+      type: 'test'
+      ...
+    # Subtest: assign-team-not-found — équipe introuvable
+    ok 13 - assign-team-not-found — équipe introuvable
+      ---
+      duration_ms: 0.206667
+      type: 'test'
+      ...
+    # Subtest: assign-team-conflict-with-address — conflit équipe, chantier existant avec adresse
+    ok 14 - assign-team-conflict-with-address — conflit équipe, chantier existant avec adresse
+      ---
+      duration_ms: 0.356958
+      type: 'test'
+      ...
+    # Subtest: assign-team-conflict-without-address — conflit équipe, chantier existant sans adresse
+    ok 15 - assign-team-conflict-without-address — conflit équipe, chantier existant sans adresse
+      ---
+      duration_ms: 0.243333
+      type: 'test'
+      ...
+    # Subtest: assign-team-conflict-late-evening-date — conflit équipe dont la date est 23:30 UTC (libellé dépend du fuseau) — T-CORE-7
+    ok 16 - assign-team-conflict-late-evening-date — conflit équipe dont la date est 23:30 UTC (libellé dépend du fuseau) — T-CORE-7
+      ---
+      duration_ms: 0.360084
+      type: 'test'
+      ...
+    # Subtest: assign-employee-conflict-one — conflit d'un employé (« Désaffectez-le »)
+    ok 17 - assign-employee-conflict-one — conflit d'un employé (« Désaffectez-le »)
+      ---
+      duration_ms: 1.052417
+      type: 'test'
+      ...
+    # Subtest: assign-employee-conflict-many — conflits de deux employés (« Désaffectez-les »)
+    ok 18 - assign-employee-conflict-many — conflits de deux employés (« Désaffectez-les »)
+      ---
+      duration_ms: 1.852542
+      type: 'test'
+      ...
+    # Subtest: assign-team-without-members — équipe sans membres : ni requête employés, ni createMany
+    ok 19 - assign-team-without-members — équipe sans membres : ni requête employés, ni createMany
+      ---
+      duration_ms: 0.82975
+      type: 'test'
+      ...
+    # Subtest: assign-worksite-already-in-progress — chantier déjà IN_PROGRESS : pas de mise à jour de statut
+    ok 20 - assign-worksite-already-in-progress — chantier déjà IN_PROGRESS : pas de mise à jour de statut
+      ---
+      duration_ms: 0.52225
+      type: 'test'
+      ...
+    # Subtest: assign-leader-without-userid — chef sans userId : ni notification, ni e-mail
+    ok 21 - assign-leader-without-userid — chef sans userId : ni notification, ni e-mail
+      ---
+      duration_ms: 0.342
+      type: 'test'
+      ...
+    # Subtest: assign-no-leader — équipe sans chef : ni notification, ni e-mail
+    ok 22 - assign-no-leader — équipe sans chef : ni notification, ni e-mail
+      ---
+      duration_ms: 0.356834
+      type: 'test'
+      ...
+    # Subtest: assign-leader-user-without-email — utilisateur du chef sans e-mail : notification, pas d'e-mail ni de lecture d'entreprise
+    ok 23 - assign-leader-user-without-email — utilisateur du chef sans e-mail : notification, pas d'e-mail ni de lecture d'entreprise
+      ---
+      duration_ms: 0.451333
+      type: 'test'
+      ...
+    # Subtest: assign-leader-user-without-name — utilisateur du chef sans nom : teamLeaderName = e-mail
+    ok 24 - assign-leader-user-without-name — utilisateur du chef sans nom : teamLeaderName = e-mail
+      ---
+      duration_ms: 0.515583
+      type: 'test'
+      ...
+    # Subtest: assign-leader-user-not-found — utilisateur du chef introuvable : pas d'e-mail
+    ok 25 - assign-leader-user-not-found — utilisateur du chef introuvable : pas d'e-mail
+      ---
+      duration_ms: 0.462083
+      type: 'test'
+      ...
+    # Subtest: assign-company-not-found — entreprise introuvable : companyName vide dans l'e-mail
+    ok 26 - assign-company-not-found — entreprise introuvable : companyName vide dans l'e-mail
+      ---
+      duration_ms: 0.412167
+      type: 'test'
+      ...
+    # Subtest: assign-email-rejects — promesse d'e-mail rejetée : absorbée par .catch, succès inchangé
+    ok 27 - assign-email-rejects — promesse d'e-mail rejetée : absorbée par .catch, succès inchangé
+      ---
+      duration_ms: 0.479541
+      type: 'test'
+      ...
+    # Subtest: assign-tx-error-assignment-create — erreur injectée dans assignment.create (2e jour) ⇒ rollback, message générique, console.error
+    ok 28 - assign-tx-error-assignment-create — erreur injectée dans assignment.create (2e jour) ⇒ rollback, message générique, console.error
+      ---
+      duration_ms: 0.444584
+      type: 'test'
+      ...
+    # Subtest: assign-tx-error-notification-create — erreur injectée dans notification.create ⇒ rollback après les créations
+    ok 29 - assign-tx-error-notification-create — erreur injectée dans notification.create ⇒ rollback après les créations
+      ---
+      duration_ms: 0.487875
+      type: 'test'
+      ...
+    # Subtest: assign-tx-error-non-error-value — valeur non-Error levée dans la transaction (String(err))
+    ok 30 - assign-tx-error-non-error-value — valeur non-Error levée dans la transaction (String(err))
+      ---
+      duration_ms: 0.361959
+      type: 'test'
+      ...
+    # Subtest: assign-auth-session-absent — session absente ⇒ exception, trace Prisma vide
+    ok 31 - assign-auth-session-absent — session absente ⇒ exception, trace Prisma vide
+      ---
+      duration_ms: 0.201542
+      type: 'test'
+      ...
+    # Subtest: assign-auth-role-employee — rôle EMPLOYEE ⇒ exception, trace Prisma vide
+    ok 32 - assign-auth-role-employee — rôle EMPLOYEE ⇒ exception, trace Prisma vide
+      ---
+      duration_ms: 0.180416
+      type: 'test'
+      ...
+    # Subtest: assign-auth-no-company — companyId absent ⇒ exception, trace Prisma vide
+    ok 33 - assign-auth-no-company — companyId absent ⇒ exception, trace Prisma vide
+      ---
+      duration_ms: 0.171541
+      type: 'test'
+      ...
+    # Subtest: T-CORE-3 (4bis) : session absente / EMPLOYEE / sans companyId ⇒ même exception, aucun appel Prisma, aucun effet (lu dans la référence)
+    ok 34 - T-CORE-3 (4bis) : session absente / EMPLOYEE / sans companyId ⇒ même exception, aucun appel Prisma, aucun effet (lu dans la référence)
+      ---
+      duration_ms: 0.200041
+      type: 'test'
+      ...
+    # Subtest: T-CORE-3 (frontière transactionnelle) : créations, mise à jour, notification, lectures du chef/entreprise et e-mail DANS la transaction ; revalidations après commit (lu dans la référence)
+    ok 35 - T-CORE-3 (frontière transactionnelle) : créations, mise à jour, notification, lectures du chef/entreprise et e-mail DANS la transaction ; revalidations après commit (lu dans la référence)
+      ---
+      duration_ms: 0.107375
+      type: 'test'
+      ...
+    # Subtest: T-CORE-3 (échec de transaction) : rollback simulé ⇒ console.error [affecterEquipe], message générique, aucune revalidation ni e-mail (lu dans la référence)
+    ok 36 - T-CORE-3 (échec de transaction) : rollback simulé ⇒ console.error [affecterEquipe], message générique, aucune revalidation ni e-mail (lu dans la référence)
+      ---
+      duration_ms: 0.186625
+      type: 'test'
+      ...
+    1..36
+ok 1 - T-CORE-2/T-CORE-3 — parité affecterEquipe (adaptateur + cœur) vs référence BASE_SHA [TZ=Europe/Paris]
+  ---
+  duration_ms: 55.087042
+  type: 'suite'
+  ...
+# Subtest: T-CORE-6 — where du conflit équipe tel qu'observé sur BASE_SHA (filtre d'entreprise : 1W-1b, T-HARD-1)
+    # Subtest: référence BASE_SHA : { teamId, date: { in } } — aucune clé team.companyId
+    ok 1 - référence BASE_SHA : { teamId, date: { in } } — aucune clé team.companyId
+      ---
+      duration_ms: 0.089125
+      type: 'test'
+      ...
+    # Subtest: cœur refactoré : même where, mêmes clés, même absence de filtre (parité, pas correction)
+    ok 2 - cœur refactoré : même where, mêmes clés, même absence de filtre (parité, pas correction)
+      ---
+      duration_ms: 0.315417
+      type: 'test'
+      ...
+    1..2
+ok 2 - T-CORE-6 — where du conflit équipe tel qu'observé sur BASE_SHA (filtre d'entreprise : 1W-1b, T-HARD-1)
+  ---
+  duration_ms: 0.450459
+  type: 'suite'
+  ...
+# Subtest: T-CORE-2 — assignTeamCore (cœur seul, dépendances en mémoire)
+    # Subtest: champs manquants ⇒ VALIDATION « Informations manquantes. », aucun port appelé
+    ok 1 - champs manquants ⇒ VALIDATION « Informations manquantes. », aucun port appelé
+      ---
+      duration_ms: 0.188
+      type: 'test'
+      ...
+    # Subtest: dateTo < dateFrom ⇒ VALIDATION « La date de fin doit être après la date de début. »
+    ok 2 - dateTo < dateFrom ⇒ VALIDATION « La date de fin doit être après la date de début. »
+      ---
+      duration_ms: 0.059708
+      type: 'test'
+      ...
+    # Subtest: chantier introuvable ⇒ WORKSITE_NOT_FOUND ; équipe introuvable ⇒ TEAM_NOT_FOUND (messages identiques)
+    ok 3 - chantier introuvable ⇒ WORKSITE_NOT_FOUND ; équipe introuvable ⇒ TEAM_NOT_FOUND (messages identiques)
+      ---
+      duration_ms: 0.070417
+      type: 'test'
+      ...
+    # Subtest: conflit équipe ⇒ TEAM_CONFLICT, message avec/sans adresse, aucune transaction
+    ok 4 - conflit équipe ⇒ TEAM_CONFLICT, message avec/sans adresse, aucune transaction
+      ---
+      duration_ms: 0.279166
+      type: 'test'
+      ...
+    # Subtest: conflits employés ⇒ EMPLOYEE_CONFLICT, « Désaffectez-le » (1) / « Désaffectez-les » (N)
+    ok 5 - conflits employés ⇒ EMPLOYEE_CONFLICT, « Désaffectez-le » (1) / « Désaffectez-les » (N)
+      ---
+      duration_ms: 0.195083
+      type: 'test'
+      ...
+    # Subtest: équipe sans membres ⇒ pas de requête de conflit employés ni de createMany
+    ok 6 - équipe sans membres ⇒ pas de requête de conflit employés ni de createMany
+      ---
+      duration_ms: 0.173791
+      type: 'test'
+      ...
+    # Subtest: chemin nominal ⇒ ok, data { assignmentIds (N), worksiteStatus IN_PROGRESS, leaderUserId } ; e-mail au même point (dans la transaction)
+    ok 7 - chemin nominal ⇒ ok, data { assignmentIds (N), worksiteStatus IN_PROGRESS, leaderUserId } ; e-mail au même point (dans la transaction)
+      ---
+      duration_ms: 0.24675
+      type: 'test'
+      ...
+    # Subtest: chantier déjà IN_PROGRESS ⇒ pas de worksite.update, worksiteStatus inchangé ; chef sans userId ⇒ ni notification ni e-mail, leaderUserId null
+    ok 8 - chantier déjà IN_PROGRESS ⇒ pas de worksite.update, worksiteStatus inchangé ; chef sans userId ⇒ ni notification ni e-mail, leaderUserId null
+      ---
+      duration_ms: 0.1705
+      type: 'test'
+      ...
+    # Subtest: erreur dans la transaction ⇒ rollback, TRANSACTION_FAILED { message générique, cause } ; aucun e-mail
+    ok 9 - erreur dans la transaction ⇒ rollback, TRANSACTION_FAILED { message générique, cause } ; aucun e-mail
+      ---
+      duration_ms: 0.074625
+      type: 'test'
+      ...
+    # Subtest: erreurs hors transaction (findWorksite) : propagées, non capturées (comme à BASE_SHA)
+    ok 10 - erreurs hors transaction (findWorksite) : propagées, non capturées (comme à BASE_SHA)
+      ---
+      duration_ms: 0.187542
+      type: 'test'
+      ...
+    1..10
+ok 3 - T-CORE-2 — assignTeamCore (cœur seul, dépendances en mémoire)
+  ---
+  duration_ms: 1.740792
+  type: 'suite'
+  ...
+# Subtest: T-CORE-1/T-CORE-3 — parité createChantier (adaptateur + cœur) vs référence BASE_SHA [TZ=Europe/Paris]
+    # Subtest: create-valid-geocode-ok — entrée valide avec adresse, géocodage réussi
+    ok 1 - create-valid-geocode-ok — entrée valide avec adresse, géocodage réussi
+      ---
+      duration_ms: 12.092834
+      type: 'test'
+      ...
+    # Subtest: create-valid-geocode-null — entrée valide avec adresse, géocodage sans résultat (null)
+    ok 2 - create-valid-geocode-null — entrée valide avec adresse, géocodage sans résultat (null)
+      ---
+      duration_ms: 1.293917
+      type: 'test'
+      ...
+    # Subtest: create-valid-no-address — entrée valide sans adresse ni description (chaînes vides) : aucun géocodage
+    ok 3 - create-valid-no-address — entrée valide sans adresse ni description (chaînes vides) : aucun géocodage
+      ---
+      duration_ms: 0.517333
+      type: 'test'
+      ...
+    # Subtest: create-valid-dailyhours-fraction — dailyHours fractionnaire accepté par z.coerce.number()
+    ok 4 - create-valid-dailyhours-fraction — dailyHours fractionnaire accepté par z.coerce.number()
+      ---
+      duration_ms: 0.475209
+      type: 'test'
+      ...
+    # Subtest: create-valid-same-day — endDate = startDate (refine >= accepte)
+    ok 5 - create-valid-same-day — endDate = startDate (refine >= accepte)
+      ---
+      duration_ms: 0.368459
+      type: 'test'
+      ...
+    # Subtest: create-geocode-throws — exception du géocodage : traitement observé à BASE_SHA (aucune capture dans l'action)
+    ok 6 - create-geocode-throws — exception du géocodage : traitement observé à BASE_SHA (aucune capture dans l'action)
+      ---
+      duration_ms: 0.902583
+      type: 'test'
+      ...
+    # Subtest: create-worksite-create-throws — erreur de worksite.create : traitement observé à BASE_SHA
+    ok 7 - create-worksite-create-throws — erreur de worksite.create : traitement observé à BASE_SHA
+      ---
+      duration_ms: 0.426042
+      type: 'test'
+      ...
+    # Subtest: create-client-not-found — client introuvable dans l'entreprise
+    ok 8 - create-client-not-found — client introuvable dans l'entreprise
+      ---
+      duration_ms: 0.339084
+      type: 'test'
+      ...
+    # Subtest: create-zod-name-empty — Zod : name vide
+    ok 9 - create-zod-name-empty — Zod : name vide
+      ---
+      duration_ms: 0.790542
+      type: 'test'
+      ...
+    # Subtest: create-zod-name-too-long — Zod : name > 100 caractères
+    ok 10 - create-zod-name-too-long — Zod : name > 100 caractères
+      ---
+      duration_ms: 0.8425
+      type: 'test'
+      ...
+    # Subtest: create-zod-description-absent — Zod : champ description absent du FormData (null, pas undefined)
+    ok 11 - create-zod-description-absent — Zod : champ description absent du FormData (null, pas undefined)
+      ---
+      duration_ms: 0.558917
+      type: 'test'
+      ...
+    # Subtest: create-zod-client-empty — Zod : clientId vide
+    ok 12 - create-zod-client-empty — Zod : clientId vide
+      ---
+      duration_ms: 0.342875
+      type: 'test'
+      ...
+    # Subtest: create-zod-startdate-empty — Zod : startDate vide
+    ok 13 - create-zod-startdate-empty — Zod : startDate vide
+      ---
+      duration_ms: 0.37275
+      type: 'test'
+      ...
+    # Subtest: create-zod-enddate-empty — Zod : endDate vide
+    ok 14 - create-zod-enddate-empty — Zod : endDate vide
+      ---
+      duration_ms: 0.281666
+      type: 'test'
+      ...
+    # Subtest: create-zod-enddate-before-startdate — Zod : endDate < startDate (refine)
+    ok 15 - create-zod-enddate-before-startdate — Zod : endDate < startDate (refine)
+      ---
+      duration_ms: 0.218833
+      type: 'test'
+      ...
+    # Subtest: create-zod-dailyhours-below-min — Zod : dailyHours 0 (< 1)
+    ok 16 - create-zod-dailyhours-below-min — Zod : dailyHours 0 (< 1)
+      ---
+      duration_ms: 0.280292
+      type: 'test'
+      ...
+    # Subtest: create-zod-dailyhours-above-max — Zod : dailyHours 25 (> 24)
+    ok 17 - create-zod-dailyhours-above-max — Zod : dailyHours 25 (> 24)
+      ---
+      duration_ms: 1.381792
+      type: 'test'
+      ...
+    # Subtest: create-zod-dailyhours-empty — Zod : dailyHours vide (coerce ⇒ 0)
+    ok 18 - create-zod-dailyhours-empty — Zod : dailyHours vide (coerce ⇒ 0)
+      ---
+      duration_ms: 0.261833
+      type: 'test'
+      ...
+    # Subtest: create-zod-dailyhours-nan — Zod : dailyHours non numérique (coerce ⇒ NaN)
+    ok 19 - create-zod-dailyhours-nan — Zod : dailyHours non numérique (coerce ⇒ NaN)
+      ---
+      duration_ms: 0.207334
+      type: 'test'
+      ...
+    # Subtest: create-zod-startdate-invalid — Zod : startDate non parsable (refine compare Invalid Date)
+    ok 20 - create-zod-startdate-invalid — Zod : startDate non parsable (refine compare Invalid Date)
+      ---
+      duration_ms: 0.282166
+      type: 'test'
+      ...
+    # Subtest: create-auth-session-absent — session absente ⇒ exception, trace Prisma vide
+    ok 21 - create-auth-session-absent — session absente ⇒ exception, trace Prisma vide
+      ---
+      duration_ms: 0.190375
+      type: 'test'
+      ...
+    # Subtest: create-auth-role-employee — rôle EMPLOYEE ⇒ exception, trace Prisma vide
+    ok 22 - create-auth-role-employee — rôle EMPLOYEE ⇒ exception, trace Prisma vide
+      ---
+      duration_ms: 0.320834
+      type: 'test'
+      ...
+    # Subtest: create-auth-no-company — companyId absent ⇒ exception, trace Prisma vide
+    ok 23 - create-auth-no-company — companyId absent ⇒ exception, trace Prisma vide
+      ---
+      duration_ms: 0.237208
+      type: 'test'
+      ...
+    # Subtest: T-CORE-3 (4bis) : session absente / EMPLOYEE / sans companyId ⇒ même exception, aucun appel Prisma, aucun effet (lu dans la référence)
+    ok 24 - T-CORE-3 (4bis) : session absente / EMPLOYEE / sans companyId ⇒ même exception, aucun appel Prisma, aucun effet (lu dans la référence)
+      ---
+      duration_ms: 0.151084
+      type: 'test'
+      ...
+    # Subtest: T-CORE-3 : exception du géocodage et erreur de worksite.create propagées, aucune revalidation (lu dans la référence)
+    ok 25 - T-CORE-3 : exception du géocodage et erreur de worksite.create propagées, aucune revalidation (lu dans la référence)
+      ---
+      duration_ms: 0.1065
+      type: 'test'
+      ...
+    1..25
+ok 4 - T-CORE-1/T-CORE-3 — parité createChantier (adaptateur + cœur) vs référence BASE_SHA [TZ=Europe/Paris]
+  ---
+  duration_ms: 39.483875
+  type: 'suite'
+  ...
+# Subtest: T-CORE-1 — createWorksiteCore (cœur seul, dépendances en mémoire)
+    # Subtest: Zod en échec ⇒ VALIDATION avec le message Zod ; aucun port appelé
+    ok 1 - Zod en échec ⇒ VALIDATION avec le message Zod ; aucun port appelé
+      ---
+      duration_ms: 0.115458
+      type: 'test'
+      ...
+    # Subtest: endDate < startDate ⇒ VALIDATION « La date de fin doit être après la date de début »
+    ok 2 - endDate < startDate ⇒ VALIDATION « La date de fin doit être après la date de début »
+      ---
+      duration_ms: 0.049042
+      type: 'test'
+      ...
+    # Subtest: client introuvable ⇒ CLIENT_NOT_FOUND « Client introuvable. » ; ni géocodage ni création
+    ok 3 - client introuvable ⇒ CLIENT_NOT_FOUND « Client introuvable. » ; ni géocodage ni création
+      ---
+      duration_ms: 0.058959
+      type: 'test'
+      ...
+    # Subtest: entrée valide avec adresse ⇒ géocodage puis création avec les mêmes champs ; data.worksiteId
+    ok 4 - entrée valide avec adresse ⇒ géocodage puis création avec les mêmes champs ; data.worksiteId
+      ---
+      duration_ms: 0.08175
+      type: 'test'
+      ...
+    # Subtest: sans adresse ⇒ aucun géocodage, latitude/longitude null ; géocodage null ⇒ idem
+    ok 5 - sans adresse ⇒ aucun géocodage, latitude/longitude null ; géocodage null ⇒ idem
+      ---
+      duration_ms: 0.060959
+      type: 'test'
+      ...
+    # Subtest: exception du géocodage et erreur de création : propagées (aucune nouvelle capture)
+    ok 6 - exception du géocodage et erreur de création : propagées (aucune nouvelle capture)
+      ---
+      duration_ms: 0.204583
+      type: 'test'
+      ...
+    # Subtest: WriteActor : companyId ⇒ where.companyId et data.companyId ; actorUserId ⇒ data.createdById
+    ok 7 - WriteActor : companyId ⇒ where.companyId et data.companyId ; actorUserId ⇒ data.createdById
+      ---
+      duration_ms: 0.04075
+      type: 'test'
+      ...
+    1..7
+ok 5 - T-CORE-1 — createWorksiteCore (cœur seul, dépendances en mémoire)
+  ---
+  duration_ms: 0.683292
+  type: 'suite'
+  ...
+1..5
+# tests 80
+# suites 5
+# pass 80
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 170.831417

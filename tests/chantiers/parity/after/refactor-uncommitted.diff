@@ -1,0 +1,1185 @@
+diff --git a/package.json b/package.json
+index dd5d56a..284ddb4 100644
+--- a/package.json
++++ b/package.json
+@@ -17,7 +17,7 @@
+     "db:reset": "prisma migrate reset --force",
+     "test:acquisition": "node --import tsx --test tests/acquisition/eligibility.test.ts tests/acquisition/partner-eligibility.resolver.test.ts tests/acquisition/acquisition-eligibility-parity.test.ts tests/acquisition/register-incoming-eligibility.runtime.test.ts tests/acquisition/partner-registry-readiness.test.ts tests/acquisition/partner-admin.service.test.ts tests/acquisition/partner-registry-bootstrap.test.ts tests/acquisition/partner-registry-bootstrap.integration.test.ts tests/acquisition/partner-registry.repository.test.ts tests/acquisition/acquisition-flag-matrix.test.ts tests/acquisition/service.integration.test.ts tests/acquisition/multi-gmail-connections.test.ts tests/acquisition/multi-gmail-identity-lock.pg.test.ts tests/acquisition/gmail-message.mapper.test.ts tests/acquisition/acquisition-gmail-sync.service.test.ts tests/acquisition/acquisition-scan-cursor.repository.integration.test.ts tests/acquisition/gmail.errors.test.ts tests/acquisition/gmail-mime-parser.test.ts tests/acquisition/gmail-mail-provider.adapter.test.ts tests/acquisition/gmail-message-sanitizer.test.ts tests/acquisition/acquisition-gmail-sync.driver.test.ts tests/acquisition/acquisition-gmail-sync.route.test.ts tests/acquisition/attachment-policy.test.ts tests/acquisition/attachment-download.service.test.ts tests/acquisition/attachment-cloudinary-folder-prefix.test.ts tests/acquisition/attachment-storage.test.ts tests/acquisition/attachment-download.integration.test.ts tests/acquisition/attachment-access.service.test.ts tests/acquisition/attachment-access.route.test.ts tests/acquisition/attachment-access.integration.test.ts tests/acquisition/attachment-download-orchestrator.test.ts tests/acquisition/attachment-download-cron.route.test.ts tests/acquisition/attachment-download-orchestrator.integration.test.ts tests/acquisition/attachment-retry.policy.test.ts tests/acquisition/attachment-recovery-orchestrator.test.ts tests/acquisition/attachment-recovery-cron.route.test.ts tests/acquisition/attachment-recovery.integration.test.ts tests/acquisition/message-content-sanitizer.test.ts tests/acquisition/message-content-mime.test.ts tests/acquisition/message-content.service.test.ts tests/acquisition/message-content.route.test.ts tests/acquisition/message-content.repository.test.ts tests/acquisition/message-content.integration.test.ts tests/acquisition/extraction.schema.test.ts tests/acquisition/deterministic-extraction.provider.test.ts tests/acquisition/extraction.service.test.ts tests/acquisition/extraction.integration.test.ts tests/acquisition/anthropic-extraction.config.test.ts tests/acquisition/anthropic-extraction.prompt.test.ts tests/acquisition/anthropic-extraction.adapter.test.ts tests/acquisition/extraction-provider.factory.test.ts tests/acquisition/consultation-ui.test.ts tests/acquisition/import-draft-review.schema.test.ts tests/acquisition/import-draft-review.service.test.ts tests/acquisition/acquisition-review.actions.test.ts tests/acquisition/import-draft-review.integration.test.ts tests/acquisition/conversion.schema.test.ts tests/acquisition/conversion.service.test.ts tests/acquisition/acquisition-conversion.actions.test.ts tests/acquisition/conversion.integration.test.ts tests/acquisition/document-bridge-delete.test.ts tests/acquisition/message-content-cron.orchestrator.test.ts tests/acquisition/message-content-cron.route.test.ts tests/acquisition/message-content-cron.integration.test.ts tests/acquisition/message-content-fetch-state.repository.test.ts tests/acquisition/extraction-cron.orchestrator.test.ts tests/acquisition/extraction-cron.route.test.ts tests/acquisition/extraction-cron.integration.test.ts tests/acquisition/extraction-cron.selection.test.ts",
+     "test:acquisition:conversion:pg": "node --import tsx --test tests/acquisition/conversion.integration.test.ts",
+-    "test:chantiers": "node --import tsx --test tests/chantiers/check-team-conflict-isolation.test.ts tests/chantiers/assignment-ui-policy.test.ts tests/chantiers/chantiers-view-filters.test.ts tests/chantiers/chantiers-results.render.test.tsx tests/chantiers/chantiers-map-empty-state.test.tsx && node --import tsx --experimental-test-module-mocks --test tests/chantiers/parity/scope-guard.test.ts",
++    "test:chantiers": "node --import tsx --test tests/chantiers/check-team-conflict-isolation.test.ts tests/chantiers/assignment-ui-policy.test.ts tests/chantiers/chantiers-view-filters.test.ts tests/chantiers/chantiers-results.render.test.tsx tests/chantiers/chantiers-map-empty-state.test.tsx && TZ=UTC node --import tsx --experimental-test-module-mocks --test tests/chantiers/parity/scope-guard.test.ts tests/chantiers/chantier-create.core.test.ts tests/chantiers/assignment-team.core.test.ts && TZ=Europe/Paris node --import tsx --experimental-test-module-mocks --test tests/chantiers/chantier-create.core.test.ts tests/chantiers/assignment-team.core.test.ts",
+     "test:employes": "DATABASE_URL=${DATABASE_URL:-postgresql://test:test@localhost:5432/test} RESEND_API_KEY=re_test_dummy node --import tsx --test tests/employes/employes-view.test.ts tests/employes/employes-render.test.tsx tests/employes/employee-delete-v1b-db.test.ts tests/employes/invitation-reactivation.test.ts",
+     "test:vehicules": "node --import tsx --test tests/vehicules/trucks-api.test.ts tests/vehicules/v1a-schema-migration.test.ts tests/vehicules/v1b-db-schema-migration.test.ts tests/vehicules/v1b-db-errors-script.test.ts tests/vehicules/v1c-schema-migration.test.ts tests/vehicules/vehicules-view.test.ts tests/vehicules/vehicules-render.test.tsx",
+     "test:equipes": "DATABASE_URL=${DATABASE_URL:-postgresql://test:test@localhost:5432/test} RESEND_API_KEY=re_test_dummy node --import tsx --test tests/equipes/equipes-view.test.ts tests/equipes/equipes-render.test.tsx tests/equipes/equipes-panel.test.tsx",
+diff --git a/src/lib/actions/assignment-team.core.ts b/src/lib/actions/assignment-team.core.ts
+new file mode 100644
+index 0000000..222ee82
+--- /dev/null
++++ b/src/lib/actions/assignment-team.core.ts
+@@ -0,0 +1,268 @@
++/**
++ * LOT-1W-1a — Cœur d'`affecterEquipe` (hors "use server"), extrait à parité stricte de
++ * `chantier.actions.ts` l.215–361 à BASE_SHA a84c73f : mêmes contrôles, même requête de conflit
++ * équipe (`{ teamId, date: { in } }`, SANS filtre d'entreprise — parité, durcissement en 1W-1b),
++ * même requête de conflit employés, même transaction (N `assignment.create`,
++ * `employeeAssignment.createMany`, passage IN_PROGRESS, `notification.create`, lecture du chef et
++ * de l'entreprise, e-mail fire-and-forget déclenché au même point, dans la transaction), mêmes
++ * messages d'erreur au caractère près. Arithmétique de dates inchangée (`setHours(0,0,0,0)` dépend
++ * du fuseau du processus — 1W-1b).
++ *
++ * Reste dans l'adaptateur : `requireAdmin`, la lecture du `FormData`, `revalidatePath`, le
++ * `console.error` préfixé `[affecterEquipe]` et la fonction d'e-mail réelle (injectée ici en port).
++ */
++
++import type { WorksiteStatus } from "@prisma/client"
++import type { CoreResult, WriteActor } from "@/lib/actions/write-actor"
++
++/** Valeurs brutes du formulaire (`FormData.get`, typées `string` par l'adaptateur — `null` à l'exécution si absentes). */
++export type AssignTeamInput = Readonly<{
++  worksiteId: string
++  teamId: string
++  dateFrom: string
++  dateTo: string
++}>
++
++export type AssignTeamData = {
++  assignmentIds: string[]
++  worksiteStatus: WorksiteStatus
++  leaderUserId: string | null
++}
++
++// ---- Arguments Prisma, à l'identique de BASE_SHA (clés et ordre) --------------------------------
++
++export type FindWorksiteArgs = { where: { id: string; companyId: string } }
++export type FindTeamArgs = {
++  where: { id: string; companyId: string }
++  include: {
++    members: { where: { leftAt: null }; select: { employeeId: true } }
++    leader: { select: { userId: true } }
++  }
++}
++export type FindTeamConflictArgs = {
++  where: { teamId: string; date: { in: Date[] } }
++  include: { worksite: { select: { name: true; address: true } } }
++  orderBy: { date: "asc" }
++}
++export type FindEmployeeConflictsArgs = {
++  where: { employeeId: { in: string[] }; date: { in: Date[] } }
++  include: {
++    employee: { select: { firstName: true; lastName: true } }
++    assignment: { select: { worksite: { select: { name: true } }; team: { select: { name: true } } } }
++  }
++  orderBy: [{ employeeId: "asc" }, { date: "asc" }]
++}
++
++export type AssignmentCreatedEmailArgs = {
++  to: string
++  teamLeaderName: string
++  worksiteName: string
++  dateLabel: string
++  companyName: string
++}
++
++/** Client transactionnel : sous-ensemble de `Prisma.TransactionClient` utilisé par le cœur. */
++export type AssignTeamTx = {
++  assignment: {
++    create: (args: { data: { worksiteId: string; teamId: string; date: Date; status: "PENDING" } }) => Promise<{ id: string }>
++  }
++  employeeAssignment: {
++    createMany: (args: { data: { assignmentId: string; employeeId: string; date: Date }[] }) => Promise<unknown>
++  }
++  worksite: {
++    update: (args: { where: { id: string }; data: { status: "IN_PROGRESS" } }) => Promise<unknown>
++  }
++  notification: {
++    create: (args: {
++      data: { userId: string; companyId: string; type: "ASSIGNMENT_CREATED"; title: string; message: string; link: string }
++    }) => Promise<unknown>
++  }
++  user: {
++    findUnique: (args: { where: { id: string }; select: { email: true; name: true } }) => Promise<{ email: string | null; name: string | null } | null>
++  }
++  company: {
++    findUnique: (args: { where: { id: string }; select: { name: true } }) => Promise<{ name: string } | null>
++  }
++}
++
++export type AssignTeamDeps = {
++  findWorksite: (args: FindWorksiteArgs) => Promise<{ id: string; name: string; status: WorksiteStatus } | null>
++  findTeam: (args: FindTeamArgs) => Promise<{ members: { employeeId: string }[]; leader: { userId: string | null } | null } | null>
++  findTeamConflict: (args: FindTeamConflictArgs) => Promise<{ date: Date; worksite: { name: string; address: string | null } } | null>
++  findEmployeeConflicts: (args: FindEmployeeConflictsArgs) => Promise<
++    { date: Date; employee: { firstName: string; lastName: string }; assignment: { worksite: { name: string }; team: { name: string } } }[]
++  >
++  /** `prisma.$transaction(fn)` : rejette si `fn` lève (rollback). */
++  transaction: <T>(fn: (tx: AssignTeamTx) => Promise<T>) => Promise<T>
++  /** `sendAssignmentCreatedEmail` réel, injecté par l'adaptateur ; appelé en fire-and-forget avec `.catch(() => {})`. */
++  sendAssignmentCreatedEmail: (args: AssignmentCreatedEmailArgs) => Promise<unknown>
++}
++
++// ---- Cœur ----------------------------------------------------------------------------------------
++
++export async function assignTeamCore(
++  input: AssignTeamInput,
++  actor: WriteActor,
++  deps: AssignTeamDeps
++): Promise<CoreResult<AssignTeamData>> {
++  const worksiteId  = input.worksiteId
++  const teamId      = input.teamId
++  const dateFromStr = input.dateFrom
++  const dateToStr   = input.dateTo
++
++  if (!worksiteId || !teamId || !dateFromStr) {
++    return { ok: false, code: "VALIDATION", details: { message: "Informations manquantes." } }
++  }
++
++  const dateFrom = new Date(dateFromStr); dateFrom.setHours(0, 0, 0, 0)
++  const dateTo   = dateToStr ? new Date(dateToStr) : new Date(dateFrom)
++  dateTo.setHours(0, 0, 0, 0)
++
++  if (dateTo < dateFrom) return { ok: false, code: "VALIDATION", details: { message: "La date de fin doit être après la date de début." } }
++
++  // Construire la liste des jours de la plage
++  const dates: Date[] = []
++  const cursor = new Date(dateFrom)
++  while (cursor <= dateTo) {
++    dates.push(new Date(cursor))
++    cursor.setDate(cursor.getDate() + 1)
++  }
++
++  // Vérifier que le chantier appartient à l'entreprise
++  const worksite = await deps.findWorksite({
++    where: { id: worksiteId, companyId: actor.companyId },
++  })
++  if (!worksite) return { ok: false, code: "WORKSITE_NOT_FOUND", details: { message: "Chantier introuvable." } }
++
++  // Vérifier que l'équipe appartient à l'entreprise
++  const team = await deps.findTeam({
++    where: { id: teamId, companyId: actor.companyId },
++    include: {
++      members: { where: { leftAt: null }, select: { employeeId: true } },
++      leader:  { select: { userId: true } },
++    },
++  })
++  if (!team) return { ok: false, code: "TEAM_NOT_FOUND", details: { message: "Équipe introuvable." } }
++
++  const memberIds = team.members.map((m) => m.employeeId)
++
++  // Vérifier les conflits sur toute la plage
++  const conflitEquipe = await deps.findTeamConflict({
++    where: { teamId, date: { in: dates } },
++    include: { worksite: { select: { name: true, address: true } } },
++    orderBy: { date: "asc" },
++  })
++  if (conflitEquipe) {
++    const d = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(conflitEquipe.date)
++    const lieu = conflitEquipe.worksite.address ? ` (${conflitEquipe.worksite.address})` : ""
++    return {
++      ok: false,
++      code: "TEAM_CONFLICT",
++      details: {
++        message: `Cette équipe est déjà affectée le ${d} au chantier « ${conflitEquipe.worksite.name} »${lieu}. Libérez-la de ce chantier avant de la réaffecter.`,
++      },
++    }
++  }
++
++  if (memberIds.length > 0) {
++    const conflitsEmployes = await deps.findEmployeeConflicts({
++      where: { employeeId: { in: memberIds }, date: { in: dates } },
++      include: {
++        employee:   { select: { firstName: true, lastName: true } },
++        assignment: { select: { worksite: { select: { name: true } }, team: { select: { name: true } } } },
++      },
++      orderBy: [{ employeeId: "asc" }, { date: "asc" }],
++    })
++    if (conflitsEmployes.length > 0) {
++      const fmt = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" })
++      const lignes = conflitsEmployes.map((c) => {
++        const nom = `${c.employee.firstName} ${c.employee.lastName}`
++        return `${nom} est affecté le ${fmt.format(c.date)} au chantier « ${c.assignment.worksite.name} » avec l'équipe ${c.assignment.team.name}.`
++      })
++      return {
++        ok: false,
++        code: "EMPLOYEE_CONFLICT",
++        details: {
++          message: `${lignes.join("\n")}\nDésaffectez-${conflitsEmployes.length > 1 ? "les" : "le"} avant de réaffecter l'équipe.`,
++        },
++      }
++    }
++  }
++
++  // Créer une affectation par jour
++  const assignmentIds: string[] = []
++  try { await deps.transaction(async (tx) => {
++    for (const date of dates) {
++      const assignment = await tx.assignment.create({
++        data: { worksiteId, teamId, date, status: "PENDING" },
++      })
++      assignmentIds.push(assignment.id)
++      if (memberIds.length > 0) {
++        await tx.employeeAssignment.createMany({
++          data: memberIds.map((employeeId) => ({
++            assignmentId: assignment.id,
++            employeeId,
++            date,
++          })),
++        })
++      }
++    }
++
++    // Passer le chantier en IN_PROGRESS si encore PLANNED
++    if (worksite.status === "PLANNED") {
++      await tx.worksite.update({
++        where: { id: worksiteId },
++        data: { status: "IN_PROGRESS" },
++      })
++    }
++
++    // Notifier le chef d'équipe (une seule notification pour toute la plage)
++    if (team.leader?.userId) {
++      const fromLabel = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(dateFrom)
++      const toLabel   = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(dateTo)
++      const rangeLabel = dates.length === 1 ? fromLabel : `du ${fromLabel} au ${toLabel}`
++
++      await tx.notification.create({
++        data: {
++          userId:    team.leader.userId,
++          companyId: actor.companyId,
++          type:      "ASSIGNMENT_CREATED",
++          title:     `Nouvelle affectation — ${worksite.name}`,
++          message:   `Votre équipe est affectée ${rangeLabel}. Confirmez ou refusez.`,
++          link:      `/planning`,
++        },
++      })
++
++      const leaderUser = await tx.user.findUnique({
++        where:  { id: team.leader.userId },
++        select: { email: true, name: true },
++      })
++      if (leaderUser?.email) {
++        const company = await tx.company.findUnique({ where: { id: actor.companyId }, select: { name: true } })
++        deps.sendAssignmentCreatedEmail({
++          to:             leaderUser.email,
++          teamLeaderName: leaderUser.name ?? leaderUser.email,
++          worksiteName:   worksite.name,
++          dateLabel:      rangeLabel,
++          companyName:    company?.name ?? "",
++        }).catch(() => {})
++      }
++    }
++  }) } catch (err: unknown) {
++    const msg = err instanceof Error ? err.message : String(err)
++    return {
++      ok: false,
++      code: "TRANSACTION_FAILED",
++      details: { message: "Erreur lors de la création des affectations. Veuillez réessayer.", cause: msg },
++    }
++  }
++
++  return {
++    ok: true,
++    data: {
++      assignmentIds,
++      worksiteStatus: worksite.status === "PLANNED" ? "IN_PROGRESS" : worksite.status,
++      leaderUserId: team.leader?.userId ?? null,
++    },
++  }
++}
+diff --git a/src/lib/actions/chantier-create.core.ts b/src/lib/actions/chantier-create.core.ts
+new file mode 100644
+index 0000000..a94a038
+--- /dev/null
++++ b/src/lib/actions/chantier-create.core.ts
+@@ -0,0 +1,76 @@
++/**
++ * LOT-1W-1a — Cœur de `createChantier` (hors "use server"), extrait à parité stricte de
++ * `chantier.actions.ts` l.25–78 à BASE_SHA a84c73f. Aucune requête, aucun contrôle, aucun message
++ * ajouté ou modifié ; les durcissements relèvent de 1W-1b.
++ *
++ * Reste dans l'adaptateur : `requireAdmin`, la lecture du `FormData`, `revalidatePath`.
++ */
++
++import type { Prisma } from "@prisma/client"
++import { createChantierSchema } from "@/lib/validations/chantier"
++import type { CoreResult, WriteActor } from "@/lib/actions/write-actor"
++
++/** Valeurs brutes du formulaire (`FormData.get`, typées `string` par l'adaptateur) ; validées par Zod ici. */
++export type CreateWorksiteInput = Readonly<{
++  name: string
++  description: string
++  address: string
++  clientId: string
++  startDate: string
++  endDate: string
++  dailyHours: string
++}>
++
++export type CreateWorksiteDeps = {
++  /** `prisma.client.findFirst(args)` — mêmes arguments qu'à BASE_SHA. */
++  findClient: (args: { where: { id: string; companyId: string } }) => Promise<object | null>
++  /** `prisma.worksite.create(args)` — mêmes champs et valeurs qu'à BASE_SHA. */
++  createWorksite: (args: { data: Prisma.WorksiteUncheckedCreateInput }) => Promise<{ id: string }>
++  /** `defaultGeocodePort.geocodeAddress` — appelé uniquement si `address` est renseignée. */
++  geocode: (address: string) => Promise<{ latitude: number; longitude: number } | null>
++}
++
++export async function createWorksiteCore(
++  input: CreateWorksiteInput,
++  actor: WriteActor,
++  deps: CreateWorksiteDeps
++): Promise<CoreResult<{ worksiteId: string }>> {
++  const parsed = createChantierSchema.safeParse(input)
++  if (!parsed.success) return { ok: false, code: "VALIDATION", details: { message: parsed.error.errors[0].message } }
++
++  // Vérifier que le client appartient à cette entreprise
++  const client = await deps.findClient({
++    where: { id: parsed.data.clientId, companyId: actor.companyId },
++  })
++  if (!client) return { ok: false, code: "CLIENT_NOT_FOUND", details: { message: "Client introuvable." } }
++
++  // Géocodage de l'adresse via Nominatim (OpenStreetMap)
++  let latitude: number | null = null
++  let longitude: number | null = null
++  if (parsed.data.address) {
++    const geo = await deps.geocode(parsed.data.address)
++    if (geo) {
++      latitude = geo.latitude
++      longitude = geo.longitude
++    }
++  }
++
++  const created = await deps.createWorksite({
++    data: {
++      name:        parsed.data.name,
++      description: parsed.data.description || null,
++      address:     parsed.data.address || null,
++      clientId:    parsed.data.clientId,
++      companyId:   actor.companyId,
++      createdById: actor.actorUserId,
++      startDate:   new Date(parsed.data.startDate),
++      endDate:     new Date(parsed.data.endDate),
++      dailyHours:  parsed.data.dailyHours,
++      status:      "PLANNED",
++      latitude,
++      longitude,
++    },
++  })
++
++  return { ok: true, data: { worksiteId: created.id } }
++}
+diff --git a/src/lib/actions/chantier.actions.ts b/src/lib/actions/chantier.actions.ts
+index 3d6dacd..dfc8b2d 100644
+--- a/src/lib/actions/chantier.actions.ts
++++ b/src/lib/actions/chantier.actions.ts
+@@ -4,8 +4,10 @@ import { revalidatePath } from "next/cache"
+ import { prisma } from "@/lib/prisma"
+ import { auth } from "@/auth"
+ import { addEmployeeToBlockCore } from "@/lib/actions/chantier-block.core"
++import { createWorksiteCore } from "@/lib/actions/chantier-create.core"
++import { assignTeamCore } from "@/lib/actions/assignment-team.core"
++import type { CoreResult, WriteActor } from "@/lib/actions/write-actor"
+ import {
+-  createChantierSchema,
+   updateChantierSchema,
+   extendChantierSchema,
+   updateDateFieldToDb,
+@@ -20,6 +22,18 @@ async function requireAdmin() {
+   return session.user
+ }
+ 
++// LOT-1W-1a : acteur d'écriture UI (SPEC §5.1) ; `agent` non renseigné dans ce sous-lot.
++function writeActorOf(user: { id: string; companyId?: string | null }): WriteActor {
++  return { companyId: user.companyId!, actorUserId: user.id }
++}
++
++// LOT-1W-1a : message UI porté par `details.message` (byte-identique à BASE_SHA).
++function coreErrorMessage(result: Extract<CoreResult<unknown>, { ok: false }>): string {
++  const message = result.details?.message
++  if (typeof message !== "string") throw new Error(`[chantier.actions] message UI absent pour le code ${result.code}`)
++  return message
++}
++
+ // ─── Créer un chantier ───────────────────────────────────────────────────────
+ 
+ export async function createChantier(formData: FormData) {
+@@ -35,43 +49,17 @@ export async function createChantier(formData: FormData) {
+     dailyHours:  formData.get("dailyHours")  as string,
+   }
+ 
+-  const parsed = createChantierSchema.safeParse(raw)
+-  if (!parsed.success) return { error: parsed.error.errors[0].message }
+-
+-  // Vérifier que le client appartient à cette entreprise
+-  const client = await prisma.client.findFirst({
+-    where: { id: parsed.data.clientId, companyId: user.companyId! },
+-  })
+-  if (!client) return { error: "Client introuvable." }
+-
+-  // Géocodage de l'adresse via Nominatim (OpenStreetMap)
+-  let latitude: number | null = null
+-  let longitude: number | null = null
+-  if (parsed.data.address) {
+-    const { defaultGeocodePort } = await import("@/lib/geo/geocode.port")
+-    const geo = await defaultGeocodePort.geocodeAddress(parsed.data.address)
+-    if (geo) {
+-      latitude = geo.latitude
+-      longitude = geo.longitude
+-    }
+-  }
+-
+-  await prisma.worksite.create({
+-    data: {
+-      name:        parsed.data.name,
+-      description: parsed.data.description || null,
+-      address:     parsed.data.address || null,
+-      clientId:    parsed.data.clientId,
+-      companyId:   user.companyId!,
+-      createdById: user.id,
+-      startDate:   new Date(parsed.data.startDate),
+-      endDate:     new Date(parsed.data.endDate),
+-      dailyHours:  parsed.data.dailyHours,
+-      status:      "PLANNED",
+-      latitude,
+-      longitude,
++  // LOT-1W-1a : logique dans chantier-create.core.ts ; ports à l'identique de BASE_SHA.
++  const result = await createWorksiteCore(raw, writeActorOf(user), {
++    findClient: (args) => prisma.client.findFirst(args),
++    createWorksite: (args) => prisma.worksite.create(args),
++    geocode: async (address) => {
++      // Géocodage de l'adresse via Nominatim (OpenStreetMap)
++      const { defaultGeocodePort } = await import("@/lib/geo/geocode.port")
++      return defaultGeocodePort.geocodeAddress(address)
+     },
+   })
++  if (!result.ok) return { error: coreErrorMessage(result) }
+ 
+   revalidatePath("/chantiers")
+   return { success: true }
+@@ -220,144 +208,30 @@ export async function affecterEquipe(formData: FormData) {
+   const dateFromStr = formData.get("dateFrom")    as string
+   const dateToStr   = formData.get("dateTo")      as string
+ 
+-  if (!worksiteId || !teamId || !dateFromStr) {
+-    return { error: "Informations manquantes." }
+-  }
+-
+-  const dateFrom = new Date(dateFromStr); dateFrom.setHours(0, 0, 0, 0)
+-  const dateTo   = dateToStr ? new Date(dateToStr) : new Date(dateFrom)
+-  dateTo.setHours(0, 0, 0, 0)
+-
+-  if (dateTo < dateFrom) return { error: "La date de fin doit être après la date de début." }
+-
+-  // Construire la liste des jours de la plage
+-  const dates: Date[] = []
+-  const cursor = new Date(dateFrom)
+-  while (cursor <= dateTo) {
+-    dates.push(new Date(cursor))
+-    cursor.setDate(cursor.getDate() + 1)
+-  }
+-
+-  // Vérifier que le chantier appartient à l'entreprise
+-  const worksite = await prisma.worksite.findFirst({
+-    where: { id: worksiteId, companyId: user.companyId! },
+-  })
+-  if (!worksite) return { error: "Chantier introuvable." }
+-
+-  // Vérifier que l'équipe appartient à l'entreprise
+-  const team = await prisma.team.findFirst({
+-    where: { id: teamId, companyId: user.companyId! },
+-    include: {
+-      members: { where: { leftAt: null }, select: { employeeId: true } },
+-      leader:  { select: { userId: true } },
+-    },
+-  })
+-  if (!team) return { error: "Équipe introuvable." }
+-
+-  const memberIds = team.members.map((m) => m.employeeId)
+-
+-  // Vérifier les conflits sur toute la plage
+-  const conflitEquipe = await prisma.assignment.findFirst({
+-    where: { teamId, date: { in: dates } },
+-    include: { worksite: { select: { name: true, address: true } } },
+-    orderBy: { date: "asc" },
+-  })
+-  if (conflitEquipe) {
+-    const d = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(conflitEquipe.date)
+-    const lieu = conflitEquipe.worksite.address ? ` (${conflitEquipe.worksite.address})` : ""
+-    return {
+-      error: `Cette équipe est déjà affectée le ${d} au chantier « ${conflitEquipe.worksite.name} »${lieu}. Libérez-la de ce chantier avant de la réaffecter.`,
+-    }
+-  }
+-
+-  if (memberIds.length > 0) {
+-    const conflitsEmployes = await prisma.employeeAssignment.findMany({
+-      where: { employeeId: { in: memberIds }, date: { in: dates } },
+-      include: {
+-        employee:   { select: { firstName: true, lastName: true } },
+-        assignment: { select: { worksite: { select: { name: true } }, team: { select: { name: true } } } },
+-      },
+-      orderBy: [{ employeeId: "asc" }, { date: "asc" }],
+-    })
+-    if (conflitsEmployes.length > 0) {
+-      const fmt = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" })
+-      const lignes = conflitsEmployes.map((c) => {
+-        const nom = `${c.employee.firstName} ${c.employee.lastName}`
+-        return `${nom} est affecté le ${fmt.format(c.date)} au chantier « ${c.assignment.worksite.name} » avec l'équipe ${c.assignment.team.name}.`
+-      })
+-      return {
+-        error: `${lignes.join("\n")}\nDésaffectez-${conflitsEmployes.length > 1 ? "les" : "le"} avant de réaffecter l'équipe.`,
+-      }
+-    }
+-  }
+-
+-  // Créer une affectation par jour
+-  try { await prisma.$transaction(async (tx) => {
+-    for (const date of dates) {
+-      const assignment = await tx.assignment.create({
+-        data: { worksiteId, teamId, date, status: "PENDING" },
+-      })
+-      if (memberIds.length > 0) {
+-        await tx.employeeAssignment.createMany({
+-          data: memberIds.map((employeeId) => ({
+-            assignmentId: assignment.id,
+-            employeeId,
+-            date,
+-          })),
+-        })
+-      }
+-    }
+-
+-    // Passer le chantier en IN_PROGRESS si encore PLANNED
+-    if (worksite.status === "PLANNED") {
+-      await tx.worksite.update({
+-        where: { id: worksiteId },
+-        data: { status: "IN_PROGRESS" },
+-      })
++  // LOT-1W-1a : logique dans assignment-team.core.ts ; requêtes et transaction à l'identique de BASE_SHA.
++  const result = await assignTeamCore(
++    { worksiteId, teamId, dateFrom: dateFromStr, dateTo: dateToStr },
++    writeActorOf(user),
++    {
++      findWorksite: (args) => prisma.worksite.findFirst(args),
++      findTeam: (args) => prisma.team.findFirst(args),
++      findTeamConflict: (args) => prisma.assignment.findFirst(args),
++      findEmployeeConflicts: (args) => prisma.employeeAssignment.findMany(args),
++      transaction: (fn) => prisma.$transaction(fn),
++      sendAssignmentCreatedEmail,
+     }
+-
+-    // Notifier le chef d'équipe (une seule notification pour toute la plage)
+-    if (team.leader?.userId) {
+-      const fromLabel = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(dateFrom)
+-      const toLabel   = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long" }).format(dateTo)
+-      const rangeLabel = dates.length === 1 ? fromLabel : `du ${fromLabel} au ${toLabel}`
+-
+-      await tx.notification.create({
+-        data: {
+-          userId:    team.leader.userId,
+-          companyId: user.companyId!,
+-          type:      "ASSIGNMENT_CREATED",
+-          title:     `Nouvelle affectation — ${worksite.name}`,
+-          message:   `Votre équipe est affectée ${rangeLabel}. Confirmez ou refusez.`,
+-          link:      `/planning`,
+-        },
+-      })
+-
+-      const leaderUser = await tx.user.findUnique({
+-        where:  { id: team.leader.userId },
+-        select: { email: true, name: true },
+-      })
+-      if (leaderUser?.email) {
+-        const company = await tx.company.findUnique({ where: { id: user.companyId! }, select: { name: true } })
+-        sendAssignmentCreatedEmail({
+-          to:             leaderUser.email,
+-          teamLeaderName: leaderUser.name ?? leaderUser.email,
+-          worksiteName:   worksite.name,
+-          dateLabel:      rangeLabel,
+-          companyName:    company?.name ?? "",
+-        }).catch(() => {})
+-      }
++  )
++  if (!result.ok) {
++    if (result.code === "TRANSACTION_FAILED") {
++      console.error("[affecterEquipe] transaction error:", result.details?.cause)
+     }
+-  }) } catch (err: unknown) {
+-    const msg = err instanceof Error ? err.message : String(err)
+-    console.error("[affecterEquipe] transaction error:", msg)
+-    return { error: "Erreur lors de la création des affectations. Veuillez réessayer." }
++    return { error: coreErrorMessage(result) }
+   }
+ 
+   revalidatePath("/chantiers")
+   revalidatePath(`/chantiers/${worksiteId}`)
+   revalidatePath("/planning")
+-  return { success: true, count: dates.length }
++  return { success: true, count: result.data.assignmentIds.length }
+ }
+ 
+ // ─── Décaler un chantier ────────────────────────────────────────────────────
+diff --git a/src/lib/actions/write-actor.ts b/src/lib/actions/write-actor.ts
+new file mode 100644
+index 0000000..812bc44
+--- /dev/null
++++ b/src/lib/actions/write-actor.ts
+@@ -0,0 +1,33 @@
++/**
++ * LOT-1W-1a — Types partagés par les cœurs d'écriture (SPEC-PLAN-AGENT-GATEWAY-002 §5.1).
++ *
++ * `agent` n'est jamais renseigné dans ce sous-lot (UI uniquement) ; il le sera par la passerelle (1W-3).
++ */
++
++export type WriteActor = {
++  companyId: string
++  /** UI : session.user.id ; agent : émetteur du principal (ADR-PLAN-002 D-W3). */
++  actorUserId: string
++  /** Présent ⇒ écriture agent. Non renseigné en 1W-1a. */
++  agent?: { principalId: string; mandateId: string }
++}
++
++export type CoreResult<T> =
++  | { ok: true; data: T }
++  | { ok: false; code: CoreErrorCode; details?: Readonly<Record<string, unknown>> }
++
++/**
++ * Codes de la SPEC §5.1, plus `TRANSACTION_FAILED` (1W-1a) : la SPEC n'a pas de code pour une
++ * transaction annulée alors que l'UI de BASE_SHA la traite distinctement (message générique +
++ * `console.error`). Ajout signalé dans la fiche de livraison, à entériner ou renommer en revue.
++ */
++export type CoreErrorCode =
++  | "VALIDATION"
++  | "CLIENT_NOT_FOUND"
++  | "WORKSITE_NOT_FOUND"
++  | "TEAM_NOT_FOUND"
++  | "DATA_ANOMALY"
++  | "TEAM_CONFLICT"
++  | "EMPLOYEE_CONFLICT"
++  | "DUPLICATE_WORKSITE"
++  | "TRANSACTION_FAILED"
+diff --git a/tests/chantiers/assignment-team.core.test.ts b/tests/chantiers/assignment-team.core.test.ts
+new file mode 100644
+index 0000000..88d5d4b
+--- /dev/null
++++ b/tests/chantiers/assignment-team.core.test.ts
+@@ -0,0 +1,316 @@
++/**
++ * LOT-1W-1a — T-CORE-2 (assignTeamCore), T-CORE-3 (adaptateur affecterEquipe), T-CORE-6
++ * (non-durcissement), T-CORE-7 (fuseau).
++ *
++ * 1. Parité : chaque cas `affecterEquipe` du harnais est rejoué contre adaptateur + cœur avec les
++ *    MÊMES doubles, la MÊME horloge figée et le MÊME `TZ` que la référence BASE_SHA, puis comparé
++ *    par égalité profonde (retour, trace ordonnée avec le marqueur `inTx`, e-mail, revalidation,
++ *    `console.error`). Références jamais régénérées : toute divergence = défaut du refactor.
++ * 2. T-CORE-6 : le `where` du conflit équipe est documenté TEL QU'OBSERVÉ sur BASE_SHA (sans
++ *    `team.companyId`) — le filtre d'entreprise relève de 1W-1b (T-HARD-1) ; ce test n'impose jamais
++ *    de le retirer : il reflète la référence.
++ * 3. Cœur seul : contrat `CoreResult` (codes, `details.message`, `data`), frontière transactionnelle.
++ *
++ * Exécution : `TZ=<UTC|Europe/Paris> node --import tsx --experimental-test-module-mocks --test <fichier>`.
++ */
++
++import assert from "node:assert/strict"
++import { execFileSync } from "node:child_process"
++import { existsSync, readFileSync } from "node:fs"
++import { join } from "node:path"
++import { before, describe, it } from "node:test"
++import {
++  CASES,
++  REFERENCE_DIR,
++  SUPPORTED_TZ,
++  loadActions,
++  referenceFileName,
++  runCase,
++  stableJson,
++  type ActionsModule,
++  type CaseRecord,
++  type TraceEntry,
++} from "./parity/harness"
++import {
++  assignTeamCore,
++  type AssignTeamDeps,
++  type AssignTeamInput,
++  type AssignTeamTx,
++} from "@/lib/actions/assignment-team.core"
++
++const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim()
++const TZ = process.env.TZ ?? ""
++
++function readReference(caseId: string): CaseRecord {
++  const path = join(ROOT, REFERENCE_DIR, referenceFileName(caseId, TZ))
++  assert.ok(existsSync(path), `référence absente : ${path}`)
++  return JSON.parse(readFileSync(path, "utf8")) as CaseRecord
++}
++
++type PrismaEntry = Extract<TraceEntry, { kind: "prisma" }>
++function prismaEntries(trace: TraceEntry[]): PrismaEntry[] {
++  return trace.filter((t): t is PrismaEntry => t.kind === "prisma")
++}
++
++// ---- 1. Parité contre la référence BASE_SHA -------------------------------------------------------
++
++describe(`T-CORE-2/T-CORE-3 — parité affecterEquipe (adaptateur + cœur) vs référence BASE_SHA [TZ=${TZ || "non défini"}]`, () => {
++  let actions: ActionsModule
++  before(async () => {
++    assert.ok(SUPPORTED_TZ[TZ], `TZ doit valoir ${Object.keys(SUPPORTED_TZ).join(" ou ")} (reçu ${JSON.stringify(TZ)})`)
++    assert.equal(Intl.DateTimeFormat().resolvedOptions().timeZone, TZ, "fuseau effectif ≠ TZ")
++    actions = await loadActions()
++  })
++
++  const assignCases = CASES.filter((c) => c.action === "affecterEquipe")
++  assert.ok(assignCases.length >= 30, "jeu de cas affecterEquipe incomplet")
++
++  for (const c of assignCases) {
++    it(`${c.id} — ${c.title}`, async () => {
++      const reference = readReference(c.id)
++      const replay = JSON.parse(stableJson(await runCase(actions, c))) as CaseRecord
++      assert.deepEqual(replay.input, reference.input, "entrées du cas ≠ référence (définition du cas modifiée ?)")
++      assert.deepEqual(replay.result, reference.result, "retour ≠ référence BASE_SHA")
++      assert.deepEqual(replay.trace, reference.trace, "trace (appels, args, inTx, effets) ≠ référence BASE_SHA")
++    })
++  }
++
++  it("T-CORE-3 (4bis) : session absente / EMPLOYEE / sans companyId ⇒ même exception, aucun appel Prisma, aucun effet (lu dans la référence)", () => {
++    const expected: Record<string, string> = {
++      "assign-auth-session-absent": "Non authentifié",
++      "assign-auth-role-employee": "Accès refusé",
++      "assign-auth-no-company": "Entreprise introuvable",
++    }
++    for (const [id, message] of Object.entries(expected)) {
++      const ref = readReference(id)
++      assert.deepEqual(ref.result, { threw: { name: "Error", message } })
++      assert.deepEqual(ref.trace.map((t) => t.kind), ["auth"])
++    }
++  })
++
++  it("T-CORE-3 (frontière transactionnelle) : créations, mise à jour, notification, lectures du chef/entreprise et e-mail DANS la transaction ; revalidations après commit (lu dans la référence)", () => {
++    const ref = readReference("assign-multi-day")
++    const kinds = ref.trace.map((t) => (t.kind === "tx" ? `tx:${t.event}` : t.kind === "prisma" ? `${t.model}.${t.method}@${t.inTx ? "tx" : "root"}` : t.kind))
++    assert.deepEqual(kinds, [
++      "auth",
++      "worksite.findFirst@root",
++      "team.findFirst@root",
++      "assignment.findFirst@root",
++      "employeeAssignment.findMany@root",
++      "tx:begin",
++      "assignment.create@tx", "employeeAssignment.createMany@tx",
++      "assignment.create@tx", "employeeAssignment.createMany@tx",
++      "assignment.create@tx", "employeeAssignment.createMany@tx",
++      "worksite.update@tx",
++      "notification.create@tx",
++      "user.findUnique@tx",
++      "company.findUnique@tx",
++      "email",
++      "tx:commit",
++      "revalidatePath", "revalidatePath", "revalidatePath",
++    ])
++  })
++
++  it("T-CORE-3 (échec de transaction) : rollback simulé ⇒ console.error [affecterEquipe], message générique, aucune revalidation ni e-mail (lu dans la référence)", () => {
++    for (const id of ["assign-tx-error-assignment-create", "assign-tx-error-notification-create", "assign-tx-error-non-error-value"]) {
++      const ref = readReference(id)
++      assert.deepEqual(ref.result, { returned: { error: "Erreur lors de la création des affectations. Veuillez réessayer." } })
++      const kinds = ref.trace.map((t) => t.kind)
++      assert.ok(ref.trace.some((t) => t.kind === "tx" && t.event === "rollback"), `${id} : rollback absent`)
++      assert.ok(!kinds.includes("revalidatePath"), `${id} : revalidation après échec`)
++      assert.ok(!kinds.includes("email"), `${id} : e-mail après échec`)
++      const log = ref.trace.find((t) => t.kind === "console.error")
++      assert.ok(log && log.kind === "console.error" && log.args[0] === "[affecterEquipe] transaction error:", `${id} : console.error attendu`)
++    }
++  })
++})
++
++// ---- 2. T-CORE-6 : preuve de non-durcissement -----------------------------------------------------
++
++describe("T-CORE-6 — where du conflit équipe tel qu'observé sur BASE_SHA (filtre d'entreprise : 1W-1b, T-HARD-1)", () => {
++  it("référence BASE_SHA : { teamId, date: { in } } — aucune clé team.companyId", () => {
++    const ref = readReference("assign-team-conflict-with-address")
++    const hit = prismaEntries(ref.trace).find((t) => t.model === "assignment" && t.method === "findFirst")
++    assert.ok(hit, "requête de conflit équipe absente de la référence")
++    const args = hit.args as { where: Record<string, unknown> }
++    assert.deepEqual(Object.keys(args.where), ["teamId", "date"])
++    assert.equal("team" in args.where, false, "à BASE_SHA le conflit équipe n'est pas filtré par entreprise (durcissement 1W-1b)")
++  })
++
++  it("cœur refactoré : même where, mêmes clés, même absence de filtre (parité, pas correction)", async () => {
++    const { deps, calls } = fakeDeps({ teamConflict: { date: new Date("2026-11-04T00:00:00.000Z"), worksite: { name: "Chantier Bêta", address: null } } })
++    const r = await assignTeamCore(INPUT, ACTOR, deps)
++    assert.equal(r.ok, false)
++    const conflict = calls.find((c) => c.port === "findTeamConflict")
++    assert.ok(conflict)
++    const args = conflict.args as { where: Record<string, unknown>; include: unknown; orderBy: unknown }
++    assert.deepEqual(Object.keys(args.where), ["teamId", "date"])
++    assert.deepEqual(args.include, { worksite: { select: { name: true, address: true } } })
++    assert.deepEqual(args.orderBy, { date: "asc" })
++  })
++})
++
++// ---- 3. Cœur seul ----------------------------------------------------------------------------------
++
++type Call = { port: string; args: unknown; inTx: boolean }
++
++type FakeOptions = Partial<{
++  worksite: { id: string; name: string; status: "PLANNED" | "IN_PROGRESS" } | null
++  team: { members: { employeeId: string }[]; leader: { userId: string | null } | null } | null
++  teamConflict: { date: Date; worksite: { name: string; address: string | null } } | null
++  employeeConflicts: { date: Date; employee: { firstName: string; lastName: string }; assignment: { worksite: { name: string }; team: { name: string } } }[]
++  leaderUser: { email: string | null; name: string | null } | null
++  failAt: "assignment.create" | "notification.create"
++}>
++
++function fakeDeps(over: FakeOptions = {}) {
++  const calls: Call[] = []
++  const emails: unknown[] = []
++  let n = 0
++  const tx: AssignTeamTx = {
++    assignment: {
++      create: async (args) => {
++        calls.push({ port: "assignment.create", args, inTx: true })
++        if (over.failAt === "assignment.create") throw new Error("P2002")
++        n += 1
++        return { id: `assignment-${n}` }
++      },
++    },
++    employeeAssignment: { createMany: async (args) => { calls.push({ port: "employeeAssignment.createMany", args, inTx: true }); return { count: args.data.length } } },
++    worksite: { update: async (args) => { calls.push({ port: "worksite.update", args, inTx: true }); return {} } },
++    notification: {
++      create: async (args) => {
++        calls.push({ port: "notification.create", args, inTx: true })
++        if (over.failAt === "notification.create") throw new Error("notification failed")
++        return {}
++      },
++    },
++    user: { findUnique: async (args) => { calls.push({ port: "user.findUnique", args, inTx: true }); return over.leaderUser === undefined ? { email: "chef@example.test", name: "Chef" } : over.leaderUser } },
++    company: { findUnique: async (args) => { calls.push({ port: "company.findUnique", args, inTx: true }); return { name: "Entreprise A" } } },
++  }
++  const deps: AssignTeamDeps = {
++    findWorksite: async (args) => { calls.push({ port: "findWorksite", args, inTx: false }); return over.worksite === undefined ? { id: "worksite-1", name: "Chantier Alpha", status: "PLANNED" } : over.worksite },
++    findTeam: async (args) => { calls.push({ port: "findTeam", args, inTx: false }); return over.team === undefined ? { members: [{ employeeId: "employee-1" }, { employeeId: "employee-2" }], leader: { userId: "user-leader-1" } } : over.team },
++    findTeamConflict: async (args) => { calls.push({ port: "findTeamConflict", args, inTx: false }); return over.teamConflict ?? null },
++    findEmployeeConflicts: async (args) => { calls.push({ port: "findEmployeeConflicts", args, inTx: false }); return over.employeeConflicts ?? [] },
++    transaction: async (fn) => {
++      calls.push({ port: "$transaction:begin", args: null, inTx: false })
++      try {
++        const r = await fn(tx)
++        calls.push({ port: "$transaction:commit", args: null, inTx: false })
++        return r
++      } catch (err) {
++        calls.push({ port: "$transaction:rollback", args: null, inTx: false })
++        throw err
++      }
++    },
++    sendAssignmentCreatedEmail: async (args) => { emails.push(args) },
++  }
++  return { deps, calls, emails }
++}
++
++const ACTOR = { companyId: "company-A", actorUserId: "user-admin-1" }
++const INPUT: AssignTeamInput = { worksiteId: "worksite-1", teamId: "team-1", dateFrom: "2026-11-03", dateTo: "2026-11-05" }
++
++describe("T-CORE-2 — assignTeamCore (cœur seul, dépendances en mémoire)", () => {
++  it("champs manquants ⇒ VALIDATION « Informations manquantes. », aucun port appelé", async () => {
++    for (const input of [{ ...INPUT, worksiteId: "" }, { ...INPUT, teamId: "" }, { ...INPUT, dateFrom: "" }]) {
++      const { deps, calls } = fakeDeps()
++      assert.deepEqual(await assignTeamCore(input, ACTOR, deps), { ok: false, code: "VALIDATION", details: { message: "Informations manquantes." } })
++      assert.deepEqual(calls, [])
++    }
++  })
++
++  it("dateTo < dateFrom ⇒ VALIDATION « La date de fin doit être après la date de début. »", async () => {
++    const { deps, calls } = fakeDeps()
++    const r = await assignTeamCore({ ...INPUT, dateFrom: "2026-11-05", dateTo: "2026-11-03" }, ACTOR, deps)
++    assert.deepEqual(r, { ok: false, code: "VALIDATION", details: { message: "La date de fin doit être après la date de début." } })
++    assert.deepEqual(calls, [])
++  })
++
++  it("chantier introuvable ⇒ WORKSITE_NOT_FOUND ; équipe introuvable ⇒ TEAM_NOT_FOUND (messages identiques)", async () => {
++    const w = fakeDeps({ worksite: null })
++    assert.deepEqual(await assignTeamCore(INPUT, ACTOR, w.deps), { ok: false, code: "WORKSITE_NOT_FOUND", details: { message: "Chantier introuvable." } })
++    assert.deepEqual(w.calls.map((c) => c.port), ["findWorksite"])
++    const t = fakeDeps({ team: null })
++    assert.deepEqual(await assignTeamCore(INPUT, ACTOR, t.deps), { ok: false, code: "TEAM_NOT_FOUND", details: { message: "Équipe introuvable." } })
++    assert.deepEqual(t.calls.map((c) => c.port), ["findWorksite", "findTeam"])
++  })
++
++  it("conflit équipe ⇒ TEAM_CONFLICT, message avec/sans adresse, aucune transaction", async () => {
++    const date = new Date("2026-11-04T12:00:00.000Z") // midi : même jour dans les deux fuseaux de capture
++    const a = fakeDeps({ teamConflict: { date, worksite: { name: "Chantier Bêta", address: "3 place du Marché, Rouen" } } })
++    assert.deepEqual(await assignTeamCore(INPUT, ACTOR, a.deps), {
++      ok: false,
++      code: "TEAM_CONFLICT",
++      details: { message: "Cette équipe est déjà affectée le 04 novembre au chantier « Chantier Bêta » (3 place du Marché, Rouen). Libérez-la de ce chantier avant de la réaffecter." },
++    })
++    assert.ok(!a.calls.some((c) => c.port.startsWith("$transaction")))
++    const b = fakeDeps({ teamConflict: { date, worksite: { name: "Chantier Bêta", address: null } } })
++    const r = await assignTeamCore(INPUT, ACTOR, b.deps)
++    assert.equal(r.ok === false && r.details?.message, "Cette équipe est déjà affectée le 04 novembre au chantier « Chantier Bêta ». Libérez-la de ce chantier avant de la réaffecter.")
++  })
++
++  it("conflits employés ⇒ EMPLOYEE_CONFLICT, « Désaffectez-le » (1) / « Désaffectez-les » (N)", async () => {
++    const date = new Date("2026-11-04T12:00:00.000Z")
++    const row = (first: string, last: string) => ({ date, employee: { firstName: first, lastName: last }, assignment: { worksite: { name: "Chantier Gamma" }, team: { name: "Équipe Sud" } } })
++    const one = fakeDeps({ employeeConflicts: [row("Alice", "Martin")] })
++    assert.deepEqual(await assignTeamCore(INPUT, ACTOR, one.deps), {
++      ok: false,
++      code: "EMPLOYEE_CONFLICT",
++      details: { message: "Alice Martin est affecté le 04 novembre au chantier « Chantier Gamma » avec l'équipe Équipe Sud.\nDésaffectez-le avant de réaffecter l'équipe." },
++    })
++    const many = fakeDeps({ employeeConflicts: [row("Alice", "Martin"), row("Bruno", "Durand")] })
++    const r = await assignTeamCore(INPUT, ACTOR, many.deps)
++    assert.ok(r.ok === false && typeof r.details?.message === "string" && r.details.message.endsWith("\nDésaffectez-les avant de réaffecter l'équipe."))
++  })
++
++  it("équipe sans membres ⇒ pas de requête de conflit employés ni de createMany", async () => {
++    const { deps, calls } = fakeDeps({ team: { members: [], leader: { userId: "user-leader-1" } } })
++    const r = await assignTeamCore(INPUT, ACTOR, deps)
++    assert.equal(r.ok, true)
++    const ports = calls.map((c) => c.port)
++    assert.ok(!ports.includes("findEmployeeConflicts"))
++    assert.ok(!ports.includes("employeeAssignment.createMany"))
++    assert.equal(ports.filter((p) => p === "assignment.create").length, 3)
++  })
++
++  it("chemin nominal ⇒ ok, data { assignmentIds (N), worksiteStatus IN_PROGRESS, leaderUserId } ; e-mail au même point (dans la transaction)", async () => {
++    const { deps, calls, emails } = fakeDeps()
++    const r = await assignTeamCore(INPUT, ACTOR, deps)
++    assert.deepEqual(r, { ok: true, data: { assignmentIds: ["assignment-1", "assignment-2", "assignment-3"], worksiteStatus: "IN_PROGRESS", leaderUserId: "user-leader-1" } })
++    const ports = calls.map((c) => c.port)
++    assert.deepEqual(ports.slice(0, 5), ["findWorksite", "findTeam", "findTeamConflict", "findEmployeeConflicts", "$transaction:begin"])
++    assert.equal(ports[ports.length - 1], "$transaction:commit")
++    assert.ok(calls.filter((c) => c.inTx).every((c) => ports.indexOf(c.port) > ports.indexOf("$transaction:begin")))
++    assert.ok(ports.includes("worksite.update") && ports.includes("notification.create") && ports.includes("user.findUnique") && ports.includes("company.findUnique"))
++    assert.deepEqual(emails, [{ to: "chef@example.test", teamLeaderName: "Chef", worksiteName: "Chantier Alpha", dateLabel: emails.length ? (emails[0] as { dateLabel: string }).dateLabel : "", companyName: "Entreprise A" }])
++    assert.match((emails[0] as { dateLabel: string }).dateLabel, /^du \d{2} novembre au \d{2} novembre$/)
++  })
++
++  it("chantier déjà IN_PROGRESS ⇒ pas de worksite.update, worksiteStatus inchangé ; chef sans userId ⇒ ni notification ni e-mail, leaderUserId null", async () => {
++    const a = fakeDeps({ worksite: { id: "worksite-1", name: "Chantier Alpha", status: "IN_PROGRESS" } })
++    const ra = await assignTeamCore(INPUT, ACTOR, a.deps)
++    assert.ok(ra.ok && ra.data.worksiteStatus === "IN_PROGRESS")
++    assert.ok(!a.calls.some((c) => c.port === "worksite.update"))
++    const b = fakeDeps({ team: { members: [{ employeeId: "employee-1" }], leader: { userId: null } } })
++    const rb = await assignTeamCore(INPUT, ACTOR, b.deps)
++    assert.ok(rb.ok && rb.data.leaderUserId === null)
++    assert.ok(!b.calls.some((c) => c.port === "notification.create" || c.port === "user.findUnique"))
++    assert.deepEqual(b.emails, [])
++  })
++
++  it("erreur dans la transaction ⇒ rollback, TRANSACTION_FAILED { message générique, cause } ; aucun e-mail", async () => {
++    const { deps, calls, emails } = fakeDeps({ failAt: "assignment.create" })
++    const r = await assignTeamCore(INPUT, ACTOR, deps)
++    assert.deepEqual(r, { ok: false, code: "TRANSACTION_FAILED", details: { message: "Erreur lors de la création des affectations. Veuillez réessayer.", cause: "P2002" } })
++    assert.equal(calls[calls.length - 1].port, "$transaction:rollback")
++    assert.deepEqual(emails, [])
++  })
++
++  it("erreurs hors transaction (findWorksite) : propagées, non capturées (comme à BASE_SHA)", async () => {
++    const { deps } = fakeDeps()
++    deps.findWorksite = async () => { throw new Error("db down") }
++    await assert.rejects(assignTeamCore(INPUT, ACTOR, deps), { message: "db down" })
++  })
++})
+diff --git a/tests/chantiers/chantier-create.core.test.ts b/tests/chantiers/chantier-create.core.test.ts
+new file mode 100644
+index 0000000..c6356b6
+--- /dev/null
++++ b/tests/chantiers/chantier-create.core.test.ts
+@@ -0,0 +1,199 @@
++/**
++ * LOT-1W-1a — T-CORE-1 (createWorksiteCore), T-CORE-3 (adaptateur createChantier), T-CORE-7 (fuseau).
++ *
++ * 1. Parité : chaque cas `createChantier` du harnais est rejoué contre adaptateur + cœur avec les
++ *    MÊMES doubles de modules, la MÊME horloge figée et le MÊME `TZ` que la référence enregistrée
++ *    sur BASE_SHA, puis comparé par égalité profonde (retour, trace ordonnée avec `inTx`, effets).
++ *    Les références ne sont jamais régénérées ici : toute divergence est un défaut du refactor.
++ * 2. Cœur seul : contrat `CoreResult` (codes, `details.message`), ports appelés ou non, propagation
++ *    des exceptions (géocodage, `worksite.create`) telle qu'observée à BASE_SHA.
++ *
++ * Exécution : `TZ=<UTC|Europe/Paris> node --import tsx --experimental-test-module-mocks --test <fichier>`
++ * (ligne `test:chantiers` de package.json).
++ */
++
++import assert from "node:assert/strict"
++import { execFileSync } from "node:child_process"
++import { existsSync, readFileSync } from "node:fs"
++import { join } from "node:path"
++import { before, describe, it } from "node:test"
++import {
++  CASES,
++  REFERENCE_DIR,
++  SUPPORTED_TZ,
++  loadActions,
++  referenceFileName,
++  runCase,
++  stableJson,
++  type ActionsModule,
++  type CaseRecord,
++} from "./parity/harness"
++import { createWorksiteCore, type CreateWorksiteDeps, type CreateWorksiteInput } from "@/lib/actions/chantier-create.core"
++
++const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim()
++const TZ = process.env.TZ ?? ""
++
++function readReference(caseId: string): CaseRecord {
++  const path = join(ROOT, REFERENCE_DIR, referenceFileName(caseId, TZ))
++  assert.ok(existsSync(path), `référence absente : ${path}`)
++  return JSON.parse(readFileSync(path, "utf8")) as CaseRecord
++}
++
++// ---- 1. Parité contre la référence BASE_SHA -------------------------------------------------------
++
++describe(`T-CORE-1/T-CORE-3 — parité createChantier (adaptateur + cœur) vs référence BASE_SHA [TZ=${TZ || "non défini"}]`, () => {
++  let actions: ActionsModule
++  before(async () => {
++    assert.ok(SUPPORTED_TZ[TZ], `TZ doit valoir ${Object.keys(SUPPORTED_TZ).join(" ou ")} (reçu ${JSON.stringify(TZ)})`)
++    assert.equal(Intl.DateTimeFormat().resolvedOptions().timeZone, TZ, "fuseau effectif ≠ TZ")
++    actions = await loadActions()
++  })
++
++  const createCases = CASES.filter((c) => c.action === "createChantier")
++  assert.ok(createCases.length >= 20, "jeu de cas createChantier incomplet")
++
++  for (const c of createCases) {
++    it(`${c.id} — ${c.title}`, async () => {
++      const reference = readReference(c.id)
++      const replay = JSON.parse(stableJson(await runCase(actions, c))) as CaseRecord
++      assert.deepEqual(replay.input, reference.input, "entrées du cas ≠ référence (définition du cas modifiée ?)")
++      assert.deepEqual(replay.result, reference.result, "retour ≠ référence BASE_SHA")
++      assert.deepEqual(replay.trace, reference.trace, "trace (appels, args, inTx, effets) ≠ référence BASE_SHA")
++    })
++  }
++
++  it("T-CORE-3 (4bis) : session absente / EMPLOYEE / sans companyId ⇒ même exception, aucun appel Prisma, aucun effet (lu dans la référence)", () => {
++    const expected: Record<string, string> = {
++      "create-auth-session-absent": "Non authentifié",
++      "create-auth-role-employee": "Accès refusé",
++      "create-auth-no-company": "Entreprise introuvable",
++    }
++    for (const [id, message] of Object.entries(expected)) {
++      const ref = readReference(id)
++      assert.deepEqual(ref.result, { threw: { name: "Error", message } })
++      assert.deepEqual(ref.trace.map((t) => t.kind), ["auth"])
++    }
++  })
++
++  it("T-CORE-3 : exception du géocodage et erreur de worksite.create propagées, aucune revalidation (lu dans la référence)", () => {
++    const geo = readReference("create-geocode-throws")
++    assert.deepEqual(geo.result, { threw: { name: "Error", message: "[double] geocode boom" } })
++    assert.ok(!geo.trace.some((t) => t.kind === "revalidatePath"))
++    const create = readReference("create-worksite-create-throws")
++    assert.deepEqual(create.result, { threw: { name: "Error", message: "[double] worksite.create failed (P2003)" } })
++    assert.ok(!create.trace.some((t) => t.kind === "revalidatePath"))
++  })
++})
++
++// ---- 2. Cœur seul ----------------------------------------------------------------------------------
++
++type Call = { port: string; args: unknown }
++
++function fakeDeps(over: Partial<{ client: object | null; geocode: "ok" | "null" | "throw"; createThrows: boolean }> = {}) {
++  const calls: Call[] = []
++  const deps: CreateWorksiteDeps = {
++    findClient: async (args) => {
++      calls.push({ port: "findClient", args })
++      return over.client === undefined ? { id: "client-1" } : over.client
++    },
++    createWorksite: async (args) => {
++      calls.push({ port: "createWorksite", args })
++      if (over.createThrows) throw new Error("create failed")
++      return { id: "worksite-new-1" }
++    },
++    geocode: async (address) => {
++      calls.push({ port: "geocode", args: address })
++      if (over.geocode === "throw") throw new Error("geocode boom")
++      if (over.geocode === "null") return null
++      return { latitude: 48.8566, longitude: 2.3522 }
++    },
++  }
++  return { deps, calls }
++}
++
++const ACTOR = { companyId: "company-A", actorUserId: "user-admin-1" }
++const INPUT: CreateWorksiteInput = {
++  name: "Rénovation toiture",
++  description: "",
++  address: "12 rue des Lilas, 75020 Paris",
++  clientId: "client-1",
++  startDate: "2026-11-03",
++  endDate: "2026-11-05",
++  dailyHours: "8",
++}
++
++describe("T-CORE-1 — createWorksiteCore (cœur seul, dépendances en mémoire)", () => {
++  it("Zod en échec ⇒ VALIDATION avec le message Zod ; aucun port appelé", async () => {
++    const { deps, calls } = fakeDeps()
++    const r = await createWorksiteCore({ ...INPUT, name: "" }, ACTOR, deps)
++    assert.deepEqual(r, { ok: false, code: "VALIDATION", details: { message: "Le nom est requis" } })
++    assert.deepEqual(calls, [])
++  })
++
++  it("endDate < startDate ⇒ VALIDATION « La date de fin doit être après la date de début »", async () => {
++    const { deps } = fakeDeps()
++    const r = await createWorksiteCore({ ...INPUT, startDate: "2026-11-05", endDate: "2026-11-03" }, ACTOR, deps)
++    assert.deepEqual(r, { ok: false, code: "VALIDATION", details: { message: "La date de fin doit être après la date de début" } })
++  })
++
++  it("client introuvable ⇒ CLIENT_NOT_FOUND « Client introuvable. » ; ni géocodage ni création", async () => {
++    const { deps, calls } = fakeDeps({ client: null })
++    const r = await createWorksiteCore(INPUT, ACTOR, deps)
++    assert.deepEqual(r, { ok: false, code: "CLIENT_NOT_FOUND", details: { message: "Client introuvable." } })
++    assert.deepEqual(calls.map((c) => c.port), ["findClient"])
++    assert.deepEqual(calls[0].args, { where: { id: "client-1", companyId: "company-A" } })
++  })
++
++  it("entrée valide avec adresse ⇒ géocodage puis création avec les mêmes champs ; data.worksiteId", async () => {
++    const { deps, calls } = fakeDeps()
++    const r = await createWorksiteCore(INPUT, ACTOR, deps)
++    assert.deepEqual(r, { ok: true, data: { worksiteId: "worksite-new-1" } })
++    assert.deepEqual(calls.map((c) => c.port), ["findClient", "geocode", "createWorksite"])
++    assert.equal(calls[1].args, INPUT.address)
++    assert.deepEqual(calls[2].args, {
++      data: {
++        name: "Rénovation toiture",
++        description: null,
++        address: "12 rue des Lilas, 75020 Paris",
++        clientId: "client-1",
++        companyId: "company-A",
++        createdById: "user-admin-1",
++        startDate: new Date("2026-11-03"),
++        endDate: new Date("2026-11-05"),
++        dailyHours: 8,
++        status: "PLANNED",
++        latitude: 48.8566,
++        longitude: 2.3522,
++      },
++    })
++  })
++
++  it("sans adresse ⇒ aucun géocodage, latitude/longitude null ; géocodage null ⇒ idem", async () => {
++    const a = fakeDeps()
++    await createWorksiteCore({ ...INPUT, address: "" }, ACTOR, a.deps)
++    assert.deepEqual(a.calls.map((c) => c.port), ["findClient", "createWorksite"])
++    const dataA = (a.calls[1].args as { data: { address: unknown; latitude: unknown; longitude: unknown } }).data
++    assert.deepEqual([dataA.address, dataA.latitude, dataA.longitude], [null, null, null])
++
++    const b = fakeDeps({ geocode: "null" })
++    await createWorksiteCore(INPUT, ACTOR, b.deps)
++    const dataB = (b.calls[2].args as { data: { latitude: unknown; longitude: unknown } }).data
++    assert.deepEqual([dataB.latitude, dataB.longitude], [null, null])
++  })
++
++  it("exception du géocodage et erreur de création : propagées (aucune nouvelle capture)", async () => {
++    const g = fakeDeps({ geocode: "throw" })
++    await assert.rejects(createWorksiteCore(INPUT, ACTOR, g.deps), { message: "geocode boom" })
++    assert.deepEqual(g.calls.map((c) => c.port), ["findClient", "geocode"])
++    const c = fakeDeps({ createThrows: true })
++    await assert.rejects(createWorksiteCore(INPUT, ACTOR, c.deps), { message: "create failed" })
++  })
++
++  it("WriteActor : companyId ⇒ where.companyId et data.companyId ; actorUserId ⇒ data.createdById", async () => {
++    const { deps, calls } = fakeDeps()
++    await createWorksiteCore({ ...INPUT, address: "" }, { companyId: "company-Z", actorUserId: "user-z" }, deps)
++    assert.deepEqual(calls[0].args, { where: { id: "client-1", companyId: "company-Z" } })
++    const data = (calls[1].args as { data: { companyId: string; createdById: string } }).data
++    assert.deepEqual([data.companyId, data.createdById], ["company-Z", "user-z"])
++  })
++})
