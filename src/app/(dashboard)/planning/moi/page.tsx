@@ -30,7 +30,7 @@ export default async function MonPlanningPage() {
 
   // Trouver l'employé lié à cet utilisateur avec son équipe et son chef
   const employee = await prisma.employee.findFirst({
-    where: { userId: session.user.id },
+    where: { userId: session.user.id, companyId: session.user.companyId! },
     select: {
       id: true,
       firstName: true,

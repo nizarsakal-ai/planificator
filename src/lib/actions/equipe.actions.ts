@@ -45,8 +45,8 @@ export async function createEquipe(formData: FormData) {
   if (!leader) return { error: "Chef d'équipe introuvable." }
 
   // Mettre à jour le rôle du chef d'équipe
-  await prisma.user.update({
-    where: { id: leader.userId },
+  await prisma.employee.update({
+    where: { id: leader.id },
     data: { role: "TEAM_LEADER" },
   })
 
@@ -103,13 +103,13 @@ export async function updateEquipeLeader(teamId: string, newLeaderId: string) {
 
   await prisma.$transaction([
     // Nouveau chef → TEAM_LEADER
-    prisma.user.update({
-      where: { id: newLeader.userId },
+    prisma.employee.update({
+      where: { id: newLeader.id },
       data: { role: "TEAM_LEADER" },
     }),
     // Ancien chef → EMPLOYEE seulement s'il ne dirige plus aucune autre équipe
-    ...(otherLeadTeams === 0 ? [prisma.user.update({
-      where: { id: team.leader.userId },
+    ...(otherLeadTeams === 0 ? [prisma.employee.update({
+      where: { id: team.leader.id },
       data: { role: "EMPLOYEE" },
     })] : []),
     // Mettre à jour l'équipe
@@ -259,9 +259,9 @@ export async function updateEquipe(teamId: string, formData: FormData) {
   await prisma.$transaction(async (tx) => {
     if (leaderChanged) {
       // Nouveau chef → TEAM_LEADER
-      await tx.user.update({ where: { id: newLeader.userId }, data: { role: "TEAM_LEADER" } })
+      await tx.employee.update({ where: { id: newLeader.id }, data: { role: "TEAM_LEADER" } })
       // Ancien chef → EMPLOYEE
-      await tx.user.update({ where: { id: team.leader.userId }, data: { role: "EMPLOYEE" } })
+      await tx.employee.update({ where: { id: team.leader.id }, data: { role: "EMPLOYEE" } })
       // S'assurer que le nouveau chef est membre actif
       const existing = await tx.teamMember.findFirst({ where: { teamId, employeeId: parsed.data.leaderId } })
       if (existing) {

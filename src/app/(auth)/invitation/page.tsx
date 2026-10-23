@@ -109,6 +109,7 @@ export default function InvitationPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Mot de passe *</Label>
+              <p className="text-xs text-slate-500">Vous avez déjà un compte ? Utilisez votre mot de passe actuel pour ajouter cette entreprise.</p>
               <Input type="password" {...register("password")} className={errors.password ? "border-red-400" : ""} />
               {errors.password && <p className="text-xs text-red-500">{errors.password.message}</p>}
             </div>

@@ -1,3 +1,4 @@
+import { CompanySwitcher } from "@/components/layout/CompanySwitcher"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { getInitials } from "@/lib/utils"
 import { NotificationBell } from "@/components/notifications/NotificationBell"
@@ -24,6 +25,7 @@ export function Navbar({ user }: { user: NavbarUser }) {
 
       {/* Actions */}
       <div className="flex items-center gap-3">
+        <CompanySwitcher userId={user.id} companyId={user.companyId} />
         <NotificationBell />
 
         {/* Avatar */}

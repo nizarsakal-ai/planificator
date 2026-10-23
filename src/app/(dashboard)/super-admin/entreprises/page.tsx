@@ -23,7 +23,7 @@ export default async function SuperAdminEntreprisesPage() {
     include: {
       _count: {
         select: {
-          users:      true,
+          users: { where: { employeeProfiles: { none: {} } } },
           employees:  true,
           worksites:  true,
         },
@@ -38,7 +38,7 @@ export default async function SuperAdminEntreprisesPage() {
   })
 
   const actives  = companies.filter((c) => c.active).length
-  const totalUsr = companies.reduce((sum, c) => sum + c._count.users, 0)
+  const totalUsr = companies.reduce((sum, c) => sum + (c._count.users + c._count.employees), 0)
 
   return (
     <div className="space-y-6">
@@ -133,7 +133,7 @@ export default async function SuperAdminEntreprisesPage() {
                     <div className="flex items-center gap-6 text-xs text-slate-500">
                       <div className="flex items-center gap-1.5">
                         <Users className="h-3.5 w-3.5 text-slate-400" />
-                        <span>{company._count.users} util.</span>
+                        <span>{(company._count.users + company._count.employees)} util.</span>
                       </div>
                       <div className="flex items-center gap-1.5">
                         <HardHat className="h-3.5 w-3.5 text-slate-400" />

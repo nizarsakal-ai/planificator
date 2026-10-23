@@ -88,10 +88,11 @@ async function main() {
   })
 
   const adminEmployee = await prisma.employee.upsert({
-    where: { userId: adminUser.id },
+    where: { userId_companyId: { userId: adminUser.id, companyId: company.id } },
     update: {},
     create: {
       userId: adminUser.id,
+      role: "ADMIN",
       companyId: company.id,
       firstName: "Admin",
       lastName: "Entreprise",
@@ -115,10 +116,11 @@ async function main() {
   })
 
   const chefEmployee = await prisma.employee.upsert({
-    where: { userId: chefUser.id },
+    where: { userId_companyId: { userId: chefUser.id, companyId: company.id } },
     update: {},
     create: {
       userId: chefUser.id,
+      role: "TEAM_LEADER",
       companyId: company.id,
       firstName: "Jean",
       lastName: "Dupont",
@@ -142,7 +144,7 @@ async function main() {
   })
 
   const marieEmployee = await prisma.employee.upsert({
-    where: { userId: marieUser.id },
+    where: { userId_companyId: { userId: marieUser.id, companyId: company.id } },
     update: {},
     create: {
       userId: marieUser.id,
@@ -166,7 +168,7 @@ async function main() {
   })
 
   const thomasEmployee = await prisma.employee.upsert({
-    where: { userId: thomasUser.id },
+    where: { userId_companyId: { userId: thomasUser.id, companyId: company.id } },
     update: {},
     create: {
       userId: thomasUser.id,

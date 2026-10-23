@@ -37,8 +37,8 @@ export default async function MesAbsencesPage() {
   // ADMIN → redirect vers la vue complète
   if (["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) redirect("/absences")
 
-  const employee = await prisma.employee.findUnique({
-    where: { userId: session.user.id },
+  const employee = await prisma.employee.findFirst({
+    where: { userId: session.user.id, companyId: session.user.companyId! },
   })
   if (!employee) redirect("/dashboard")
 

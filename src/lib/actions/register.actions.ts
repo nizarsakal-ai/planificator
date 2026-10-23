@@ -111,8 +111,7 @@ export async function createCompanyAsAdmin(formData: FormData) {
 
   // Inviter le premier admin si email fourni
   if (parsed.data.adminEmail) {
-    const existing = await prisma.user.findUnique({ where: { email: parsed.data.adminEmail } })
-    if (!existing) {
+    { // Existing identities also receive an invitation to the new company.
       const token   = crypto.randomBytes(32).toString("hex")
       const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
 
