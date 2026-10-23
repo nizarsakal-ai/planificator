@@ -8,13 +8,16 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createClientSchema, type CreateClientInput } from "@/lib/validations/client"
-import { createClient } from "@/lib/actions/client.actions"
+import { createClient, updateClient } from "@/lib/actions/client.actions"
+
+export type EditableClient = { id: string; name: string; email: string | null; phone: string | null; address: string | null; notes: string | null }
 
 interface ClientFormProps {
+  client?: EditableClient
   onSuccess: () => void
 }
 
-export function ClientForm({ onSuccess }: ClientFormProps) {
+export function ClientForm({ onSuccess, client }: ClientFormProps) {
   const {
     register,
     handleSubmit,
@@ -22,6 +25,7 @@ export function ClientForm({ onSuccess }: ClientFormProps) {
     reset,
   } = useForm<CreateClientInput>({
     resolver: zodResolver(createClientSchema),
+    defaultValues: { name: client?.name ?? "", email: client?.email ?? "", phone: client?.phone ?? "", address: client?.address ?? "", notes: client?.notes ?? "" },
   })
 
   const onSubmit = async (data: CreateClientInput) => {
@@ -30,14 +34,20 @@ export function ClientForm({ onSuccess }: ClientFormProps) {
       if (v !== undefined && v !== null) formData.append(k, v)
     })
 
-    const result = await createClient(formData)
+    let result
+    try {
+      result = client ? await updateClient(client.id, formData) : await createClient(formData)
+    } catch {
+      toast.error("Enregistrement impossible. Veuillez réessayer.")
+      return
+    }
 
     if (result?.error) {
       toast.error(result.error)
       return
     }
 
-    toast.success("Client créé avec succès !")
+    toast.success(client ? "Client modifié avec succès !" : "Client créé avec succès !")
     reset()
     onSuccess()
   }
@@ -106,9 +116,9 @@ export function ClientForm({ onSuccess }: ClientFormProps) {
       <div className="flex justify-end pt-2">
         <Button type="submit" disabled={isSubmitting} className="bg-[#0f3460] hover:bg-[#0a2540]">
           {isSubmitting ? (
-            <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Création...</>
+            <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {client ? "Enregistrement..." : "Création..."}</>
           ) : (
-            "Créer le client"
+            client ? "Enregistrer les modifications" : "Créer le client"
           )}
         </Button>
       </div>

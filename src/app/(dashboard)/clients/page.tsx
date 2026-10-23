@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { UserCheck, Mail, Phone, MapPin, FileText, HardHat } from "lucide-react"
 import { NouveauClientDialog } from "@/components/clients/NouveauClientDialog"
+import { ModifierClientDialog } from "@/components/clients/ModifierClientDialog"
 import { ClientActions } from "@/components/clients/ClientActions"
 
 export const metadata: Metadata = { title: "Clients" }
@@ -114,7 +115,8 @@ export default async function ClientsPage() {
                 </div>
 
                 {/* Actions */}
-                <div className="border-t border-slate-100 pt-3 flex justify-end">
+                <div className="border-t border-slate-100 pt-3 flex flex-wrap justify-end gap-2">
+                  <ModifierClientDialog client={{ id: client.id, name: client.name, email: client.email, phone: client.phone, address: client.address, notes: client.notes }} />
                   <ClientActions clientId={client.id} active={client.active} />
                 </div>
               </CardContent>
