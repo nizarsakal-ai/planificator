@@ -28,7 +28,7 @@ export default async function PlanningEquipePage() {
 
   // Trouver l'employé lié à ce chef d'équipe
   const employee = await prisma.employee.findFirst({
-    where: { userId: session.user.id },
+    where: { userId: session.user.id, companyId: session.user.companyId! },
     select: { id: true, firstName: true, lastName: true },
   })
   if (!employee) redirect("/dashboard")

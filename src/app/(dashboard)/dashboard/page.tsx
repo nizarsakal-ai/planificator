@@ -328,8 +328,8 @@ async function TeamLeaderDashboard({
   userId: string
   companyId: string
 }) {
-  const employee = await prisma.employee.findUnique({
-    where: { userId },
+  const employee = await prisma.employee.findFirst({
+    where: { userId, companyId },
     include: {
       ledTeams: {
         where: { active: true },
@@ -418,15 +418,15 @@ async function TeamLeaderDashboard({
 
 // ─── Dashboard Employé ───────────────────────────────────────────────────────
 
-async function EmployeeDashboard({ userId, days }: { userId: string; days: 7 | 30 }) {
+async function EmployeeDashboard({ userId, companyId, days }: { userId: string; companyId: string; days: 7 | 30 }) {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
   const toDate = new Date(today)
   toDate.setDate(toDate.getDate() + days)
 
-  const employee = await prisma.employee.findUnique({
-    where: { userId },
+  const employee = await prisma.employee.findFirst({
+    where: { userId, companyId },
     include: {
       teamMemberships: {
         where: { leftAt: null },
@@ -602,8 +602,8 @@ export default async function DashboardPage({
         <TeamLeaderDashboard userId={userId} companyId={companyId} />
       )}
 
-      {role === "EMPLOYEE" && (
-        <EmployeeDashboard userId={userId} days={planningDays} />
+      {role === "EMPLOYEE" && companyId && (
+        <EmployeeDashboard companyId={companyId} userId={userId} days={planningDays} />
       )}
     </div>
   )

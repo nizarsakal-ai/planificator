@@ -1,3 +1,4 @@
+import { resolveCompanyAccess } from "@/lib/company-access"
 import NextAuth from "next-auth"
 import Credentials from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
@@ -7,11 +8,11 @@ import { authConfig, edgeSessionCallback } from "@/auth.config"
 
 // Schéma de validation des credentials
 const credentialsSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().toLowerCase().email(),
   password: z.string().min(1),
 })
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   ...authConfig,
   providers: [
     Credentials({
@@ -27,16 +28,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const { email, password } = parsed.data
 
         // Recherche de l'utilisateur avec son profil employé
-        const user = await prisma.user.findUnique({
-          where: { email },
+        const user = await prisma.user.findFirst({
+          where: { email: { equals: email, mode: "insensitive" } },
           include: {
-            employeeProfile: {
-              select: {
-                firstName: true,
-                lastName: true,
-                avatarUrl: true,
-              },
-            },
+            company: { select: { active: true } },
+            employeeProfiles: { include: { company: { select: { active: true } } } },
           },
         })
 
@@ -52,18 +48,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           data: { lastLoginAt: new Date() },
         })
 
-        // Construction du nom affiché
-        const displayName = user.employeeProfile
-          ? `${user.employeeProfile.firstName} ${user.employeeProfile.lastName}`
-          : user.email
+        const access = resolveCompanyAccess(user, user.companyId)
+        if (!access) return null
+        const profile = user.employeeProfiles.find(p => p.companyId === access.companyId)
+        const displayName = profile ? `${profile.firstName} ${profile.lastName}` : user.email
 
         return {
           id: user.id,
           email: user.email,
           name: displayName,
-          image: user.employeeProfile?.avatarUrl ?? null,
-          role: user.role,
-          companyId: user.companyId,
+          image: profile?.avatarUrl ?? null,
+          role: access.role as typeof user.role,
+          companyId: access.companyId,
         }
       },
     }),
@@ -74,7 +70,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     ...authConfig.callbacks,
     // Node uniquement : relit Prisma pour garder role/companyId à jour.
     // Le middleware Edge continue d'utiliser edgeJwtCallback (sans Prisma).
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger, session }) {
       if (user) {
         token.id = user.id as string
         token.role = (user as { role: typeof token.role }).role
@@ -83,11 +79,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       } else if (token.id) {
         const dbUser = await prisma.user.findUnique({
           where: { id: token.id as string },
-          select: { role: true, companyId: true, active: true },
+          include: { company: { select: { active: true } }, employeeProfiles: { include: { company: { select: { active: true } } } } },
         })
         if (!dbUser || !dbUser.active) return null
-        token.role = dbUser.role
-        token.companyId = dbUser.companyId
+        const requested = trigger === "update" && typeof session?.user?.companyId === "string"
+          ? session.user.companyId : token.companyId
+        const access = resolveCompanyAccess(dbUser, requested)
+        if (!access) return null
+        token.role = access.role as typeof token.role
+        token.companyId = access.companyId
       }
       return token
     },

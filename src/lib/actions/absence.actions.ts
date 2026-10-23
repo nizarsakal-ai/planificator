@@ -79,8 +79,8 @@ export async function demanderAbsence(formData: FormData) {
   const session = await auth()
   if (!session?.user) return { error: "Non authentifié" }
 
-  const employee = await prisma.employee.findUnique({
-    where: { userId: session.user.id },
+  const employee = await prisma.employee.findFirst({
+    where: { userId: session.user.id, companyId: session.user.companyId! },
   })
   if (!employee) return { error: "Profil employé introuvable." }
 

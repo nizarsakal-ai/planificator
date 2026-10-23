@@ -147,7 +147,7 @@ export function EmployeForm({ onSuccess }: EmployeFormProps) {
           <p className="text-xs text-red-500">{errors.password.message}</p>
         )}
         <p className="text-xs text-slate-400">
-          L'employé pourra le changer à sa première connexion.
+          Nouveau compte : mot de passe provisoire. Compte existant : son mot de passe actuel est conservé.
         </p>
       </div>
 

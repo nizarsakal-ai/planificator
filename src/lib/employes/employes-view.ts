@@ -247,6 +247,7 @@ export interface EmployeeRow {
   phone: string | null
   avatarUrl: string | null
   active: boolean
+  role?: string
   user: { role: string }
   teamMemberships: { team: { id: string; name: string; color: string | null; companyId: string } }[]
   ledTeams: { id: string; name: string; color: string | null; companyId: string }[]
@@ -271,7 +272,7 @@ export function toEmployeeViewItems(rows: readonly EmployeeRow[], companyId: str
       phone: r.phone,
       avatarUrl: r.avatarUrl,
       active: r.active,
-      leadsTeam: Boolean(ledTeam) || r.user.role === "TEAM_LEADER",
+      leadsTeam: Boolean(ledTeam) || (r.role ?? r.user.role) === "TEAM_LEADER",
       team: team ? { id: team.id, name: team.name, color: team.color } : null,
     })
   }

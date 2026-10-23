@@ -1,5 +1,6 @@
 "use server"
 
+import { attachEmployee } from "@/lib/actions/employee-membership.core"
 import { revalidatePath } from "next/cache"
 import bcrypt from "bcryptjs"
 import { v2 as cloudinary } from "cloudinary"
@@ -43,36 +44,15 @@ export async function createEmploye(formData: FormData) {
 
   const { firstName, lastName, email, jobTitle, phone, password } = parsed.data
 
-  // Vérifier que l'email n'est pas déjà utilisé
-  const existing = await prisma.user.findUnique({ where: { email } })
-  if (existing) {
-    return { error: "Cet email est déjà utilisé." }
+  try {
+    await prisma.$transaction(async (tx) => {
+      await attachEmployee(tx, { companyId: user.companyId!, firstName, lastName, email, jobTitle, phone, password },
+        password => bcrypt.hash(password, 12))
+    })
+  } catch (error) {
+    if (error instanceof Error && !('code' in error)) return { error: error.message }
+    return { error: "Impossible de rattacher cet employé. Actualisez la liste et réessayez." }
   }
-
-  const hashedPassword = await bcrypt.hash(password, 12)
-
-  // Créer le compte User + le profil Employee en une transaction
-  await prisma.$transaction(async (tx) => {
-    const newUser = await tx.user.create({
-      data: {
-        email,
-        password: hashedPassword,
-        role: "EMPLOYEE",
-        companyId: user.companyId!,
-      },
-    })
-
-    await tx.employee.create({
-      data: {
-        userId: newUser.id,
-        companyId: user.companyId!,
-        firstName,
-        lastName,
-        jobTitle: jobTitle || null,
-        phone: phone || null,
-      },
-    })
-  })
 
   revalidatePath("/employes")
   return { success: true }
@@ -102,6 +82,11 @@ export async function updateEmploye(employeeId: string, formData: FormData) {
     where: { id: employeeId, companyId: user.companyId! },
   })
   if (!employee) return { error: "Employé introuvable." }
+
+  const account = await prisma.user.findUnique({ where: { id: employee.userId }, select: { email: true } })
+  if (account?.email !== parsed.data.email && await prisma.employee.count({ where: { userId: employee.userId } }) > 1) {
+    return { error: "Ce compte est partagé entre plusieurs entreprises. Modifiez son email depuis le profil du titulaire." }
+  }
 
   // Vérifier que le nouvel email n'est pas déjà utilisé par un autre compte
   const existingUser = await prisma.user.findFirst({
@@ -238,16 +223,7 @@ export async function toggleEmployeActive(employeeId: string, active: boolean) {
   })
   if (!employee) return { error: "Employé introuvable." }
 
-  await prisma.$transaction([
-    prisma.employee.update({
-      where: { id: employeeId },
-      data: { active },
-    }),
-    prisma.user.update({
-      where: { id: employee.userId },
-      data: { active },
-    }),
-  ])
+  await prisma.employee.update({ where: { id: employeeId }, data: { active } })
 
   revalidatePath("/employes")
   return { success: true }
@@ -269,11 +245,18 @@ export async function deleteEmploye(employeeId: string) {
       return history + current > 0
     },
     deleteEmployeeRecords: (id) =>
-      prisma.$transaction([
-        prisma.employeeAssignment.deleteMany({ where: { employeeId: id } }),
-        prisma.employee.delete({ where: { id } }),
-      ]),
-    deleteUser: (id) => prisma.user.delete({ where: { id } }),
+      prisma.$transaction(async tx => {
+        const member = await tx.employee.findUnique({ where: { id }, select: { userId: true, companyId: true } })
+        await tx.employeeAssignment.deleteMany({ where: { employeeId: id } })
+        await tx.employee.delete({ where: { id } })
+        if (member) {
+          // Removing the primary employee membership must not restore legacy primary access.
+          await tx.user.updateMany({ where: { id: member.userId, companyId: member.companyId, role: { not: "SUPER_ADMIN" } },
+            data: { companyId: null, role: "EMPLOYEE" } })
+        }
+      }),
+    // Keep the login identity: another membership or primary admin access can still exist.
+    deleteUser: async (_id) => undefined,
     revalidate: () => revalidatePath("/employes"),
   })
 }

@@ -570,7 +570,7 @@ model User {
 
   // Relations
   company         Company?        @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  employeeProfile Employee?       // présent pour ADMIN, TEAM_LEADER, EMPLOYEE
+  employeeProfiles Employee[]       // présent pour ADMIN, TEAM_LEADER, EMPLOYEE
   clientProfile   ClientProfile?  // présent pour CLIENT uniquement
   sentInvitations Invitation[]    @relation("InvitedBy")
   passwordResets  PasswordReset[]
@@ -594,7 +594,8 @@ model User {
 
 model Employee {
   id        String    @id @default(cuid())
-  userId    String    @unique // lien 1-to-1 vers le compte de connexion
+  userId    String    // un compte, une fiche par entreprise
+  role      Role      @default(EMPLOYEE)
   companyId String
   firstName String
   lastName  String
@@ -623,6 +624,7 @@ model Employee {
 
   @@index([companyId])
   @@index([userId])
+  @@unique([userId, companyId])
   @@map("employees")
 }
 

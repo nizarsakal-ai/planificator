@@ -121,7 +121,9 @@ describe("suppression Employee — historique véhicule", () => {
     const { readFileSync } = await import("node:fs")
     const src = readFileSync("src/lib/actions/employe.actions.ts", "utf8")
     const fn = src.slice(src.indexOf("export async function toggleEmployeActive"), src.indexOf("export async function deleteEmploye"))
-    assert.ok(fn.includes("prisma.employee.update") && fn.includes("prisma.user.update"))
+    assert.ok(fn.includes("prisma.employee.update"))
+    // Archiving one membership must preserve the global login and other companies.
+    assert.ok(!fn.includes("prisma.user.update"))
     assert.ok(!/delete|hasVehicleHistory/.test(fn))
   })
 
@@ -129,7 +131,7 @@ describe("suppression Employee — historique véhicule", () => {
     const { readFileSync } = await import("node:fs")
     const src = readFileSync("src/lib/actions/employe.actions.ts", "utf8")
     const fn = src.slice(src.indexOf("export async function deleteEmploye("))
-    assert.ok(/prisma\.\$transaction\(\[\s*prisma\.employeeAssignment\.deleteMany[\s\S]*prisma\.employee\.delete/.test(fn))
+    assert.ok(/prisma\.\$transaction\(async tx =>[\s\S]*tx\.employeeAssignment\.deleteMany[\s\S]*tx\.employee\.delete/.test(fn))
     assert.ok(fn.includes("prisma.truckAssignment.count({ where: { chauffeurId: id, companyId } })"))
     assert.ok(fn.includes("prisma.truck.count({ where: { chauffeurId: id, companyId } })"))
   })

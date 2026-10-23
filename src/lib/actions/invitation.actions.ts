@@ -6,7 +6,7 @@ import { auth } from "@/auth"
 import { sendInvitationEmail } from "@/lib/email"
 import bcrypt from "bcryptjs"
 import { inviterMembreImpl } from "@/lib/actions/invitation-invite.core"
-import { acceptInvitationImpl, type AcceptableInvitation } from "@/lib/actions/invitation-accept.core"
+import { acceptInvitationImpl, acceptSchema, type AcceptableInvitation } from "@/lib/actions/invitation-accept.core"
 
 async function requireAdmin() {
   const session = await auth()
@@ -22,17 +22,19 @@ async function requireAdmin() {
 export async function inviterMembre(formData: FormData) {
   return inviterMembreImpl(formData, {
     requireSession: requireAdmin,
-    findExistingUser: (email, companyId) =>
-      prisma.user.findFirst({
-        where: { email, companyId },
+    findExistingUser: async (email, companyId) => {
+      const account = await prisma.user.findFirst({
+        where: { email, OR: [{ companyId }, { employeeProfiles: { some: { companyId } } }] },
         select: {
           id: true,
           active: true,
           role: true,
           companyId: true,
-          employeeProfile: { select: { id: true, active: true, companyId: true } },
+          employeeProfiles: { where: { companyId }, select: { id: true, active: true, companyId: true, role: true } },
         },
-      }),
+      })
+      return account ? { ...account, companyId, role: account.employeeProfiles[0]?.role ?? account.role, employeeProfile: account.employeeProfiles[0] ?? null } : null
+    },
     // T2bis — ne supprime que les invitations en attente de CETTE entreprise.
     deletePendingInvitations: (email, companyId) =>
       prisma.invitation.deleteMany({
@@ -76,6 +78,37 @@ export async function getInvitation(token: string) {
 }
 
 export async function acceptInvitation(formData: FormData) {
+  const parsed = acceptSchema.safeParse(Object.fromEntries(formData))
+  if (!parsed.success) return { error: parsed.error.errors[0].message }
+  const invitation = await prisma.invitation.findFirst({ where: {
+    token: parsed.data.token, status: "PENDING", expiresAt: { gt: new Date() }, company: { active: true },
+  } })
+  if (!invitation) return { error: "Invitation invalide ou expirée." }
+  const existing = await prisma.user.findUnique({ where: { email: invitation.email } })
+  if (existing?.active) {
+    // An invitation never authorizes resetting an existing account's password.
+    if (existing.role === "CLIENT" || existing.role === "SUPER_ADMIN"
+      || !await bcrypt.compare(parsed.data.password, existing.password)) {
+      return { error: "Pour rattacher un compte existant, saisissez son mot de passe actuel." }
+    }
+    try {
+      await prisma.$transaction(async tx => {
+        const claimed = await tx.invitation.updateMany({
+          where: { id: invitation.id, status: "PENDING", expiresAt: { gt: new Date() } },
+          data: { status: "ACCEPTED" },
+        })
+        if (claimed.count !== 1) throw new Error("Invitation déjà utilisée")
+        const [firstName, ...rest] = parsed.data.name.split(" ")
+        await tx.employee.upsert({
+          where: { userId_companyId: { userId: existing.id, companyId: invitation.companyId } },
+          create: { userId: existing.id, companyId: invitation.companyId, role: invitation.role,
+            firstName, lastName: rest.join(" ") },
+          update: { active: true, role: invitation.role },
+        })
+      })
+      return { success: true }
+    } catch { return { error: "Invitation déjà utilisée ou rattachement impossible. Actualisez la page." } }
+  }
   return acceptInvitationImpl(formData, {
     findInvitation: async (token) => {
       const invitation = await prisma.invitation.findFirst({
@@ -83,17 +116,19 @@ export async function acceptInvitation(formData: FormData) {
       })
       return invitation as AcceptableInvitation | null
     },
-    findUserByEmail: (email) =>
-      prisma.user.findUnique({
+    findUserByEmail: async (email) => {
+      const account = await prisma.user.findUnique({
         where: { email },
         select: {
           id: true,
           active: true,
           role: true,
           companyId: true,
-          employeeProfile: { select: { id: true, active: true, companyId: true } },
+          employeeProfiles: { select: { id: true, active: true, companyId: true } },
         },
-      }),
+      })
+      return account ? { ...account, employeeProfile: account.employeeProfiles.find(p => p.companyId === account.companyId) ?? null } : null
+    },
     hashPassword: (password) => bcrypt.hash(password, 12),
     createMember: ({ invitation, name, password }) =>
       prisma.$transaction(async (tx) => {
@@ -113,6 +148,7 @@ export async function acceptInvitation(formData: FormData) {
           await tx.employee.create({
             data: {
               userId: newUser.id,
+              role: invitation.role,
               companyId: invitation.companyId,
               firstName: firstName || name,
               lastName: rest.join(" ") || "",
@@ -135,7 +171,7 @@ export async function acceptInvitation(formData: FormData) {
           })
           const e = await tx.employee.updateMany({
             where: { id: employeeId, userId, companyId, active: false },
-            data: { active: true },
+            data: { active: true, role },
           })
           if (u.count !== 1 || e.count !== 1) throw new IdentityStateChanged()
           await tx.invitation.update({ where: { id: invitationId }, data: { status: "ACCEPTED" } })
