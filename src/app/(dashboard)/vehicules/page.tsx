@@ -4,6 +4,7 @@ import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { VehiculesView } from "@/components/vehicules/VehiculesView"
 import { resolveVehiclesAccess, VEHICLE_HISTORY_LIMIT, limitHistory } from "@/lib/vehicules/vehicules-view"
+import { maintenanceSummary } from "@/lib/vehicules/maintenance-domain"
 
 export const metadata: Metadata = { title: "Véhicules" }
 
@@ -17,6 +18,13 @@ export default async function VehiculesPage() {
     prisma.truck.findMany({
       where: { companyId },
       include: {
+        maintenancePlan: { select: { intervalKm: true, intervalMonths: true } },
+        maintenanceEntries: {
+          where: { kind: "OIL_CHANGE" },
+          orderBy: [{ occurredAt: "desc" }, { mileage: "desc" }, { recordedAt: "desc" }, { id: "desc" }],
+          take: 1,
+          select: { kind: true, occurredAt: true, mileage: true, recordedAt: true },
+        },
         team: { select: { id: true, name: true, color: true } },
         chauffeur: { select: { id: true, firstName: true, lastName: true } },
         assignments: {
@@ -45,10 +53,13 @@ export default async function VehiculesPage() {
 
   return (
     <VehiculesView
+      canManageV2={session?.user?.role === "ADMIN" || session?.user?.role === "SUPER_ADMIN"}
       trucks={trucks.map((t) => {
         const { entries, truncated } = limitHistory(t.assignments)
         return {
           id: t.id,
+          currentMileage: t.currentMileage,
+          maintenanceSummary: maintenanceSummary(t.maintenancePlan, t.maintenanceEntries, t.currentMileage, new Date()),
           matricule: t.matricule,
           marque: t.marque,
           modele: t.modele,

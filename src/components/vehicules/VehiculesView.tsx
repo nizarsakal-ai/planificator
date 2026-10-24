@@ -28,6 +28,7 @@ import {
 } from "@/lib/vehicules/vehicules-view"
 
 interface Props {
+  canManageV2?: boolean
   trucks: VehicleViewItem[]
   teams: VehicleTeamOption[]
   employees: VehicleEmployeeOption[]
@@ -35,7 +36,7 @@ interface Props {
 
 type Dialog = { mode: "create" } | { mode: "edit"; id: string } | null
 
-export function VehiculesView({ trucks, teams, employees }: Props) {
+export function VehiculesView({ trucks, teams, employees, canManageV2 = false }: Props) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [dialog, setDialog] = useState<Dialog>(null)
@@ -133,7 +134,7 @@ export function VehiculesView({ trucks, teams, employees }: Props) {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Véhicules</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Gérez votre parc : identité, affectations aux équipes et aux chauffeurs, historique.
+            Gérez votre parc : affectations, kilométrage, trajets, vidanges et entretien.
           </p>
         </div>
         <Button onClick={() => setDialog({ mode: "create" })} className="bg-[#0f3460] hover:bg-[#0a2540] gap-2 shrink-0">
@@ -195,6 +196,7 @@ export function VehiculesView({ trucks, teams, employees }: Props) {
                 <VehiculeCard
                   key={t.id}
                   truck={t}
+                  canManageV2={canManageV2}
                   teams={teams}
                   employees={employees}
                   layout={view}
