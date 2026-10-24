@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { ClientForm, type EditableClient } from "@/components/clients/ClientForm"
+import { ClientLinkedPartnersPanel } from "@/components/clients/ClientLinkedPartnersPanel"
 import { deleteClient, toggleClientActive } from "@/lib/actions/client.actions"
 import { getClientMenuActions, type ClientMenuAction } from "@/lib/clients/client-actions-view"
 
@@ -56,6 +57,11 @@ export function ClientActions({ client, canDelete }: ClientActionsProps) {
   const [editOpen, setEditOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  // Refus pour partenaire(s) lié(s) : le dialogue affiche le panneau de réaffectation (recherche par id, jamais par nom).
+  const [showPartners, setShowPartners] = useState(false)
+  // Appel serveur du panneau partenaires en vol : verrouille le pied du dialogue et sa fermeture comme `pending`.
+  const [partnersBusy, setPartnersBusy] = useState(false)
+  const dialogLocked = pending || partnersBusy
   const busy = useRef(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const actions = getClientMenuActions(client.active, canDelete)
@@ -96,6 +102,7 @@ export function ClientActions({ client, canDelete }: ClientActionsProps) {
         if (result?.error) {
           // Refus métier (relations liées, client introuvable, course) : reste dans le dialogue pour être lu.
           setDeleteError(result.error)
+          if (/partenaire/.test(result.error)) setShowPartners(true)
           return
         }
         setDeleteOpen(false)
@@ -108,13 +115,18 @@ export function ClientActions({ client, canDelete }: ClientActionsProps) {
 
   const openDelete = () => {
     setDeleteError(null)
+    setShowPartners(false)
     setDeleteOpen(true)
   }
 
   const onDeleteOpenChange = (open: boolean) => {
-    if (!open && pending) return // pas de fermeture pendant l'appel serveur
+    if (!open && dialogLocked) return // pas de fermeture pendant un appel serveur (suppression ou panneau)
     setDeleteOpen(open)
-    if (!open) setDeleteError(null)
+    if (!open) {
+      setDeleteError(null)
+      setShowPartners(false)
+      setPartnersBusy(false)
+    }
   }
 
   const returnFocusToTrigger = (e: Event) => {
@@ -195,7 +207,8 @@ export function ClientActions({ client, canDelete }: ClientActionsProps) {
             <DialogHeader>
               <DialogTitle>Supprimer le client</DialogTitle>
               <DialogDescription>
-                Supprimer définitivement « {client.name} » ? Cette action est irréversible. Un client lié à des chantiers,
+                Supprimer définitivement « {client.name} »{client.email ? ` (${client.email})` : ""} — fiche …{client.id.slice(-6)} ?
+                Cette action est irréversible. Un client lié à des chantiers,
                 devis, factures, partenaires ou à un accès portail ne peut pas être supprimé : désactivez-le plutôt.
               </DialogDescription>
             </DialogHeader>
@@ -204,15 +217,25 @@ export function ClientActions({ client, canDelete }: ClientActionsProps) {
                 {deleteError}
               </p>
             )}
+            {showPartners && (
+              <ClientLinkedPartnersPanel
+                clientId={client.id}
+                disabled={pending}
+                onBusyChange={setPartnersBusy}
+                onChange={(remaining) => {
+                  if (remaining === 0) setDeleteError("Plus aucun partenaire lié : vous pouvez relancer la suppression.")
+                }}
+              />
+            )}
             <DialogFooter className="gap-2 sm:gap-0">
-              <Button type="button" variant="outline" onClick={() => onDeleteOpenChange(false)} disabled={pending}>
+              <Button type="button" variant="outline" onClick={() => onDeleteOpenChange(false)} disabled={dialogLocked}>
                 Annuler
               </Button>
               <Button
                 type="button"
                 variant="destructive"
                 onClick={handleDelete}
-                disabled={pending}
+                disabled={dialogLocked}
                 aria-busy={pending}
               >
                 {pending ? (
