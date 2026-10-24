@@ -6,8 +6,8 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { UserCheck, Mail, Phone, MapPin, FileText, HardHat } from "lucide-react"
 import { NouveauClientDialog } from "@/components/clients/NouveauClientDialog"
-import { ModifierClientDialog } from "@/components/clients/ModifierClientDialog"
 import { ClientActions } from "@/components/clients/ClientActions"
+import { canDeleteClient } from "@/lib/clients/client-actions-view"
 
 export const metadata: Metadata = { title: "Clients" }
 
@@ -27,6 +27,8 @@ export default async function ClientsPage() {
   })
 
   const actifs = clients.filter((c) => c.active).length
+  // Affichage seulement : la garde réelle est requireDeleteAdmin dans deleteClient.
+  const canDelete = canDeleteClient(session.user.role)
 
   return (
     <div className="space-y-6">
@@ -114,10 +116,12 @@ export default async function ClientsPage() {
                   )}
                 </div>
 
-                {/* Actions */}
-                <div className="border-t border-slate-100 pt-3 flex flex-wrap justify-end gap-2">
-                  <ModifierClientDialog client={{ id: client.id, name: client.name, email: client.email, phone: client.phone, address: client.address, notes: client.notes }} />
-                  <ClientActions clientId={client.id} active={client.active} />
+                {/* Actions : menu « ⋯ » Modifier / Désactiver-Réactiver / Supprimer */}
+                <div className="border-t border-slate-100 pt-3 flex justify-end">
+                  <ClientActions
+                    client={{ id: client.id, name: client.name, email: client.email, phone: client.phone, address: client.address, notes: client.notes, active: client.active }}
+                    canDelete={canDelete}
+                  />
                 </div>
               </CardContent>
             </Card>
