@@ -1,7 +1,7 @@
 /**
  * Suppression de clients — lanceur de base PostgreSQL jetable (même pratique que LOT-1W-1b, lanceur distinct).
  *
- *   node --import tsx tests/clients/pg/client-delete-run.ts <create|migrate|target [fichier]|test|seed|dev|drop>
+ *   node --import tsx tests/clients/pg/client-delete-run.ts <create|migrate|target [fichier]|test [fichier]|seed|dev|drop>
  *
  * Une seule variable : `CLIENT_DELETE_DATABASE_URL` — AUCUN repli (`DATABASE_URL` et les autres variables de
  * test sont ignorées). L'URL est validée (garde dépôt `assertSafeDisposableTestDatabaseUrl`, nom de base exact
@@ -25,6 +25,8 @@ export const DB_MARKER_PREFIX = "planificator client-delete disposable; created=
 const ENV_VAR = "CLIENT_DELETE_DATABASE_URL"
 const RUNNER_FLAG = "CLIENT_DELETE_RUNNER"
 const PG_TEST = "tests/clients/pg/client-delete.pg.test.ts"
+/** Tests PG admis pour « test [fichier] » : uniquement ce dossier, suffixe .pg.test.ts (pas de chemin libre). */
+const PG_TEST_DIR = "tests/clients/pg/"
 const SEED = "tests/clients/pg/client-delete-seed.ts"
 
 function fail(message: string, code = 2): never {
@@ -140,11 +142,15 @@ async function cmdTarget(url: string, outFile: string): Promise<void> {
   }
 }
 
-async function cmdTest(url: string): Promise<void> {
+async function cmdTest(url: string, file?: string): Promise<void> {
   await requireMarked(url)
+  const target = file ?? PG_TEST
+  if (!target.startsWith(PG_TEST_DIR) || !target.endsWith(".pg.test.ts") || target.includes("..")) {
+    fail(`fichier de test refusé : seuls ${PG_TEST_DIR}*.pg.test.ts sont admis`)
+  }
   const code = await run(
     "node",
-    ["--import", "tsx", "--experimental-test-module-mocks", "--test", PG_TEST],
+    ["--import", "tsx", "--experimental-test-module-mocks", "--test", target],
     { ...process.env, DATABASE_URL: url, [RUNNER_FLAG]: "1" }
   )
   process.exit(code)
@@ -192,11 +198,11 @@ async function main(): Promise<void> {
     case "create": return cmdCreate(url)
     case "migrate": return cmdMigrate(url)
     case "target": return cmdTarget(url, arg ?? "tests/clients/pg/pg-target.txt")
-    case "test": return cmdTest(url)
+    case "test": return cmdTest(url, arg)
     case "seed": return cmdSeed(url)
     case "dev": return cmdDev(url)
     case "drop": return cmdDrop(url)
-    default: fail("commande attendue : create | migrate | target [fichier] | test | seed | dev | drop")
+    default: fail("commande attendue : create | migrate | target [fichier] | test [fichier .pg.test.ts] | seed | dev | drop")
   }
 }
 

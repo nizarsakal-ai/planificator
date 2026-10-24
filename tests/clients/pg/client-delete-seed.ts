@@ -65,9 +65,15 @@ async function main() {
       create: { email: "portail@client-delete.local", name: "Portail Jetable", password: hash, role: "CLIENT", companyId: company.id },
     })
     await prisma.clientProfile.create({ data: { clientId: avecPortail.id, userId: portalUser.id } })
+    // Deux homonymes « HALL EXPO » : seul le premier est pointé par un partenaire d'acquisition (identité par id, jamais par nom)
+    const hallExpo1 = await prisma.client.create({ data: { name: "HALL EXPO", companyId: company.id, email: "contact@hall-expo.fictif.local", address: "Zone fictive, Brignais" } })
+    const hallExpo2 = await prisma.client.create({ data: { name: "HALL EXPO", companyId: company.id, active: false } })
+    await prisma.acquisitionPartner.create({
+      data: { companyId: company.id, name: "Hall Expo (partenaire)", code: "hall-expo", clientId: hallExpo1.id },
+    })
     await prisma.client.create({ data: { name: "Client d'une autre entreprise", companyId: other.id } })
 
-    console.log(`[client-delete-seed] entreprise ${company.slug} ; clients : ${[libre, inactif, avecChantier, avecDevis, avecPortail].map((c) => c.name).join(" | ")} ; chantier ${chantier.name}`)
+    console.log(`[client-delete-seed] entreprise ${company.slug} ; clients : ${[libre, inactif, avecChantier, avecDevis, avecPortail, hallExpo1, hallExpo2].map((c) => c.name).join(" | ")} ; chantier ${chantier.name}`)
   } finally {
     await prisma.$disconnect()
   }
