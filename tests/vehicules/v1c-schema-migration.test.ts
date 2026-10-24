@@ -35,19 +35,43 @@ describe("V1C — schéma Prisma", () => {
     }
   })
 
-  it("aucun champ hors périmètre (kilométrage, VIN, entretien…)", () => {
-    for (const name of ["odometer", "kilometrage", "mileage", "vin", "maintenance", "controleTechnique", "brand", "model"]) {
+  it("V1C n'introduit pas de kilométrage ; un lot ultérieur peut ajouter la projection et le journal", () => {
+    for (const token of ["mileage", "currentMileage", "MileageEntry", "MileageTrip", "odometer", "kilometrage"]) {
+      assert.doesNotMatch(executable, new RegExp(token, "i"), `SQL V1C: ${token}`)
+    }
+    // Le token exact `mileage` est insuffisant : currentMileage ne le contient pas comme champ entier.
+    // Identifiants qu'un lot postérieur peut poser. Tout autre kilométrage sur Truck fait échouer le test.
+    const allowedLater = [
+      "trucks_current_mileage_entry_truck_company_key",
+      "trucks_current_mileage_entry_fkey",
+      "currentMileageEntryId",
+      "currentMileageEntry",
+      "TruckMileageEntries",
+      "TruckMileageTrips",
+      "TruckCurrentMileage",
+      "mileageRevision",
+      "mileageEntries",
+      "mileageTrips",
+      "currentMileage",
+      "MileageEntry",
+      "MileageTrip",
+    ]
+    for (const line of truck.split("\n").map((value) => value.replace(/\/\/.*$/, "").trim())) {
+      if (!/mileage|odometer|kilometrage/i.test(line)) continue
+      let residual = line
+      for (const token of allowedLater) residual = residual.replaceAll(token, "")
+      assert.equal(/mileage|odometer|kilometrage/i.test(residual), false, line)
+    }
+    for (const name of ["odometer", "kilometrage", "vin", "maintenance", "controleTechnique", "brand", "model"]) {
       assert.equal(field(name), "", name)
     }
   })
 
-  it("migration V1C est la plus récente des migrations véhicules", () => {
-    // Des modules ultérieurs (ex. Tâches) peuvent ajouter des migrations plus récentes :
-    // on vérifie uniquement que V1C reste la dernière migration du périmètre véhicules.
-    const names = readdirSync("prisma/migrations")
-      .filter((n) => /^\d{14}_/.test(n) && n.includes("vehicles"))
-      .sort()
-    assert.equal(names[names.length - 1], MIGRATION_NAME)
+  it("migration V1C présente et postérieure à V1B-db", () => {
+    // V1C suit immédiatement V1B-db : les migrations ultérieures (Tâches, V2…) ne s'intercalent pas.
+    const names = readdirSync("prisma/migrations").filter((n) => /^\d{14}_/.test(n)).sort()
+    assert.ok(names.includes(MIGRATION_NAME))
+    assert.equal(names[names.indexOf(MIGRATION_NAME) - 1], "20261006180000_vehicles_v1b_db_integrity")
   })
 })
 

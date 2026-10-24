@@ -109,6 +109,15 @@ export interface VehicleDriverRef {
 }
 
 export interface VehicleViewItem {
+  currentMileage?: number | null
+  maintenanceSummary?: {
+    status: string
+    lastOilChange: { occurredAt: string; mileage: number } | null
+    nextMileage: number | null
+    nextDate: string | null
+    remainingKm: number | null
+    remainingDays: number | null
+  }
   id: string
   matricule: string
   marque: string | null

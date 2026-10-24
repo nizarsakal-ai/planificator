@@ -13,12 +13,12 @@
  *   - nouvelles affectations refusées vers une équipe archivée, un chauffeur inactif ou un véhicule archivé ;
  *     les relations existantes (legacy) ne sont jamais réécrites.
  */
-import type { Prisma, PrismaClient, TruckAssignmentReason } from "@prisma/client"
+import { Prisma, type PrismaClient, type Truck, type TruckAssignmentReason } from "@prisma/client"
 import { z } from "zod"
 
 // ─── Dépendances ─────────────────────────────────────────────────────────────
 
-export type TrucksDb = Pick<PrismaClient, "truck" | "team" | "employee" | "truckAssignment" | "$transaction">
+export type TrucksDb = Pick<PrismaClient, "truck" | "team" | "employee" | "truckAssignment" | "mileageTrip" | "$transaction">
 
 export interface TrucksSession {
   user?: { id?: string | null; role?: string | null; companyId?: string | null } | null
@@ -53,6 +53,7 @@ export type TrucksErrorCode =
   | "TEAM_CONFLICT"
   | "TRUCK_ARCHIVED"
   | "TRUCK_ARCHIVED_EXISTS"
+  | "TRUCK_HAS_OPEN_TRIP"
   | "TEAM_INACTIVE"
   | "DRIVER_INACTIVE"
   | "PERIOD_CONFLICT"
@@ -75,6 +76,7 @@ const ERRORS: Record<TrucksErrorCode, { status: number; message: string }> = {
     status: 409,
     message: "Ce véhicule existe déjà et est archivé : restaurez-le depuis la page Véhicules",
   },
+  TRUCK_HAS_OPEN_TRIP: { status: 409, message: "Trajet en cours : terminez-le avant d'archiver le véhicule" },
   TEAM_INACTIVE: { status: 409, message: "Équipe archivée : affectation impossible" },
   DRIVER_INACTIVE: { status: 409, message: "Chauffeur inactif : affectation impossible" },
   PERIOD_CONFLICT: { status: 409, message: "Modification concurrente de l'historique du véhicule, réessayez" },
@@ -116,10 +118,10 @@ export function classifyVanishedReference(err: unknown): "TRUCK_NOT_FOUND" | "TE
 }
 
 /**
- * Violation de la CHECK chronologique (V1B-db : endedAt >= startedAt), reconnue uniquement par le nom de la
- * contrainte dans l'erreur Prisma (P2004) ou PostgreSQL (23514). Toute autre erreur reste inchangée (500).
+ * Contraintes connues : chronologie V1B et interdiction V2 d'archiver un véhicule avec trajet ouvert.
+ * Seuls leurs noms dans une erreur de contrainte Prisma/PostgreSQL sont reconnus ; sinon 500.
  */
-export function classifyCheckViolation(err: unknown): "PERIOD_CONFLICT" | null {
+export function classifyCheckViolation(err: unknown): "PERIOD_CONFLICT" | "TRUCK_HAS_OPEN_TRIP" | null {
   if (!err || typeof err !== "object") return null
   const { code, message, meta } = err as {
     code?: unknown
@@ -133,7 +135,9 @@ export function classifyCheckViolation(err: unknown): "PERIOD_CONFLICT" | null {
   const texts = [message, meta?.database_error, meta?.message, meta?.constraint].filter(
     (v): v is string => typeof v === "string"
   )
-  return texts.some((t) => t.includes("truck_assignments_v1b_chronology_check")) ? "PERIOD_CONFLICT" : null
+  if (texts.some((t) => t.includes("truck_assignments_v1b_chronology_check"))) return "PERIOD_CONFLICT"
+  if (texts.some((t) => t.includes("trucks_v2_no_open_mileage_trip_check"))) return "TRUCK_HAS_OPEN_TRIP"
+  return null
 }
 
 function errorDetails(err: unknown): Record<string, string | undefined> {
@@ -324,6 +328,30 @@ function handleFailure(deps: TrucksApiDeps, context: string, err: unknown): Resp
   return trucksError("SERVER_ERROR")
 }
 
+// ─── DTO historique : ne jamais exposer les colonnes kilométriques V2 ────────
+
+type LegacyTruckDto = Pick<Truck,
+  "id" | "matricule" | "marque" | "modele" | "companyId" | "teamId" | "chauffeurId" |
+  "active" | "archivedAt" | "createdAt" | "updatedAt"
+>
+
+/** Liste explicite : les droits historiques de ces routes n'autorisent pas la lecture V2. */
+function toLegacyTruckDto(truck: LegacyTruckDto): LegacyTruckDto {
+  return {
+    id: truck.id,
+    matricule: truck.matricule,
+    marque: truck.marque,
+    modele: truck.modele,
+    companyId: truck.companyId,
+    teamId: truck.teamId,
+    chauffeurId: truck.chauffeurId,
+    active: truck.active,
+    archivedAt: truck.archivedAt,
+    createdAt: truck.createdAt,
+    updatedAt: truck.updatedAt,
+  }
+}
+
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 export async function handleTrucksGet(deps: TrucksApiDeps): Promise<Response> {
@@ -334,7 +362,7 @@ export async function handleTrucksGet(deps: TrucksApiDeps): Promise<Response> {
       where: { companyId: access.companyId },
       orderBy: { matricule: "asc" },
     })
-    return Response.json(trucks)
+    return Response.json(trucks.map(toLegacyTruckDto))
   } catch (err) {
     return handleFailure(deps, "GET failed", err)
   }
@@ -369,7 +397,7 @@ export async function handleTrucksPost(req: Request, deps: TrucksApiDeps): Promi
       })
       return created
     })
-    return Response.json(truck)
+    return Response.json(toLegacyTruckDto(truck))
   } catch (err) {
     if (classifyUniqueConflict(err) === "MATRICULE_CONFLICT") {
       try {
@@ -484,7 +512,7 @@ export async function handleTruckPatch(req: Request, id: string, deps: TrucksApi
 
       return updated
     })
-    return Response.json(truck)
+    return Response.json(toLegacyTruckDto(truck))
   } catch (err) {
     return handleFailure(deps, "PATCH failed", err)
   }
@@ -506,6 +534,13 @@ export async function handleTruckArchive(id: string, deps: TrucksApiDeps): Promi
       if (!existing) throw new TrucksApiError("TRUCK_NOT_FOUND")
       if (!existing.active) return { truck: existing, changed: false }
 
+      // Même verrou parent que les commandes kilométriques : aucun départ ne peut s'intercaler.
+      const openTrip = await tx.mileageTrip.findFirst({
+        where: { truckId: id, companyId, endEntryId: null },
+        select: { id: true },
+      })
+      if (openTrip) throw new TrucksApiError("TRUCK_HAS_OPEN_TRIP")
+
       const now = new Date()
       await rotatePeriod(tx, { truckId: id, companyId, teamId: null, chauffeurId: null, reason: "ARCHIVED", now })
       const truck = await tx.truck.update({
@@ -513,8 +548,8 @@ export async function handleTruckArchive(id: string, deps: TrucksApiDeps): Promi
         data: { teamId: null, chauffeurId: null, active: false, archivedAt: now },
       })
       return { truck, changed: true }
-    })
-    return Response.json({ ok: true, archived: true, alreadyArchived: !result.changed, truck: result.truck })
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted })
+    return Response.json({ ok: true, archived: true, alreadyArchived: !result.changed, truck: toLegacyTruckDto(result.truck) })
   } catch (err) {
     return handleFailure(deps, "ARCHIVE failed", err)
   }
@@ -538,7 +573,7 @@ export async function handleTruckRestore(id: string, deps: TrucksApiDeps): Promi
       const truck = await tx.truck.update({ where: { id }, data: { active: true, archivedAt: null } })
       return { truck, changed: true }
     })
-    return Response.json({ ok: true, restored: true, alreadyActive: !result.changed, truck: result.truck })
+    return Response.json({ ok: true, restored: true, alreadyActive: !result.changed, truck: toLegacyTruckDto(result.truck) })
   } catch (err) {
     return handleFailure(deps, "RESTORE failed", err)
   }

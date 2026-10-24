@@ -7,7 +7,18 @@ const withPWA = withPWAInit({
   aggressiveFrontEndNavCaching: true,
   reloadOnOnline: true,
   disable: process.env.NODE_ENV === "development",
+  extendDefaultRuntimeCaching: true,
   workboxOptions: {
+    // Données de parc authentifiées : jamais de repli sur la réponse d'une autre session.
+    // Cette règle précède les caches génériques API / pages de next-pwa.
+    runtimeCaching: [{
+      urlPattern: ({ url, sameOrigin }) => sameOrigin && (
+        url.pathname === "/vehicules" || url.pathname.startsWith("/vehicules/")
+        || url.pathname === "/api/trucks" || url.pathname.startsWith("/api/trucks/")
+      ),
+      handler: "NetworkOnly",
+      method: "GET",
+    }],
     disableDevLogs: true,
     // Le nouveau service worker s'active dès qu'il est installé…
     skipWaiting: true,

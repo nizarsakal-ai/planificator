@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/vehicules/**/*.ts", "tests/vehicules/**/*.tsx"],
+  "exclude": ["node_modules"]
+}
