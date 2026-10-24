@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
 import { sendInvitationEmail } from "@/lib/email"
 import bcrypt from "bcryptjs"
-import { inviterMembreImpl } from "@/lib/actions/invitation-invite.core"
+import { IDENTITY_AMBIGUOUS, inviterMembreImpl } from "@/lib/actions/invitation-invite.core"
 import { acceptInvitationImpl, acceptSchema, type AcceptableInvitation } from "@/lib/actions/invitation-accept.core"
 
 async function requireAdmin() {
@@ -13,7 +13,8 @@ async function requireAdmin() {
   if (!session?.user) throw new Error("Non authentifié")
   if (!["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role))
     throw new Error("Accès refusé")
-  if (!session.user.companyId) throw new Error("Entreprise introuvable")
+  // Le SUPER_ADMIN peut ne porter aucune entreprise : le cœur exige alors une cible explicite.
+  if (!session.user.companyId && session.user.role !== "SUPER_ADMIN") throw new Error("Entreprise introuvable")
   return session.user
 }
 
@@ -22,18 +23,53 @@ async function requireAdmin() {
 export async function inviterMembre(formData: FormData) {
   return inviterMembreImpl(formData, {
     requireSession: requireAdmin,
+    // Supervision (SUPER_ADMIN) : entreprise cible par id, existence et activité vérifiées côté serveur.
+    findTargetCompany: (companyId) =>
+      prisma.company.findUnique({ where: { id: companyId }, select: { id: true, name: true, active: true } }),
+    // Une seule transaction : purge des invitations en attente de la cible, création, journal INVITED.
+    // Le jeton n'est jamais journalisé.
+    createSupervisedInvitation: ({ email, role, companyId, invitedById, token, expiresAt }) =>
+      prisma.$transaction(async (tx) => {
+        await tx.invitation.deleteMany({
+          where: { email: { equals: email, mode: "insensitive" }, companyId, status: "PENDING" },
+        })
+        const invitation = await tx.invitation.create({
+          data: { email, role, companyId, invitedById, token, expiresAt, status: "PENDING" },
+          select: { id: true },
+        })
+        await tx.historyLog.create({
+          data: {
+            companyId,
+            actorId: invitedById,
+            action: "INVITED",
+            entityType: "Invitation",
+            entityId: invitation.id,
+            detail: `Invitation ${role} adressée à ${email} par la supervision (SUPER_ADMIN)`,
+          },
+        })
+        return invitation
+      }),
+    // Recherche d'identité insensible à la casse et déterministe : plusieurs lignes, ou une ligne d'une autre
+    // casse que l'adresse normalisée, ⇒ ambiguïté refusée (jamais de sélection arbitraire).
     findExistingUser: async (email, companyId) => {
-      const account = await prisma.user.findFirst({
-        where: { email, OR: [{ companyId }, { employeeProfiles: { some: { companyId } } }] },
+      const accounts = await prisma.user.findMany({
+        where: { email: { equals: email, mode: "insensitive" } },
         select: {
           id: true,
+          email: true,
           active: true,
           role: true,
           companyId: true,
           employeeProfiles: { where: { companyId }, select: { id: true, active: true, companyId: true, role: true } },
         },
       })
-      return account ? { ...account, companyId, role: account.employeeProfiles[0]?.role ?? account.role, employeeProfile: account.employeeProfiles[0] ?? null } : null
+      if (accounts.length > 1) return IDENTITY_AMBIGUOUS
+      const account = accounts[0]
+      if (!account) return null
+      if (account.email !== email) return IDENTITY_AMBIGUOUS
+      // Identité d'une autre entreprise : comportement historique (rattachement à l'acceptation).
+      if (account.companyId !== companyId && account.employeeProfiles.length === 0) return null
+      return { ...account, companyId, role: account.employeeProfiles[0]?.role ?? account.role, employeeProfile: account.employeeProfiles[0] ?? null }
     },
     // T2bis — ne supprime que les invitations en attente de CETTE entreprise.
     deletePendingInvitations: (email, companyId) =>
