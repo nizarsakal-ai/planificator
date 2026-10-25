@@ -7,6 +7,7 @@ import { PrismaClient, Prisma } from "@prisma/client"
 import { AccountingError, createDraftEntry, postEntry, reverseEntry, verifyChain, type AccountingContext } from "@/lib/accounting/engine/posting"
 import { ensureBaseReferential } from "@/lib/accounting/engine/setup"
 import { advanceFiscalYear, openFiscalYear } from "@/lib/accounting/engine/fiscal-years"
+import { runAccountingTransaction } from "@/lib/accounting/engine/transaction"
 import { trialBalance, generalLedger } from "@/lib/accounting/engine/reads"
 import { flushDeferredConstraints } from "@/lib/deferred-constraints"
 
@@ -261,6 +262,45 @@ describe("Révocation", () => {
     assert.ok(r.number > 0)
     await db.user.update({ where: { id: "admB" }, data: { active: true } })
   })
+  // Compte ADMIN historique sans fiche : l'ajout ou le rattachement d'une fiche retire le repli ADMIN.
+  const draftB = (label: string) => db.$transaction((tx) => createDraftEntry(tx, B, { journalId: ids["coB:VT"], fiscalYearId: ids["coB:FY"], entryDate: D("2026-03-09"), label,
+    lines: [{ accountId: ids["coB:411"], debitCents: c(4), creditCents: c(0) }, { accountId: ids["coB:706"], debitCents: c(0), creditCents: c(4) }] }))
+  async function membershipWaitsForPosting(mutation: () => Promise<unknown>) {
+    const d = await draftB("Fiche concurrente")
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    let posted!: () => void
+    const isPosted = new Promise<void>((r) => { posted = r })
+    const poster = db.$transaction(async (tx) => { const r = await postEntry(tx, B, d.id); posted(); await gate; return r })
+    await isPosted
+    let done = false
+    const m = mutation().then(() => { done = true })
+    await sleep(400)
+    assert.equal(done, false, "la mutation d'appartenance doit attendre la fin de la validation")
+    release()
+    assert.ok((await poster).number > 0)
+    await m
+    await assert.rejects(db.$transaction(async (tx) => postEntry(tx, B, (await draftB("Après fiche")).id)), (e: unknown) => e instanceof AccountingError && e.code === "ACCESS_REVOKED")
+    await db.employee.deleteMany({ where: { userId: "admB", companyId: "coB" } })
+    assert.ok((await db.$transaction(async (tx) => postEntry(tx, B, (await draftB("Repli rétabli")).id))).number > 0)
+  }
+  it("création concurrente d'une fiche EMPLOYEE active : attend la validation, puis l'accès est refusé", async () => {
+    await membershipWaitsForPosting(() => db.employee.create({ data: { userId: "admB", companyId: "coB", role: "EMPLOYEE", firstName: "F", lastName: "L" } }))
+  })
+  it("création concurrente d'une fiche inactive : attend la validation, puis l'accès est refusé", async () => {
+    await membershipWaitsForPosting(() => db.employee.create({ data: { userId: "admB", companyId: "coB", role: "ADMIN", active: false, firstName: "F", lastName: "L" } }))
+  })
+  it("rattachement concurrent d'une fiche existante (UPDATE userId) : attend la validation, puis l'accès est refusé", async () => {
+    await db.$executeRawUnsafe(`INSERT INTO users(id,email,password,role,"companyId","updatedAt") VALUES ('tmpU','t@x','x','EMPLOYEE','coB',now())`)
+    const f = await db.employee.create({ data: { userId: "tmpU", companyId: "coB", role: "EMPLOYEE", firstName: "T", lastName: "U" } })
+    await membershipWaitsForPosting(() => db.employee.update({ where: { id: f.id }, data: { userId: "admB" } }))
+  })
+  it("fiche ajoutée et validée AVANT la validation : vue, accès refusé", async () => {
+    const d = await draftB("Fiche avant")
+    await db.employee.create({ data: { userId: "admB", companyId: "coB", role: "EMPLOYEE", firstName: "F", lastName: "L" } })
+    await assert.rejects(db.$transaction((tx) => postEntry(tx, B, d.id)), (e: unknown) => e instanceof AccountingError && e.code === "ACCESS_REVOKED")
+    await db.employee.deleteMany({ where: { userId: "admB", companyId: "coB" } })
+  })
 })
 
 describe("Frontière de privilèges (rôle applicatif non propriétaire, indicateur forgé)", () => {
@@ -268,6 +308,11 @@ describe("Frontière de privilèges (rôle applicatif non propriétaire, indicat
     await db.$executeRawUnsafe(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'acc_app') THEN CREATE ROLE acc_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE; END IF; END $$`)
     await db.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO acc_app`)
     await db.$executeRawUnsafe(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO acc_app`)
+  })
+  it("fonctions SECURITY DEFINER non exécutables par défaut (EXECUTE retiré à PUBLIC)", async () => {
+    const msg = await forged("acc_app", (tx) => tx.$queryRaw`SELECT * FROM accounting_post_entry('coA', 'x', 'admA')`)
+    assert.match(msg, /permission denied for function accounting_post_entry/)
+    await db.$executeRawUnsafe(`GRANT EXECUTE ON FUNCTION accounting_post_entry(text, text, text), accounting_advance_fiscal_year(text, text, text, text) TO acc_app`)
   })
   const draft = (label: string, date: string) => db.$transaction((tx) => createDraftEntry(tx, A, { journalId: ids["coA:VT"], fiscalYearId: ids["coA:FY"], entryDate: D(date), label,
     lines: [{ accountId: ids["coA:411"], debitCents: c(8), creditCents: c(0) }, { accountId: ids["coA:706"], debitCents: c(0), creditCents: c(8) }] }))
@@ -336,6 +381,22 @@ describe("Plusieurs écritures et journaux dans une même transaction, en concur
     })))
     for (const j of ["coA:VT", "coA:OD"]) {
       const v = await db.$transaction((tx) => verifyChain(tx, A, ids[j]))
+      assert.equal(v.ok, true, JSON.stringify(v))
+    }
+  })
+})
+
+describe("Transactions multi-sociétés en ordres opposés (interblocage possible) avec reprise bornée", () => {
+  it("6 transactions A→B / B→A : toutes aboutissent via runAccountingTransaction, chaînes intactes", async () => {
+    const post = (tx: TxC, ctx: AccountingContext, amount: number) => createDraftEntry(tx, ctx, { journalId: ids[`${ctx.companyId}:OD`], fiscalYearId: ids[`${ctx.companyId}:FY`],
+      entryDate: D("2026-07-03"), label: "Croisé",
+      lines: [{ accountId: ids[`${ctx.companyId}:411`], debitCents: c(amount), creditCents: c(0) }, { accountId: ids[`${ctx.companyId}:706`], debitCents: c(0), creditCents: c(amount) }] }).then((d) => postEntry(tx, ctx, d.id))
+    const results = await Promise.allSettled([0, 1, 2, 3, 4, 5].map((i) => runAccountingTransaction(db, async (tx) => {
+      for (const ctx of i % 2 ? [A, B] : [B, A]) { await post(tx, ctx, 20 + i); await sleep(20) }
+    }, { maxAttempts: 8, timeoutMs: 60000, maxWaitMs: 60000 })))
+    assert.deepEqual(results.map((r) => r.status), Array(6).fill("fulfilled"), JSON.stringify(results.filter((r) => r.status === "rejected").map((r) => String((r as PromiseRejectedResult).reason).slice(0, 200))))
+    for (const [ctx, j] of [[A, "coA:OD"], [B, "coB:OD"]] as const) {
+      const v = await db.$transaction((tx) => verifyChain(tx, ctx, ids[j]))
       assert.equal(v.ok, true, JSON.stringify(v))
     }
   })

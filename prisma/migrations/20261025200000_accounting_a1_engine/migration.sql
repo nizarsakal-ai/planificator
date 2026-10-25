@@ -614,3 +614,8 @@ BEGIN
   EXECUTE format('ALTER FUNCTION accounting_post_entry(text, text, text) SET search_path = %I, pg_temp', current_schema());
   EXECUTE format('ALTER FUNCTION accounting_advance_fiscal_year(text, text, text, text) SET search_path = %I, pg_temp', current_schema());
 END $$;
+
+-- Points d'entrée non exposés par défaut : seul le propriétaire peut les exécuter. Le rôle applicatif
+-- (non propriétaire) reçoit EXECUTE au déploiement : GRANT EXECUTE ON FUNCTION … TO <rôle applicatif>.
+REVOKE EXECUTE ON FUNCTION accounting_post_entry(text, text, text) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION accounting_advance_fiscal_year(text, text, text, text) FROM PUBLIC;

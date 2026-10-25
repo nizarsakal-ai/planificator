@@ -99,3 +99,27 @@ describe("flushDeferredConstraints (garde d'identifiant)", () => {
     assert.equal(sql.length, 3)
   })
 })
+
+describe("runAccountingTransaction / erreurs transitoires", () => {
+  it("rejoue uniquement 40P01/40001/P2034, jamais une erreur métier ; borne le nombre d'essais", async () => {
+    const { isTransientConcurrencyError, runAccountingTransaction } = await import("@/lib/accounting/engine/transaction")
+    const { AccountingError } = await import("@/lib/accounting/engine/posting")
+    assert.equal(isTransientConcurrencyError(new Error("ERROR: deadlock detected (40P01)")), true)
+    assert.equal(isTransientConcurrencyError({ code: "P2034", message: "Transaction failed due to a write conflict or a deadlock" }), true)
+    assert.equal(isTransientConcurrencyError(new AccountingError("SOURCE_CONFLICT")), false)
+    assert.equal(isTransientConcurrencyError(new Error("ENTRY_UNBALANCED")), false)
+    let calls = 0
+    const fake = { $transaction: async (fn: (tx: unknown) => Promise<unknown>) => { calls++; if (calls < 3) throw new Error("deadlock detected"); return fn({}) } }
+    const r = await runAccountingTransaction(fake as never, async () => "ok")
+    assert.equal(r, "ok")
+    assert.equal(calls, 3)
+    calls = 0
+    const always = { $transaction: async () => { calls++; throw new Error("deadlock detected") } }
+    await assert.rejects(runAccountingTransaction(always as never, async () => "x", { maxAttempts: 2 }), /deadlock/)
+    assert.equal(calls, 2)
+    calls = 0
+    const business = { $transaction: async () => { calls++; throw new AccountingError("SOURCE_CONFLICT") } }
+    await assert.rejects(runAccountingTransaction(business as never, async () => "x"), (e: unknown) => e instanceof AccountingError)
+    assert.equal(calls, 1)
+  })
+})

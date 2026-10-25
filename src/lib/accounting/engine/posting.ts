@@ -21,15 +21,18 @@ export class AccountingError extends Error {
 type Tx = Prisma.TransactionClient
 
 /**
- * Protection contre une révocation concurrente. Les lignes d'autorité (utilisateur, ses fiches salarié,
- * sociétés concernées) sont verrouillées FOR SHARE jusqu'à la fin de la transaction, PUIS relues :
- * - une révocation validée avant le verrou est vue (READ COMMITTED relit la dernière version) ;
- * - une révocation lancée après attend la fin de l'opération comptable (sérialisation).
+ * Protection contre une révocation concurrente, verrous gardés jusqu'à la fin de la transaction PUIS relecture :
+ * - utilisateur FOR UPDATE : incompatible avec le FOR KEY SHARE que prend toute création ou tout rattachement
+ *   (INSERT / UPDATE de userId) de fiche salarié le référençant — une fiche ajoutée retire le repli « ADMIN
+ *   historique » de resolveCompanyAccess ; elle attend donc la fin de l'opération comptable, ou est vue ;
+ * - fiches existantes et sociétés concernées FOR SHARE : leurs UPDATE/DELETE attendent également ;
+ * - une révocation validée avant les verrous est vue (READ COMMITTED relit la dernière version).
  * Même règle que la session (resolveCompanyAccess), sans repli silencieux vers une autre société.
  * Ordre des verrous : users → employees → companies → (exercice → écriture → compteur → tête).
+ * Conséquence assumée : les opérations comptables d'un même utilisateur sont sérialisées.
  */
 export async function assertStillAccountingAdmin(tx: Tx, ctx: AccountingContext): Promise<void> {
-  await tx.$queryRaw`SELECT 1 FROM "users" WHERE "id" = ${ctx.userId} FOR SHARE`
+  await tx.$queryRaw`SELECT 1 FROM "users" WHERE "id" = ${ctx.userId} FOR UPDATE`
   await tx.$queryRaw`SELECT 1 FROM "employees" WHERE "userId" = ${ctx.userId} ORDER BY "id" FOR SHARE`
   const read = () => tx.user.findUnique({
     where: { id: ctx.userId },

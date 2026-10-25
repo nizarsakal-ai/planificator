@@ -109,7 +109,8 @@ describe("flag — jamais exposé au navigateur", () => {
 
 describe("A1 — périmètre du moteur comptable (aucun branchement facture, aucune écriture hors service)", () => {
   const A1_MIGRATION = "20261025200000_accounting_a1_engine"
-  const ENGINE_WRITERS = ["src/lib/accounting/engine/fiscal-years.ts", "src/lib/accounting/engine/posting.ts", "src/lib/accounting/engine/setup.ts"]
+  // transaction.ts n'écrit rien lui-même : il ouvre la transaction ($transaction) du moteur.
+  const ENGINE_WRITERS = ["src/lib/accounting/engine/fiscal-years.ts", "src/lib/accounting/engine/posting.ts", "src/lib/accounting/engine/setup.ts", "src/lib/accounting/engine/transaction.ts"]
 
   it("schema.prisma : exactement les modèles et enums comptables d'A1", () => {
     const schema = read("prisma/schema.prisma")
@@ -157,6 +158,7 @@ describe("A1 — périmètre du moteur comptable (aucun branchement facture, auc
       "src/lib/accounting/engine/posting.ts",
       "src/lib/accounting/engine/reads.ts",
       "src/lib/accounting/engine/setup.ts",
+      "src/lib/accounting/engine/transaction.ts",
       "src/lib/accounting/engine/validate.ts",
     ])
   })
