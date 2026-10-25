@@ -30,7 +30,7 @@ Aucune restauration Neon, aucun échange de branches et aucune réécriture des 
 | Vérification | Résultat |
 | --- | --- |
 | PostgreSQL local | 21/21 réussies |
-| Recontrôle Neon isolé | 9/9 réussies |
+| Recontrôle Neon isolé | 4 scénarios ciblés réussis ; 9 entrées TAP, dont 5 fichiers sans scénario correspondant au filtre |
 | Tests V3 | 144 réussis |
 | Tests de pages V3 | 9 réussis |
 | Tests V1 | 219 réussis |
@@ -61,6 +61,14 @@ Le contexte AI Team consulté à **10:59 UTC** indique un contrôleur actuelleme
 
 ## État de publication
 
-**La préproduction est prête et vérifiée. La publication en production reste à effectuer au moment de la rédaction de ce bilan.**
+Publication effectuée : **dpl_4hyzjRwMBSuyrGQNGmpbhxuxC69F**, état **READY**, domaine **https://www.galyaevents.fr** relié au nouveau déploiement. Code applicatif **3609f872d437cc0e3dcad29338d0198ff15af7e9**. Le candidat de production contient les mêmes 583 fichiers `src/` que le candidat final de préproduction testé.
 
-Le responsable de publication doit compléter cette section avec l’identifiant du déploiement de production, l’application de la migration 63 et les résultats des contrôles après publication. La disponibilité de la préproduction ne doit pas être présentée comme une activation en production.
+Migration additive 63 appliquée sur la branche de production d’origine. Les 63 empreintes de migrations correspondent aux fichiers attendus ; aucune migration incomplète, aucun index ni contrainte invalide. Aucun rétablissement ou échange de branche. LSN avant `0/391CE418`, après `0/391D48A8`. Rétention PITR de 21600 secondes vérifiée, sauvegardes existantes conservées ; aucun nouvel instantané créé, quota déjà atteint.
+
+Contrôle authentifié en production : bouton « Modifier » visible sur le contrôle technique FL-129-AM existant ; ouverture du formulaire avec dates, centre, numéro de procès-verbal, observations et « Valider les modifications ». Fermeture par « Annuler », sans changer les données de ce document. Six contrôles HTTP après publication réussis, dont quatre refus d’accès privés 401 et une origine étrangère 403. Aucun groupe de journal error/fatal/warning retourné pour ce déploiement dans la fenêtre contrôlée.
+
+Essais supplémentaires dans le candidat final : correction du nom d’une tournée terminée, distance réelle de 23 km et étapes conservées ; copie puis modification et validation explicite d’un import déjà approuvé, source d’origine conservée ; annulation d’un brouillon documentaire sans changement de la version enregistrée.
+
+Les deux premiers échecs du passage Neon complet provenaient d’assertions de recette (Buffer/Uint8Array et préparation de kilométrage hors projection), puis l’assertion de message d’immutabilité a été alignée sur le message SQL français. Les journaux initiaux sont conservés. Le passage local final comporte 21 tests réussis ; le recontrôle Neon final comporte 4 scénarios métier ciblés réussis (9 entrées TAP, dont 5 fichiers sans scénario correspondant au filtre) et complète les scénarios antérieurs réussis. Ce bilan ne transforme pas le premier passage Neon en succès intégral.
+
+Livrable local : `outputs/planificator-v3-modification-livraison-20261025.zip` dans l’espace de reprise. Les tests, preuves de migration, rapport et capture du formulaire synthétique sont inclus. Aucun secret ni fichier d’environnement dans l’archive du code.
