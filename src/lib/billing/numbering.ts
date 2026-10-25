@@ -8,12 +8,14 @@
 
 import type { Prisma } from "@prisma/client"
 
-export type DocumentType = "QUOTE" | "INVOICE" | "CREDIT_NOTE"
+// Lot C : INVOICE_DRAFT = numéro PROVISOIRE d'un brouillon de facture (le numéro légal FAC est attribué à l'émission).
+export type DocumentType = "QUOTE" | "INVOICE" | "CREDIT_NOTE" | "INVOICE_DRAFT"
 
 const PREFIX: Record<DocumentType, string> = {
   QUOTE:   "DEV",
   INVOICE: "FAC",
   CREDIT_NOTE: "AV",
+  INVOICE_DRAFT: "PROV",
 }
 
 /**

@@ -5,6 +5,7 @@ import { Navbar } from "@/components/layout/Navbar"
 import { InstallPrompt } from "@/components/pwa/InstallPrompt"
 import { isAccountingModuleEnabled } from "@/lib/accounting/accounting-feature-flag"
 import { isAccountingNavVisible } from "@/lib/accounting/access/accounting-access.core"
+import { isBillingCompleteEnabled } from "@/lib/billing/billing-feature-flag"
 import type { Role } from "@prisma/client"
 
 export default async function DashboardLayout({
@@ -28,7 +29,9 @@ export default async function DashboardLayout({
     role,
     companyId,
   })
-  const user = { ...session.user, role, companyId, accountingNavVisible }
+  // Lien « Devis » (Lot C) : drapeau serveur + rôle ADMIN/SUPER_ADMIN + société ; affichage seulement.
+  const billingNavVisible = isBillingCompleteEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
+  const user = { ...session.user, role, companyId, accountingNavVisible, billingNavVisible }
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">

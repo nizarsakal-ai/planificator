@@ -52,7 +52,11 @@ export const LIFECYCLE_ERRORS = {
   notDraft: "Seule une facture brouillon peut être modifiée.",
   notCreditable: "Seule une facture émise (envoyée ou payée) peut faire l'objet d'un avoir.",
   alreadyCredited: "Cette facture a déjà un avoir.",
+  provisionalNumber: "Cette facture porte un numéro provisoire : émettez-la depuis sa fiche (numéro légal attribué à l'émission).",
 } as const
+
+/** Lot C : brouillon à numéro provisoire (créé par la facturation complète) — jamais émis par ce chemin. */
+export const PROVISIONAL_NUMBER_PREFIX = "PROV-"
 
 export interface TransitionInput {
   companyId: string
@@ -75,6 +79,7 @@ export async function transitionInvoiceCore(
   const from = invoice.status
   if (input.to === "CANCELLED" && from !== "DRAFT") return { ok: false, error: LIFECYCLE_ERRORS.cancelIssued }
   if (!canTransition(from, input.to)) return { ok: false, error: LIFECYCLE_ERRORS.forbidden }
+  if (input.to === "SENT" && invoice.number.startsWith(PROVISIONAL_NUMBER_PREFIX)) return { ok: false, error: LIFECYCLE_ERRORS.provisionalNumber }
 
   const updated = await tx.invoice.updateMany({
     where: { id: invoice.id, companyId: input.companyId, status: from, kind: "INVOICE" },
@@ -182,9 +187,11 @@ export async function createCreditNoteCore(
     select: {
       id: true, status: true, kind: true, number: true, worksiteId: true, clientId: true, quoteId: true,
       periodStart: true, periodEnd: true, totalHT: true, totalVAT: true, totalTTC: true, paymentTerms: true,
+      globalDiscountBp: true, vatReverseCharge: true,
       lines: {
         orderBy: { position: "asc" },
-        select: { articleId: true, designation: true, unit: true, quantity: true, unitPrice: true, vatRate: true, lineHT: true, position: true },
+        // Lot C1 : description et remise de ligne font partie de la copie exacte.
+        select: { articleId: true, designation: true, description: true, unit: true, quantity: true, unitPrice: true, vatRate: true, lineHT: true, position: true, discountBp: true },
       },
     },
   })
@@ -221,6 +228,8 @@ export async function createCreditNoteCore(
       totalHT: original.totalHT,
       totalVAT: original.totalVAT,
       totalTTC: original.totalTTC,
+      globalDiscountBp: original.globalDiscountBp ?? 0,
+      vatReverseCharge: original.vatReverseCharge ?? false,
       paymentTerms: original.paymentTerms,
       notes: `Avoir total sur la facture ${original.number}${input.reason ? ` — ${input.reason}` : ""}`,
       createdById: input.actorId,

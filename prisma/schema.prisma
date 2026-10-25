@@ -142,6 +142,7 @@ enum QuoteStatus {
   ACCEPTED  // Accepté par le client
   REFUSED   // Refusé
   EXPIRED   // Expiré (au-delà de validUntil)
+  CONVERTED // Converti en facture (Lot C1)
 }
 
 enum InvoiceStatus {
@@ -364,6 +365,8 @@ model Company {
   accountingSequences     AccountingSequence[]
   accountingChainHeads    AccountingChainHead[]
   documentCounters        DocumentCounter[]
+  billingSettings         BillingSettings?
+  billingMailLogs         BillingMailLog[]
   acquisitionMessages     AcquisitionMessage[]
   worksiteImportDrafts    WorksiteImportDraft[]
   acquisitionAttachments  AcquisitionAttachment[]
@@ -473,6 +476,25 @@ model Quote {
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
+  // Lot C1 (SPEC-BILLING-C1) — colonnes additives, calculs en centimes (BigInt) côté service.
+  subject                 String?
+  globalDiscountBp        Int       @default(0)     // remise globale en points de base (250 = 2,50 %)
+  vatReverseCharge        Boolean   @default(false) // autoliquidation (art. 283-2 nonies CGI)
+  acceptedAt              DateTime?
+  refusedAt               DateTime?
+  refusalReason           String?
+  expiredAt               DateTime?
+  convertedAt             DateTime?
+  signerName              String?
+  signedAt                DateTime?
+  signatureIpHash         String?   // sha256 de l'adresse IP du signataire (jamais en clair)
+  signatureTokenHash      String?   @unique // sha256 du jeton de signature (jeton jamais stocké)
+  signatureTokenExpiresAt DateTime?
+  reminderJ3SentAt        DateTime?
+  reminderJ7SentAt        DateTime?
+  reminderJ15SentAt       DateTime?
+  importRef               String?   // référence externe d'import (unique par société)
+
   // Relations
   company  Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   worksite Worksite    @relation(fields: [worksiteId], references: [id], onDelete: Cascade)
@@ -481,7 +503,11 @@ model Quote {
   invoices Invoice[]   // factures issues de ce devis
 
   @@unique([companyId, number])
+  @@unique([id, companyId])
+  @@unique([companyId, importRef])
   @@index([companyId])
+  @@index([companyId, status])
+  @@index([companyId, issueDate])
   @@index([worksiteId])
   @@index([clientId])
   @@index([status])
@@ -497,8 +523,10 @@ model QuoteLine {
   quantity    Decimal @db.Decimal(10, 2)
   unitPrice   Decimal @db.Decimal(10, 2)  // prix HT figé
   vatRate     Decimal @db.Decimal(5, 2)   // TVA figée
-  lineHT      Decimal @db.Decimal(10, 2)  // quantity * unitPrice
+  lineHT      Decimal @db.Decimal(10, 2)  // quantity * unitPrice (après remise de ligne, Lot C1)
   position    Int     @default(0)         // ordre d'affichage
+  description String?                     // Lot C1 : détail facultatif
+  discountBp  Int     @default(0)         // Lot C1 : remise de ligne en points de base
 
   // Relations
   quote   Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
@@ -532,6 +560,9 @@ model Invoice {
   paidAt      DateTime?     // date de règlement
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
+  // Lot C1 : remise globale et autoliquidation (copiées du devis ; utilisées par C2–C4).
+  globalDiscountBp Int     @default(0)
+  vatReverseCharge Boolean @default(false)
 
   // Relations
   // Lot B : pièces conservées — aucune suppression en cascade depuis la société ou le chantier.
@@ -563,6 +594,8 @@ model InvoiceLine {
   vatRate     Decimal @db.Decimal(5, 2)
   lineHT      Decimal @db.Decimal(10, 2)
   position    Int     @default(0)
+  description String?                 // Lot C1
+  discountBp  Int     @default(0)     // Lot C1 : remise de ligne en points de base
 
   // Relations
   invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
@@ -570,6 +603,65 @@ model InvoiceLine {
 
   @@index([invoiceId])
   @@map("invoice_lines")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FACTURATION COMPLÈTE — Lot C1 (SPEC-BILLING-C1) : paramètres de facturation et journal des courriers.
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum VatRegime {
+  DEBITS        // TVA sur les débits (facturation)
+  ENCAISSEMENTS // TVA sur les encaissements (prestations de services)
+}
+
+model BillingSettings {
+  id                String    @id @default(cuid())
+  companyId         String    @unique
+  vatNumber         String?   // TVA intracommunautaire du vendeur
+  legalForm         String?   // SARL, SAS, EI…
+  shareCapital      String?   // "10 000 €"
+  rcs               String?   // "RCS Paris 123 456 789"
+  iban              String?
+  bic               String?
+  quoteValidityDays Int       @default(30)
+  paymentTermsDays  Int       @default(30)
+  latePenaltyText   String?   // remplace la mention par défaut (pénalités, indemnité forfaitaire 40 €)
+  quoteFooter       String?
+  invoiceFooter     String?
+  vatRegime         VatRegime @default(DEBITS)
+  defaultDepositBp  Int       @default(3000) // 30 %
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("billing_settings")
+}
+
+enum BillingMailStatus {
+  SIMULATED // courrier journalisé, non envoyé (drapeau BILLING_MAIL_ENABLED absent)
+  SENT
+  FAILED
+}
+
+model BillingMailLog {
+  id           String            @id @default(cuid())
+  companyId    String
+  kind         String            // QUOTE_SENT | QUOTE_REMINDER_J3 | … | INVOICE_SENT | INVOICE_REMINDER_30 | …
+  to           String
+  subject      String
+  documentType String            // "Quote" | "Invoice"
+  documentId   String
+  status       BillingMailStatus
+  providerId   String?
+  error        String?
+  createdAt    DateTime          @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, documentType, documentId])
+  @@index([companyId, createdAt])
+  @@map("billing_mail_logs")
 }
 
 // Compteur pour la numérotation séquentielle légale (sans trou), par entreprise/type/an.
@@ -739,6 +831,8 @@ model Client {
   notes     String?
   companyId String
   active    Boolean  @default(true)
+  siret     String?  // Lot C1 : mentions de facturation (SIRET/SIREN du client)
+  vatNumber String?  // Lot C1 : TVA intracommunautaire du client
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

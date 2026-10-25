@@ -18,6 +18,11 @@ const withPWA = withPWAInit({
         url.pathname === "/vehicules" || url.pathname.startsWith("/vehicules/")
         || url.pathname === "/api/trucks" || url.pathname.startsWith("/api/trucks/")
         || url.pathname === "/api/vehicle-documents" || url.pathname.startsWith("/api/vehicle-documents/")
+        // Lot C : pièces de facturation et comptabilité (PDF, exports CSV/FEC, pages privées) — jamais de cache SW.
+        || url.pathname.startsWith("/api/pdf/devis/") || url.pathname.startsWith("/api/pdf/facture/")
+        || url.pathname === "/devis" || url.pathname.startsWith("/devis/")
+        || url.pathname === "/factures" || url.pathname.startsWith("/factures/")
+        || url.pathname === "/comptabilite" || url.pathname.startsWith("/comptabilite/")
       ),
       handler: "NetworkOnly",
       method: "GET",

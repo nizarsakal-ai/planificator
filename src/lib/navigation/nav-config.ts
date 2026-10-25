@@ -138,6 +138,27 @@ export function withAccountingNavItem(items: readonly NavItem[], visible: boolea
   return result
 }
 
+/**
+ * Lot C (facturation complète) — entrée « Devis », ajoutée seulement si `visible` (drapeau serveur
+ * BILLING_COMPLETE_ENABLED + rôle ADMIN/SUPER_ADMIN + société, calculé côté serveur). Insérée juste avant
+ * « Factures » ; sans « Factures » ou déjà présente, la liste est inchangée. Affichage uniquement.
+ */
+export const QUOTES_NAV_ITEM: NavItem = {
+  label: "Devis",
+  href: "/devis",
+  icon: FileText,
+}
+
+export function withBillingNavItems(items: readonly NavItem[], visible: boolean): NavItem[] {
+  const result = [...items]
+  if (visible !== true) return result
+  if (result.some((item) => item.href === QUOTES_NAV_ITEM.href)) return result
+  const anchor = result.findIndex((item) => item.href === "/factures")
+  if (anchor === -1) return result
+  result.splice(anchor, 0, QUOTES_NAV_ITEM)
+  return result
+}
+
 /** Entrées de menu d'un rôle (CLIENT et rôle inconnu → aucune entrée). */
 export function getNavItems(role: Role): NavItem[] {
   return [...(NAV_ITEMS_BY_ROLE[role] ?? [])]
