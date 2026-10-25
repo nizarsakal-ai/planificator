@@ -6,7 +6,14 @@ import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
 import { createInvoiceSchema, invoiceLineSchema, type InvoiceLineInput } from "@/lib/validations/invoice"
 import { nextDocumentNumber } from "@/lib/billing/numbering"
+import { flushDeferredConstraints } from "@/lib/deferred-constraints"
 import { computeLineHT, computeTotals } from "@/lib/billing/totals"
+import {
+  createCreditNoteCore,
+  parseRequestedStatus,
+  replaceDraftLinesCore,
+  transitionInvoiceCore,
+} from "@/lib/billing/invoice-lifecycle.core"
 
 // Facturation réservée aux administrateurs (pas TEAM_LEADER).
 async function requireBillingAdmin() {
@@ -63,7 +70,7 @@ export async function createInvoice(input: unknown) {
 
   const invoice = await prisma.$transaction(async (tx) => {
     const number = await nextDocumentNumber(tx, user.companyId!, "INVOICE")
-    return tx.invoice.create({
+    const created = await tx.invoice.create({
       data: {
         companyId:   user.companyId!,
         worksiteId:  worksite.id,
@@ -83,22 +90,32 @@ export async function createInvoice(input: unknown) {
       },
       select: { id: true, number: true },
     })
+    await tx.historyLog.create({
+      data: {
+        companyId:  user.companyId!,
+        worksiteId: worksite.id,
+        actorId:    user.id,
+        action:     "CREATED",
+        entityType: "Invoice",
+        entityId:   created.id,
+        detail:     `Facture ${created.number} créée (brouillon)`,
+      },
+    })
+    await flushDeferredConstraints(tx)
+    return created
   })
 
   revalidatePath("/factures")
   return { success: true, id: invoice.id, number: invoice.number }
 }
 
-/** Remplace intégralement les lignes d'une facture brouillon et recalcule les totaux. */
+/**
+ * Remplace intégralement les lignes d'une facture brouillon et recalcule les totaux.
+ * Lot B : contrôle DRAFT et remplacement dans UNE transaction conditionnelle (pas de course avec l'émission).
+ */
 export async function setInvoiceLines(invoiceId: string, rawLines: unknown) {
   const user = await requireBillingAdmin()
-
-  const existing = await prisma.invoice.findFirst({
-    where:  { id: invoiceId, companyId: user.companyId! },
-    select: { id: true, status: true },
-  })
-  if (!existing) return { error: "Facture introuvable." }
-  if (existing.status !== "DRAFT") return { error: "Seule une facture brouillon peut être modifiée." }
+  if (typeof invoiceId !== "string" || !invoiceId) return { error: "Facture introuvable." }
 
   const parsed = z.array(invoiceLineSchema).safeParse(rawLines)
   if (!parsed.success) return { error: parsed.error.errors[0].message }
@@ -106,45 +123,60 @@ export async function setInvoiceLines(invoiceId: string, rawLines: unknown) {
   const lines = mapLines(parsed.data)
   const totals = computeTotals(parsed.data)
 
-  await prisma.$transaction([
-    prisma.invoiceLine.deleteMany({ where: { invoiceId } }),
-    prisma.invoice.update({
-      where: { id: invoiceId },
-      data: {
-        totalHT:  totals.totalHT,
-        totalVAT: totals.totalVAT,
-        totalTTC: totals.totalTTC,
-        lines:    { create: lines },
-      },
-    }),
-  ])
+  const result = await prisma.$transaction(async (tx) => {
+    const r = await replaceDraftLinesCore(tx, { companyId: user.companyId!, invoiceId, actorId: user.id, lines, totals })
+    if (r.ok) await flushDeferredConstraints(tx)
+    return r
+  })
+  if (!result.ok) return { error: result.error }
 
   revalidatePath("/factures")
   return { success: true }
 }
 
-/** Fait évoluer le statut d'une facture (envoyée / payée / annulée). */
-export async function updateInvoiceStatus(
-  invoiceId: string,
-  status: "SENT" | "PAID" | "CANCELLED"
-) {
+/**
+ * Fait évoluer le statut d'une facture. Lot B : statut validé à l'exécution, automate sans retour
+ * arrière, mise à jour conditionnelle et trace d'audit. Une facture émise s'annule par avoir.
+ */
+export async function updateInvoiceStatus(invoiceId: string, status: unknown) {
   const user = await requireBillingAdmin()
+  const to = parseRequestedStatus(status)
+  if (!to) return { error: "Statut invalide." }
+  if (typeof invoiceId !== "string" || !invoiceId) return { error: "Facture introuvable." }
 
-  const existing = await prisma.invoice.findFirst({
-    where:  { id: invoiceId, companyId: user.companyId! },
-    select: { id: true },
+  const result = await prisma.$transaction(async (tx) => {
+    const r = await transitionInvoiceCore(tx, { companyId: user.companyId!, invoiceId, to, actorId: user.id, now: new Date() })
+    if (r.ok) await flushDeferredConstraints(tx)
+    return r
   })
-  if (!existing) return { error: "Facture introuvable." }
-
-  await prisma.invoice.update({
-    where: { id: invoiceId },
-    data: {
-      status,
-      ...(status === "SENT" ? { sentAt: new Date() } : {}),
-      ...(status === "PAID" ? { paidAt: new Date() } : {}),
-    },
-  })
+  if (!result.ok) return { error: result.error }
 
   revalidatePath("/factures")
   return { success: true }
+}
+
+/** Émet un avoir total sur une facture envoyée ou payée, qui passe à « annulée ». */
+export async function createCreditNote(invoiceId: string, reason?: unknown) {
+  const user = await requireBillingAdmin()
+  if (typeof invoiceId !== "string" || !invoiceId) return { error: "Facture introuvable." }
+  const motive = typeof reason === "string" ? reason.trim().slice(0, 500) : ""
+
+  const result = await prisma.$transaction(async (tx) => {
+    const r = await createCreditNoteCore(tx, {
+      companyId: user.companyId!,
+      invoiceId,
+      actorId: user.id,
+      reason: motive || null,
+      now: new Date(),
+      nextNumber: (t) => nextDocumentNumber(t, user.companyId!, "CREDIT_NOTE"),
+    })
+    // Prisma avale les erreurs levées au COMMIT : les invariants différés (avoir = copie exacte,
+    // annulation par avoir uniquement) sont évalués ici, avant le COMMIT.
+    if (r.ok) await flushDeferredConstraints(tx)
+    return r
+  })
+  if (!result.ok) return { error: result.error }
+
+  revalidatePath("/factures")
+  return { success: true, id: result.value.id, number: result.value.number }
 }

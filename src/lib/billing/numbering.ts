@@ -1,18 +1,19 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // Facturation — Numérotation séquentielle légale (sans trou)
 //
-// Génère un numéro DEV-YYYY-NNNN (devis) ou FAC-YYYY-NNNN (facture), unique par
+// Génère un numéro DEV-YYYY-NNNN (devis), FAC-YYYY-NNNN (facture) ou AV-YYYY-NNNN (avoir), unique par
 // entreprise et par année, via un compteur incrémenté ATOMIQUEMENT en base pour
 // éviter les doublons en cas d'appels concurrents.
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { Prisma } from "@prisma/client"
 
-export type DocumentType = "QUOTE" | "INVOICE"
+export type DocumentType = "QUOTE" | "INVOICE" | "CREDIT_NOTE"
 
 const PREFIX: Record<DocumentType, string> = {
   QUOTE:   "DEV",
   INVOICE: "FAC",
+  CREDIT_NOTE: "AV",
 }
 
 /**
