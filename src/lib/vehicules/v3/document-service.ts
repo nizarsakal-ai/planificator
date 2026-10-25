@@ -275,7 +275,7 @@ async function publish(
         await writeVehicleAudit(tx, {
           companyId: session.companyId, truckId, actorId: author.id, actorNameSnapshot: author.name,
           action: upload ? "DOCUMENT_UPLOAD" : "DOCUMENT_REPLACE", entityType: "VehicleDocumentVersion", entityId: version.id, outcome: "DONE",
-          detail: { documentId: document.id, category: document.category, versionNumber, sha256: validated.sha256, sizeBytes: validated.sizeBytes },
+          detail: { documentId: document.id, category: document.category, versionNumber, sha256: validated.sha256, sizeBytes: validated.sizeBytes, previousTitle: document.title, title: replace?.title ?? document.title },
         })
         return { receipt: { documentId: document.id, versionId: version.id, versionNumber, revision: nextRevision }, replayed: false }
       }, transactionOptions)
@@ -318,6 +318,43 @@ export function uploadVehicleDocument(truckId: string, body: unknown, file: Docu
 
 export function replaceVehicleDocument(truckId: string, documentId: string, body: unknown, file: DocumentFileInput, key: string | null, deps: DocumentServiceDeps) {
   return publish(truckId, "REPLACE", documentId, body, file, key, deps)
+}
+
+/** Correct metadata without asking the user to upload the same file again.
+ * Publish a fresh immutable version, reset human verification and preserve the prior file/history.
+ * Private bytes are integrity checked; publication rechecks scope, rights and revision at commit.
+ */
+export async function updateVehicleDocumentMetadata(truckId: string, documentId: string, body: unknown, key: string | null, deps: DocumentServiceDeps) {
+  const session = requireMileageSession(await deps.auth())
+  const parsed = parseDocumentReplace(body, key)
+  const { idempotencyKey, ...command } = parsed
+  const scope = { companyId: session.companyId, truckId }
+  const target = await deps.db.$transaction(async tx => {
+    const { truck } = await authorizeVehicleV3(tx, truckId, session, "DOCUMENT_WRITE")
+    if (!truck.active) throw new MileageDomainError("TRUCK_ARCHIVED", 409)
+    const document = await tx.vehicleDocument.findFirst({ where: { ...scope, id: documentId } })
+    if (!document) throw new MileageDomainError("DOCUMENT_NOT_FOUND", 404)
+    if (document.archivedAt) throw new MileageDomainError("DOCUMENT_ARCHIVED", 409)
+    const previous = await tx.vehicleDocumentVersion.findFirst({ where: { ...scope, idempotencyKey } })
+    if (previous) {
+      const file = { filename: previous.originalFilename, mimeType: previous.mimeType, sizeBytes: previous.sizeBytes, sha256: previous.sha256, extension: previous.originalFilename.slice(previous.originalFilename.lastIndexOf(".")).toLowerCase() }
+      const hash = documentRequestHash("REPLACE", command, file, { ...scope, actorId: session.userId, documentId })
+      const replay = await replayFor(tx, scope, { idempotencyKey, requestHash: hash })
+      return { replay, version: null }
+    }
+    if (document.revision !== command.expectedRevision) throw new MileageDomainError("DOCUMENT_REVISION_CONFLICT", 409)
+    assertMetadataForCategory(document.category, command)
+    await assertMaintenanceLink(tx, scope, command.maintenanceEntryId)
+    const version = await tx.vehicleDocumentVersion.findFirst({ where: { ...scope, documentId, id: document.currentVersionId! } })
+    if (!version) throw new MileageDomainError("DOCUMENT_VERSION_NOT_FOUND", 404)
+    return { replay: null, version }
+  }, transactionOptions)
+  if (target.replay) return { receipt: target.replay, replayed: true }
+  const version = target.version!
+  const file = await openVehicleDocumentFile(truckId, documentId, version.id, "VIEW", deps)
+  // openVehicleDocumentFile has already bounded and checked all bytes against immutable size/SHA.
+  const bytes = new Uint8Array(await new Response(file.stream).arrayBuffer())
+  return replaceVehicleDocument(truckId, documentId, body, { filename: file.filename, declaredMimeType: file.mimeType, bytes }, key, deps)
 }
 
 /** Validation humaine de la version courante : auteur, date, révision. Rejeu identique toléré. */

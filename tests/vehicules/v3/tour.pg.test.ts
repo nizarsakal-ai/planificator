@@ -23,22 +23,30 @@ test("Tour lifecycle is atomic, idempotent, ordered, isolated and reflects V2 co
         await assert.rejects(commandTour(f.truck.id, created.id, { type: "START", expectedRevision: 1, expectedMileageRevision: 1, mileage: 100 }, randomUUID(), deps), /MILEAGE_REVISION_CONFLICT/);
         assert.equal((await db.vehicleTour.findUniqueOrThrow({ where: { id: created.id } })).status, "PLANNED");
         assert.equal(await db.mileageEntry.count({ where: { truckId: f.truck.id } }), 0);
+        const editCommand={type:"EDIT",expectedRevision:1,title:"Livraisons corrigées",startsAt:body.startsAt,endsAt:body.endsAt,estimatedKm:90,stops:body.stops,reason:"Adresse et estimation relues"};
+        const editKey=randomUUID();
+        await commandTour(f.truck.id,created.id,editCommand,editKey,deps);
+        assert.equal((await commandTour(f.truck.id,created.id,editCommand,editKey,deps)).replayed,true);
+        await assert.rejects(commandTour(f.truck.id,created.id,editCommand,randomUUID(),deps),/TOUR_REVISION_CONFLICT/);
+        assert.equal((await db.vehicleTour.findUniqueOrThrow({where:{id:created.id}})).title,"Livraisons corrigées");
+        const audits=await db.vehicleAuditLog.findMany({where:{entityId:created.id,action:"TOUR_EDIT"}});assert.equal(audits.length,1);assert.equal((audits[0].detail as any).reason,editCommand.reason);
         const startKey = randomUUID();
-        await commandTour(f.truck.id, created.id, { type: "START", expectedRevision: 1, expectedMileageRevision: 0, mileage: 100 }, startKey, deps);
-        assert.equal((await commandTour(f.truck.id, created.id, { type: "START", expectedRevision: 1, expectedMileageRevision: 0, mileage: 100 }, startKey, deps)).replayed, true);
+        await commandTour(f.truck.id, created.id, { type: "START", expectedRevision: 2, expectedMileageRevision: 0, mileage: 100 }, startKey, deps);
+        assert.equal((await commandTour(f.truck.id, created.id, { type: "START", expectedRevision: 2, expectedMileageRevision: 0, mileage: 100 }, startKey, deps)).replayed, true);
         let tour = (await readTours(f.truck.id, deps)).tours[0];
         assert.ok(tour.mileageTripId);
         assert.equal(await db.mileageTrip.count({ where: { truckId: f.truck.id } }), 1);
-        await assert.rejects(commandTour(f.truck.id, created.id, { type: "CANCEL", expectedRevision: 2 }, randomUUID(), deps), /TOUR_CANNOT_CANCEL/);
-        await assert.rejects(commandTour(f.truck.id, created.id, { type: "STOP", expectedRevision: 2, stopId: tour.stops[1].id }, randomUUID(), deps), /TOUR_STOP_ORDER_CONFLICT/);
+        await assert.rejects(commandTour(f.truck.id, created.id, { type: "CANCEL", expectedRevision: 3 }, randomUUID(), deps), /TOUR_CANNOT_CANCEL/);
+        await assert.rejects(commandTour(f.truck.id, created.id, { type: "STOP", expectedRevision: 3, stopId: tour.stops[1].id }, randomUUID(), deps), /TOUR_STOP_ORDER_CONFLICT/);
         await assert.rejects(executeMileageCommand(f.truck.id, "END", { tripId: tour.mileageTripId, mileage: 200, expectedRevision: 1 }, randomUUID(), deps), /TRIP_MANAGED_BY_TOUR/);
-        await commandTour(f.truck.id, created.id, { type: "STOP", expectedRevision: 2, stopId: tour.stops[0].id }, randomUUID(), deps);
-        await commandTour(f.truck.id, created.id, { type: "SKIP", expectedRevision: 3, stopId: tour.stops[1].id, reason: "Retour prévu non nécessaire" }, randomUUID(), deps);
-        await assert.rejects(commandTour(f.truck.id, created.id, { type: "COMPLETE", expectedRevision: 4, expectedMileageRevision: 1, mileage: 99 }, randomUUID(), deps), /ARRIVAL_BELOW_DEPARTURE/);
+        await commandTour(f.truck.id, created.id, { type: "STOP", expectedRevision: 3, stopId: tour.stops[0].id }, randomUUID(), deps);
+        await commandTour(f.truck.id, created.id, { type: "SKIP", expectedRevision: 4, stopId: tour.stops[1].id, reason: "Retour prévu non nécessaire" }, randomUUID(), deps);
+        await assert.rejects(commandTour(f.truck.id, created.id, { type: "COMPLETE", expectedRevision: 5, expectedMileageRevision: 1, mileage: 99 }, randomUUID(), deps), /ARRIVAL_BELOW_DEPARTURE/);
         tour = (await readTours(f.truck.id, deps)).tours[0];
         assert.equal(tour.status, "IN_PROGRESS");
+        await assert.rejects(commandTour(f.truck.id,created.id,{...editCommand,expectedRevision:tour.revision},randomUUID(),deps),/TOUR_NOT_PLANNED/);
         assert.equal(tour.mileageTrip?.endEntryId, null);
-        await commandTour(f.truck.id, created.id, { type: "COMPLETE", expectedRevision: 4, expectedMileageRevision: 1, mileage: 200 }, randomUUID(), deps);
+        await commandTour(f.truck.id, created.id, { type: "COMPLETE", expectedRevision: 5, expectedMileageRevision: 1, mileage: 200 }, randomUUID(), deps);
         tour = (await readTours(f.truck.id, deps)).tours[0];
         assert.equal(tour.actualKm, 100);
         await executeMileageCommand(f.truck.id, "CORRECTION", { entryId: tour.mileageTrip!.startEntryId, expectedEffectiveEntryId: tour.mileageTrip!.startEntryId, expectedRevision: 2, mileage: 110, reason: "Relecture" }, randomUUID(), deps);
@@ -159,4 +167,29 @@ test("Non-visited stop is ordered, audited, idempotent and closes with actual V2
   assert.ok(tour.stops[1].completedAt);
   assert.equal(await db.mileageEntry.count({ where: { truckId: f.truck.id } }), 2);
  } finally { await db.$disconnect(); }
+});
+
+
+test("Tour details can be amended in every state without rewriting actual events or reservations",async()=>{
+ const client=new PrismaClient({datasources:{db:{url}}});
+ try{
+  for(const status of ["PLANNED","IN_PROGRESS","COMPLETED","CANCELLED"]){
+   const f=await fixture(client),deps=f.deps(),created=await createTour(f.truck.id,{title:"Historique",startsAt:"2028-02-01T08:00:00Z",endsAt:"2028-02-01T10:00:00Z",teamId:null,chauffeurId:null,stops:[{label:"Étape",address:"12 rue de Paris",addressValidated:true}]},randomUUID(),deps);
+   let revision=1;
+   if(status==="CANCELLED"){await commandTour(f.truck.id,created.id,{type:"CANCEL",expectedRevision:revision++},randomUUID(),deps)}
+   if(status==="IN_PROGRESS"||status==="COMPLETED"){
+    await commandTour(f.truck.id,created.id,{type:"START",expectedRevision:revision++,expectedMileageRevision:0,mileage:100},randomUUID(),deps);
+    if(status==="COMPLETED"){const stop=await client.vehicleTourStop.findFirstOrThrow({where:{tourId:created.id}});await commandTour(f.truck.id,created.id,{type:"STOP",expectedRevision:revision++,stopId:stop.id},randomUUID(),deps);await commandTour(f.truck.id,created.id,{type:"COMPLETE",expectedRevision:revision++,expectedMileageRevision:1,mileage:123},randomUUID(),deps)}
+   }
+   const before=await client.vehicleTour.findUniqueOrThrow({where:{id:created.id},include:{stops:{orderBy:{position:"asc"}},mileageTrip:true}});
+   const entries=await client.mileageEntry.findMany({where:{truckId:f.truck.id}}),key=randomUUID(),command={type:"DETAILS",expectedRevision:revision,title:"Nom corrigé",estimatedKm:30,reason:"Référence documentaire corrigée"};
+   const result=await commandTour(f.truck.id,created.id,command,key,deps);assert.equal(result.revision,revision+1);
+   const after=await client.vehicleTour.findUniqueOrThrow({where:{id:created.id},include:{stops:{orderBy:{position:"asc"}},mileageTrip:true}});
+   assert.deepEqual(after,{...before,title:"Nom corrigé",estimatedKm:30,revision:revision+1});assert.deepEqual(await client.mileageEntry.findMany({where:{truckId:f.truck.id}}),entries);
+   assert.equal((await commandTour(f.truck.id,created.id,command,key,deps)).replayed,true);
+   await assert.rejects(commandTour(f.truck.id,created.id,command,randomUUID(),deps),/TOUR_REVISION_CONFLICT/);
+   assert.equal(await client.vehicleAuditLog.count({where:{entityId:created.id,action:"TOUR_DETAILS_EDIT"}}),1);
+   await assert.rejects(commandTour(f.otherTruck.id,created.id,{...command,expectedRevision:revision+1},randomUUID(),deps),/TRUCK_NOT_FOUND/);
+  }
+ }finally{await client.$disconnect()}
 });

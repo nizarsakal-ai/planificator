@@ -27,3 +27,15 @@ test("Non-visited stop requires an explicit bounded reason and stop identity", (
  for (const patch of [{ reason: " " }, { reason: "x".repeat(2001) }, { stopId: "" }, { completedAt: "2026-01-01" }])
   assert.throws(() => tourParse(tourCommandSchema, { ...skip, ...patch }), /INVALID_PAYLOAD/);
 });
+
+ test("Tour edit is an explicit revision command with a reason and reconfirmed stops",()=>{
+ const edit={type:"EDIT",expectedRevision:1,title:valid.title,startsAt:valid.startsAt,endsAt:valid.endsAt,estimatedKm:10,stops:valid.stops,reason:"Adresse corrigée"};
+ assert.deepEqual(tourParse(tourCommandSchema,edit),edit);
+ for(const patch of [{expectedRevision:-1},{reason:" "},{stops:[]},{stops:[{...valid.stops[0],addressValidated:false}]},{title:""}])assert.throws(()=>tourParse(tourCommandSchema,{...edit,...patch}),/INVALID_PAYLOAD/);
+ });
+
+ test("Historical tour details edit accepts only title, estimate, reason and explicit revision",()=>{
+  const details={type:"DETAILS",expectedRevision:4,title:"Libellé corrigé",estimatedKm:25,reason:"Relecture de la référence"};
+  assert.deepEqual(tourParse(tourCommandSchema,details),details);
+  for(const patch of [{startsAt:valid.startsAt},{stops:valid.stops},{mileage:100},{status:"COMPLETED"},{reason:" "},{estimatedKm:-1},{expectedRevision:-1}])assert.throws(()=>tourParse(tourCommandSchema,{...details,...patch}),/INVALID_PAYLOAD/);
+ });

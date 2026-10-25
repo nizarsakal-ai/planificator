@@ -38,3 +38,7 @@ export async function handleImportReview(request:Request,truckId:string,importId
   return Response.json(await reviewImport(truckId,importId,await limitedJson(request),deps),{headers:importHeaders})
  }catch(error){return importFailure(error)}
 }
+
+export async function handleImportCopy(request:Request,truckId:string,importId:string,deps:import("./import-service").ImportDeps){
+ try{assertImportOrigin(request);const {preauthorizeImport,copyImportForEditing}=await import("./import-service");await preauthorizeImport(truckId,deps);return Response.json(await copyImportForEditing(truckId,importId,await limitedJson(request),deps),{status:201,headers:importHeaders})}catch(error){return importFailure(error)}
+}

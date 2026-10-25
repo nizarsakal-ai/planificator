@@ -2,7 +2,7 @@
 import assert from "node:assert/strict"
 import { after, before, describe, it } from "node:test"
 import { GET as listGet, POST as uploadPost } from "@/app/api/trucks/[id]/documents/route"
-import { GET as detailGet } from "@/app/api/trucks/[id]/documents/[documentId]/route"
+import { GET as detailGet, PATCH as metadataPatch } from "@/app/api/trucks/[id]/documents/[documentId]/route"
 import { POST as replacePost } from "@/app/api/trucks/[id]/documents/[documentId]/versions/route"
 import { POST as verifyPost } from "@/app/api/trucks/[id]/documents/[documentId]/verify/route"
 import { POST as archivePost } from "@/app/api/trucks/[id]/documents/[documentId]/archive/route"
@@ -185,3 +185,24 @@ describe("V3 routes documents", () => {
     assert.deepEqual(body, { code: "SERVER_ERROR", error: "Erreur serveur" })
   })
 })
+
+
+describe("V3 PATCH métadonnées sans fichier",()=>{
+ it("validation explicite JSON crée une version privée non vérifiée et le rejeu identique répond 200",async()=>{
+  const db=new V3MemoryDb(),storage=new MemoryDocumentStorage(),deps=db.deps(ADMIN,storage);
+  const first=await payload(await uploadPost(multipart({category:"TECHNICAL_INSPECTION",title:"CT"},pdf),params({}),deps));const documentId=String(first.documentId);
+  assert.equal((await verifyPost(json("POST",{expectedRevision:1,versionId:first.versionId}),params({documentId}),deps)).status,200);
+  const k=key(),body={expectedRevision:2,title:"Contrôle technique complet",issuedOn:"2026-10-01",validUntil:"2027-10-01",observations:"Informations complétées après dépôt"};
+  const request=()=>json("PATCH",body,{"Idempotency-Key":k});const response=await metadataPatch(request(),params({documentId}),deps);
+  assert.equal(response.status,201);assert.equal(response.headers.get("Cache-Control"),"private, no-store");assert.equal(response.headers.get("Idempotency-Replayed"),"false");const result=await payload(response);assert.equal(result.versionNumber,2);assert.equal(result.revision,3);
+  const replay=await metadataPatch(request(),params({documentId}),deps);assert.equal(replay.status,200);assert.equal(replay.headers.get("Idempotency-Replayed"),"true");assert.deepEqual(await payload(replay),result);
+  const current=db.state.vehicleDocumentVersion.find(v=>v.id===result.versionId)!;assert.equal(current.verifiedAt,null);assert.equal(storage.stored.length,2);
+  const conflict=await metadataPatch(json("PATCH",{...body,title:"Autre"},{"Idempotency-Key":k}),params({documentId}),deps);assert.equal(conflict.status,409);assert.equal((await payload(conflict)).code,"IDEMPOTENCY_CONFLICT");
+ });
+ it("origine étrangère et rôle lecture seule refusés sans lire le corps ni le fichier",async()=>{
+  const db=new V3MemoryDb(),storage=new MemoryDocumentStorage(),deps=db.deps(ADMIN,storage);
+  const first=await payload(await uploadPost(multipart({category:"INSURANCE",title:"Assurance"},pdf),params({}),deps));let reads=0;
+  for(const [origin,actor] of [["https://evil.invalid",ADMIN],[ORIGIN,LEADER]] as const){const request=json("PATCH",{expectedRevision:1},{origin,"Idempotency-Key":key()});Object.defineProperty(request,"body",{get(){reads++;throw Error("body must remain unread")}});const r=await metadataPatch(request,params({documentId:String(first.documentId)}),db.deps(actor,storage));assert.equal(r.status,403)}
+  assert.equal(reads,0);assert.equal(storage.signed.length,0);assert.equal(storage.stored.length,1);
+ });
+});

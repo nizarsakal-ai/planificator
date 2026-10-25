@@ -237,7 +237,7 @@ export function VehiculesView({ trucks, teams, employees, canManageV2 = false, v
               key={editing?.id ?? "create"}
               idPrefix="vehicules"
               initialValues={editing ? vehicleToFormValues(editing) : undefined}
-              submitLabel={editing ? "Enregistrer" : "Ajouter"}
+              submitLabel={editing ? "Valider les modifications" : "Valider l’ajout"}
               submitting={loading}
               onSubmit={editing ? saveEdit : addTruck}
               onCancel={() => setDialog(null)}

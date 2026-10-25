@@ -1,5 +1,7 @@
+import { readImportBoundedBody } from "./import-bounded-body"
+import { assertMutationOrigin } from "./request-origin"
 import { MileageDomainError } from "./mileage-domain"
-import { readMaintenance, recordMaintenance, updateMaintenancePlan, type MaintenanceServiceDeps } from "./maintenance-service"
+import { preauthorizeMaintenanceCorrection, correctMaintenance, readMaintenance, recordMaintenance, updateMaintenancePlan, type MaintenanceServiceDeps } from "./maintenance-service"
 const headers = { "Cache-Control": "private, no-store" }
 function failure(error: unknown) {
   if (error instanceof MileageDomainError) return Response.json({ code: error.code, error: "Opération d’entretien refusée" }, { status: error.status, headers })
@@ -19,4 +21,17 @@ export async function handleMaintenancePost(request: Request, truckId: string, d
 }
 export async function handleMaintenancePlanPut(request: Request, truckId: string, deps: MaintenanceServiceDeps) {
   try { return Response.json(await updateMaintenancePlan(truckId, await payload(request), deps), { headers }) } catch (error) { return failure(error) }
+}
+
+export async function handleMaintenanceCorrectionPost(request: Request, truckId: string, entryId: string, deps: MaintenanceServiceDeps) {
+  try {
+    assertMutationOrigin(request)
+    await preauthorizeMaintenanceCorrection(truckId, entryId, deps)
+    if (request.headers.get("content-type")?.split(";")[0].trim() !== "application/json") throw new MileageDomainError("INVALID_CONTENT_TYPE", 415)
+    const bytes = await readImportBoundedBody(request, { maxBytes: 32768 })
+    let body: unknown
+    try { body = JSON.parse(bytes.toString("utf8")) } catch { throw new MileageDomainError("INVALID_JSON", 400) }
+    const result = await correctMaintenance(truckId, entryId, body, request.headers.get("Idempotency-Key"), deps)
+    return Response.json({ entryId: result.entryId }, { status: 201, headers: { ...headers, "Idempotency-Replayed": String(result.replayed) } })
+  } catch (error) { return failure(error) }
 }

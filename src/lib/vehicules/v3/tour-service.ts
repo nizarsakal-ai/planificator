@@ -1,3 +1,4 @@
+import { writeVehicleAudit } from "./v3-audit";
 import { randomUUID, createHash } from "node:crypto";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
@@ -117,7 +118,7 @@ export async function commandTour(truckId: string, tourId: string, body: unknown
     try {
         return await deps.db.$transaction(async (tx) => {
             await reservationLock(tx, session.companyId);
-            const { truck } = await authorizeVehicleLocked(tx, truckId, session, command.type === "CANCEL" ? "READING" : command.type === "COMPLETE" ? "END" : "START");
+            const { truck, actor } = await authorizeVehicleLocked(tx, truckId, session, ["CANCEL", "EDIT", "DETAILS"].includes(command.type) ? "READING" : command.type === "COMPLETE" ? "END" : "START");
             const tour = await tx.vehicleTour.findFirst({ where: { id: tourId, companyId: session.companyId, truckId }, include: { stops: { orderBy: { position: "asc" } } } });
             if (!tour)
                 fail("TOUR_NOT_FOUND", 404);
@@ -134,7 +135,28 @@ export async function commandTour(truckId: string, tourId: string, body: unknown
             if (!truck.active)
                 fail("TRUCK_ARCHIVED");
             let data: Prisma.VehicleTourUncheckedUpdateInput = { revision: { increment: 1 } };
-            if (command.type === "START") {
+            if (command.type === "DETAILS") {
+                await writeVehicleAudit(tx,{companyId:session.companyId,truckId,actorId:session.userId,actorNameSnapshot:actor.name?.trim()||actor.id,action:"TOUR_DETAILS_EDIT",entityType:"VehicleTour",entityId:tour.id,outcome:"DONE",detail:{reason:command.reason,previousRevision:tour.revision,before:JSON.stringify({title:tour.title,estimatedKm:tour.estimatedKm}),after:JSON.stringify({title:command.title,estimatedKm:command.estimatedKm})}});
+                data={...data,title:command.title,estimatedKm:command.estimatedKm};
+            }
+            else if (command.type === "EDIT") {
+                if (tour.status !== "PLANNED") fail("TOUR_NOT_PLANNED");
+                const startsAt = new Date(command.startsAt), endsAt = new Date(command.endsAt);
+                if (endsAt <= startsAt || endsAt.getTime() - startsAt.getTime() > 7 * 86400000) fail("INVALID_PAYLOAD", 400);
+                for (const stop of command.stops) {
+                    if (stop.worksiteId) {
+                        const site = await tx.worksite.findFirst({ where: { id: stop.worksiteId, companyId: session.companyId, archivedAt: null } });
+                        if (!site) fail("WORKSITE_NOT_FOUND",404);
+                        if (stop.clientId && site.clientId !== stop.clientId) fail("CLIENT_WORKSITE_MISMATCH",400);
+                    }
+                    if (stop.clientId && !await tx.client.findFirst({where:{id:stop.clientId, companyId:session.companyId,active:true}})) fail("CLIENT_NOT_FOUND",404);
+                }
+                await resourceCheck(tx, session.companyId, truckId, {teamId:tour.teamId,chauffeurId:tour.chauffeurId,startsAt,endsAt,stops:command.stops}, tour.id);
+                await writeVehicleAudit(tx,{companyId:session.companyId,truckId,actorId:session.userId,actorNameSnapshot:actor.name?.trim()||actor.id,action:"TOUR_EDIT",entityType:"VehicleTour",entityId:tour.id,outcome:"DONE",detail:{reason:command.reason,previousRevision:tour.revision,before:JSON.stringify({title:tour.title,startsAt:tour.startsAt,endsAt:tour.endsAt,estimatedKm:tour.estimatedKm,stops:tour.stops}),after:JSON.stringify(command)}});
+                await tx.vehicleTourStop.deleteMany({where:{tourId:tour.id,companyId:session.companyId}});
+                data = {...data,title:command.title,startsAt,endsAt,estimatedKm:command.estimatedKm,stops:{create:command.stops.map(({addressValidated,...stop},position)=>({...stop,position,validatedById:session.userId}))}};
+            }
+            else if (command.type === "START") {
                 if (tour.status !== "PLANNED")
                     fail("TOUR_NOT_PLANNED");
                 if (tour.teamId !== truck.teamId || tour.chauffeurId !== truck.chauffeurId)

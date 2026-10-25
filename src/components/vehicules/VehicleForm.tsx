@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { preventImplicitEnter, isExplicitSubmit } from "./explicit-submit"
 import { Button } from "@/components/ui/button"
 import {
   isVehicleFormSubmittable,
@@ -40,8 +41,10 @@ export function VehicleForm({
   return (
     <form
       className="space-y-3"
+      onKeyDown={preventImplicitEnter}
       onSubmit={(e) => {
         e.preventDefault()
+        if (!isExplicitSubmit(e)) return
         if (isVehicleFormSubmittable(values) && !submitting) void onSubmit(values)
       }}
     >
@@ -94,6 +97,7 @@ export function VehicleForm({
       <div className="flex gap-2 pt-1">
         <Button
           type="submit"
+          data-explicit-submit="true"
           disabled={submitting || !isVehicleFormSubmittable(values)}
           className="bg-[#0f3460] hover:bg-[#0a2540]"
         >

@@ -17,13 +17,23 @@ const planSchema = z.object({
 }).strict().refine(value => value.intervalKm !== null || value.intervalMonths !== null)
 export type MaintenanceEntryInput = z.infer<typeof entrySchema>
 export type MaintenancePlanInput = z.infer<typeof planSchema>
-export interface MaintenanceObservation { kind: string; occurredAt: Date; mileage: number; recordedAt?: Date }
+export interface MaintenanceObservation { id?: string; supersedesEntryId?: string | null; kind: string; occurredAt: Date; mileage: number; recordedAt?: Date }
 export function parseMaintenanceEntry(body: unknown, key: string | null) {
   const parsed = entrySchema.safeParse(body)
   const parsedKey = z.string().trim().uuid().safeParse(key)
   if (!parsedKey.success) throw new MileageDomainError("INVALID_IDEMPOTENCY_KEY", 400)
   if (!parsed.success) throw new MileageDomainError("INVALID_PAYLOAD", 400)
   return { ...parsed.data, notes: parsed.data.notes || null, idempotencyKey: parsedKey.data.toLowerCase() }
+}
+export function parseMaintenanceCorrection(body: unknown, key: string | null) {
+  const parsed = entrySchema.extend({ reason: z.string().trim().min(1).max(2000) }).safeParse(body)
+  if (!parsed.success) throw new MileageDomainError("INVALID_PAYLOAD", 400)
+  const { reason, ...entry } = parsed.data
+  return { ...parseMaintenanceEntry({ ...entry, occurredAt: entry.occurredAt.toISOString() }, key), reason }
+}
+export function effectiveMaintenanceEntries<T extends MaintenanceObservation>(entries: readonly T[]): T[] {
+  const superseded = new Set(entries.map(entry => entry.supersedesEntryId).filter(Boolean))
+  return entries.filter(entry => !entry.id || !superseded.has(entry.id))
 }
 export function parseMaintenancePlan(body: unknown) {
   const parsed = planSchema.safeParse(body)
@@ -59,7 +69,7 @@ export function addMaintenanceMonths(date: Date, months: number) {
 }
 export function maintenanceSummary(plan: { intervalKm: number | null; intervalMonths: number | null } | null,
   entries: readonly MaintenanceObservation[], currentMileage: number | null, now: Date) {
-  const last = entries.filter(entry => entry.kind === "OIL_CHANGE")
+  const last = effectiveMaintenanceEntries(entries).filter(entry => entry.kind === "OIL_CHANGE")
     .sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime() || b.mileage - a.mileage || (b.recordedAt?.getTime() ?? 0) - (a.recordedAt?.getTime() ?? 0))[0] ?? null
   const nextMileage = last && plan?.intervalKm ? last.mileage + plan.intervalKm : null
   const nextDate = last && plan?.intervalMonths ? addMaintenanceMonths(last.occurredAt, plan.intervalMonths) : null

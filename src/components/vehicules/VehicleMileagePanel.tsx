@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react"
 import { Gauge, RefreshCw } from "lucide-react"
+import { preventImplicitEnter, isExplicitSubmit } from "./explicit-submit"
 import { Button } from "@/components/ui/button"
 
 export interface MileageHistoryEntry {
@@ -92,6 +93,7 @@ export function VehicleMileagePanel({ truckId, matricule, active, canManage, ini
   const [action, setAction] = useState<Action>("reading")
   const [value, setValue] = useState("")
   const [targetId, setTargetId] = useState("")
+  const [targetEffectiveId, setTargetEffectiveId] = useState("")
   const [reason, setReason] = useState("")
   // Une réponse réseau perdue conserve la même clé et le même corps au prochain essai.
   const pending = useRef<{ fingerprint: string; key: string } | null>(null)
@@ -119,6 +121,10 @@ export function VehicleMileagePanel({ truckId, matricule, active, canManage, ini
     return () => controller.abort()
   }, [open, refresh])
 
+  useEffect(() => {
+    if (action === "correction" && targetId) document.getElementById(`${id}-reason`)?.focus()
+  }, [action, targetId, id])
+
   const entries = data ? effectiveMileageEntries(data.history) : []
   const target = entries.find((entry) => entry.original.id === targetId)
   const availableAction: Action = !canManage ? (data?.openTrip ? "end" : "start")
@@ -126,6 +132,7 @@ export function VehicleMileagePanel({ truckId, matricule, active, canManage, ini
     : action === "start" && data?.openTrip ? "end" : action
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (!isExplicitSubmit(event)) return
     if (!data || saving || loading || !active) return
     const mileage = Number(value)
     if (!/^\d+$/.test(value) || !Number.isSafeInteger(mileage) || mileage > 9_999_999) {
@@ -143,7 +150,7 @@ export function VehicleMileagePanel({ truckId, matricule, active, canManage, ini
         setError("Choisissez un relevé et indiquez le motif de correction."); return
       }
       path = `/entries/${encodeURIComponent(target.original.id)}/corrections`
-      body.expectedEffectiveEntryId = target.effective.id
+      body.expectedEffectiveEntryId = targetEffectiveId
       body.reason = reason.trim()
     }
     if (availableAction === "reading" && !canManage) return
@@ -187,7 +194,7 @@ export function VehicleMileagePanel({ truckId, matricule, active, canManage, ini
       {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
       {notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
       {!active && <p className="text-sm text-slate-500">Véhicule archivé : journal consultable, saisie désactivée.</p>}
-      {data && active && <form onSubmit={submit} className="space-y-3">
+      {data && active && <form onKeyDown={preventImplicitEnter} onSubmit={submit} className="space-y-3">
         <div><label htmlFor={`${id}-action`} className="mb-1 block text-xs font-medium text-slate-600">Opération</label>
           <select id={`${id}-action`} className={FIELD} value={canManage ? availableAction : data.openTrip ? "end" : "start"} disabled={saving || loading} onChange={(e) => { setAction(e.target.value as Action); setValue(""); setError("") }}>
             {canManage && <option value="reading">Ajouter un relevé compteur</option>}
@@ -198,7 +205,7 @@ export function VehicleMileagePanel({ truckId, matricule, active, canManage, ini
         </div>
         {availableAction === "correction" && canManage && <>
           <div><label htmlFor={`${id}-target`} className="mb-1 block text-xs font-medium text-slate-600">Relevé à corriger</label>
-            <select id={`${id}-target`} className={FIELD} required value={targetId} disabled={saving || loading} onChange={(e) => { setTargetId(e.target.value); setValue(String(entries.find((entry) => entry.original.id === e.target.value)?.effective.mileage ?? "")) }}>
+            <select id={`${id}-target`} className={FIELD} required value={targetId} disabled={saving || loading} onChange={(e) => { setTargetId(e.target.value); const selected = entries.find((entry) => entry.original.id === e.target.value); setTargetEffectiveId(selected?.effective.id ?? ""); setValue(String(selected?.effective.mileage ?? "")) }}>
               <option value="">Choisir un relevé</option>{entries.slice().reverse().map(({ original, effective }) => <option key={original.id} value={original.id}>{KIND[original.kind]} · {date(original.occurredAt ?? original.recordedAt)} · {km(effective.mileage)}</option>)}
             </select>
           </div>
@@ -206,10 +213,12 @@ export function VehicleMileagePanel({ truckId, matricule, active, canManage, ini
           <p className="text-xs text-slate-500">La valeur d’origine et chaque correction restent dans le journal.</p>
         </>}
         <div><label htmlFor={`${id}-value`} className="mb-1 block text-xs font-medium text-slate-600">Compteur kilométrique (km)</label><input id={`${id}-value`} className={FIELD} type="number" inputMode="numeric" required min={0} max={9999999} step={1} value={value} disabled={saving || loading} onChange={(e) => setValue(e.target.value)} placeholder={data.currentMileage != null ? String(data.currentMileage) : "Ex. 125000"} /></div>
-        <Button type="submit" size="sm" disabled={saving || loading} className="bg-[#0f3460] hover:bg-[#0a2540]">{saving ? "Enregistrement…" : "Enregistrer"}</Button>
+        <Button type="submit" data-explicit-submit="true" size="sm" disabled={saving || loading} className="bg-[#0f3460] hover:bg-[#0a2540]">{saving ? "Enregistrement…" : availableAction === "correction" ? "Valider la modification" : "Valider"}</Button>
+        {availableAction === "correction" && <Button type="button" variant="outline" size="sm" disabled={saving || loading} onClick={() => { setAction("reading"); setTargetId(""); setValue(""); setReason(""); setError("") }}>Annuler</Button>}
       </form>}
       {data && <div className="space-y-3">
         <h4 className="text-sm font-semibold text-slate-700">Journal kilométrique</h4>
+        {canManage && active && entries.length > 0 && <div className="space-y-2"><p className="text-xs text-slate-500">Modifier un relevé ajoute une correction avec motif ; la valeur d’origine reste conservée.</p>{entries.slice().reverse().map(({ original, effective }) => <div key={original.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 p-2 text-xs"><span>{KIND[original.kind]} · {date(original.occurredAt ?? original.recordedAt)} · {km(effective.mileage)}</span><Button type="button" size="sm" variant="outline" disabled={saving || loading} aria-label={`Modifier le relevé du ${date(original.occurredAt ?? original.recordedAt)}`} onClick={() => { setAction("correction"); setTargetId(original.id); setTargetEffectiveId(effective.id); setValue(String(effective.mileage)); setReason(""); setError("") }}>Modifier</Button></div>)}</div>}
         {data.history.length === 0 ? <p className="text-sm text-slate-500">Aucun relevé. Commencez par saisir le compteur actuel.</p> : <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-100"><ol className="divide-y divide-slate-100">{data.history.slice().reverse().map((entry) => <li key={entry.id} className="p-3 text-xs text-slate-500"><div className="flex justify-between gap-2"><span className="font-medium text-slate-700">{KIND[entry.kind]}</span><strong className="text-slate-900">{km(entry.mileage)}</strong></div><p>{date(entry.occurredAt ?? entry.recordedAt)}{entry.createdByName ? ` · ${entry.createdByName}` : ""}</p>{entry.correctionReason && <p className="mt-1 text-slate-600">Motif : {entry.correctionReason}</p>}</li>)}</ol></div>}
         {data.trips.length > 0 && <><h4 className="text-sm font-semibold text-slate-700">Trajets</h4><ul className="max-h-48 space-y-2 overflow-y-auto">{data.trips.slice().reverse().map((trip) => <li key={trip.id} className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500"><p className="font-medium text-slate-700">{trip.endEntryId === null ? "En cours" : "Terminé"}{trip.distance != null ? ` · ${km(trip.distance)}` : ""}</p><p>{[trip.teamName, trip.chauffeurName, trip.worksiteName].filter(Boolean).join(" · ") || "Sans affectation au départ"}</p></li>)}</ul></>}
       </div>}

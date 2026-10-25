@@ -1395,6 +1395,10 @@ model VehicleMaintenanceEntry {
   createdByNameSnapshot String
   recordedAt            DateTime @default(now())
   idempotencyKey        String
+  supersedesEntryId     String? @unique
+  correctionReason      String?
+  supersedes VehicleMaintenanceEntry? @relation("MaintenanceCorrections", fields: [supersedesEntryId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict)
+  corrections VehicleMaintenanceEntry[] @relation("MaintenanceCorrections")
   requestHash           String
 
   company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)

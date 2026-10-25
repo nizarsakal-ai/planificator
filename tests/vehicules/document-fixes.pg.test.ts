@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import { test } from "node:test"
 import { PrismaClient, type Prisma } from "@prisma/client"
 import { fixture } from "./pg/fixtures"
-import { archiveVehicleDocument, updateReminderSettings, openVehicleDocumentFile, replaceVehicleDocument, runVehicleDocumentReminders, uploadVehicleDocument, verifyVehicleDocumentVersion, type DocumentServiceDeps } from "../../src/lib/vehicules/v3/document-service"
+import { archiveVehicleDocument, updateVehicleDocumentMetadata, updateReminderSettings, openVehicleDocumentFile, replaceVehicleDocument, runVehicleDocumentReminders, uploadVehicleDocument, verifyVehicleDocumentVersion, type DocumentServiceDeps } from "../../src/lib/vehicules/v3/document-service"
 import type { DocumentStoragePort } from "../../src/lib/vehicules/v3/document-storage.port"
 const value = process.env.V3_DOCFIX_DATABASE_URL
 if (!value) throw new Error("V3_DOCFIX_DATABASE_URL required; no fallback")
@@ -158,3 +158,26 @@ test("PostgreSQL document receipts: reject stale verification and different arch
   assert.equal(await db.vehicleAuditLog.count({ where: { companyId: f.company.id } }), auditBefore)
  } finally { await db.$disconnect() }
 })
+
+
+test("PostgreSQL metadata editing: five categories, immutable prior evidence, verification reset, replay and revision race",{timeout:55000},async()=>{
+ try{
+  const f=await fixture(db),memory=storageFixture(),deps:DocumentServiceDeps={...f.deps(),...memory};
+  for(const category of ["TECHNICAL_INSPECTION","REPAIR_MAINTENANCE","REGISTRATION","INSURANCE","EXPENSE_RECEIPT"] as const){
+   const first=(await uploadVehicleDocument(f.truck.id,{category,title:"Avant modification",issuedOn:"2020-01-01",issuerName:"Émetteur initial"},file,randomUUID(),deps)).receipt;
+   await verifyVehicleDocumentVersion(f.truck.id,first.documentId,{expectedRevision:1,versionId:first.versionId},deps);
+   const before=await db.vehicleDocumentVersion.findUniqueOrThrow({where:{id:first.versionId}});
+   const edit={expectedRevision:2,title:"Informations complétées",issuedOn:"2020-02-03",issuerName:"Émetteur corrigé",observations:"Correction explicite"},key=randomUUID();
+   const result=await updateVehicleDocumentMetadata(f.truck.id,first.documentId,edit,key,deps);
+   assert.equal(result.receipt.versionNumber,2);assert.equal(result.receipt.revision,3);
+   const [old,current]=await Promise.all([db.vehicleDocumentVersion.findUniqueOrThrow({where:{id:first.versionId}}),db.vehicleDocumentVersion.findUniqueOrThrow({where:{id:result.receipt.versionId}})]);
+   assert.equal(old.issuedOn?.toISOString().slice(0,10),"2020-01-01");assert.equal(old.issuerName,"Émetteur initial");assert.deepEqual(old.verifiedAt,before.verifiedAt);assert.ok(old.supersededAt);assert.equal(current.verifiedAt,null);assert.equal(current.verifiedById,null);assert.equal(current.issuerName,"Émetteur corrigé");assert.equal(current.sha256,before.sha256);assert.notEqual(current.storageKey,before.storageKey);assert.deepEqual(Buffer.from(memory.objects.get(current.storageKey)!),bytes);assert.deepEqual(Buffer.from(memory.objects.get(before.storageKey)!),bytes);
+   const count=memory.objects.size;assert.equal((await updateVehicleDocumentMetadata(f.truck.id,first.documentId,edit,key,deps)).replayed,true);assert.equal(memory.objects.size,count);
+   await assert.rejects(updateVehicleDocumentMetadata(f.truck.id,first.documentId,{...edit,title:"Divergent"},key,deps),/IDEMPOTENCY_CONFLICT/);
+   await assert.rejects(db.vehicleDocumentVersion.update({where:{id:first.versionId},data:{issuerName:"Réécriture interdite"}}),/VEHICLES_V3: version immuable/);
+  }
+  const first=(await uploadVehicleDocument(f.truck.id,{category:"TECHNICAL_INSPECTION",title:"Course"},file,randomUUID(),deps)).receipt;
+  const results=await Promise.allSettled([updateVehicleDocumentMetadata(f.truck.id,first.documentId,{expectedRevision:1,title:"A"},randomUUID(),deps),updateVehicleDocumentMetadata(f.truck.id,first.documentId,{expectedRevision:1,title:"B"},randomUUID(),deps)]);
+  assert.equal(results.filter(r=>r.status==="fulfilled").length,1);assert.equal(await db.vehicleDocumentVersion.count({where:{documentId:first.documentId}}),2);assert.equal((await db.vehicleDocument.findUniqueOrThrow({where:{id:first.documentId}})).revision,2);assert.match(String((results.find(r=>r.status==="rejected") as PromiseRejectedResult).reason),/DOCUMENT_REVISION_CONFLICT/);
+ }finally{await db.$disconnect()}
+});

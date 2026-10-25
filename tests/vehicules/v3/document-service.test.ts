@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import {
   archiveVehicleDocument, listVehicleDocuments, openVehicleDocumentFile, readReminderSettings, readVehicleDocument, replaceVehicleDocument,
-  runVehicleDocumentReminders, updateReminderSettings, uploadVehicleDocument, verifyVehicleDocumentVersion,
+  runVehicleDocumentReminders, updateVehicleDocumentMetadata, updateReminderSettings, uploadVehicleDocument, verifyVehicleDocumentVersion,
 } from "@/lib/vehicules/v3/document-service"
 import {
   ADMIN, COMPANY, EMPLOYEE, JPEG_BYTES, LEADER, MemoryDocumentStorage, NEXT_LEADER, OTHER_ADMIN, OTHER_TRUCK, PDF_BYTES, SUPER_ADMIN, TRUCK,
@@ -348,3 +348,55 @@ describe("V3 reminders — transaction budget per company",()=>{
   for(const receipt of db.state.vehicleDocumentReminder){const document=db.state.vehicleDocument.find(d=>d.id===receipt.documentId);assert.equal(receipt.companyId,document?.companyId)}
  })
 })
+
+
+describe("V3 documents — modification explicite sans nouveau fichier",()=>{
+ for(const category of ["TECHNICAL_INSPECTION","REPAIR_MAINTENANCE","REGISTRATION","INSURANCE","EXPENSE_RECEIPT"] as const){
+  it(`${category} : modifier une pièce vérifiée conserve les anciens champs et octets, crée une version à vérifier et rejoue sans duplication`,async()=>{
+   const db=new V3MemoryDb(),storage=new MemoryDocumentStorage(),deps=db.deps(ADMIN,storage);
+   const first=(await uploadVehicleDocument(TRUCK,{category,title:"Avant",issuedOn:"2026-01-01",issuerName:"Ancien émetteur",observations:"Avant correction"},pdfFile(),key(),deps)).receipt;
+   await verifyVehicleDocumentVersion(TRUCK,first.documentId,{expectedRevision:1,versionId:first.versionId},deps);
+   const previous=structuredClone(db.state.vehicleDocumentVersion[0]);
+   const command={expectedRevision:2,title:"Après",issuedOn:"2026-02-03",issuerName:"Nouvel émetteur",observations:"Après correction",...(category==="TECHNICAL_INSPECTION"||category==="INSURANCE"?{validUntil:"2027-01-01"}:{})};
+   const k=key(),result=await updateVehicleDocumentMetadata(TRUCK,first.documentId,command,k,deps);
+   assert.equal(result.replayed,false);assert.equal(result.receipt.versionNumber,2);assert.equal(result.receipt.revision,3);
+   const old=db.state.vehicleDocumentVersion.find(v=>v.id===first.versionId)!,current=db.state.vehicleDocumentVersion.find(v=>v.id===result.receipt.versionId)!;
+   assert.equal(old.issuedOn instanceof Date?old.issuedOn.toISOString().slice(0,10):old.issuedOn,"2026-01-01");assert.equal(old.issuerName,"Ancien émetteur");assert.equal(old.observations,"Avant correction");assert.deepEqual(old.verifiedAt,previous.verifiedAt);assert.ok(old.supersededAt);
+   assert.equal(current.issuerName,"Nouvel émetteur");assert.equal(current.verifiedAt,null);assert.equal(current.verifiedById,null);assert.equal(current.sha256,old.sha256);assert.notEqual(current.storageKey,old.storageKey);
+   assert.deepEqual(storage.objects.get(String(current.storageKey)),PDF_BYTES);assert.deepEqual(storage.objects.get(String(old.storageKey)),PDF_BYTES);
+   assert.equal(db.state.vehicleDocument[0].title,"Après");assert.equal(db.state.trucks[0].currentMileage,120000);
+   const fetched=storage.signed.length,replay=await updateVehicleDocumentMetadata(TRUCK,first.documentId,command,k,deps);
+   assert.equal(replay.replayed,true);assert.deepEqual(replay.receipt,result.receipt);assert.equal(storage.stored.length,2);assert.equal(storage.signed.length,fetched);
+   await rejects(updateVehicleDocumentMetadata(TRUCK,first.documentId,{...command,title:"Changement divergent"},k,deps),"IDEMPOTENCY_CONFLICT");
+   await rejects(updateVehicleDocumentMetadata(TRUCK,first.documentId,command,key(),deps),"DOCUMENT_REVISION_CONFLICT");
+  });
+ }
+ it("droits et tenant refusent la modification avant lecture privée ; intégrité du fichier relue avant publication",async()=>{
+  const db=new V3MemoryDb(),storage=new MemoryDocumentStorage(),deps=db.deps(ADMIN,storage);
+  const first=(await uploadVehicleDocument(TRUCK,insurance(),pdfFile(),key(),deps)).receipt;
+  const body={expectedRevision:1,title:"Corrigé"};
+  await rejects(updateVehicleDocumentMetadata(TRUCK,first.documentId,body,key(),db.deps(LEADER,storage)),"FORBIDDEN");
+  await rejects(updateVehicleDocumentMetadata(TRUCK,first.documentId,body,key(),db.deps(OTHER_ADMIN,storage)),"TRUCK_NOT_FOUND");
+  await rejects(updateVehicleDocumentMetadata(OTHER_TRUCK,first.documentId,body,key(),deps),"TRUCK_NOT_FOUND");
+  await rejects(updateVehicleDocumentMetadata(TRUCK,"absent",body,key(),deps),"DOCUMENT_NOT_FOUND");
+  assert.equal(storage.signed.length,0);assert.equal(storage.stored.length,1);
+  const bytes=new Uint8Array(PDF_BYTES);bytes[0]=0;storage.objects.set(storage.stored[0],bytes);
+  await rejects(updateVehicleDocumentMetadata(TRUCK,first.documentId,body,key(),deps),"DOCUMENT_FILE_INTEGRITY");assert.equal(db.state.vehicleDocumentVersion.length,1);assert.equal(storage.stored.length,1);
+ });
+ it("révocation pendant la lecture privée bloque la publication ; un échec de stockage conserve la version courante",async()=>{
+  const db=new V3MemoryDb(),storage=new MemoryDocumentStorage(),deps=db.deps(ADMIN,storage);
+  const first=(await uploadVehicleDocument(TRUCK,insurance(),pdfFile(),key(),deps)).receipt;
+  const altered={...deps,fetchSigned:async(url:string)=>{const response=await storage.fetchSigned(url);db.state.users[0].active=false;return response}};
+  await rejects(updateVehicleDocumentMetadata(TRUCK,first.documentId,{expectedRevision:1,title:"Refus"},key(),altered),"UNAUTHENTICATED");
+  assert.equal(storage.stored.length,1);assert.equal(db.state.vehicleDocumentVersion.length,1);db.state.users[0].active=true;
+  storage.failNextStore=true;await rejects(updateVehicleDocumentMetadata(TRUCK,first.documentId,{expectedRevision:1,title:"Échec"},key(),deps),"DOCUMENT_STORAGE_FAILED");
+  assert.equal(db.state.vehicleDocument[0].currentVersionId,first.versionId);assert.equal(db.state.vehicleDocument[0].revision,1);assert.equal(db.state.vehicleDocumentVersion[0].supersededAt,null);
+ });
+ it("deux modifications concurrentes ne publient qu’une version ; la copie perdante est compensée",async()=>{
+  const db=new V3MemoryDb(),storage=new MemoryDocumentStorage(),deps=db.deps(ADMIN,storage);
+  const first=(await uploadVehicleDocument(TRUCK,insurance(),pdfFile(),key(),deps)).receipt;
+  const results=await Promise.allSettled([updateVehicleDocumentMetadata(TRUCK,first.documentId,{expectedRevision:1,title:"Correction A"},key(),deps),updateVehicleDocumentMetadata(TRUCK,first.documentId,{expectedRevision:1,title:"Correction B"},key(),deps)]);
+  assert.equal(results.filter(r=>r.status==="fulfilled").length,1);assert.equal(db.state.vehicleDocumentVersion.length,2);assert.equal(storage.objects.size,2);assert.equal(db.state.vehicleDocument[0].revision,2);
+  assert.equal((results.find(r=>r.status==="rejected") as PromiseRejectedResult).reason.code,"DOCUMENT_REVISION_CONFLICT");
+ });
+});

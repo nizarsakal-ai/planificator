@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import type { Prisma } from "@prisma/client"
 import { handleMaintenanceGet, handleMaintenancePlanPut, handleMaintenancePost } from "@/lib/vehicules/maintenance-api"
-import { readMaintenance, recordMaintenance, updateMaintenancePlan, type MaintenanceServiceDeps } from "@/lib/vehicules/maintenance-service"
+import { correctMaintenance, readMaintenance, recordMaintenance, updateMaintenancePlan, type MaintenanceServiceDeps } from "@/lib/vehicules/maintenance-service"
 import type { MileageSession } from "@/lib/vehicules/mileage-access"
 import { ADMIN, LEADER, NEXT_LEADER, MileageMemoryDb, SERVER_NOW, TRUCK } from "./mileage-test-db"
 type Row = Record<string, unknown>
@@ -46,6 +46,30 @@ describe("maintenance service and HTTP", () => {
     assert.equal(dto.history.length, 1)
     assert.equal(JSON.stringify(dto).includes("requestHash"), false)
     assert.equal(JSON.stringify(dto).includes("companyId"), false)
+  })
+  it("appends audited intervention corrections, projects the effective version, and rejects stale or foreign edits", async () => {
+    const db = new MaintenanceDb()
+    db.base.state.trucks[0].currentMileage = 20000
+    await updateMaintenancePlan(TRUCK, plan, db.deps())
+    const original = await recordMaintenance(TRUCK, entry, key, db.deps())
+    const originalRow = structuredClone(db.entries[0])
+    const correction = { ...entry, mileage: 15000, reason: "Erreur du compteur saisi" }
+    const correctionKey = key.replace(/1$/, "2")
+    const saved = await correctMaintenance(TRUCK, original.entryId, correction, correctionKey, db.deps())
+    assert.deepEqual(db.entries[0], originalRow)
+    assert.equal(db.entries.length, 2)
+    assert.equal(db.entries[1].supersedesEntryId, original.entryId)
+    assert.equal(db.entries[1].correctionReason, correction.reason)
+    assert.equal((await readMaintenance(TRUCK, db.deps())).summary.nextMileage, 25000)
+    assert.deepEqual(await correctMaintenance(TRUCK, original.entryId, correction, correctionKey, db.deps()), { ...saved, replayed: true })
+    await assert.rejects(correctMaintenance(TRUCK, original.entryId, correction, key.replace(/1$/, "3"), db.deps()), /MAINTENANCE_CORRECTION_CONFLICT/)
+    await assert.rejects(correctMaintenance(TRUCK, saved.entryId, correction, key.replace(/1$/, "4"), db.deps(LEADER)), /FORBIDDEN/)
+    await assert.rejects(correctMaintenance(TRUCK, "foreign", correction, key.replace(/1$/, "4"), db.deps()), /MAINTENANCE_ENTRY_NOT_FOUND/)
+    await assert.rejects(correctMaintenance(TRUCK, saved.entryId, { ...correction, reason: " " }, key.replace(/1$/, "4"), db.deps()), /INVALID_PAYLOAD/)
+    await assert.rejects(correctMaintenance(TRUCK, saved.entryId, { ...correction, mileage: 20001 }, key.replace(/1$/, "4"), db.deps()), /MAINTENANCE_ABOVE_CURRENT_MILEAGE/)
+    const dto = await readMaintenance(TRUCK, db.deps())
+    assert.equal(dto.history.find(item => item.id === original.entryId)?.isEffective, false)
+    assert.equal(dto.history.find(item => item.id === saved.entryId)?.isEffective, true)
   })
   it("uses current roles, team ownership, tenant boundaries, and archival rules", async () => {
     const db = new MaintenanceDb()

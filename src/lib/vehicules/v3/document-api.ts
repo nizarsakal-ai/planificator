@@ -6,7 +6,7 @@ import { MileageDomainError } from "../mileage-domain"
 import { getVehicleDocumentMaxBytes } from "./document-domain"
 import {
   authorizeDocumentWriteBeforeBody, authorizeReminderSettingsBeforeBody, archiveVehicleDocument, listVehicleDocuments, openVehicleDocumentFile, readReminderSettings, readVehicleDocument,
-  replaceVehicleDocument, updateReminderSettings, uploadVehicleDocument, verifyVehicleDocumentVersion,
+  replaceVehicleDocument, updateVehicleDocumentMetadata, updateReminderSettings, uploadVehicleDocument, verifyVehicleDocumentVersion,
   type DocumentFileInput, type DocumentServiceDeps,
 } from "./document-service"
 import { idempotencyKeyOf, readV3BodyBytes, v3Json, v3JsonBody, v3Route, V3_HEADERS } from "./v3-http"
@@ -60,6 +60,14 @@ export function handleDocumentReplace(request: Request, truckId: string, documen
     const { body, file } = await readDocumentMultipart(request, deps.env)
     const result = await replaceVehicleDocument(truckId, documentId, body, file, idempotencyKeyOf(request), deps)
     return v3Json(result.receipt, { status: 201, headers: { "Idempotency-Replayed": String(result.replayed) } })
+  })
+}
+
+export function handleDocumentUpdate(request: Request, truckId: string, documentId: string, deps: DocumentServiceDeps) {
+  return v3Route(request, async () => {
+    await authorizeDocumentWriteBeforeBody(truckId, documentId, deps)
+    const result = await updateVehicleDocumentMetadata(truckId, documentId, await v3JsonBody(request), idempotencyKeyOf(request), deps)
+    return v3Json(result.receipt, { status: result.replayed ? 200 : 201, headers: { "Idempotency-Replayed": String(result.replayed) } })
   })
 }
 

@@ -20,6 +20,7 @@ export interface CategorySectionProps {
   versions: Record<string, DocumentVersionView[] | undefined>
   onToggleVersions: (document: DocumentView) => void
   onVerify: (document: DocumentView) => void
+  onEdit: (document: DocumentView) => void
   onReplace: (document: DocumentView) => void
   onArchive: (document: DocumentView) => void
   onAdd: (category: VehicleDocumentCategoryCode) => void
@@ -83,7 +84,7 @@ export function VehicleDocumentCategorySection(props: CategorySectionProps) {
             <button type="button" className="text-xs text-slate-600 underline-offset-2 hover:underline" aria-expanded={expanded} onClick={() => props.onToggleVersions(document)}>{expanded ? "Masquer l'historique" : "Historique des versions"}</button>
             {canManage && !document.archivedAt && <>
               {version && !version.verifiedAt && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => props.onVerify(document)}>Marquer comme vérifié</Button>}
-              {truckActive && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => props.onReplace(document)}>Remplacer</Button>}
+              {truckActive && <><Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => props.onEdit(document)}>Modifier</Button><Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => props.onReplace(document)}>Remplacer le fichier</Button></>}
               <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => props.onArchive(document)}>Archiver</Button>
             </>}
           </div>

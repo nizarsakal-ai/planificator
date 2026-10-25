@@ -60,7 +60,7 @@ describe("V3 UI — rendu statique", () => {
     const html = withRouter(createElement(VehicleDocumentCategorySection, {
       truckId: "truck-a", category: { code: "INSURANCE", label: "Assurance" }, active: [document()], archived: [], canManage: true, truckActive: true, busy: false,
       expandedId: "d1", versions: { d1: [version(), version({ id: "v0", versionNumber: 0, status: "HISTORICAL", supersededAt: "2026-02-01T00:00:00.000Z" })] },
-      onToggleVersions: noop, onVerify: noop, onReplace: noop, onArchive: noop, onAdd: noop,
+      onToggleVersions: noop, onVerify: noop, onEdit: noop, onReplace: noop, onArchive: noop, onAdd: noop,
     }))
     assert.match(html, /Bientôt échu/)
     assert.match(html, /Échéance dans 22 jours/)
@@ -68,7 +68,8 @@ describe("V3 UI — rendu statique", () => {
     assert.match(html, /href="\/api\/trucks\/truck-a\/documents\/d1\/versions\/v1\/file"/)
     assert.match(html, /href="\/api\/trucks\/truck-a\/documents\/d1\/versions\/v1\/file\?dl=1"/)
     assert.match(html, /Marquer comme vérifié/)
-    assert.match(html, /Remplacer/)
+    assert.match(html, />Modifier<\/button>/)
+    assert.match(html, /Remplacer le fichier/)
     assert.match(html, /Historique/)
     assert.doesNotMatch(html, /cloudinary|signature|storageKey/i)
   })
@@ -76,13 +77,13 @@ describe("V3 UI — rendu statique", () => {
   it("lecture seule : aucune action d'écriture pour un chef d'équipe ni sur un camion archivé ; rubrique vide = manquant", () => {
     const readOnly = withRouter(createElement(VehicleDocumentCategorySection, {
       truckId: "truck-a", category: { code: "INSURANCE", label: "Assurance" }, active: [document()], archived: [], canManage: false, truckActive: true, busy: false,
-      expandedId: null, versions: {}, onToggleVersions: noop, onVerify: noop, onReplace: noop, onArchive: noop, onAdd: noop,
+      expandedId: null, versions: {}, onToggleVersions: noop, onVerify: noop, onEdit: noop, onReplace: noop, onArchive: noop, onAdd: noop,
     }))
-    assert.doesNotMatch(readOnly, /Marquer comme vérifié|Remplacer|Archiver|Ajouter une pièce/)
+    assert.doesNotMatch(readOnly, /Marquer comme vérifié|Modifier|Remplacer|Archiver|Ajouter une pièce/)
     assert.match(readOnly, /Consulter/)
     const archivedTruck = withRouter(createElement(VehicleDocumentCategorySection, {
       truckId: "truck-a", category: { code: "TECHNICAL_INSPECTION", label: "Contrôle technique" }, active: [], archived: [], canManage: true, truckActive: false, busy: false,
-      expandedId: null, versions: {}, onToggleVersions: noop, onVerify: noop, onReplace: noop, onArchive: noop, onAdd: noop,
+      expandedId: null, versions: {}, onToggleVersions: noop, onVerify: noop, onEdit: noop, onReplace: noop, onArchive: noop, onAdd: noop,
     }))
     assert.match(archivedTruck, /Manquant/)
     assert.doesNotMatch(archivedTruck, /Ajouter une pièce/)

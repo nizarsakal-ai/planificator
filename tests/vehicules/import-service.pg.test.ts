@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import {PrismaClient} from "@prisma/client"
 import {randomUUID} from "node:crypto"
 import {fixture} from "./pg/fixtures"
-import {createImport,listImports,reviewImport,consumeApprovedImportInTransaction} from "../../src/lib/vehicules/import-service"
+import {createImport,listImports,reviewImport,consumeApprovedImportInTransaction,copyImportForEditing} from "../../src/lib/vehicules/import-service"
 import {extractAddressLines,hashSource} from "../../src/lib/vehicules/import-domain"
 import {reserveImportProvider} from "../../src/lib/vehicules/import-provider-quota"
 const value=process.env.IMPORTS_TEST_DATABASE_URL;if(!value)throw Error("IMPORTS_TEST_DATABASE_URL required");const u=new URL(value);if(u.hostname!=="127.0.0.1"||u.port!=="55433"||u.pathname!=="/v3_imports_test"||u.username!=="vehicule_test"||u.search||u.hash)throw Error("Only isolated v3_imports_test permitted")
@@ -24,6 +24,18 @@ test("PG: tenant authority, human version approval, concurrent review/consume, i
  const consumed=await Promise.all([consume(1),consume(1)]);assert.deepEqual(consumed[0],consumed[1]);await assert.rejects(consume(1,"tour-two"),/ALREADY_CONSUMED/);
  for(const status of ["DRAFT","PROCESSING","APPROVED","FAILED"])await assert.rejects(db.vehicleAddressImport.update({where:{id:row.id},data:{status}}));
  await assert.rejects(db.$transaction(async tx=>{await tx.vehicleAddressImport.update({where:{id:row.id},data:{status:"PROCESSING"}});await tx.vehicleAddressImport.update({where:{id:row.id},data:{sourceHash:"changed",candidates:[]}})}));
+ const copyId=randomUUID();let stores=0;const copyDeps={...deps,storeSource:async()=>{stores++;return randomUUID()}};
+ const copy=await copyImportForEditing(f.truck.id,row.id,{expectedRevision:1,copyId},copyDeps);
+ assert.equal(copy.replayed,false);assert.equal(stores,1);
+ const editable=await db.vehicleAddressImport.findUniqueOrThrow({where:{id:copy.id}});assert.equal(editable.status,"DRAFT");assert.notEqual(editable.storageId,row.storageId);assert.equal(editable.reviewedAt,null);assert.equal((editable.candidates as any[])[0].confirmed,false);
+ assert.equal((await copyImportForEditing(f.truck.id,row.id,{expectedRevision:1,copyId},copyDeps)).replayed,true);assert.equal(stores,1);
+ assert.equal((await copyImportForEditing(f.truck.id,row.id,{expectedRevision:1,copyId},{...copyDeps,readSource:async()=>{throw Error("Replay must not fetch private provider")}})).replayed,true);
+ const duplicateSource=await db.vehicleAddressImport.create({data:{companyId:f.company.id,truckId:f.truck.id,createdById:f.user.id,filename:row.filename,mime:row.mime,sourceHash:row.sourceHash,storageId:randomUUID(),candidates,warnings:[]}});
+ await reviewImport(f.truck.id,duplicateSource.id,{expectedRevision:0,approve:true,candidates:candidates.map(c=>({...c,confirmed:true}))},deps);
+ await assert.rejects(copyImportForEditing(f.truck.id,duplicateSource.id,{expectedRevision:1,copyId},copyDeps),/IMPORT_STALE_OR_UNAVAILABLE/);
+
+ await assert.rejects(copyImportForEditing(f.truck.id,row.id,{expectedRevision:0,copyId:randomUUID()},copyDeps),/IMPORT_STALE_OR_UNAVAILABLE/);
+ await assert.rejects(copyImportForEditing(f.otherTruck.id,row.id,{expectedRevision:1,copyId:randomUUID()},copyDeps),/TRUCK_NOT_FOUND/);
  const still=await db.vehicleAddressImport.findUniqueOrThrow({where:{id:row.id}});assert.equal(still.status,"CONSUMED");assert.equal(still.revision,1);assert.equal(still.sourceHash,hashSource(Buffer.from("original")));assert.equal((still.candidates as any[]).length,1)
  await assert.rejects(db.vehicleAddressImport.update({where:{id:row.id},data:{sourceHash:"b".repeat(64)}}));await assert.rejects(db.vehicleAddressImport.update({where:{id:row.id},data:{candidates:[]}}))
  await assert.rejects(db.vehicleAddressImport.create({data:{companyId:f.otherCompany.id,truckId:f.truck.id,createdById:f.user.id,filename:"cross",mime:"text/plain",sourceHash:"a",storageId:randomUUID(),candidates:[],warnings:[]}}))

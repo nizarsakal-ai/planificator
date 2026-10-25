@@ -21,7 +21,7 @@ export default async function VehiculesPage() {
       include: {
         maintenancePlan: { select: { intervalKm: true, intervalMonths: true } },
         maintenanceEntries: {
-          where: { kind: "OIL_CHANGE" },
+          where: { kind: "OIL_CHANGE", corrections: { none: {} } },
           orderBy: [{ occurredAt: "desc" }, { mileage: "desc" }, { recordedAt: "desc" }, { id: "desc" }],
           take: 1,
           select: { kind: true, occurredAt: true, mileage: true, recordedAt: true },
