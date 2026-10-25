@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Building2, Users, HardHat, Calendar, CheckCircle2, XCircle } from "lucide-react"
 import { CreateCompanyDialog } from "@/components/super-admin/CreateCompanyDialog"
 import { CompanyActions } from "@/components/super-admin/CompanyActions"
+import { InviteAdminForm } from "@/components/super-admin/InviteAdminForm"
 
 export const metadata: Metadata = { title: "Super Admin — Entreprises" }
 
@@ -108,7 +109,8 @@ export default async function SuperAdminEntreprisesPage() {
           ) : (
             <div className="divide-y divide-slate-50">
               {companies.map((company) => (
-                <div key={company.id} className="flex items-center justify-between px-5 py-4 hover:bg-slate-50 transition-colors">
+                <div key={company.id} className="px-5 py-4 hover:bg-slate-50 transition-colors">
+                <div className="flex items-center justify-between">
                   {/* Identité */}
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-xl bg-[#0f3460]/10 flex items-center justify-center font-bold text-[#0f3460] text-sm shrink-0">
@@ -157,6 +159,13 @@ export default async function SuperAdminEntreprisesPage() {
                       companyName={company.name}
                     />
                   </div>
+                </div>
+                {/* Supervision : invitation d'un administrateur (entreprise active, cible par id) */}
+                {company.active && (
+                  <div className="mt-3 pl-14">
+                    <InviteAdminForm companyId={company.id} companyName={company.name} />
+                  </div>
+                )}
                 </div>
               ))}
             </div>

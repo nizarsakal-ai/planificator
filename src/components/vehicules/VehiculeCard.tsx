@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { VehicleHistory } from "@/components/vehicules/VehicleHistory"
+import { VehicleV2Panels } from "@/components/vehicules/VehicleV2Panels"
 import { vehicleIdentityLabel, formatVehicleIdentity, vehicleAssignmentBadge, type VehicleViewItem } from "@/lib/vehicules/vehicules-view"
 
 export interface VehicleTeamOption {
@@ -18,6 +19,7 @@ export interface VehicleEmployeeOption {
 }
 
 interface VehiculeCardProps {
+  canManageV2?: boolean
   truck: VehicleViewItem
   /** Équipes ACTIVES (seules affectables). */
   teams: VehicleTeamOption[]
@@ -40,7 +42,7 @@ const ICON_BTN =
 
 /** Carte véhicule compacte (mosaïque ou liste) : identité, statut, équipe, chauffeur, actions, historique. */
 export function VehiculeCard({
-  truck: t, teams, employees, layout, loading, historyOpen, onToggleHistory, onEdit, onArchive, onRestore, onAssign,
+  truck: t, teams, employees, layout, loading, historyOpen, onToggleHistory, onEdit, onArchive, onRestore, onAssign, canManageV2 = false,
 }: VehiculeCardProps) {
   const identity = formatVehicleIdentity(t.marque, t.modele)
   const teamArchived = t.team !== null && !teams.some((team) => team.id === t.team!.id)
@@ -87,6 +89,8 @@ export function VehiculeCard({
             </div>
           </div>
           {historyOpen && <VehicleHistory entries={t.history} truncated={t.historyTruncated} />}
+          <VehicleV2Panels truckId={t.id} matricule={t.matricule} active={t.active} canManage={canManageV2}
+            currentMileage={t.currentMileage} maintenanceSummary={t.maintenanceSummary} />
         </CardContent>
       </Card>
     )
@@ -187,6 +191,8 @@ export function VehiculeCard({
         </div>
 
         {historyOpen && <VehicleHistory entries={t.history} truncated={t.historyTruncated} />}
+        <VehicleV2Panels truckId={t.id} matricule={t.matricule} active={t.active} canManage={canManageV2}
+          currentMileage={t.currentMileage} maintenanceSummary={t.maintenanceSummary} />
       </CardContent>
     </Card>
   )
