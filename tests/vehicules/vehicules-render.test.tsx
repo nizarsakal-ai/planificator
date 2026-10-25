@@ -203,7 +203,7 @@ describe("VehicleForm — formulaire partagé", () => {
     assert.match(html, /Enregistrer/)
   })
   it("création : bouton désactivé sans immatriculation", () => {
-    assert.match(form(), /type="submit" disabled=""/)
+    assert.match(form(), /type="submit"[^>]*disabled=""/)
   })
   it("ids uniques par préfixe (plusieurs formulaires sur une page)", () => {
     assert.match(form({ idPrefix: "team-1-add" }), /id="team-1-add-matricule"/)

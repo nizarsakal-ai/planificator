@@ -250,6 +250,16 @@ export async function assignTeamCore(
     }
   }) } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
+    const databaseError = err && typeof err === "object" && "meta" in err
+      ? String((err as {meta?: {database_error?: unknown}}).meta?.database_error ?? "") : ""
+    const conflict = `${msg} ${databaseError}`.match(/\bDAILY_(TEAM|DRIVER)_PLANNING_CONFLICT\b/)
+    if (conflict) return {
+      ok: false,
+      code: conflict[1] === "TEAM" ? "TEAM_CONFLICT" : "EMPLOYEE_CONFLICT",
+      details: { message: conflict[1] === "TEAM"
+        ? "Cette équipe est déjà réservée pour une tournée sur cette période. Modifiez l’équipe ou les dates."
+        : "Un chauffeur est déjà réservé pour une tournée sur cette période. Modifiez l’équipe ou les dates." },
+    }
     return {
       ok: false,
       code: "TRANSACTION_FAILED",

@@ -11,10 +11,13 @@ const withPWA = withPWAInit({
   workboxOptions: {
     // Données de parc authentifiées : jamais de repli sur la réponse d'une autre session.
     // Cette règle précède les caches génériques API / pages de next-pwa.
+    // V3 : les routes documentaires hors préfixe /api/trucks restent elles aussi NetworkOnly
+    // (aucun cache partagé ni hors ligne pour des pièces privées).
     runtimeCaching: [{
       urlPattern: ({ url, sameOrigin }) => sameOrigin && (
         url.pathname === "/vehicules" || url.pathname.startsWith("/vehicules/")
         || url.pathname === "/api/trucks" || url.pathname.startsWith("/api/trucks/")
+        || url.pathname === "/api/vehicle-documents" || url.pathname.startsWith("/api/vehicle-documents/")
       ),
       handler: "NetworkOnly",
       method: "GET",
