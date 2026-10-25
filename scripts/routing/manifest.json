@@ -1,0 +1,14 @@
+{
+  "engine": "GraphHopper 11.1",
+  "java": "Temurin 21",
+  "container": "eclipse-temurin:21-jre@sha256:227118764cccd3c3294617061aaa93a08309c63a395eefa83e6b35032992ea99",
+  "jarSha256": "8462f758d9ea49edaded557cec5c687a0a24f004ec371cd4daaeb0534824ea33",
+  "graphVersion": "france-geofabrik-20261024-gh11.1-car-turncosts-v1",
+  "pbf": {
+    "md5": "7dc9a3bca5150f33bc24d198809f7a9a",
+    "bytes": 5103982981,
+    "source": "https://download.geofabrik.de/europe/france-latest.osm.pbf"
+  },
+  "coverage": "France m\u00e9tropolitaine",
+  "profile": "car with turn restrictions; not guaranteed for heavy vehicles"
+}

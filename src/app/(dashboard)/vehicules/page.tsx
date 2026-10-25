@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma"
 import { VehiculesView } from "@/components/vehicules/VehiculesView"
 import { resolveVehiclesAccess, VEHICLE_HISTORY_LIMIT, limitHistory } from "@/lib/vehicules/vehicules-view"
 import { maintenanceSummary } from "@/lib/vehicules/maintenance-domain"
+import { isVehiclesV3Enabled } from "@/lib/vehicules/v3/v3-feature-flag"
 
 export const metadata: Metadata = { title: "Véhicules" }
 
@@ -20,7 +21,7 @@ export default async function VehiculesPage() {
       include: {
         maintenancePlan: { select: { intervalKm: true, intervalMonths: true } },
         maintenanceEntries: {
-          where: { kind: "OIL_CHANGE" },
+          where: { kind: "OIL_CHANGE", corrections: { none: {} } },
           orderBy: [{ occurredAt: "desc" }, { mileage: "desc" }, { recordedAt: "desc" }, { id: "desc" }],
           take: 1,
           select: { kind: true, occurredAt: true, mileage: true, recordedAt: true },
@@ -54,6 +55,7 @@ export default async function VehiculesPage() {
   return (
     <VehiculesView
       canManageV2={session?.user?.role === "ADMIN" || session?.user?.role === "SUPER_ADMIN"}
+      v3Enabled={isVehiclesV3Enabled()}
       trucks={trucks.map((t) => {
         const { entries, truncated } = limitHistory(t.assignments)
         return {

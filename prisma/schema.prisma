@@ -115,6 +115,10 @@ enum NotificationType {
   ACCOMMODATION_CREATED   // Logement réservé
   ACCOMMODATION_CANCELLED // Logement annulé
   BOOKING_DETECTED        // Email Booking.com détecté, en attente de validation
+
+  // Véhicules V3 — ajouts des lots isolés.
+  VEHICLE_DOCUMENT_EXPIRING // V3 : document véhicule bientôt échu (rappel interne)
+  VEHICLE_DOCUMENT_EXPIRED  // V3 : document véhicule expiré (rappel interne)
 }
 
 enum AccommodationStatus {
@@ -386,6 +390,15 @@ model Company {
   agentPrincipals             AgentPrincipal[]
 
   @@map("companies")
+
+  // Véhicules V3 — ajouts des lots isolés.
+  vehicleCartographyCache VehicleCartographyCache[]
+  vehicleImportProviderWindows VehicleImportProviderWindow[]
+  vehicleDocuments            VehicleDocument[]
+  vehicleDocumentVersions     VehicleDocumentVersion[]
+  vehicleDocumentReminderSetting VehicleDocumentReminderSetting?
+  vehicleDocumentReminders    VehicleDocumentReminder[]
+  vehicleAuditLogs            VehicleAuditLog[]
 }
 
 // Paramètres de l'entreprise — extensible sans toucher au schéma principal
@@ -603,6 +616,7 @@ model User {
   acquisitionAttachmentAccessLogs AcquisitionAttachmentAccessLog[]
   /// PLAN-AGENT-GATEWAY-001 — LOT-1A (relation inverse, sans effet SQL sur users)
   createdAgentPrincipals AgentPrincipal[] @relation("AgentPrincipalCreatedBy")
+  skippedTourStops VehicleTourStop[] @relation("TourStopSkippedBy")
   mileageEntries MileageEntry[] @relation("MileageAuthor")
   maintenanceEntries VehicleMaintenanceEntry[] @relation("MaintenanceAuthor")
   updatedMaintenancePlans VehicleMaintenancePlan[] @relation("MaintenancePlanAuthor")
@@ -610,6 +624,11 @@ model User {
   @@index([companyId])
   @@index([email])
   @@map("users")
+
+  // Véhicules V3 — ajouts des lots isolés.
+  vehicleDocumentsCreated VehicleDocument[] @relation("VehicleDocumentAuthor")
+  vehicleDocumentVersionsUploaded VehicleDocumentVersion[] @relation("VehicleDocumentVersionAuthor")
+  vehicleAuditLogs VehicleAuditLog[] @relation("VehicleAuditActor")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1352,6 +1371,14 @@ model Truck {
   @@index([companyId])
   @@index([chauffeurId])
   @@map("trucks")
+
+  // Véhicules V3 — ajouts des lots isolés.
+  vehicleExpenses VehicleExpense[]
+  tours VehicleTour[]
+  addressImports        VehicleAddressImport[]
+  vehicleDocuments         VehicleDocument[]
+  vehicleDocumentVersions  VehicleDocumentVersion[]
+  vehicleDocumentReminders VehicleDocumentReminder[]
 }
 
 // Entretien V2 : journal séparé du kilométrage ; les interventions ne changent pas le compteur.
@@ -1387,6 +1414,10 @@ model VehicleMaintenanceEntry {
   createdByNameSnapshot String
   recordedAt            DateTime @default(now())
   idempotencyKey        String
+  supersedesEntryId     String? @unique
+  correctionReason      String?
+  supersedes VehicleMaintenanceEntry? @relation("MaintenanceCorrections", fields: [supersedesEntryId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict)
+  corrections VehicleMaintenanceEntry[] @relation("MaintenanceCorrections")
   requestHash           String
 
   company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -1396,6 +1427,11 @@ model VehicleMaintenanceEntry {
   @@unique([companyId, truckId, idempotencyKey])
   @@index([companyId, truckId, occurredAt])
   @@map("vehicle_maintenance_entries")
+
+  // Véhicules V3 — ajouts des lots isolés.
+  documentVersions VehicleDocumentVersion[] @relation("VehicleDocumentMaintenanceEntry")
+  @@unique([id, truckId, companyId], map: "vehicle_maintenance_entries_id_truck_company_key")
+  expenses VehicleExpense[] @relation("VehicleExpenseMaintenance")
 }
 
 enum MileageEntryKind {
@@ -1478,6 +1514,11 @@ model MileageTrip {
   @@index([teamId, companyId])
   @@index([chauffeurId, companyId])
   @@map("mileage_trips")
+
+  // Véhicules V3 — ajouts des lots isolés.
+  @@unique([id, truckId, companyId], map: "mileage_trips_id_truck_company_key")
+  tour VehicleTour?
+  @@unique([id, truckId, companyId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2322,4 +2363,351 @@ model JournalEntryLine {
   @@unique([entryId, position])
   @@index([companyId, accountId])
   @@map("journal_entry_lines")
+}
+
+model VehicleExpense {
+  id                    String                     @id @default(cuid())
+  companyId             String
+  truckId               String
+  category              String
+  occurredAt            DateTime                   @db.Timestamptz(3)
+  amount                Decimal                    @db.Decimal(14, 2)
+  currency              String                     @db.Char(3)
+  litres                Decimal?                   @db.Decimal(12, 3)
+  mileageObservation    Int?
+  supplier              String?
+  reference             String?
+  receiptFingerprint    String?
+  maintenanceEntryId String?
+  documentVersionId   String?
+  notes                 String?
+  status                String                     @default("PENDING")
+  revision              Int                        @default(1)
+  sourceExpenseReportId String?
+  sourceSnapshot        Json?
+  createdById           String
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  truck                 Truck                      @relation(fields: [truckId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  allocations           VehicleExpenseAllocation[]
+  commands              VehicleExpenseCommand[]
+
+  @@unique([id, truckId, companyId])
+  @@unique([companyId, sourceExpenseReportId])
+  @@index([companyId, truckId, occurredAt])
+  @@map("vehicle_expenses")
+  documentVersion VehicleDocumentVersion? @relation("VehicleExpenseDocument", fields: [documentVersionId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "vehicle_expenses_document_scope_fkey")
+  maintenanceEntry VehicleMaintenanceEntry? @relation("VehicleExpenseMaintenance", fields: [maintenanceEntryId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "vehicle_expenses_maintenance_scope_fkey")
+}
+
+
+model VehicleExpenseAllocation {
+  id            String         @id @default(cuid())
+  companyId     String
+  truckId       String
+  expenseId     String
+  mileageTripId String?
+  amount        Decimal        @db.Decimal(14, 2)
+  expense       VehicleExpense @relation(fields: [expenseId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([companyId, truckId, expenseId])
+  @@map("vehicle_expense_allocations")
+}
+
+
+model VehicleExpenseCommand {
+  id             String         @id @default(cuid())
+  companyId      String
+  truckId        String
+  expenseId      String
+  idempotencyKey String         @db.Uuid
+  requestHash    String         @db.Char(64)
+  action         String
+  actorId        String
+  reason         String?
+  before         Json?
+  after          Json
+  recordedAt     DateTime       @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  expense        VehicleExpense @relation(fields: [expenseId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([companyId, truckId, idempotencyKey])
+  @@index([companyId, expenseId, recordedAt])
+  @@map("vehicle_expense_commands")
+}
+
+
+model VehicleTour {
+ id String @id @default(cuid())
+ companyId String
+ truckId String
+ teamId String?
+ chauffeurId String?
+ teamNameSnapshot String?
+ chauffeurNameSnapshot String?
+ title String
+ startsAt DateTime @db.Timestamptz(3)
+ endsAt DateTime @db.Timestamptz(3)
+ status String @default("PLANNED")
+ revision Int @default(1)
+ estimatedKm Float?
+ mileageTripId String? @unique
+ createdById String
+ createdAt DateTime @default(now())
+ completedAt DateTime?
+ truck Truck @relation(fields: [truckId, companyId], references: [id, companyId], onDelete: Restrict)
+ mileageTrip MileageTrip? @relation(fields: [mileageTripId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict)
+ stops VehicleTourStop[]
+ commands VehicleTourCommand[]
+ @@unique([id, companyId])
+ @@unique([mileageTripId, truckId, companyId])
+ @@index([companyId, truckId, startsAt])
+ @@map("vehicle_tours")
+}
+
+
+model VehicleTourStop {
+ id String @id @default(cuid())
+ tourId String
+ companyId String
+ position Int
+ label String
+ address String
+ worksiteId String?
+ clientId String?
+ latitude Float?
+ longitude Float?
+ validatedById String
+ validatedAt DateTime @default(now())
+ completedAt DateTime?
+ skippedAt DateTime? @db.Timestamptz(3)
+ skippedReason String?
+ skippedById String?
+ skippedBy User? @relation("TourStopSkippedBy", fields: [skippedById], references: [id], onDelete: Restrict)
+ tour VehicleTour @relation(fields: [tourId, companyId], references: [id, companyId], onDelete: Restrict)
+ @@unique([tourId, position])
+ @@map("vehicle_tour_stops")
+}
+
+
+model VehicleTourCommand {
+ id String @id @default(cuid())
+ tourId String
+ companyId String
+ truckId String
+ key String @db.Uuid
+ requestHash String
+ acceptedRevision Int
+ createdAt DateTime @default(now())
+ tour VehicleTour @relation(fields: [tourId, companyId], references: [id, companyId], onDelete: Restrict)
+ @@unique([companyId, truckId, key])
+ @@map("vehicle_tour_commands")
+}
+
+
+model VehicleAddressImport {
+  id             String    @id @default(cuid())
+  companyId      String
+  truckId        String
+  createdById    String
+  filename       String
+  mime           String
+  sourceHash     String
+  storageId      String    @unique
+  revision       Int       @default(0)
+  candidates     Json
+  warnings       Json
+  status         String    @default("DRAFT")
+  reviewedById   String?
+  reviewedAt     DateTime?
+  consumptionKey String?
+  createdAt      DateTime  @default(now())
+  truck          Truck     @relation(fields: [truckId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([companyId, truckId, createdAt])
+  @@index([companyId, createdAt])
+  @@map("vehicle_address_imports")
+}
+
+
+model VehicleImportProviderWindow {
+  companyId   String
+  provider    String
+  windowStart DateTime
+  count       Int
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@id([companyId, provider, windowStart])
+  @@map("vehicle_import_provider_windows")
+}
+
+
+enum VehicleDocumentCategory {
+  TECHNICAL_INSPECTION // Contrôle technique
+  REPAIR_MAINTENANCE   // Réparations et entretien (factures, comptes rendus)
+  REGISTRATION         // Carte grise
+  INSURANCE            // Assurance
+  EXPENSE_RECEIPT
+}
+
+
+model VehicleDocument {
+  id                     String                  @id @default(cuid())
+  companyId              String
+  truckId                String
+  category               VehicleDocumentCategory
+  title                  String
+  currentVersionId       String?
+  revision               Int                     @default(1)
+  archivedAt             DateTime?               @db.Timestamptz(3)
+  archivedById           String?
+  archivedByNameSnapshot String?
+  archiveReason          String?
+  createdAt              DateTime                @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  createdById            String
+  createdByNameSnapshot  String
+  updatedAt              DateTime                @updatedAt @db.Timestamptz(3)
+
+  company        Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  truck          Truck                     @relation(fields: [truckId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  createdBy      User                      @relation("VehicleDocumentAuthor", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  currentVersion VehicleDocumentVersion?   @relation("VehicleDocumentCurrentVersion", fields: [currentVersionId, id, companyId], references: [id, documentId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "vehicle_documents_current_version_fkey")
+  versions       VehicleDocumentVersion[]  @relation("VehicleDocumentVersions")
+  reminders      VehicleDocumentReminder[]
+
+  @@unique([id, truckId, companyId], map: "vehicle_documents_id_truck_company_key")
+  @@unique([currentVersionId, id, companyId], map: "vehicle_documents_current_version_document_company_key")
+  @@index([companyId, truckId, category])
+  @@map("vehicle_documents")
+}
+
+
+model VehicleDocumentVersion {
+  id                     String    @id @default(cuid())
+  companyId              String
+  truckId                String
+  documentId             String
+  versionNumber          Int
+  storageProvider        String
+  storageKey             String
+  storageResourceType    String
+  storageDeliveryType    String
+  originalFilename       String
+  mimeType               String
+  sizeBytes              Int
+  sha256                 String    @db.Char(64)
+  // Dates métier (jour civil, interprété dans le fuseau de l'entreprise)
+  issuedOn               DateTime? @db.Date
+  validFrom              DateTime? @db.Date
+  validUntil             DateTime? @db.Date
+  // Métadonnées typées facultatives selon la rubrique
+  issuerName             String?
+  referenceNumber        String?
+  observations           String?   @db.Text
+  // Kilométrage mentionné sur la pièce : information, jamais appliqué au compteur V2
+  mileage                Int?
+  // Lien facultatif vers une intervention V2 existante ; une facture ancienne sans
+  // kilométrage reste conservable sans créer d'intervention fictive.
+  maintenanceEntryId     String?
+  uploadedById           String
+  uploadedByNameSnapshot String
+  uploadedAt             DateTime  @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  verifiedAt             DateTime? @db.Timestamptz(3)
+  verifiedById           String?
+  verifiedByNameSnapshot String?
+  supersededAt           DateTime? @db.Timestamptz(3)
+  idempotencyKey         String    @db.Uuid
+  requestHash            String    @db.Char(64)
+
+  company          Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  truck            Truck                     @relation(fields: [truckId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  document         VehicleDocument           @relation("VehicleDocumentVersions", fields: [documentId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "vehicle_document_versions_document_truck_company_fkey")
+  uploadedBy       User                      @relation("VehicleDocumentVersionAuthor", fields: [uploadedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  maintenanceEntry VehicleMaintenanceEntry?  @relation("VehicleDocumentMaintenanceEntry", fields: [maintenanceEntryId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "vehicle_document_versions_maintenance_entry_fkey")
+  currentOf        VehicleDocument?          @relation("VehicleDocumentCurrentVersion")
+  reminders        VehicleDocumentReminder[]
+
+  @@unique([id, documentId, companyId], map: "vehicle_document_versions_id_document_company_key")
+  @@unique([documentId, versionNumber], map: "vehicle_document_versions_document_number_key")
+  @@unique([companyId, truckId, idempotencyKey], map: "vehicle_document_versions_company_truck_idempotency_key")
+  @@unique([companyId, storageKey], map: "vehicle_document_versions_company_storage_key")
+  @@index([companyId, validUntil])
+  @@index([maintenanceEntryId, truckId, companyId], map: "vehicle_document_versions_maintenance_entry_idx")
+  @@map("vehicle_document_versions")
+  expenses VehicleExpense[] @relation("VehicleExpenseDocument")
+  @@unique([id, truckId, companyId], map: "vehicle_document_versions_id_truck_company_key")
+}
+
+
+model VehicleDocumentReminderSetting {
+  id                    String   @id @default(cuid())
+  companyId             String   @unique
+  thresholdsDays        Int[]    @default([30, 7])
+  revision              Int      @default(1)
+  updatedAt             DateTime @updatedAt @db.Timestamptz(3)
+  updatedById           String
+  updatedByNameSnapshot String
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("vehicle_document_reminder_settings")
+}
+
+
+model VehicleDocumentReminder {
+  id              String   @id @default(cuid())
+  companyId       String
+  truckId         String
+  documentId      String
+  versionId       String
+  thresholdDays   Int
+  dueOn           DateTime @db.Date
+  recipientUserId String
+  notificationId  String?
+  createdAt       DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+
+  company  Company                @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  truck    Truck                  @relation(fields: [truckId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  document VehicleDocument        @relation(fields: [documentId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "vehicle_document_reminders_document_fkey")
+  version  VehicleDocumentVersion @relation(fields: [versionId, documentId, companyId], references: [id, documentId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "vehicle_document_reminders_version_fkey")
+
+  @@unique([versionId, thresholdDays, recipientUserId], map: "vehicle_document_reminders_version_threshold_recipient_key")
+  @@index([companyId, truckId])
+  @@map("vehicle_document_reminders")
+}
+
+
+model VehicleAuditLog {
+  id                String   @id @default(cuid())
+  companyId         String
+  truckId           String?
+  actorId           String
+  actorNameSnapshot String
+  action            String
+  entityType        String
+  entityId          String?
+  outcome           String
+  detail            Json?
+  createdAt         DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  actor   User    @relation("VehicleAuditActor", fields: [actorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([companyId, truckId, createdAt])
+  @@index([companyId, entityType, entityId])
+  @@map("vehicle_audit_logs")
+}
+
+model VehicleCartographyAdmission {
+ provider String @id
+ nextAllowedAt DateTime @db.Timestamptz(6)
+ @@map("vehicle_cartography_admission")
+}
+model VehicleCartographyCache {
+ key String @id
+ companyId String
+ value Json
+ expiresAt DateTime @db.Timestamptz(6)
+ company Company @relation(fields:[companyId],references:[id],onDelete:Cascade)
+ @@index([expiresAt],map:"vehicle_cartography_cache_expiresAt_idx")
+ @@map("vehicle_cartography_cache")
 }
