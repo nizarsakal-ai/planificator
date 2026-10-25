@@ -49,7 +49,11 @@ export async function assertStillAccountingAdmin(tx: Tx, ctx: AccountingContext)
   const user = await read()
   if (!user || !user.active) throw new AccountingError("ACCESS_REVOKED")
   const access = resolveCompanyAccess(user, ctx.companyId)
-  if (!access || access.companyId !== ctx.companyId || access.role !== "ADMIN") throw new AccountingError("ACCESS_REVOKED")
+  if (!access || access.companyId !== ctx.companyId) throw new AccountingError("ACCESS_REVOKED")
+  // ADMIN de la société, ou SUPER_ADMIN pour sa seule société de rattachement (décision du 25/10/2026).
+  const allowed = access.role === "ADMIN"
+    || (access.role === "SUPER_ADMIN" && user.companyId === ctx.companyId && user.company?.active === true)
+  if (!allowed) throw new AccountingError("ACCESS_REVOKED")
 }
 
 export interface DraftInput {
@@ -98,6 +102,18 @@ export async function createDraftEntry(tx: Tx, ctx: AccountingContext, input: Dr
   await assertStillAccountingAdmin(tx, ctx)
   const label = checkLabel(input.label, 300)
   if (input.lines.length < 2 || input.lines.length > 500) throw new AccountingError("LINES_INVALID")
+  // Exercice de la société, saisissable (OUVERT, ou EN CLÔTURE pour une écriture de clôture) et date dans l'exercice.
+  // Lecture sans verrou : la validation (postEntry + fonction SQL) revérifie sous verrou ; ce contrôle évite
+  // seulement des brouillons inutilisables (exercice clos, autre société, date hors période).
+  const year = await tx.fiscalYear.findFirst({
+    where: { id: input.fiscalYearId, companyId: ctx.companyId },
+    select: { status: true, startDate: true, endDate: true },
+  })
+  if (!year) throw new AccountingError("FISCAL_YEAR_NOT_FOUND")
+  if (!(year.status === "OPEN" || (year.status === "CLOSING" && input.closingEntry === true))) throw new AccountingError("ENTRY_INVALID", ["YEAR_NOT_OPEN"])
+  if (Number.isNaN(input.entryDate.getTime()) || input.entryDate < year.startDate || input.entryDate > year.endDate) {
+    throw new AccountingError("ENTRY_INVALID", ["DATE_OUTSIDE_YEAR"])
+  }
   if (input.source) {
     if (!input.source.type || !input.source.id || !Number.isSafeInteger(input.source.version) || input.source.version < 0) {
       throw new AccountingError("SOURCE_INVALID")

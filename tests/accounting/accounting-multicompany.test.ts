@@ -26,6 +26,7 @@ async function accountingFor(acc: ReturnType<typeof account>, requested: string 
     isModuleEnabled: () => true,
     auth: async () => (access ? { user: { id: "u1", role: access.role, companyId: access.companyId } } : { user: { id: "u1", role: null, companyId: null } }),
     findCompany: async (id) => companies[id] ?? null,
+    findUserHomeCompanyId: async () => acc.companyId,
   }
   return { access, result: await resolveAccountingAccess(deps) }
 }
@@ -80,10 +81,10 @@ describe("Comptabilité × multi-société", () => {
     assert.equal(result.ok, false)
   })
 
-  it("SUPER_ADMIN : refusé même avec une société (Lot 0, décision D2)", async () => {
-    const { access, result } = await accountingFor(account("SUPER_ADMIN", A, []), A)
-    assert.equal(access?.role, "SUPER_ADMIN")
-    assert.deepEqual(result, { ok: false, reason: "FORBIDDEN" })
+  it("SUPER_ADMIN : autorisé pour sa société de rattachement uniquement (décision du 25/10/2026)", async () => {
+    const { access, result } = await accountingFor(account("SUPER_ADMIN", A, []), B)
+    assert.deepEqual(access, { companyId: A, role: "SUPER_ADMIN" }, "le résolveur ne bascule jamais un SUPER_ADMIN vers une autre société")
+    assert.deepEqual(result, { ok: true, context: { userId: "u1", role: "SUPER_ADMIN", companyId: A } })
   })
 
   it("aucune appartenance : refusé", async () => {

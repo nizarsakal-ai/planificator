@@ -23,40 +23,73 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 const ACCOUNTING_LIB_FILES = walk(join(ROOT, "src/lib/accounting")).map((p) => relative(ROOT, p))
-const PAGE = "src/app/(dashboard)/comptabilite/page.tsx"
+const UI_DIR = "src/app/(dashboard)/comptabilite"
+const UI_FILES = walk(join(ROOT, UI_DIR)).map((p) => relative(ROOT, p)).sort()
+const PAGES = UI_FILES.filter((f) => f.endsWith("/page.tsx"))
+const ROUTES = UI_FILES.filter((f) => f.endsWith("/route.ts"))
 
-describe("/comptabilite — protection côté serveur (pas seulement le menu)", () => {
-  it("la page existe et est un composant serveur asynchrone", () => {
-    assert.ok(existsSync(join(ROOT, PAGE)))
-    const src = read(PAGE)
-    assert.doesNotMatch(src, /"use client"/)
-    assert.match(src, /export default async function ComptabilitePage\(/)
+describe("/comptabilite (A2) — protection côté serveur de chaque écran (pas seulement le menu)", () => {
+  it("inventaire exact des écrans et exports", () => {
+    assert.deepEqual(UI_FILES, [
+      `${UI_DIR}/balance/export/route.ts`,
+      `${UI_DIR}/balance/page.tsx`,
+      `${UI_DIR}/ecritures/[id]/page.tsx`,
+      `${UI_DIR}/ecritures/nouvelle/page.tsx`,
+      `${UI_DIR}/ecritures/page.tsx`,
+      `${UI_DIR}/exercices/page.tsx`,
+      `${UI_DIR}/grand-livre/export/route.ts`,
+      `${UI_DIR}/grand-livre/page.tsx`,
+      `${UI_DIR}/layout.tsx`,
+      `${UI_DIR}/page.tsx`,
+      `${UI_DIR}/plan/page.tsx`,
+    ])
   })
 
-  it("la garde serveur s'exécute AVANT tout rendu et tout contenu", () => {
-    const src = read(PAGE)
-    const guard = src.indexOf("await resolveAccountingAccessForRequest()")
-    const firstJsx = src.indexOf("return (")
-    assert.ok(guard > 0 && firstJsx > guard, "garde avant le premier return JSX")
-    assert.match(src, /if \(!access\.ok\) \{/)
+  it("layout et pages : composants serveur asynchrones, garde AVANT toute lecture et tout rendu", () => {
+    for (const file of [`${UI_DIR}/layout.tsx`, ...PAGES]) {
+      const src = code(file)
+      assert.doesNotMatch(src, /"use client"/, file)
+      assert.match(src, /export default async function \w+\(/, file)
+      const guard = src.indexOf("await requireAccountingPage()")
+      assert.ok(guard > 0, `${file} : garde requireAccountingPage()`)
+      for (const marker of ["await params", "await searchParams", "prisma, ctx", "return ("]) {
+        const at = src.indexOf(marker)
+        if (at >= 0) assert.ok(at > guard, `${file} : « ${marker} » après la garde`)
+      }
+    }
   })
 
-  it("refus : /login si non connecté, 404 si module désactivé, /dashboard sinon", () => {
-    const src = read(PAGE)
+  it("la garde de page applique les conventions du Lot 0 (login / 404 / dashboard)", () => {
+    const src = code("src/lib/accounting/ui/page-context.ts")
     assert.match(src, /disposition === "login"\) redirect\("\/login"\)/)
     assert.match(src, /disposition === "not-found"\) notFound\(\)/)
     assert.match(src, /redirect\("\/dashboard"\)/)
   })
 
-  it("la page n'accepte aucune entrée client (ni searchParams, ni params, ni formulaire, ni companyId)", () => {
-    const src = code(PAGE)
-    assert.doesNotMatch(src, /searchParams|params|formData|FormData|cookies\(|headers\(|companyId/)
+  it("exports CSV : garde requireAccountingRoute() en premier, réponse non mise en cache", () => {
+    for (const file of ROUTES) {
+      const src = code(file)
+      const guard = src.indexOf("await requireAccountingRoute()")
+      assert.ok(guard > 0, file)
+      assert.ok(src.indexOf("request.url") > guard, `${file} : paramètres lus après la garde`)
+      assert.doesNotMatch(src, /export async function (POST|PUT|PATCH|DELETE)/, `${file} : lecture seule`)
+    }
+    assert.match(code("src/lib/accounting/ui/route-guard.ts"), /"Cache-Control": "no-store"/)
   })
 
-  it("la page n'affiche aucune donnée financière : aucun accès base, facture, KPI", () => {
-    const src = code(PAGE)
-    assert.doesNotMatch(src, /prisma|invoice|facture|KPI|€|toLocaleString/i)
-    assert.match(src, /Module comptabilité — préparation en cours/)
+  it("aucun écran ne reçoit la société du client : companyId vient uniquement de la session", () => {
+    for (const file of UI_FILES) assert.doesNotMatch(code(file), /companyId/, file)
+    for (const file of walk(join(ROOT, "src/components/comptabilite")).map((p) => relative(ROOT, p))) {
+      assert.doesNotMatch(code(file), /companyId|@\/lib\/prisma/, file)
+    }
+  })
+
+  it("les Server Actions passent toutes par requireAccountingAdmin() et le moteur transactionnel", () => {
+    const src = code("src/lib/accounting/actions/accounting.actions.ts")
+    assert.match(src, /^"use server"/m)
+    assert.match(src, /await requireAccountingAdmin\(\)/)
+    assert.match(src, /runAccountingTransaction\(/)
+    assert.doesNotMatch(src, /companyId:\s*(raw|input|data)\b/)
   })
 
   it("le middleware ne contient aucune règle comptable (la sécurité n'y est pas déléguée)", () => {
@@ -110,7 +143,7 @@ describe("flag — jamais exposé au navigateur", () => {
 describe("A1 — périmètre du moteur comptable (aucun branchement facture, aucune écriture hors service)", () => {
   const A1_MIGRATION = "20261025200000_accounting_a1_engine"
   // transaction.ts n'écrit rien lui-même : il ouvre la transaction ($transaction) du moteur.
-  const ENGINE_WRITERS = ["src/lib/accounting/engine/fiscal-years.ts", "src/lib/accounting/engine/posting.ts", "src/lib/accounting/engine/setup.ts", "src/lib/accounting/engine/transaction.ts"]
+  const ENGINE_WRITERS = ["src/lib/accounting/engine/admin.ts", "src/lib/accounting/engine/fiscal-years.ts", "src/lib/accounting/engine/posting.ts", "src/lib/accounting/engine/setup.ts", "src/lib/accounting/engine/transaction.ts"]
 
   it("schema.prisma : exactement les modèles et enums comptables d'A1", () => {
     const schema = read("prisma/schema.prisma")
@@ -152,14 +185,22 @@ describe("A1 — périmètre du moteur comptable (aucun branchement facture, auc
       "src/lib/accounting/access/accounting-access.core.ts",
       "src/lib/accounting/access/accounting-access.ts",
       "src/lib/accounting/accounting-feature-flag.ts",
+      "src/lib/accounting/actions/accounting.actions.ts",
+      "src/lib/accounting/engine/admin.ts",
       "src/lib/accounting/engine/canonical.ts",
       "src/lib/accounting/engine/fiscal-years.ts",
       "src/lib/accounting/engine/money.ts",
       "src/lib/accounting/engine/posting.ts",
+      "src/lib/accounting/engine/queries.ts",
       "src/lib/accounting/engine/reads.ts",
       "src/lib/accounting/engine/setup.ts",
       "src/lib/accounting/engine/transaction.ts",
       "src/lib/accounting/engine/validate.ts",
+      "src/lib/accounting/ui/csv.ts",
+      "src/lib/accounting/ui/forms.ts",
+      "src/lib/accounting/ui/labels.ts",
+      "src/lib/accounting/ui/page-context.ts",
+      "src/lib/accounting/ui/route-guard.ts",
     ])
   })
 })

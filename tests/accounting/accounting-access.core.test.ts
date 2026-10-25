@@ -21,6 +21,7 @@ function makeDeps(opts: {
   companies?: Record<string, { id: string; active: boolean }>
   authThrows?: boolean
   findThrows?: boolean
+  homes?: Record<string, string | null>
 }) {
   const calls = { auth: 0, find: [] as string[] }
   const companies = opts.companies ?? { [CO_A]: { id: CO_A, active: true }, [CO_B]: { id: CO_B, active: true } }
@@ -36,6 +37,7 @@ function makeDeps(opts: {
       if (opts.findThrows) throw new Error("db down")
       return companies[id] ?? null
     },
+    findUserHomeCompanyId: async (userId) => (opts.homes ?? { "sa-galya": CO_A })[userId] ?? null,
   }
   return { deps, calls }
 }
@@ -92,9 +94,8 @@ describe("accounting access — rôles", () => {
     }
   })
 
-  it("seul ADMIN est autorisé dans le Lot 0 (SUPER_ADMIN explicitement absent)", () => {
-    assert.deepEqual([...ACCOUNTING_ALLOWED_ROLES], ["ADMIN"])
-    assert.ok(!(ACCOUNTING_ALLOWED_ROLES as readonly string[]).includes("SUPER_ADMIN"))
+  it("rôles autorisés : ADMIN et SUPER_ADMIN (ce dernier borné à sa société de rattachement)", () => {
+    assert.deepEqual([...ACCOUNTING_ALLOWED_ROLES], ["ADMIN", "SUPER_ADMIN"])
   })
 
   it("non authentifié : UNAUTHENTICATED (session nulle, sans utilisateur, sans id, auth qui échoue)", async () => {
@@ -107,37 +108,34 @@ describe("accounting access — rôles", () => {
   })
 })
 
-describe("accounting access — SUPER_ADMIN : REFUSÉ dans le Lot 0 (aucun contexte société explicite n'existe encore)", () => {
-  it("SUPER_ADMIN sans companyId : refusé", async () => {
-    for (const companyId of [null, "", "   ", undefined as unknown as null]) {
-      const { deps, calls } = makeDeps({ session: session("SUPER_ADMIN", companyId) })
-      assert.deepEqual(await resolveAccountingAccess(deps), { ok: false, reason: "FORBIDDEN" }, String(companyId))
-      assert.deepEqual(calls.find, [])
-    }
+describe("accounting access — SUPER_ADMIN : uniquement sa société de rattachement (décision du 25/10/2026)", () => {
+  it("SUPER_ADMIN dans sa société de rattachement (ex. Galya), active : autorisé", async () => {
+    const { deps } = makeDeps({ session: session("SUPER_ADMIN", CO_A, "sa-galya") })
+    assert.deepEqual(await resolveAccountingAccess(deps), { ok: true, context: { userId: "sa-galya", role: "SUPER_ADMIN", companyId: CO_A } })
   })
 
-  it("SUPER_ADMIN AVEC companyId (société valide et active) : refusé quand même — aucun repli sur la société du compte", async () => {
-    const { deps, calls } = makeDeps({ session: session("SUPER_ADMIN", CO_A, "sa-1") })
+  it("SUPER_ADMIN dans une AUTRE société que la sienne : refusé (FORBIDDEN), avant toute lecture de société", async () => {
+    const { deps, calls } = makeDeps({ session: session("SUPER_ADMIN", CO_B, "sa-galya") })
     assert.deepEqual(await resolveAccountingAccess(deps), { ok: false, reason: "FORBIDDEN" })
-    assert.deepEqual(calls.find, [], "la société n'est même pas consultée pour un SUPER_ADMIN")
+    assert.deepEqual(calls.find, [])
+    await assert.rejects(() => requireAccountingAdminImpl(deps), (err: unknown) => err instanceof AccountingAccessError && err.reason === "FORBIDDEN")
   })
 
-  it("SUPER_ADMIN refusé par la variante « require » (Server Actions)", async () => {
-    const { deps } = makeDeps({ session: session("SUPER_ADMIN", CO_A) })
-    await assert.rejects(
-      () => requireAccountingAdminImpl(deps),
-      (err: unknown) => err instanceof AccountingAccessError && err.reason === "FORBIDDEN"
-    )
-  })
-
-  it("SUPER_ADMIN avec société inexistante ou inactive : refusé (FORBIDDEN, avant toute lecture de société)", async () => {
-    const { deps: d1 } = makeDeps({ session: session("SUPER_ADMIN", "ghost") })
+  it("SUPER_ADMIN sans société de rattachement, sans société de session, ou lecture en échec : refusé", async () => {
+    const { deps: d1 } = makeDeps({ session: session("SUPER_ADMIN", CO_A, "sa-orphan"), homes: { "sa-orphan": null } })
     assert.deepEqual(await resolveAccountingAccess(d1), { ok: false, reason: "FORBIDDEN" })
-    const { deps: d2 } = makeDeps({
-      session: session("SUPER_ADMIN", CO_A),
-      companies: { [CO_A]: { id: CO_A, active: false } },
-    })
-    assert.deepEqual(await resolveAccountingAccess(d2), { ok: false, reason: "FORBIDDEN" })
+    for (const companyId of [null, "", "   "]) {
+      const { deps } = makeDeps({ session: session("SUPER_ADMIN", companyId, "sa-galya") })
+      assert.deepEqual(await resolveAccountingAccess(deps), { ok: false, reason: "NO_COMPANY" }, String(companyId))
+    }
+    const { deps: d3 } = makeDeps({ session: session("SUPER_ADMIN", CO_A, "sa-galya") })
+    d3.findUserHomeCompanyId = async () => { throw new Error("db down") }
+    assert.deepEqual(await resolveAccountingAccess(d3), { ok: false, reason: "FORBIDDEN" })
+  })
+
+  it("SUPER_ADMIN dans sa société mais société inactive : refusé (COMPANY_UNAVAILABLE)", async () => {
+    const { deps } = makeDeps({ session: session("SUPER_ADMIN", CO_A, "sa-galya"), companies: { [CO_A]: { id: CO_A, active: false } } })
+    assert.deepEqual(await resolveAccountingAccess(deps), { ok: false, reason: "COMPANY_UNAVAILABLE" })
   })
 })
 
@@ -220,9 +218,9 @@ describe("accounting access — réaction des pages et visibilité du menu", () 
     }
   })
 
-  it("lien de menu visible seulement : flag ON + rôle ADMIN + société (jamais SUPER_ADMIN)", () => {
+  it("lien de menu visible seulement : flag ON + rôle ADMIN ou SUPER_ADMIN + société (affichage, la garde borne le SUPER_ADMIN)", () => {
     assert.equal(isAccountingNavVisible({ enabled: true, role: "ADMIN", companyId: CO_A }), true)
-    assert.equal(isAccountingNavVisible({ enabled: true, role: "SUPER_ADMIN", companyId: CO_A }), false)
+    assert.equal(isAccountingNavVisible({ enabled: true, role: "SUPER_ADMIN", companyId: CO_A }), true)
     assert.equal(isAccountingNavVisible({ enabled: true, role: "SUPER_ADMIN", companyId: null }), false)
     assert.equal(isAccountingNavVisible({ enabled: false, role: "ADMIN", companyId: CO_A }), false)
     assert.equal(isAccountingNavVisible({ enabled: true, role: "ADMIN", companyId: "  " }), false)

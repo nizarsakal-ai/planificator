@@ -12,14 +12,14 @@
  *   Les fonctions de ce module ne prennent que des dépendances serveur ; un argument supplémentaire est ignoré.
  * - ADMIN : uniquement la société active de sa session (appartenance ADMIN active résolue par le callback JWT),
  *   obligatoire, existante et active.
- * - SUPER_ADMIN : REFUSÉ dans le Lot 0, même s'il possède exceptionnellement un companyId. Aucun repli vers une
- *   société rattachée au compte, aucun sélecteur de société : le mécanisme de contexte société explicite pour
- *   SUPER_ADMIN n'existe pas encore et sera conçu dans un lot ultérieur.
+ * - SUPER_ADMIN (décision de Nizar du 25/10/2026, SPEC-ACC-A2 §7) : autorisé UNIQUEMENT pour sa propre société
+ *   de rattachement (users.companyId, ex. Galya), lorsque c'est aussi la société active de sa session. Jamais pour
+ *   une autre société, aucun sélecteur de société ; les autres entreprises passent par leurs propres ADMIN.
  * - TEAM_LEADER, EMPLOYEE, CLIENT et tout rôle inconnu : refusés.
  * - Tout échec (flag, session, rôle, société, erreur d'accès base) ⇒ refus (fail-closed).
  */
 
-export const ACCOUNTING_ALLOWED_ROLES = ["ADMIN"] as const
+export const ACCOUNTING_ALLOWED_ROLES = ["ADMIN", "SUPER_ADMIN"] as const
 export type AccountingAllowedRole = (typeof ACCOUNTING_ALLOWED_ROLES)[number]
 
 export type AccountingAccessDenial =
@@ -42,6 +42,8 @@ export interface AccountingAccessDeps {
   auth: () => Promise<AccountingSessionLike | null>
   isModuleEnabled: () => boolean
   findCompany: (companyId: string) => Promise<AccountingCompanyRecord | null>
+  /** Société de rattachement du compte (users.companyId), lue en base : borne l'accès d'un SUPER_ADMIN. */
+  findUserHomeCompanyId: (userId: string) => Promise<string | null>
 }
 
 export interface AccountingAccessContext {
@@ -86,12 +88,19 @@ export async function resolveAccountingAccess(deps: AccountingAccessDeps): Promi
   const userId = typeof user?.id === "string" ? user.id.trim() : ""
   if (!user || !userId) return { ok: false, reason: "UNAUTHENTICATED" }
 
-  // 3. Rôle : ADMIN uniquement (SUPER_ADMIN refusé dans le Lot 0, même avec un companyId).
+  // 3. Rôle : ADMIN, ou SUPER_ADMIN limité à sa société de rattachement (contrôlé en 4 bis).
   if (!isAllowedRole(user.role)) return { ok: false, reason: "FORBIDDEN" }
 
   // 4. Contexte société : issu de la session, obligatoire.
   const companyId = sessionCompanyId(user.companyId)
   if (!companyId) return { ok: false, reason: "NO_COMPANY" }
+
+  // 4 bis. SUPER_ADMIN : la société de session doit être sa société de rattachement en base (jamais une autre).
+  if (user.role === "SUPER_ADMIN") {
+    let home: string | null
+    try { home = await deps.findUserHomeCompanyId(userId) } catch { return { ok: false, reason: "FORBIDDEN" } }
+    if (!home || home !== companyId) return { ok: false, reason: "FORBIDDEN" }
+  }
 
   // 5. Validation serveur de la société (existante et active). Erreur d'accès ⇒ refus.
   let company: AccountingCompanyRecord | null
@@ -133,7 +142,8 @@ export function accountingDenialDisposition(reason: AccountingAccessDenial): Acc
 
 /**
  * Visibilité du lien « Comptabilité » (affichage uniquement, JAMAIS une autorisation) :
- * flag serveur actif, rôle ADMIN (jamais SUPER_ADMIN dans le Lot 0), société présente.
+ * flag serveur actif, rôle ADMIN ou SUPER_ADMIN, société présente (la garde serveur borne le SUPER_ADMIN
+ * à sa société de rattachement).
  * L'autorisation réelle est `resolveAccountingAccess`.
  */
 export function isAccountingNavVisible(input: {
