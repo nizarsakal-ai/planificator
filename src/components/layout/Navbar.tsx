@@ -12,6 +12,7 @@ interface NavbarUser {
   image?: string | null
   role: Role
   companyId: string | null
+  accountingNavVisible?: boolean
 }
 
 export function Navbar({ user }: { user: NavbarUser }) {

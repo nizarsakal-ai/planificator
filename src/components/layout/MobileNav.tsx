@@ -8,7 +8,7 @@ import { Menu, X, LogOut, ChevronRight } from "lucide-react"
 import { cn, getInitials } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { PlanificatorLogo } from "@/components/brand/PlanificatorLogo"
-import { getActiveNavHref, getNavItems, ROLE_LABELS } from "@/lib/navigation/nav-config"
+import { getActiveNavHref, getNavItems, withAccountingNavItem, ROLE_LABELS } from "@/lib/navigation/nav-config"
 import type { Role } from "@prisma/client"
 
 interface MobileNavUser {
@@ -17,12 +17,14 @@ interface MobileNavUser {
   email?: string | null
   image?: string | null
   role: Role
+  /** Calculé côté serveur (flag + rôle + société) ; affichage seulement, pas une autorisation. */
+  accountingNavVisible?: boolean
 }
 
 export function MobileNav({ user }: { user: MobileNavUser }) {
   const [open, setOpen] = useState(false)
   const pathname = usePathname()
-  const navItems = getNavItems(user.role)
+  const navItems = withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true)
   const activeHref = getActiveNavHref(navItems, pathname)
 
   return (

@@ -31,6 +31,7 @@ import {
   FileText,
   Truck,
   Mail,
+  Calculator,
 } from "lucide-react"
 
 export interface NavItem {
@@ -113,6 +114,28 @@ const NAV_ITEMS_BY_ROLE: Partial<Record<Role, readonly NavItem[]>> = {
     { label: "Pointage",         href: "/pointage",               icon: MapPin },
     { label: "Mon profil",       href: "/profil",                 icon: User },
   ],
+}
+
+/**
+ * Lot 0 Comptabilité — entrée unique, ajoutée seulement si `visible` (flag serveur + rôle ADMIN + société,
+ * calculé côté serveur : voir `isAccountingNavVisible` ; jamais pour SUPER_ADMIN dans le Lot 0). Insérée juste
+ * après « Factures » ; si le menu n'a pas « Factures » ou contient déjà l'entrée, la liste est inchangée.
+ * Affichage uniquement : la page `/comptabilite` applique sa propre garde serveur.
+ */
+export const ACCOUNTING_NAV_ITEM: NavItem = {
+  label: "Comptabilité",
+  href: "/comptabilite",
+  icon: Calculator,
+}
+
+export function withAccountingNavItem(items: readonly NavItem[], visible: boolean): NavItem[] {
+  const result = [...items]
+  if (visible !== true) return result
+  if (result.some((item) => item.href === ACCOUNTING_NAV_ITEM.href)) return result
+  const anchor = result.findIndex((item) => item.href === "/factures")
+  if (anchor === -1) return result
+  result.splice(anchor + 1, 0, ACCOUNTING_NAV_ITEM)
+  return result
 }
 
 /** Entrées de menu d'un rôle (CLIENT et rôle inconnu → aucune entrée). */
