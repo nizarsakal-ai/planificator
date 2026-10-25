@@ -53,6 +53,7 @@ export type TrucksErrorCode =
   | "TEAM_CONFLICT"
   | "TRUCK_ARCHIVED"
   | "TRUCK_ARCHIVED_EXISTS"
+  | "TRUCK_HAS_ACTIVE_TOUR"
   | "TRUCK_HAS_OPEN_TRIP"
   | "TEAM_INACTIVE"
   | "DRIVER_INACTIVE"
@@ -76,6 +77,7 @@ const ERRORS: Record<TrucksErrorCode, { status: number; message: string }> = {
     status: 409,
     message: "Ce véhicule existe déjà et est archivé : restaurez-le depuis la page Véhicules",
   },
+  TRUCK_HAS_ACTIVE_TOUR: { status: 409, message: "Tournée planifiée ou en cours : terminez ou annulez-la avant archivage" },
   TRUCK_HAS_OPEN_TRIP: { status: 409, message: "Trajet en cours : terminez-le avant d'archiver le véhicule" },
   TEAM_INACTIVE: { status: 409, message: "Équipe archivée : affectation impossible" },
   DRIVER_INACTIVE: { status: 409, message: "Chauffeur inactif : affectation impossible" },
@@ -121,7 +123,7 @@ export function classifyVanishedReference(err: unknown): "TRUCK_NOT_FOUND" | "TE
  * Contraintes connues : chronologie V1B et interdiction V2 d'archiver un véhicule avec trajet ouvert.
  * Seuls leurs noms dans une erreur de contrainte Prisma/PostgreSQL sont reconnus ; sinon 500.
  */
-export function classifyCheckViolation(err: unknown): "PERIOD_CONFLICT" | "TRUCK_HAS_OPEN_TRIP" | null {
+export function classifyCheckViolation(err: unknown): "PERIOD_CONFLICT" | "TRUCK_HAS_OPEN_TRIP" | "TRUCK_HAS_ACTIVE_TOUR" | null {
   if (!err || typeof err !== "object") return null
   const { code, message, meta } = err as {
     code?: unknown
@@ -136,6 +138,7 @@ export function classifyCheckViolation(err: unknown): "PERIOD_CONFLICT" | "TRUCK
     (v): v is string => typeof v === "string"
   )
   if (texts.some((t) => t.includes("truck_assignments_v1b_chronology_check"))) return "PERIOD_CONFLICT"
+  if (texts.some((t) => t.includes("trucks_v3_active_tour_check"))) return "TRUCK_HAS_ACTIVE_TOUR"
   if (texts.some((t) => t.includes("trucks_v2_no_open_mileage_trip_check"))) return "TRUCK_HAS_OPEN_TRIP"
   return null
 }

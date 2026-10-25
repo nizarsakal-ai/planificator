@@ -1,6 +1,7 @@
 "use client"
 
-import { Archive, ArchiveRestore, History, Layers, Pencil, Truck, User } from "lucide-react"
+import Link from "next/link"
+import { Archive, ArchiveRestore, FolderLock, History, Layers, Pencil, Truck, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
@@ -20,6 +21,8 @@ export interface VehicleEmployeeOption {
 
 interface VehiculeCardProps {
   canManageV2?: boolean
+  /** V3 : lien vers la fiche camion (documents) ; null tant que le prototype n'est pas activé. */
+  sheetHref?: string | null
   truck: VehicleViewItem
   /** Équipes ACTIVES (seules affectables). */
   teams: VehicleTeamOption[]
@@ -42,12 +45,23 @@ const ICON_BTN =
 
 /** Carte véhicule compacte (mosaïque ou liste) : identité, statut, équipe, chauffeur, actions, historique. */
 export function VehiculeCard({
-  truck: t, teams, employees, layout, loading, historyOpen, onToggleHistory, onEdit, onArchive, onRestore, onAssign, canManageV2 = false,
+  truck: t, teams, employees, layout, loading, historyOpen, onToggleHistory, onEdit, onArchive, onRestore, onAssign, canManageV2 = false, sheetHref = null,
 }: VehiculeCardProps) {
   const identity = formatVehicleIdentity(t.marque, t.modele)
   const teamArchived = t.team !== null && !teams.some((team) => team.id === t.team!.id)
   const badge = vehicleAssignmentBadge(t)
   const driverInactive = t.chauffeur !== null && !employees.some((e) => e.id === t.chauffeur!.id)
+
+  const sheetLink = sheetHref ? (
+    <Link
+      href={sheetHref}
+      title="Documents du véhicule"
+      aria-label={`Documents du véhicule ${t.matricule}`}
+      className={`${ICON_BTN} hover:border-blue-400 hover:text-blue-500`}
+    >
+      <FolderLock className="h-3.5 w-3.5" />
+    </Link>
+  ) : null
 
   const historyButton = (
     <button
@@ -81,6 +95,7 @@ export function VehiculeCard({
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
+              {sheetLink}
               {historyButton}
               <Button variant="outline" size="sm" disabled={loading} onClick={onRestore} className="gap-1.5">
                 <ArchiveRestore className="h-3.5 w-3.5" />
@@ -119,6 +134,7 @@ export function VehiculeCard({
               <Badge variant={badge.assigned ? "default" : "secondary"}>
                 {`${badge.label}${t.team && teamArchived ? " (archivée)" : ""}`}
               </Badge>
+              {sheetLink}
               {historyButton}
               <button
                 type="button"

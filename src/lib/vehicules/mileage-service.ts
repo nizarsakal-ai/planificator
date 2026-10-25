@@ -104,6 +104,8 @@ export function normalizeMileageFailure(error: unknown): never {
     if (/mileage_trips.*open/.test(detail)) throw new MileageDomainError("TRIP_ALREADY_OPEN", 409)
     if (/revision/.test(detail)) throw new MileageDomainError("MILEAGE_REVISION_CONFLICT", 409)
   }
+  if ((code === "23514" || e?.code === "P2004") && /vehicle_tours_trip_consistency_check/.test(detail))
+    throw new MileageDomainError("TRIP_MANAGED_BY_TOUR", 409)
   if ((code === "23514" || e?.code === "P2004") && /trucks_v2_no_open_mileage_trip_check/.test(detail))
     throw new MileageDomainError("TRUCK_HAS_OPEN_TRIP", 409)
   throw error
@@ -118,9 +120,14 @@ export async function executeMileageCommand(
 ): Promise<{ receipt: MileageReceipt; replayed: boolean; status: number }> {
   const session = requireMileageSession(await deps.auth())
   const command = parseMileageCommand(type, body, idempotencyKey)
-  const requestHash = computeMileageRequestHash(command, { companyId: session.companyId, truckId, actorId: session.userId })
   try {
-    return await deps.db.$transaction(async (tx) => {
+    return await deps.db.$transaction((tx) => executeMileageCommandInTransaction(tx, truckId, command, session), transactionOptions)
+  } catch (error) { return normalizeMileageFailure(error) }
+}
+
+/** Cœur composable : conserve autorité, verrou et replay V2 dans la transaction appelante. */
+export async function executeMileageCommandInTransaction(tx: Tx, truckId: string, command: MileageCommand, session: ReturnType<typeof requireMileageSession>, composedTourId?: string) {
+  const requestHash = computeMileageRequestHash(command, { companyId: session.companyId, truckId, actorId: session.userId })
       const { truck, actor, team } = await authorizeVehicleLocked(tx, truckId, session, command.type)
       const scope = { companyId: session.companyId, truckId }
       // Le droit courant est vérifié avant replay, la révision APRÈS replay.
@@ -156,6 +163,10 @@ export async function executeMileageCommand(
           context = await departureContext(tx, truck, team, command)
         }
         if (command.type === "END") {
+          if (process.env.PLANIFICATOR_VEHICLES_V3_ENABLED === "true") {
+            const linkedTour = await tx.vehicleTour.findFirst({ where: { mileageTripId: command.tripId, truckId, companyId: session.companyId }, select: { id: true } })
+            if (linkedTour && linkedTour.id !== composedTourId) throw new MileageDomainError("TRIP_MANAGED_BY_TOUR", 409)
+          }
           endingTrip = trips.find((trip) => trip.id === command.tripId)
           if (!endingTrip) throw new MileageDomainError("TRIP_NOT_FOUND", 404)
           if (endingTrip.endEntryId !== null) throw new MileageDomainError("TRIP_ALREADY_CLOSED", 409)
@@ -203,10 +214,6 @@ export async function executeMileageCommand(
       })
       if (updated.count !== 1) throw new MileageDomainError("MILEAGE_REVISION_CONFLICT", 409)
       return { receipt: await receiptFor(tx, entry), replayed: false, status }
-    }, transactionOptions)
-  } catch (error) {
-    return normalizeMileageFailure(error)
-  }
 }
 
 /** Lecture cœur Lot 1. Pas de route publique; pagination UI/API à intégrer au Lot 2. */

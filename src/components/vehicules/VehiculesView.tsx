@@ -29,6 +29,8 @@ import {
 
 interface Props {
   canManageV2?: boolean
+  /** V3 : fiche camion (documents) disponible. Faux par défaut : prototype désactivé. */
+  v3Enabled?: boolean
   trucks: VehicleViewItem[]
   teams: VehicleTeamOption[]
   employees: VehicleEmployeeOption[]
@@ -36,7 +38,7 @@ interface Props {
 
 type Dialog = { mode: "create" } | { mode: "edit"; id: string } | null
 
-export function VehiculesView({ trucks, teams, employees, canManageV2 = false }: Props) {
+export function VehiculesView({ trucks, teams, employees, canManageV2 = false, v3Enabled = false }: Props) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [dialog, setDialog] = useState<Dialog>(null)
@@ -197,6 +199,7 @@ export function VehiculesView({ trucks, teams, employees, canManageV2 = false }:
                   key={t.id}
                   truck={t}
                   canManageV2={canManageV2}
+                  sheetHref={v3Enabled ? `/vehicules/${encodeURIComponent(t.id)}` : null}
                   teams={teams}
                   employees={employees}
                   layout={view}
