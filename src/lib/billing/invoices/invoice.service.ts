@@ -109,7 +109,7 @@ export async function issueInvoice(db: Db, ctx: InvoiceContext, invoiceId: strin
 export async function sendInvoiceMail(db: Db, ctx: InvoiceContext, invoiceId: string): Promise<LifecycleResult<{ status: string }>> {
   const inv = await db.invoice.findFirst({
     where: { id: invoiceId, companyId: ctx.companyId },
-    select: { id: true, number: true, status: true, kind: true, dueDate: true, totalTTC: true, client: { select: { name: true, email: true } }, company: { select: { name: true } }, payments: { select: { amountCents: true } } },
+    select: { id: true, number: true, status: true, kind: true, dueDate: true, totalTTC: true, client: { select: { name: true, email: true } }, company: { select: { name: true } }, payments: { select: { amountCents: true } }, creditNotes: { where: { creditScope: "PARTIAL", status: { not: "CANCELLED" } }, select: { totalTTC: true } } },
   })
   if (!inv) return { ok: false, error: INVOICE_C2_ERRORS.notFound }
   if (inv.kind === "CREDIT_NOTE") return { ok: false, error: "L'envoi d'un avoir par courrier n'est pas encore disponible : transmettez le PDF." }
@@ -117,7 +117,7 @@ export async function sendInvoiceMail(db: Db, ctx: InvoiceContext, invoiceId: st
   const to = inv.client.email?.trim()
   if (!to) return { ok: false, error: "Le client n'a pas d'adresse e-mail." }
   const ttc = decimalToCents(inv.totalTTC)
-  const remaining = inv.status === "PAID" ? BigInt(0) : ttc - inv.payments.reduce((s, p) => s + p.amountCents, BigInt(0))
+  const remaining = inv.status === "PAID" ? BigInt(0) : ttc - inv.payments.reduce((s, p) => s + p.amountCents, BigInt(0)) - inv.creditNotes.reduce((s, c) => s + decimalToCents(c.totalTTC), BigInt(0))
   const mail = invoiceSentMail({ companyName: inv.company.name, clientName: inv.client.name, invoiceNumber: inv.number, totalTTC: formatEuro(ttc), remaining: formatEuro(remaining), dueDate: inv.dueDate ? dateFr.format(inv.dueDate) : "—" })
   const sent = await sendBillingMail(db, { companyId: ctx.companyId, kind: "INVOICE_SENT", documentType: "Invoice", documentId: inv.id }, { to, ...mail })
   await db.historyLog.create({ data: { companyId: ctx.companyId, actorId: ctx.userId, action: "UPDATED", entityType: "Invoice", entityId: inv.id, detail: `Facture ${inv.number} envoyée à ${to} (${sent.status})` } })
@@ -153,7 +153,7 @@ export async function runInvoiceReminders(db: Db, now: Date, limit = 200): Promi
     const threshold = new Date(now.getTime() - step * 86_400_000)
     const due = await db.invoice.findMany({
       where: { status: { in: ["SENT", "PARTIAL"] }, kind: { not: "CREDIT_NOTE" }, totalTTC: { gt: 0 }, dueDate: { lte: threshold }, [column]: null, client: { email: { not: null } } },
-      select: { id: true, companyId: true, number: true, dueDate: true, totalTTC: true, client: { select: { name: true, email: true } }, company: { select: { name: true } }, payments: { select: { amountCents: true } } },
+      select: { id: true, companyId: true, number: true, dueDate: true, totalTTC: true, client: { select: { name: true, email: true } }, company: { select: { name: true } }, payments: { select: { amountCents: true } }, creditNotes: { where: { creditScope: "PARTIAL", status: { not: "CANCELLED" } }, select: { totalTTC: true } } },
       take: limit,
     })
     let sent = 0
@@ -163,7 +163,8 @@ export async function runInvoiceReminders(db: Db, now: Date, limit = 200): Promi
       const claimed = await db.invoice.updateMany({ where: { id: inv.id, companyId: inv.companyId, status: { in: ["SENT", "PARTIAL"] }, [column]: null }, data: { [column]: now } })
       if (claimed.count !== 1) continue
       const ttc = decimalToCents(inv.totalTTC)
-      const remaining = ttc - inv.payments.reduce((s, p) => s + p.amountCents, BigInt(0))
+      const remaining = ttc - inv.payments.reduce((s, p) => s + p.amountCents, BigInt(0)) - inv.creditNotes.reduce((s, c) => s + decimalToCents(c.totalTTC), BigInt(0))
+      if (remaining <= BigInt(0)) continue
       const daysLate = Math.floor((now.getTime() - inv.dueDate.getTime()) / 86_400_000)
       const mail = invoiceReminderMail({ step, daysLate, companyName: inv.company.name, clientName: inv.client.name, invoiceNumber: inv.number, totalTTC: formatEuro(ttc), remaining: formatEuro(remaining), dueDate: dateFr.format(inv.dueDate) })
       await sendBillingMail(db, { companyId: inv.companyId, kind: `INVOICE_REMINDER_${step}`, documentType: "Invoice", documentId: inv.id }, { to, ...mail })
@@ -176,12 +177,13 @@ export async function runInvoiceReminders(db: Db, now: Date, limit = 200): Promi
 
 /** Relance manuelle depuis le détail (hors paliers automatiques), journalisée. */
 export async function sendManualReminder(db: Db, ctx: InvoiceContext, invoiceId: string, now: Date): Promise<LifecycleResult<{ status: string }>> {
-  const inv = await db.invoice.findFirst({ where: { id: invoiceId, companyId: ctx.companyId, status: { in: ["SENT", "PARTIAL"] }, kind: { not: "CREDIT_NOTE" } }, select: { id: true, number: true, dueDate: true, totalTTC: true, client: { select: { name: true, email: true } }, company: { select: { name: true } }, payments: { select: { amountCents: true } } } })
+  const inv = await db.invoice.findFirst({ where: { id: invoiceId, companyId: ctx.companyId, status: { in: ["SENT", "PARTIAL"] }, kind: { not: "CREDIT_NOTE" } }, select: { id: true, number: true, dueDate: true, totalTTC: true, client: { select: { name: true, email: true } }, company: { select: { name: true } }, payments: { select: { amountCents: true } }, creditNotes: { where: { creditScope: "PARTIAL", status: { not: "CANCELLED" } }, select: { totalTTC: true } } } })
   if (!inv) return { ok: false, error: "Seule une facture émise non soldée peut être relancée." }
   const to = inv.client.email?.trim()
   if (!to) return { ok: false, error: "Le client n'a pas d'adresse e-mail." }
   const ttc = decimalToCents(inv.totalTTC)
-  const remaining = ttc - inv.payments.reduce((s, p) => s + p.amountCents, BigInt(0))
+  const remaining = ttc - inv.payments.reduce((s, p) => s + p.amountCents, BigInt(0)) - inv.creditNotes.reduce((s, c) => s + decimalToCents(c.totalTTC), BigInt(0))
+  if (remaining <= BigInt(0)) return { ok: false, error: "Cette facture n'a plus de reste à payer." }
   const daysLate = inv.dueDate ? Math.max(0, Math.floor((now.getTime() - inv.dueDate.getTime()) / 86_400_000)) : 0
   const mail = invoiceReminderMail({ step: 30, daysLate, companyName: inv.company.name, clientName: inv.client.name, invoiceNumber: inv.number, totalTTC: formatEuro(ttc), remaining: formatEuro(remaining), dueDate: inv.dueDate ? dateFr.format(inv.dueDate) : "—" })
   const sent = await sendBillingMail(db, { companyId: ctx.companyId, kind: "INVOICE_REMINDER_MANUAL", documentType: "Invoice", documentId: inv.id }, { to, ...mail })

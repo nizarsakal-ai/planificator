@@ -208,9 +208,9 @@ export async function createCreditNoteCore(
   }
   const existing = await tx.invoice.findFirst({
     where: { creditedInvoiceId: original.id, companyId: input.companyId },
-    select: { id: true },
+    select: { id: true, creditScope: true },
   })
-  if (existing) return { ok: false, error: LIFECYCLE_ERRORS.alreadyCredited }
+  if (existing) return { ok: false, error: existing.creditScope === "PARTIAL" ? "Des avoirs partiels existent sur cette facture : utilisez un avoir partiel du reste créditable." : LIFECYCLE_ERRORS.alreadyCredited }
   const DEPOSIT_DEDUCTED = "Cet acompte est déduit sur une facture de solde émise : établissez l'avoir sur la facture de solde."
   const deductedOnIssuedFinal = () => tx.invoiceDepositDeduction.findFirst({ where: { companyId: input.companyId, depositInvoiceId: original.id, finalInvoice: { status: { not: "DRAFT" } } }, select: { id: true } })
   if (original.kind === "DEPOSIT" && (await deductedOnIssuedFinal())) return { ok: false, error: DEPOSIT_DEDUCTED }

@@ -120,10 +120,17 @@ export async function sumPayments(tx: Prisma.TransactionClient, companyId: strin
   return agg._sum.amountCents ?? BigInt(0)
 }
 
+/** Σ TTC des avoirs PARTIELS émis sur une facture (Lot C4), en centimes. */
+export async function sumPartialCredits(tx: Prisma.TransactionClient, companyId: string, invoiceId: string): Promise<bigint> {
+  const rows = await tx.invoice.findMany({ where: { companyId, creditedInvoiceId: invoiceId, kind: "CREDIT_NOTE", creditScope: "PARTIAL", status: { not: "CANCELLED" } }, select: { totalTTC: true } })
+  return rows.reduce((s, r) => s + decimalToCents(r.totalTTC), BigInt(0))
+}
+
 export type PaymentStatus = "SENT" | "PARTIAL" | "PAID"
-export function statusForPaid(paidCents: bigint, totalCents: bigint): PaymentStatus {
+/** Statut selon paiements (+ avoirs partiels) : PAID quand paiements + avoirs = TTC ; SENT sans paiement. */
+export function statusForPaid(paidCents: bigint, totalCents: bigint, creditedCents: bigint = BigInt(0)): PaymentStatus {
   if (paidCents <= BigInt(0)) return "SENT"
-  return paidCents >= totalCents ? "PAID" : "PARTIAL"
+  return paidCents + creditedCents >= totalCents ? "PAID" : "PARTIAL"
 }
 
 export interface RecordPaymentInput {
@@ -152,14 +159,15 @@ export async function recordPaymentCore(tx: Prisma.TransactionClient, input: Rec
   if (inv.status === "PAID") return { ok: false, error: INVOICE_C2_ERRORS.alreadyPaid }
   const total = decimalToCents(inv.totalTTC)
   const paid = await sumPayments(tx, input.companyId, inv.id)
-  const remaining = total - paid
+  const credited = await sumPartialCredits(tx, input.companyId, inv.id)
+  const remaining = total - paid - credited
   if (input.amountCents > remaining) return { ok: false, error: `${INVOICE_C2_ERRORS.exceeds} (reste : ${centsToDecimalString(remaining)} €)` }
   const payment = await tx.invoicePayment.create({
     data: { companyId: input.companyId, invoiceId: inv.id, amountCents: input.amountCents, method: input.method, paidAt: input.paidAt, reference: input.reference, notes: input.notes, recordedById: input.actorId },
     select: { id: true },
   })
   const newPaid = paid + input.amountCents
-  const status = statusForPaid(newPaid, total)
+  const status = statusForPaid(newPaid, total, credited)
   const from = inv.status as PaymentStatus
   if (status !== from) {
     const u = await tx.invoice.updateMany({ where: { id: inv.id, companyId: input.companyId, status: from }, data: { status, ...(status === "PAID" ? { paidAt: input.now } : {}) } })
@@ -173,7 +181,7 @@ export async function recordPaymentCore(tx: Prisma.TransactionClient, input: Rec
       oldValue: { status: from, paid: centsToDecimalString(paid) }, newValue: { status, paid: centsToDecimalString(newPaid), paymentId: payment.id },
     },
   })
-  return { ok: true, value: { paymentId: payment.id, status, remainingCents: total - newPaid } }
+  return { ok: true, value: { paymentId: payment.id, status, remainingCents: total - newPaid - credited } }
 }
 
 export interface ReversePaymentInput {
@@ -203,7 +211,7 @@ export async function reversePaymentCore(tx: Prisma.TransactionClient, input: Re
     data: { companyId: input.companyId, invoiceId: p.invoiceId, amountCents: -p.amountCents, method: p.method, paidAt: new Date(Date.UTC(input.now.getUTCFullYear(), input.now.getUTCMonth(), input.now.getUTCDate())), reference: null, notes: input.reason, recordedById: input.actorId, reversesPaymentId: p.id },
   })
   const paid = await sumPayments(tx, input.companyId, inv.id)
-  const status = statusForPaid(paid, decimalToCents(inv.totalTTC))
+  const status = statusForPaid(paid, decimalToCents(inv.totalTTC), await sumPartialCredits(tx, input.companyId, inv.id))
   const from = inv.status as PaymentStatus
   if (status !== from) {
     const u = await tx.invoice.updateMany({ where: { id: inv.id, companyId: input.companyId, status: from }, data: { status, ...(from === "PAID" ? { paidAt: null } : {}) } })

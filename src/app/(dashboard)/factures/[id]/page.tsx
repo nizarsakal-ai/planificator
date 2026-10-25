@@ -12,6 +12,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { InvoiceStatusBadge } from "@/components/factures/InvoiceStatusBadge"
 import { InvoiceActions, ReversePaymentButton } from "@/components/factures/InvoiceActions"
 import { PaymentDialog } from "@/components/factures/PaymentDialog"
+import { CreditNoteDialog } from "@/components/factures/CreditNoteDialog"
 
 export const metadata: Metadata = { title: "Facture" }
 const MAIL_KIND: Record<string, string> = { INVOICE_SENT: "Envoi de la facture", CREDIT_NOTE_SENT: "Envoi de l'avoir", INVOICE_REMINDER_30: "Relance J+30", INVOICE_REMINDER_45: "Relance J+45", INVOICE_REMINDER_60: "Relance J+60", INVOICE_REMINDER_MANUAL: "Relance manuelle" }
@@ -35,13 +36,16 @@ export default async function FactureDetailPage({ params }: { params: Promise<{ 
           <h1 className="flex items-center gap-3 text-2xl font-bold text-slate-900">{inv.number} <InvoiceStatusBadge status={inv.status} kind={inv.kind} overdue={inv.overdue} /></h1>
           {inv.subject && <p className="text-slate-600">{inv.subject}</p>}
         </div>
-        <InvoiceActions id={inv.id} status={inv.status} kind={inv.kind} hasEmail={!!inv.client.email} payable={inv.payable} hasQuote={!!inv.quoteId} />
+        <div className="flex flex-wrap items-center gap-2">
+          {inv.creditable && <CreditNoteDialog invoiceId={inv.id} remainingLabel={formatEuro(inv.creditableCents)} lines={inv.lines.filter((l) => !l.deductsDepositId && l.unitPrice.toNumber() > 0).map((l) => ({ id: l.id, designation: l.designation, quantity: l.quantity.toFixed(2).replace(/\.?0+$/, ""), unitPrice: l.unitPrice.toFixed(2) }))} />}
+          <InvoiceActions id={inv.id} status={inv.status} kind={inv.kind} hasEmail={!!inv.client.email} payable={inv.payable} hasQuote={!!inv.quoteId} />
+        </div>
       </div>
       {blockers.length > 0 && <Card className="border-amber-300"><CardContent className="p-4 text-sm text-amber-800"><p className="font-medium">Avant émission, corrigez :</p><ul className="list-disc pl-5">{blockers.map((b) => <li key={b.code}>{b.message}</li>)}</ul></CardContent></Card>}
 
       <div className="grid gap-3 md:grid-cols-3">
         <Card><CardContent className="p-4 text-sm"><p className="text-xs uppercase text-slate-500">Client</p><p className="font-medium">{inv.client.name}</p><p className="text-slate-600">{inv.client.email ?? "aucun e-mail"}</p>{inv.client.address && <p className="text-slate-600">{inv.client.address}</p>}<p className="mt-2 text-xs uppercase text-slate-500">Chantier</p><p>{inv.worksite.name}</p>{inv.quote && <p className="text-xs">Devis <Link className="underline" href={`/devis/${inv.quote.id}`}>{inv.quote.number}</Link></p>}</CardContent></Card>
-        <Card><CardContent className="p-4 text-sm"><p className="text-xs uppercase text-slate-500">Dates</p><p>{inv.status === "DRAFT" ? "Non émise (numéro provisoire)" : `Émise le ${fmtDate(inv.issueDate)}`}</p>{inv.kind !== "CREDIT_NOTE" && <p>Échéance {fmtDate(inv.dueDate)}{inv.overdue ? <span className="ml-1 font-medium text-red-600">— en retard</span> : null}</p>}{inv.paidAt && <p className="text-green-700">Soldée le {fmtDate(inv.paidAt)}</p>}{inv.creditedInvoice && <p>Avoir sur la facture <Link className="underline" href={`/factures/${inv.creditedInvoice.id}`}>{inv.creditedInvoice.number}</Link></p>}{inv.creditNotes.length > 0 && <p>Avoirs : {inv.creditNotes.map((c) => <Link key={c.id} className="underline" href={`/factures/${c.id}`}>{c.number}</Link>)}</p>}</CardContent></Card>
+        <Card><CardContent className="p-4 text-sm"><p className="text-xs uppercase text-slate-500">Dates</p><p>{inv.status === "DRAFT" ? "Non émise (numéro provisoire)" : `Émise le ${fmtDate(inv.issueDate)}`}</p>{inv.kind !== "CREDIT_NOTE" && <p>Échéance {fmtDate(inv.dueDate)}{inv.overdue ? <span className="ml-1 font-medium text-red-600">— en retard</span> : null}</p>}{inv.paidAt && <p className="text-green-700">Soldée le {fmtDate(inv.paidAt)}</p>}{inv.creditedInvoice && <p>Avoir sur la facture <Link className="underline" href={`/factures/${inv.creditedInvoice.id}`}>{inv.creditedInvoice.number}</Link></p>}{inv.creditNotes.length > 0 && <p>Avoirs : {inv.creditNotes.map((c) => <span key={c.id} className="mr-2"><Link className="underline" href={`/factures/${c.id}`}>{c.number}</Link> ({c.creditScope === "TOTAL" ? "total" : "partiel"})</span>)}{inv.creditedPartialCents > BigInt(0) && <span className="text-slate-500">— avoirs partiels : {formatEuro(inv.creditedPartialCents)}</span>}</p>}</CardContent></Card>
         <Card><CardContent className="p-4 text-sm">
           <p className="text-xs uppercase text-slate-500">Paiement</p>
           {inv.kind === "CREDIT_NOTE" ? <p className="text-slate-500">Avoir : aucun paiement attendu.</p> : inv.status === "DRAFT" || inv.status === "CANCELLED" ? <p className="text-slate-500">—</p> : (

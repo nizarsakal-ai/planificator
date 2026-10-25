@@ -43,7 +43,7 @@ export function InvoiceActions({ id, status, kind, hasEmail, payable, hasQuote =
     }
     if (payable) buttons.push(B("remind", "Relancer", () => { if (!hasEmail) { toast.error("Le client n'a pas d'adresse e-mail."); return } void act("remind", () => sendInvoiceReminderAction(id), (r) => (r.status === "SENT" ? "Relance envoyée." : "Relance journalisée (envoi désactivé).")) }))
     if (status === "SENT" || status === "PARTIAL" || status === "PAID") {
-      buttons.push(B("credit", "Avoir total (annulation)", () => { const reason = window.prompt("Émettre un avoir TOTAL : la facture passera à « annulée ». Motif (facultatif) :", ""); if (reason !== null) void act("credit", () => createCreditNote(id, reason).then((r) => ("error" in r && r.error ? { ok: false, error: r.error } : { ok: true, number: (r as { number?: string }).number })), (r) => `Avoir ${r.number} émis.`) }))
+      buttons.push(B("credit", "Avoir total (annulation)", () => { const reason = window.prompt("Émettre un avoir TOTAL : la facture passera à « annulée » (impossible si des avoirs partiels existent). Motif (facultatif) :", ""); if (reason !== null) void act("credit", () => createCreditNote(id, reason).then((r) => ("error" in r && r.error ? { ok: false, error: r.error } : { ok: true, number: (r as { number?: string }).number })), (r) => `Avoir ${r.number} émis.`) }))
     }
   }
   buttons.push(<Button key="pdf" size="sm" variant="outline" asChild><a href={`/api/pdf/facture/${id}`} target="_blank" rel="noopener">PDF</a></Button>)

@@ -31,6 +31,8 @@
     "test:billing:c2:pg": "node --import tsx --test --test-concurrency=1 tests/billing/c2/pg/invoices.pg.test.ts",
     "test:billing:c3": "node --import tsx --test tests/billing/c3/deposit-unit.test.ts",
     "test:billing:c3:pg": "node --import tsx --test --test-concurrency=1 tests/billing/c3/pg/deposits.pg.test.ts",
+    "test:billing:c4": "node --import tsx --test tests/billing/c4/credit-note-unit.test.ts",
+    "test:billing:c4:pg": "node --import tsx --test --test-concurrency=1 tests/billing/c4/pg/credit-notes.pg.test.ts",
     "test:invitations": "node --import tsx --experimental-test-module-mocks --test tests/employes/invitation-superadmin.action.test.ts",
     "test:invitations:pg": "node --import tsx tests/employes/pg/invitation-superadmin-run.ts test",
     "test:navigation": "node --import tsx --test tests/navigation/nav-config.test.ts",

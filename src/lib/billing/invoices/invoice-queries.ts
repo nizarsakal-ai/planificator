@@ -30,7 +30,7 @@ export function invoiceWhere(companyId: string, f: InvoiceListFilters, today: Da
 
 export interface InvoiceRow {
   id: string; number: string; status: string; kind: string; issueDate: Date; dueDate: Date | null; subject: string | null
-  totalHTCents: bigint; totalTTCCents: bigint; paidCents: bigint; remainingCents: bigint; overdue: boolean
+  totalHTCents: bigint; totalTTCCents: bigint; paidCents: bigint; creditedPartialCents: bigint; remainingCents: bigint; overdue: boolean
   clientId: string; clientName: string; worksiteName: string; lastPaymentMethod: string | null; quoteNumber: string | null
 }
 
@@ -46,6 +46,7 @@ export async function listInvoices(db: Db, companyId: string, f: InvoiceListFilt
         id: true, number: true, status: true, kind: true, issueDate: true, dueDate: true, subject: true, totalHT: true, totalTTC: true,
         client: { select: { id: true, name: true } }, worksite: { select: { name: true } }, quote: { select: { number: true } },
         payments: { select: { amountCents: true, method: true, reversesPaymentId: true, createdAt: true }, orderBy: { createdAt: "desc" } },
+        creditNotes: { where: { creditScope: "PARTIAL", status: { not: "CANCELLED" } }, select: { totalTTC: true } },
       },
     }),
   ])
@@ -54,12 +55,14 @@ export async function listInvoices(db: Db, companyId: string, f: InvoiceListFilt
     rows: rows.map((r): InvoiceRow => {
       const paid = r.payments.reduce((s, p) => s + p.amountCents, BigInt(0))
       const ttc = decimalToCents(r.totalTTC)
+      const credited = r.creditNotes.reduce((s, c) => s + decimalToCents(c.totalTTC), BigInt(0))
       const last = r.payments.find((p) => !p.reversesPaymentId)
       // PAID sans paiements enregistrés = réglée hors module (Lot B) : reste 0, « payé » = TTC.
-      const settledOutside = r.status === "PAID" && paid < ttc
+      const settledOutside = r.status === "PAID" && paid + credited < ttc
       return {
         id: r.id, number: r.number, status: r.status, kind: r.kind, issueDate: r.issueDate, dueDate: r.dueDate, subject: r.subject,
-        totalHTCents: decimalToCents(r.totalHT), totalTTCCents: ttc, paidCents: settledOutside ? ttc : paid, remainingCents: r.kind === "CREDIT_NOTE" || r.status === "CANCELLED" || r.status === "DRAFT" || r.status === "PAID" ? BigInt(0) : ttc - paid,
+        totalHTCents: decimalToCents(r.totalHT), totalTTCCents: ttc, paidCents: settledOutside ? ttc - credited : paid, creditedPartialCents: credited,
+        remainingCents: r.kind === "CREDIT_NOTE" || r.status === "CANCELLED" || r.status === "DRAFT" || r.status === "PAID" ? BigInt(0) : ttc - paid - credited,
         overdue: isOverdue(r, today), clientId: r.client.id, clientName: r.client.name, worksiteName: r.worksite.name, lastPaymentMethod: last?.method ?? null, quoteNumber: r.quote?.number ?? null,
       }
     }),
@@ -71,11 +74,11 @@ export async function invoiceSummary(db: Db, companyId: string, now: Date = new 
   const today = todayUtc(now)
   const [paid, open] = await Promise.all([
     db.invoicePayment.aggregate({ where: { companyId }, _sum: { amountCents: true } }),
-    db.invoice.findMany({ where: { companyId, status: { in: ["SENT", "PARTIAL"] }, kind: { not: "CREDIT_NOTE" } }, select: { id: true, totalTTC: true, dueDate: true, status: true, kind: true, payments: { select: { amountCents: true } } } }),
+    db.invoice.findMany({ where: { companyId, status: { in: ["SENT", "PARTIAL"] }, kind: { not: "CREDIT_NOTE" } }, select: { id: true, totalTTC: true, dueDate: true, status: true, kind: true, payments: { select: { amountCents: true } }, creditNotes: { where: { creditScope: "PARTIAL", status: { not: "CANCELLED" } }, select: { totalTTC: true } } } }),
   ])
   let due = BigInt(0), overdue = BigInt(0), overdueCount = 0
   for (const i of open) {
-    const r = decimalToCents(i.totalTTC) - i.payments.reduce((s, p) => s + p.amountCents, BigInt(0))
+    const r = decimalToCents(i.totalTTC) - i.payments.reduce((s, p) => s + p.amountCents, BigInt(0)) - i.creditNotes.reduce((s, c) => s + decimalToCents(c.totalTTC), BigInt(0))
     due += r
     if (isOverdue(i, today)) { overdue += r; overdueCount++ }
   }
@@ -100,12 +103,16 @@ export async function getInvoiceDetail(db: Db, companyId: string, invoiceId: str
   })
   if (!inv) return null
   const [creditNotes, mails] = await Promise.all([
-    db.invoice.findMany({ where: { companyId, creditedInvoiceId: inv.id }, select: { id: true, number: true, status: true, totalTTC: true, issueDate: true } }),
+    db.invoice.findMany({ where: { companyId, creditedInvoiceId: inv.id }, select: { id: true, number: true, status: true, totalTTC: true, issueDate: true, creditScope: true, creditReason: true } }),
     db.billingMailLog.findMany({ where: { companyId, documentType: "Invoice", documentId: inv.id }, orderBy: { createdAt: "desc" }, take: 20, select: { id: true, kind: true, to: true, status: true, createdAt: true, error: true } }),
   ])
   const ttc = decimalToCents(inv.totalTTC)
   const paid = inv.payments.reduce((s, p) => s + p.amountCents, BigInt(0))
-  const payable = inv.kind !== "CREDIT_NOTE" && (inv.status === "SENT" || inv.status === "PARTIAL") && ttc > BigInt(0)
-  const settledOutside = inv.status === "PAID" && paid < ttc
-  return { ...inv, creditNotes, mails, totalTTCCents: ttc, paidCents: settledOutside ? ttc : paid, remainingCents: payable ? ttc - paid : BigInt(0), settledOutside, overdue: isOverdue(inv, todayUtc(now)), payable }
+  const credited = creditNotes.filter((c) => c.creditScope === "PARTIAL" && c.status !== "CANCELLED").reduce((s, c) => s + decimalToCents(c.totalTTC), BigInt(0))
+  const payable = inv.kind !== "CREDIT_NOTE" && (inv.status === "SENT" || inv.status === "PARTIAL") && ttc - credited > BigInt(0)
+  const settledOutside = inv.status === "PAID" && paid + credited < ttc
+  // Créditable = reste à payer (TTC − avoirs − paiements) : jamais de trop-perçu par avoir ; un acompte ne reçoit qu'un avoir total.
+  const creditableCents = settledOutside ? BigInt(0) : ttc - credited - paid
+  const creditable = inv.kind === "INVOICE" && ["SENT", "PARTIAL", "PAID"].includes(inv.status) && !creditNotes.some((c) => c.creditScope === "TOTAL") && creditableCents > BigInt(0)
+  return { ...inv, creditNotes, mails, totalTTCCents: ttc, paidCents: settledOutside ? ttc - credited : paid, creditedPartialCents: credited, remainingCents: payable ? ttc - paid - credited : BigInt(0), creditableCents, settledOutside, overdue: isOverdue(inv, todayUtc(now)), payable, creditable }
 }

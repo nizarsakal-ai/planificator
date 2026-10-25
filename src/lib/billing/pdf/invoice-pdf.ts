@@ -12,6 +12,7 @@ export async function buildInvoicePdfData(db: Db, companyId: string, invoiceId: 
     select: {
       number: true, status: true, kind: true, issueDate: true, dueDate: true, periodStart: true, periodEnd: true, subject: true, notes: true, paymentTerms: true, globalDiscountBp: true, vatReverseCharge: true, totalTTC: true, creditReason: true, depositBp: true,
       depositDeductions: { select: { amountTTCCents: true, deposit: { select: { number: true, issueDate: true } } } },
+      creditNotes: { where: { creditScope: "PARTIAL", status: { not: "CANCELLED" } }, select: { number: true, totalTTC: true } },
       company: { select: { name: true, address: true, siret: true, email: true, phone: true } },
       client: { select: { name: true, address: true, siret: true, vatNumber: true, email: true } },
       worksite: { select: { name: true } }, quote: { select: { number: true } }, creditedInvoice: { select: { number: true, issueDate: true } },
@@ -38,12 +39,14 @@ export async function buildInvoicePdfData(db: Db, companyId: string, invoiceId: 
   if (!isCredit && !draft && inv.status !== "CANCELLED") {
     const ttc = decimalToCents(inv.totalTTC)
     const paid = inv.payments.reduce((s, p) => s + p.amountCents, BigInt(0))
+    const credited = inv.creditNotes.reduce((s, c) => s + decimalToCents(c.totalTTC), BigInt(0))
     const rows = inv.payments.map((p) => `${dateFr.format(p.paidAt)} — ${formatEuro(p.amountCents)} (${{ TRANSFER: "virement", CHECK: "chèque", CASH: "espèces", CARD: "carte", DIRECT_DEBIT: "prélèvement", OTHER: "autre" }[p.method] ?? p.method})`)
-    if (inv.status === "PAID") rows.push(paid < ttc ? "Facture acquittée (règlement constaté)." : "Facture acquittée.")
-    else rows.push(`Reste à payer : ${formatEuro(ttc - paid)}`)
+    for (const c of inv.creditNotes) rows.push(`Avoir ${c.number} : −${formatEuro(decimalToCents(c.totalTTC))}`)
+    if (inv.status === "PAID") rows.push(paid + credited >= ttc ? (credited > BigInt(0) && paid < ttc ? "Facture soldée (paiements et avoir)." : "Facture acquittée.") : "Facture acquittée (règlement constaté).")
+    else rows.push(`Reste à payer : ${formatEuro(ttc - paid - credited)}`)
     extraBlocks.push({ title: inv.payments.length ? "Règlements reçus" : "Règlement", rows })
   }
-  if (isCredit && inv.creditedInvoice) extraBlocks.push({ title: "Avoir", rows: [`Avoir sur la facture ${inv.creditedInvoice.number} du ${fmtDate(inv.creditedInvoice.issueDate)}.`, inv.creditReason ? `Motif : ${inv.creditReason}` : "Montant à déduire de la prochaine facture ou à rembourser."] })
+  if (isCredit && inv.creditedInvoice) extraBlocks.push({ title: "Avoir", rows: [`Avoir sur la facture ${inv.creditedInvoice.number} du ${fmtDate(inv.creditedInvoice.issueDate)}.`, ...(inv.creditReason ? [`Motif : ${inv.creditReason}`] : []), "Montant à déduire de la prochaine facture ou à rembourser."] })
   if (inv.depositDeductions.length > 0) extraBlocks.push({ title: "Acomptes déduits", rows: inv.depositDeductions.map((d) => `Facture d'acompte ${d.deposit.number} du ${fmtDate(d.deposit.issueDate)} : ${formatEuro(d.amountTTCCents)} TTC`) })
   if (isDeposit && inv.quote) extraBlocks.push({ title: "Acompte", rows: [`${inv.depositBp ? `Acompte de ${inv.depositBp / 100} %` : "Acompte"} sur le devis ${inv.quote.number}. Le solde sera facturé à l'issue des prestations, déduction faite du présent acompte.`] })
   return {

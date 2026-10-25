@@ -37,6 +37,8 @@ describe("règles pures", () => {
   })
   it("statut selon la somme des paiements ; numéro légal", () => {
     assert.equal(statusForPaid(c(0), c(100)), "SENT"); assert.equal(statusForPaid(c(1), c(100)), "PARTIAL"); assert.equal(statusForPaid(c(100), c(100)), "PAID"); assert.equal(statusForPaid(c(-5), c(100)), "SENT")
+    // C4 : avoirs partiels comptés dans le solde ; sans paiement, jamais PAID par cette fonction (le service le gère).
+    assert.equal(statusForPaid(c(60), c(100), c(40)), "PAID"); assert.equal(statusForPaid(c(10), c(100), c(40)), "PARTIAL"); assert.equal(statusForPaid(c(0), c(100), c(100)), "SENT")
     assert.ok(LEGAL_NUMBER.test("FAC-2026-0001")); assert.ok(!LEGAL_NUMBER.test("PROV-2026-0001"))
   })
   it("OVERDUE calculé : SENT/PARTIAL avec échéance passée, jamais pour un avoir, un brouillon ou une facture payée", () => {
@@ -68,6 +70,8 @@ function makeTx(invoices: Row[], payments: Row[] = []) {
   const tx = {
     invoice: {
       findFirst: async ({ where }: { where: Record<string, unknown> }) => { const r = inv.find((x) => matches(x, where)); return r ? { ...r, company: { name: "S", address: "1 rue", siret: "12345678900012" }, client: { name: "C", address: "2 rue" }, lines: (r.lines as unknown[]) ?? [] } : null },
+      // Avoirs partiels (C4) : aucun dans ces scénarios.
+      findMany: async () => [],
       updateMany: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => { hooks.beforeUpdate?.(); let n = 0; for (const r of inv) if (matches(r, where)) { Object.assign(r, data); n++ } return { count: n } },
     },
     invoiceLine: { deleteMany: async () => ({ count: 0 }), createMany: async ({ data }: { data: Row[] }) => { lines.push(...data); return { count: data.length } } },
