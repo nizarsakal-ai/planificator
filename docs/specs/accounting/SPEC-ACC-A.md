@@ -70,3 +70,12 @@ Exclus du Lot A : FEC, rapprochement bancaire, OCR, Factur-X/facture électroniq
 ## 6. Hors périmètre et dépendances
 
 Lot B minimal (factures) : automate de statuts sans retour à DRAFT, émission transactionnelle verrouillée, avoirs, suppression des cascades sur pièces émises, audit. Lots ultérieurs : FEC, TVA, banque, OCR, facture électronique, interface.
+
+## 7. Notes d'implémentation A1 (écarts et constats)
+
+- **Verrous** : `FOR NO KEY UPDATE` au lieu de `FOR UPDATE` sur exercice, écriture, compteur et tête de chaîne. `FOR UPDATE` entrait en interblocage (40P01) avec les `FOR KEY SHARE` posés par les FK lors de la création concurrente de brouillons. `FOR NO KEY UPDATE` reste exclusif entre validations et avec l'UPDATE d'état de l'exercice (colonne non clé) : la sérialisation validation/clôture est conservée (test « clôture concurrente »).
+- **Pas de retry** : la transaction est en READ COMMITTED avec verrous explicites dans un ordre unique (FiscalYear → JournalEntry → AccountingSequence → AccountingChainHead) ; aucun échec de sérialisation (40001) n'est attendu. Le retry borné reste à la charge de l'appelant si un niveau SERIALIZABLE est introduit plus tard.
+- **Prisma avale les erreurs levées au COMMIT** des transactions interactives (constaté sur 5.22 : la base annule, la promesse est résolue). Les contrôles différés sont donc exécutés explicitement en fin de service via `flushDeferredConstraints` (`src/lib/deferred-constraints.ts`). Un test PG fige ce comportement pour détecter une évolution de Prisma. Le Lot B (déclencheurs différés sur factures/avoirs) est concerné et reçoit le même correctif.
+- **Contre-passation** : contrôle miroir côté service (`ENTRY_REVERSAL_INVALID`, erreur typée) ET en base (déclencheur différé, testé en contournant le service).
+- **Exercices** : `openFiscalYear` / `advanceFiscalYear` (ADMIN revérifié, verrou d'exercice, audit `HistoryLog`). Chaque validation d'écriture est auditée dans la même transaction.
+- **Réserve de déploiement** : l'immutabilité suppose que le rôle SQL applicatif ne soit pas propriétaire des tables (sinon il peut désactiver les déclencheurs). À vérifier/mettre en place avant toute migration réelle ; hors périmètre du code A1.

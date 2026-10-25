@@ -107,35 +107,57 @@ describe("flag — jamais exposé au navigateur", () => {
   })
 })
 
-describe("Lot 0 — aucune base de données, aucune logique comptable", () => {
-  it("schema.prisma ne contient aucun modèle ni enum comptable", () => {
+describe("A1 — périmètre du moteur comptable (aucun branchement facture, aucune écriture hors service)", () => {
+  const A1_MIGRATION = "20261025200000_accounting_a1_engine"
+  const ENGINE_WRITERS = ["src/lib/accounting/engine/fiscal-years.ts", "src/lib/accounting/engine/posting.ts", "src/lib/accounting/engine/setup.ts"]
+
+  it("schema.prisma : exactement les modèles et enums comptables d'A1", () => {
     const schema = read("prisma/schema.prisma")
-    assert.doesNotMatch(schema, /^(model|enum)\s+(Accounting|Journal|Ledger|Fiscal|Posting|ChartOf|VatRate)/m)
+    const found = [...schema.matchAll(/^(model|enum)\s+(Accounting\w*|Journal\w*|Ledger\w*|Fiscal\w*|Posting\w*|ChartOf\w*|VatRate\w*)/gm)].map((m) => m[2]).sort()
+    assert.deepEqual(found, [
+      "AccountingAccount", "AccountingChainHead", "AccountingJournal", "AccountingJournalKind", "AccountingSequence",
+      "FiscalYear", "FiscalYearStatus", "JournalEntry", "JournalEntryLine", "JournalEntryStatus",
+    ])
+    const entryModel = schema.slice(schema.indexOf("model JournalEntry {"), schema.indexOf("}", schema.indexOf("model JournalEntry {")))
+    assert.doesNotMatch(entryModel, /\b(Invoice|Quote|ExpenseReport)\b/, "aucune relation écriture → facture/devis/note de frais en A1")
   })
 
-  it("aucune migration comptable", () => {
+  it("une seule migration comptable : celle d'A1", () => {
     const dirs = readdirSync(join(ROOT, "prisma/migrations"))
     assert.deepEqual(
       dirs.filter((d) => /accounting|comptabilit|ledger|fiscal_|posting|chart_of_accounts|_fec(_|$)|_vat(_|$)|_tva(_|$)/i.test(d)),
-      []
+      [A1_MIGRATION]
     )
   })
 
-  it("src/lib/accounting n'écrit jamais en base et ne touche ni facture, ni devis, ni acquisition", () => {
+  it("src/lib/accounting : écritures uniquement dans le service transactionnel, jamais sur facture/devis/acquisition", () => {
     assert.ok(ACCOUNTING_LIB_FILES.length > 0)
     for (const file of ACCOUNTING_LIB_FILES) {
       const src = code(file)
-      assert.doesNotMatch(src, /\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\(|\$executeRaw|\$queryRaw|\$transaction/, file)
-      assert.doesNotMatch(src, /prisma\.(invoice|quote|expenseReport|documentCounter|worksite|client)\b/i, file)
+      if (!ENGINE_WRITERS.includes(file)) {
+        assert.doesNotMatch(src, /\b(prisma|tx|db)\.\w+\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\(|\$executeRaw|\$transaction|\b(INSERT|UPDATE|DELETE)\s+(INTO\s+|FROM\s+)?"/, file)
+      }
+      assert.doesNotMatch(src, /\b(prisma|tx)\.(invoice|quote|expenseReport|documentCounter|worksite|client)\b/i, file)
+      assert.doesNotMatch(src, /"(invoices|invoice_lines|quotes|expense_reports|document_counters)"/i, file)
       assert.doesNotMatch(src, /from\s+["'][^"']*(acquisition|booking|gmail|billing|anthropic|openai)[^"']*["']/i, file)
+      if (file.startsWith("src/lib/accounting/engine/")) {
+        assert.doesNotMatch(src, /from\s+["']@\/lib\/prisma["']/, `${file} : le moteur reçoit le client de transaction, il n'importe pas le client global`)
+      }
     }
   })
 
-  it("seuls fichiers autorisés dans src/lib/accounting (pas de structure vide artificielle)", () => {
+  it("seuls fichiers autorisés dans src/lib/accounting", () => {
     assert.deepEqual(ACCOUNTING_LIB_FILES.sort(), [
       "src/lib/accounting/access/accounting-access.core.ts",
       "src/lib/accounting/access/accounting-access.ts",
       "src/lib/accounting/accounting-feature-flag.ts",
+      "src/lib/accounting/engine/canonical.ts",
+      "src/lib/accounting/engine/fiscal-years.ts",
+      "src/lib/accounting/engine/money.ts",
+      "src/lib/accounting/engine/posting.ts",
+      "src/lib/accounting/engine/reads.ts",
+      "src/lib/accounting/engine/setup.ts",
+      "src/lib/accounting/engine/validate.ts",
     ])
   })
 })

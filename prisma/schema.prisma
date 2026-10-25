@@ -346,6 +346,13 @@ model Company {
   articles                Article[]
   quotes                  Quote[]
   invoices                Invoice[]
+  accountingAccounts      AccountingAccount[]
+  accountingJournals      AccountingJournal[]
+  fiscalYears             FiscalYear[]
+  journalEntries          JournalEntry[]
+  journalEntryLines       JournalEntryLine[]
+  accountingSequences     AccountingSequence[]
+  accountingChainHeads    AccountingChainHead[]
   documentCounters        DocumentCounter[]
   acquisitionMessages     AcquisitionMessage[]
   worksiteImportDrafts    WorksiteImportDraft[]
@@ -1987,4 +1994,169 @@ model AgentGatewayControl {
   updatedByUserId String?
 
   @@map("agent_gateway_control")
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPTABILITÉ — Lot A1 (ADR-PLAN-003, SPEC-ACC-A) : partie double, multi-société.
+// Montants en centimes (BigInt). Écritures validées immuables (déclencheurs SQL de la
+// migration accounting_a1_engine). Toutes les relations : onDelete Restrict, FK composites
+// (companyId, id) pour garantir l'appartenance à la même société.
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum FiscalYearStatus {
+  OPEN
+  CLOSING
+  CLOSED
+}
+
+enum JournalEntryStatus {
+  DRAFT
+  VALIDATED
+}
+
+enum AccountingJournalKind {
+  SALES      // VT
+  PURCHASES  // HA
+  BANK       // BQ
+  MISC       // OD
+}
+
+model AccountingAccount {
+  id        String   @id @default(cuid())
+  companyId String
+  number    String   // numéro PCG (ex. 411000)
+  label     String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  company Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  lines   JournalEntryLine[]
+
+  @@unique([companyId, number])
+  @@unique([companyId, id])
+  @@map("accounting_accounts")
+}
+
+model AccountingJournal {
+  id        String                @id @default(cuid())
+  companyId String
+  code      String                // VT, HA, BQ, OD
+  label     String
+  kind      AccountingJournalKind
+  createdAt DateTime              @default(now())
+
+  company    Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  entries    JournalEntry[]
+  sequences  AccountingSequence[]
+  chainHeads AccountingChainHead[]
+
+  @@unique([companyId, code])
+  @@unique([companyId, id])
+  @@map("accounting_journals")
+}
+
+model FiscalYear {
+  id        String           @id @default(cuid())
+  companyId String
+  startDate DateTime         @db.Date
+  endDate   DateTime         @db.Date
+  status    FiscalYearStatus @default(OPEN)
+  createdAt DateTime         @default(now())
+
+  company   Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  entries   JournalEntry[]
+  sequences AccountingSequence[]
+
+  @@unique([companyId, id])
+  @@index([companyId, startDate])
+  @@map("fiscal_years")
+}
+
+model AccountingSequence {
+  companyId    String
+  journalId    String
+  fiscalYearId String
+  lastNumber   Int    @default(0)
+
+  company    Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  journal    AccountingJournal @relation(fields: [companyId, journalId], references: [companyId, id], onDelete: Restrict)
+  fiscalYear FiscalYear        @relation(fields: [companyId, fiscalYearId], references: [companyId, id], onDelete: Restrict)
+
+  @@id([companyId, journalId, fiscalYearId])
+  @@map("accounting_sequences")
+}
+
+model AccountingChainHead {
+  companyId   String
+  journalId   String
+  lastEntryId String?
+  lastHash    String
+
+  company Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  journal AccountingJournal @relation(fields: [companyId, journalId], references: [companyId, id], onDelete: Restrict)
+
+  @@id([companyId, journalId])
+  @@map("accounting_chain_heads")
+}
+
+model JournalEntry {
+  id            String             @id @default(cuid())
+  companyId     String
+  journalId     String
+  fiscalYearId  String
+  status        JournalEntryStatus @default(DRAFT)
+  entryDate     DateTime           @db.Date
+  documentDate  DateTime?          @db.Date
+  documentRef   String?
+  label         String
+  closingEntry  Boolean            @default(false)
+  number        Int?
+  validatedAt   DateTime?
+  validatedById String?
+  sourceType    String?
+  sourceId      String?
+  sourceVersion Int?
+  sourceHash    String?
+  reversalOfId  String?
+  prevEntryId   String?
+  prevHash      String?
+  hash          String?
+  createdById   String
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  company    Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  journal    AccountingJournal  @relation(fields: [companyId, journalId], references: [companyId, id], onDelete: Restrict)
+  fiscalYear FiscalYear         @relation(fields: [companyId, fiscalYearId], references: [companyId, id], onDelete: Restrict)
+  reversalOf JournalEntry?      @relation("EntryReversal", fields: [companyId, reversalOfId], references: [companyId, id], onDelete: Restrict)
+  reversedBy JournalEntry[]     @relation("EntryReversal")
+  lines      JournalEntryLine[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, journalId, fiscalYearId, number])
+  @@unique([companyId, sourceType, sourceId, sourceVersion])
+  @@index([companyId, status])
+  @@index([companyId, fiscalYearId])
+  @@map("journal_entries")
+}
+
+model JournalEntryLine {
+  id          String  @id @default(cuid())
+  companyId   String
+  entryId     String
+  accountId   String
+  position    Int
+  label       String?
+  debitCents  BigInt  @default(0)
+  creditCents BigInt  @default(0)
+  vatRateBp   Int?    // taux de TVA en points de base (2000 = 20 %)
+
+  company Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  entry   JournalEntry      @relation(fields: [companyId, entryId], references: [companyId, id], onDelete: Restrict)
+  account AccountingAccount @relation(fields: [companyId, accountId], references: [companyId, id], onDelete: Restrict)
+
+  @@unique([entryId, position])
+  @@index([companyId, accountId])
+  @@map("journal_entry_lines")
 }
