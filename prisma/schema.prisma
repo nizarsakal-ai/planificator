@@ -521,7 +521,7 @@ model Invoice {
   company  Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
   worksite Worksite      @relation(fields: [worksiteId], references: [id], onDelete: Restrict)
   client   Client        @relation(fields: [clientId], references: [id])
-  quote    Quote?        @relation(fields: [quoteId], references: [id])
+  quote    Quote?        @relation(fields: [quoteId], references: [id], onDelete: Restrict)
   lines    InvoiceLine[]
   creditedInvoice Invoice? @relation("InvoiceCreditNote", fields: [creditedInvoiceId], references: [id], onDelete: Restrict)
   creditNote      Invoice? @relation("InvoiceCreditNote")
@@ -549,7 +549,7 @@ model InvoiceLine {
 
   // Relations
   invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  article Article? @relation(fields: [articleId], references: [id])
+  article Article? @relation(fields: [articleId], references: [id], onDelete: Restrict)
 
   @@index([invoiceId])
   @@map("invoice_lines")

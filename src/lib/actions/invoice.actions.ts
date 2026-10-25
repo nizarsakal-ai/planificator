@@ -16,6 +16,19 @@ import {
 } from "@/lib/billing/invoice-lifecycle.core"
 
 // Facturation réservée aux administrateurs (pas TEAM_LEADER).
+/**
+ * Invariant PostgreSQL de facturation (déclencheurs Lot B) refusé dans la transaction : message lisible
+ * au lieu d'une erreur serveur brute. Les autres erreurs sont relancées telles quelles.
+ */
+function billingIntegrityError(error: unknown): string | null {
+  const message = error instanceof Error ? error.message : ""
+  const code = /\b(INVOICE_[A-Z_]+|CREDIT_NOTE_INVALID)\b/.exec(message)?.[1]
+  if (!code) return null
+  if (code === "CREDIT_NOTE_INVALID") return "Avoir refusé : il doit reprendre exactement la facture d'origine."
+  if (code === "INVOICE_CANCEL_WITHOUT_CREDIT_NOTE") return "Une facture émise ne s'annule que par un avoir."
+  return "Opération refusée : une facture émise n'est plus modifiable."
+}
+
 async function requireBillingAdmin() {
   const session = await auth()
   if (!session?.user) throw new Error("Non authentifié")
@@ -123,11 +136,18 @@ export async function setInvoiceLines(invoiceId: string, rawLines: unknown) {
   const lines = mapLines(parsed.data)
   const totals = computeTotals(parsed.data)
 
-  const result = await prisma.$transaction(async (tx) => {
-    const r = await replaceDraftLinesCore(tx, { companyId: user.companyId!, invoiceId, actorId: user.id, lines, totals })
-    if (r.ok) await flushDeferredConstraints(tx)
-    return r
-  })
+  let result
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      const r = await replaceDraftLinesCore(tx, { companyId: user.companyId!, invoiceId, actorId: user.id, lines, totals })
+      if (r.ok) await flushDeferredConstraints(tx)
+      return r
+    })
+  } catch (error) {
+    const mapped = billingIntegrityError(error)
+    if (mapped) return { error: mapped }
+    throw error
+  }
   if (!result.ok) return { error: result.error }
 
   revalidatePath("/factures")
@@ -144,11 +164,18 @@ export async function updateInvoiceStatus(invoiceId: string, status: unknown) {
   if (!to) return { error: "Statut invalide." }
   if (typeof invoiceId !== "string" || !invoiceId) return { error: "Facture introuvable." }
 
-  const result = await prisma.$transaction(async (tx) => {
-    const r = await transitionInvoiceCore(tx, { companyId: user.companyId!, invoiceId, to, actorId: user.id, now: new Date() })
-    if (r.ok) await flushDeferredConstraints(tx)
-    return r
-  })
+  let result
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      const r = await transitionInvoiceCore(tx, { companyId: user.companyId!, invoiceId, to, actorId: user.id, now: new Date() })
+      if (r.ok) await flushDeferredConstraints(tx)
+      return r
+    })
+  } catch (error) {
+    const mapped = billingIntegrityError(error)
+    if (mapped) return { error: mapped }
+    throw error
+  }
   if (!result.ok) return { error: result.error }
 
   revalidatePath("/factures")
@@ -161,20 +188,27 @@ export async function createCreditNote(invoiceId: string, reason?: unknown) {
   if (typeof invoiceId !== "string" || !invoiceId) return { error: "Facture introuvable." }
   const motive = typeof reason === "string" ? reason.trim().slice(0, 500) : ""
 
-  const result = await prisma.$transaction(async (tx) => {
-    const r = await createCreditNoteCore(tx, {
-      companyId: user.companyId!,
-      invoiceId,
-      actorId: user.id,
-      reason: motive || null,
-      now: new Date(),
-      nextNumber: (t) => nextDocumentNumber(t, user.companyId!, "CREDIT_NOTE"),
+  let result
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      const r = await createCreditNoteCore(tx, {
+        companyId: user.companyId!,
+        invoiceId,
+        actorId: user.id,
+        reason: motive || null,
+        now: new Date(),
+        nextNumber: (t) => nextDocumentNumber(t, user.companyId!, "CREDIT_NOTE"),
+      })
+      // Prisma avale les erreurs levées au COMMIT : les invariants différés (avoir = copie exacte,
+      // annulation par avoir uniquement) sont évalués ici, avant le COMMIT.
+      if (r.ok) await flushDeferredConstraints(tx)
+      return r
     })
-    // Prisma avale les erreurs levées au COMMIT : les invariants différés (avoir = copie exacte,
-    // annulation par avoir uniquement) sont évalués ici, avant le COMMIT.
-    if (r.ok) await flushDeferredConstraints(tx)
-    return r
-  })
+  } catch (error) {
+    const mapped = billingIntegrityError(error)
+    if (mapped) return { error: mapped }
+    throw error
+  }
   if (!result.ok) return { error: result.error }
 
   revalidatePath("/factures")

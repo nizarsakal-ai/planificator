@@ -522,6 +522,17 @@ describe("Exercices et clôture", () => {
   })
 })
 
+describe("Garanties hors du schéma Prisma (index partiels, déclencheurs, fonctions)", () => {
+  it("présentes après migration : un prisma migrate futur ne doit pas les avoir retirées", async () => {
+    const idx = await db.$queryRawUnsafe<{ indexname: string }[]>(`SELECT indexname FROM pg_indexes WHERE indexname IN ('je_one_reversal_per_entry','je_one_successor','je_one_genesis') ORDER BY 1`)
+    assert.deepEqual(idx.map((r) => r.indexname), ["je_one_genesis", "je_one_reversal_per_entry", "je_one_successor"])
+    const trg = await db.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM pg_trigger WHERE NOT tgisinternal AND tgname IN ('fiscal_years_guard_trg','accounting_accounts_guard_trg','journal_entries_guard_trg','journal_entry_lines_guard_trg','accounting_sequences_guard_trg','accounting_chain_heads_guard_trg','journal_entries_validation_check_trg','accounting_sequences_check_trg','accounting_chain_heads_check_trg')`)
+    assert.equal(trg[0].n, 9)
+    const fn = await db.$queryRawUnsafe<{ proname: string; prosecdef: boolean }[]>(`SELECT proname, prosecdef FROM pg_proc WHERE proname IN ('accounting_post_entry','accounting_advance_fiscal_year') ORDER BY 1`)
+    assert.deepEqual(fn, [{ proname: "accounting_advance_fiscal_year", prosecdef: true }, { proname: "accounting_post_entry", prosecdef: true }])
+  })
+})
+
 describe("Contrôles différés et Prisma", () => {
   it("Prisma avale l'erreur levée au COMMIT ; flushDeferredConstraints la fait remonter", async () => {
     await db.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS zz_deferred_probe (id int)`)
