@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
 import { createInvoiceSchema, invoiceLineSchema, type InvoiceLineInput } from "@/lib/validations/invoice"
 import { nextDocumentNumber } from "@/lib/billing/numbering"
+import { flushDeferredConstraints } from "@/lib/deferred-constraints"
 import { computeLineHT, computeTotals } from "@/lib/billing/totals"
 import {
   createCreditNoteCore,
@@ -100,6 +101,7 @@ export async function createInvoice(input: unknown) {
         detail:     `Facture ${created.number} créée (brouillon)`,
       },
     })
+    await flushDeferredConstraints(tx)
     return created
   })
 
@@ -121,9 +123,11 @@ export async function setInvoiceLines(invoiceId: string, rawLines: unknown) {
   const lines = mapLines(parsed.data)
   const totals = computeTotals(parsed.data)
 
-  const result = await prisma.$transaction((tx) =>
-    replaceDraftLinesCore(tx, { companyId: user.companyId!, invoiceId, actorId: user.id, lines, totals })
-  )
+  const result = await prisma.$transaction(async (tx) => {
+    const r = await replaceDraftLinesCore(tx, { companyId: user.companyId!, invoiceId, actorId: user.id, lines, totals })
+    if (r.ok) await flushDeferredConstraints(tx)
+    return r
+  })
   if (!result.ok) return { error: result.error }
 
   revalidatePath("/factures")
@@ -140,9 +144,11 @@ export async function updateInvoiceStatus(invoiceId: string, status: unknown) {
   if (!to) return { error: "Statut invalide." }
   if (typeof invoiceId !== "string" || !invoiceId) return { error: "Facture introuvable." }
 
-  const result = await prisma.$transaction((tx) =>
-    transitionInvoiceCore(tx, { companyId: user.companyId!, invoiceId, to, actorId: user.id, now: new Date() })
-  )
+  const result = await prisma.$transaction(async (tx) => {
+    const r = await transitionInvoiceCore(tx, { companyId: user.companyId!, invoiceId, to, actorId: user.id, now: new Date() })
+    if (r.ok) await flushDeferredConstraints(tx)
+    return r
+  })
   if (!result.ok) return { error: result.error }
 
   revalidatePath("/factures")
@@ -155,8 +161,8 @@ export async function createCreditNote(invoiceId: string, reason?: unknown) {
   if (typeof invoiceId !== "string" || !invoiceId) return { error: "Facture introuvable." }
   const motive = typeof reason === "string" ? reason.trim().slice(0, 500) : ""
 
-  const result = await prisma.$transaction((tx) =>
-    createCreditNoteCore(tx, {
+  const result = await prisma.$transaction(async (tx) => {
+    const r = await createCreditNoteCore(tx, {
       companyId: user.companyId!,
       invoiceId,
       actorId: user.id,
@@ -164,7 +170,11 @@ export async function createCreditNote(invoiceId: string, reason?: unknown) {
       now: new Date(),
       nextNumber: (t) => nextDocumentNumber(t, user.companyId!, "CREDIT_NOTE"),
     })
-  )
+    // Prisma avale les erreurs levées au COMMIT : les invariants différés (avoir = copie exacte,
+    // annulation par avoir uniquement) sont évalués ici, avant le COMMIT.
+    if (r.ok) await flushDeferredConstraints(tx)
+    return r
+  })
   if (!result.ok) return { error: result.error }
 
   revalidatePath("/factures")

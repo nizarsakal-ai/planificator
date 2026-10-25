@@ -24,6 +24,7 @@
     "test:tasks": "node --import tsx --test tests/tasks/task-schema.test.ts tests/tasks/task-create-core.test.ts tests/tasks/task-prisma-adapter.test.ts tests/tasks/task-schema-migration.test.ts tests/tasks/task-dashboard.test.ts tests/tasks/task-form-submit.test.ts tests/tasks/task-form-render.test.tsx",
     "test:agent-gateway": "node --import tsx --test tests/agent-gateway/flags.test.ts tests/agent-gateway/scopes.test.ts tests/agent-gateway/secrets.test.ts tests/agent-gateway/migration-sql.test.ts",
     "test:billing": "node --import tsx --test tests/billing/invoice-lifecycle.test.ts",
+    "test:billing:pg": "node --import tsx --test --test-concurrency=1 tests/billing/pg/lot-b-prisma-commit.pg.test.ts",
     "test:navigation": "node --import tsx --test tests/navigation/nav-config.test.ts",
     "test:clients": "node --import tsx --test tests/clients/client-actions-view.test.ts && node --import tsx --experimental-test-module-mocks --test tests/clients/client-delete.test.ts tests/clients/client-actions.render.test.tsx tests/clients/client-partners.actions.test.ts",
     "test:security:t2bis": "RESEND_API_KEY=re_test_dummy node --import tsx --test tests/security/t2bis-tenant-isolation.test.ts",
