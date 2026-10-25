@@ -11,3 +11,9 @@ Claude : deux revues initiales puis validation finale statique PASS du code (ré
 Raspberry : aucun diagnostic ni réparation revendiqué ; toute prochaine intervention doit vérifier la disponibilité de nohisac@100.88.103.1 sans modifier les accès ou exposer un service.
 
 Prochaine action : utilisation fonctionnelle et suivi normal de V3. Toute nouvelle mission gouvernée devra respecter les dépôts réellement autorisés par le contrôleur. Aucun secret ni donnée client dans ces documents.
+
+## Dernier contrôle production,25/10/2026 vers09:34UTC
+
+Déploiement et code applicatif inchangés ; quatre onglets chargés, cinq API privées401 sans session, origine étrangère403,62 checksums attendus et zéro structure invalide. Fournisseurs IGN/GraphHopper à nouveau PASS, moteur privé actif sansOOM ni redémarrage, aucun journal error/fatal/warning retourné sur la fenêtre contrôlée et aucune erreur navigateur. Aucun nouveau défaut reproduit, aucune migration ni écriture de recette en production.
+
+Passerelle relue09:27:59UTC. Proposition non exécutante pour planificator refuséeREPOSITORY_NOT_AUTHORIZED ; aucun submit ni contournement. Nouvelle revue Claude non exécutée ; revues finales précédentes réutilisées sur code inchangé. Preuves : outputs/verification-production-v3-20261025-0930/rapport.md dans le workspace de reprise. Cette restriction de revue reste distincte du bon fonctionnement applicatif observé.
