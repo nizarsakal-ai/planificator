@@ -20,13 +20,14 @@ Rendre les factures émises fiables avant tout raccordement comptable : correcti
    - création obligatoirement en DRAFT ; id, createdAt, kind et companyId immuables ; CHECK kind ↔ creditedInvoiceId ;
    - hors DRAFT : seules SENT→PAID et SENT/PAID→CANCELLED (factures) ; contenu et sentAt figés ; paidAt posé uniquement au passage à PAID ; émission exige sentAt ;
    - lignes : toute mutation prend un verrou partagé sur la ou les factures concernées (ordre déterministe) puis refuse si l'une n'est pas DRAFT — sérialisé avec l'émission ;
-   - invariant différé (COMMIT) : une facture émise annulée possède son avoir total émis, de même société et mêmes montants ; un avoir référence une facture annulée de même société, mêmes montants, et est émis.
+   - invariant différé (COMMIT) : une facture émise annulée possède son avoir total émis, **copie exacte** (même société, chantier, client, totaux et mêmes lignes : désignation, unité, quantité, prix, taux, montant HT, position, article — identifiants exclus) ; une facture vide n'admet qu'un avoir vide ; les lignes d'un avoir sont recontrôlées au COMMIT ;
+   - un brouillon ne peut être créé avec une date d'envoi ou de paiement.
 
 ## Hors périmètre (lots suivants)
 Avoirs partiels ; numéro attribué à l'émission plutôt qu'au brouillon ; calcul exact en centimes de `totals.ts` (toujours en `number`) ; devis (cycle différent) ; facture électronique.
 
 ## Vérifications (v2)
 - `test:billing` (20 tests unitaires : automate, concurrence simulée, avoirs, isolation, audit, contrôles de sources) — transaction simulée, ne remplace pas les essais PostgreSQL.
-- `tests/billing/pg/lot-b-invariants.sql` : 29 essais PostgreSQL avec assertions (contraintes différées forcées par SET CONSTRAINTS IMMEDIATE).
+- `tests/billing/pg/lot-b-invariants.sql` : 39 essais PostgreSQL avec assertions (contraintes différées forcées par SET CONSTRAINTS IMMEDIATE).
 - `tests/billing/pg/lot-b-concurrency.sh` : 3 scénarios à deux sessions (ligne puis émission ; émission puis ligne ; deux avoirs concurrents).
 - Note : la garde de périmètre T-CORE-5 de test:chantiers (propre au lot LOT-1W-1a, comparée à un BASE_SHA figé) échoue déjà sur main (3 sous-tests) ; ce lot ajoute un sous-test du même type (schéma/migrations modifiés). À retirer ou mettre à jour par le propriétaire de LOT-1W-1a.

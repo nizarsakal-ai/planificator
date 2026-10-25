@@ -48,6 +48,9 @@ BEGIN
     IF NEW."status" <> 'DRAFT' THEN
       RAISE EXCEPTION 'INVOICE_IMMUTABLE: une facture doit être créée en brouillon (%).', NEW."number";
     END IF;
+    IF NEW."sentAt" IS NOT NULL OR NEW."paidAt" IS NOT NULL THEN
+      RAISE EXCEPTION 'INVOICE_IMMUTABLE: un brouillon n''a ni date d''envoi ni de paiement (%).', NEW."number";
+    END IF;
     RETURN NEW;
   END IF;
 
@@ -162,40 +165,53 @@ CREATE TRIGGER invoice_lines_guard_issued_trg
   BEFORE INSERT OR UPDATE OR DELETE ON "invoice_lines"
   FOR EACH ROW EXECUTE FUNCTION invoice_lines_guard_issued();
 
--- Invariant différé : vérifié au COMMIT (autorise la séquence annulation → avoir → émission de createCreditNoteCore).
+-- Invariant différé : vérifié au COMMIT (autorise la séquence annulation → avoir → lignes → émission
+-- de createCreditNoteCore). Un avoir total doit être la copie exacte de la facture d'origine :
+-- même société, même chantier, même client, mêmes totaux, et mêmes lignes (multiensemble des champs
+-- métier, identifiants exclus). Une facture vide n'admet qu'un avoir vide ; une facture non vide
+-- n'admet pas d'avoir vide.
+CREATE OR REPLACE FUNCTION invoice_credit_matches(note_id text, orig_id text) RETURNS boolean AS $$
+  SELECT EXISTS (
+           SELECT 1 FROM "invoices" n JOIN "invoices" o ON o."id" = orig_id
+           WHERE n."id" = note_id
+             AND n."kind" = 'CREDIT_NOTE' AND n."creditedInvoiceId" = o."id" AND n."status" = 'SENT'
+             AND o."kind" = 'INVOICE' AND o."status" = 'CANCELLED' AND o."sentAt" IS NOT NULL
+             AND n."companyId" = o."companyId" AND n."worksiteId" = o."worksiteId" AND n."clientId" = o."clientId"
+             AND n."totalHT" = o."totalHT" AND n."totalVAT" = o."totalVAT" AND n."totalTTC" = o."totalTTC")
+     AND NOT EXISTS (
+           (SELECT "articleId", "designation", "unit", "quantity", "unitPrice", "vatRate", "lineHT", "position"
+              FROM "invoice_lines" WHERE "invoiceId" = note_id
+            EXCEPT ALL
+            SELECT "articleId", "designation", "unit", "quantity", "unitPrice", "vatRate", "lineHT", "position"
+              FROM "invoice_lines" WHERE "invoiceId" = orig_id)
+           UNION ALL
+           (SELECT "articleId", "designation", "unit", "quantity", "unitPrice", "vatRate", "lineHT", "position"
+              FROM "invoice_lines" WHERE "invoiceId" = orig_id
+            EXCEPT ALL
+            SELECT "articleId", "designation", "unit", "quantity", "unitPrice", "vatRate", "lineHT", "position"
+              FROM "invoice_lines" WHERE "invoiceId" = note_id))
+$$ LANGUAGE sql STABLE;
+
 CREATE OR REPLACE FUNCTION invoices_credit_invariant() RETURNS trigger AS $$
 DECLARE
   cur record;
-  ok  boolean;
+  note_id text;
 BEGIN
   SELECT * INTO cur FROM "invoices" WHERE "id" = NEW."id";
   IF NOT FOUND THEN
     RETURN NULL;
   END IF;
 
-  -- Avoir : référence une FACTURE de la même société, mêmes montants ; émis au COMMIT.
   IF cur."kind" = 'CREDIT_NOTE' THEN
-    SELECT EXISTS (
-      SELECT 1 FROM "invoices" o
-      WHERE o."id" = cur."creditedInvoiceId" AND o."companyId" = cur."companyId" AND o."kind" = 'INVOICE'
-        AND o."status" = 'CANCELLED' AND o."sentAt" IS NOT NULL
-        AND o."totalHT" = cur."totalHT" AND o."totalVAT" = cur."totalVAT" AND o."totalTTC" = cur."totalTTC"
-    ) INTO ok;
-    IF NOT ok OR cur."status" <> 'SENT' THEN
-      RAISE EXCEPTION 'CREDIT_NOTE_INVALID: avoir % incohérent (facture d''origine, société, montants ou émission).', cur."number";
+    IF NOT invoice_credit_matches(cur."id", cur."creditedInvoiceId") THEN
+      RAISE EXCEPTION 'CREDIT_NOTE_INVALID: l''avoir % n''est pas la copie exacte émise de la facture annulée (société, chantier, client, montants, lignes).', cur."number";
     END IF;
   END IF;
 
-  -- Facture émise annulée : son avoir total émis doit exister.
   IF cur."kind" = 'INVOICE' AND cur."status" = 'CANCELLED' AND cur."sentAt" IS NOT NULL THEN
-    SELECT EXISTS (
-      SELECT 1 FROM "invoices" n
-      WHERE n."creditedInvoiceId" = cur."id" AND n."kind" = 'CREDIT_NOTE' AND n."companyId" = cur."companyId"
-        AND n."status" = 'SENT'
-        AND n."totalHT" = cur."totalHT" AND n."totalVAT" = cur."totalVAT" AND n."totalTTC" = cur."totalTTC"
-    ) INTO ok;
-    IF NOT ok THEN
-      RAISE EXCEPTION 'INVOICE_CANCEL_WITHOUT_CREDIT_NOTE: la facture émise % ne peut être annulée que par un avoir total émis.', cur."number";
+    SELECT n."id" INTO note_id FROM "invoices" n WHERE n."creditedInvoiceId" = cur."id" AND n."kind" = 'CREDIT_NOTE';
+    IF note_id IS NULL OR NOT invoice_credit_matches(note_id, cur."id") THEN
+      RAISE EXCEPTION 'INVOICE_CANCEL_WITHOUT_CREDIT_NOTE: la facture émise % ne peut être annulée que par un avoir total émis, copie exacte.', cur."number";
     END IF;
   END IF;
   RETURN NULL;
@@ -206,3 +222,23 @@ CREATE CONSTRAINT TRIGGER invoices_credit_invariant_trg
   AFTER INSERT OR UPDATE ON "invoices"
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION invoices_credit_invariant();
+
+-- Les lignes d'un avoir sont aussi contrôlées au COMMIT (ajout/suppression de lignes d'un avoir brouillon).
+CREATE OR REPLACE FUNCTION invoice_lines_credit_invariant() RETURNS trigger AS $$
+DECLARE
+  inv record;
+  lid text;
+BEGIN
+  lid := CASE WHEN TG_OP = 'DELETE' THEN OLD."invoiceId" ELSE NEW."invoiceId" END;
+  SELECT "id", "kind", "creditedInvoiceId", "number" INTO inv FROM "invoices" WHERE "id" = lid;
+  IF FOUND AND inv."kind" = 'CREDIT_NOTE' AND NOT invoice_credit_matches(inv."id", inv."creditedInvoiceId") THEN
+    RAISE EXCEPTION 'CREDIT_NOTE_INVALID: lignes de l''avoir % différentes de la facture d''origine.', inv."number";
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE CONSTRAINT TRIGGER invoice_lines_credit_invariant_trg
+  AFTER INSERT OR UPDATE OR DELETE ON "invoice_lines"
+  DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION invoice_lines_credit_invariant();

@@ -102,8 +102,51 @@ DO $$ BEGIN
   PERFORM pg_temp.check('T22 état après avoir : facture CANCELLED, avoir SENT',
     (SELECT status FROM invoices WHERE id='i1')='CANCELLED' AND (SELECT status FROM invoices WHERE id='av1')='SENT', 'états');
   PERFORM pg_temp.expect_error('T23 second avoir refusé', $q$INSERT INTO invoices(id,"companyId","worksiteId","clientId",number,"createdById","updatedAt",status,kind,"creditedInvoiceId","totalHT","totalVAT","totalTTC") VALUES ('av2','coA','wA','clA','AV-2','u',now(),'DRAFT','CREDIT_NOTE','i1',100,20,120)$q$, 'invoices_creditedInvoiceId_key');
-  PERFORM pg_temp.expect_error('T24 un avoir ne se paie ni ne s''annule', $q$UPDATE invoices SET status='CANCELLED' WHERE id='av1'$q$, 'interdite');
+  PERFORM pg_temp.expect_error('T24 un avoir ne s''annule pas', $q$UPDATE invoices SET status='CANCELLED' WHERE id='av1'$q$, 'interdite');
+  PERFORM pg_temp.expect_error('T24b un avoir ne se paie pas', $q$UPDATE invoices SET status='PAID', "paidAt"=now() WHERE id='av1'$q$, 'interdite');
   PERFORM pg_temp.expect_error('T25 annulée -> payée refusé', $q$UPDATE invoices SET status='PAID' WHERE id='i1'$q$, 'interdite');
+  -- Contenu de l'avoir : copie exacte des lignes exigée (facture d'origine à 2 lignes).
+  PERFORM pg_temp.new_invoice('k','coA','wA','clA');
+  INSERT INTO invoice_lines(id,"invoiceId",designation,quantity,"unitPrice","vatRate","lineHT",position) VALUES ('l-k2','k','L2',1,0,10,0,1);
+  UPDATE invoices SET status='SENT', "sentAt"=now() WHERE id='k';
+  PERFORM pg_temp.expect_error('T30 avoir sans aucune ligne refusé', $q$
+    UPDATE invoices SET status='CANCELLED' WHERE id='k';
+    INSERT INTO invoices(id,"companyId","worksiteId","clientId",number,"createdById","updatedAt",status,kind,"creditedInvoiceId","totalHT","totalVAT","totalTTC") VALUES ('ak','coA','wA','clA','AV-k','u',now(),'DRAFT','CREDIT_NOTE','k',100,20,120);
+    UPDATE invoices SET status='SENT', "sentAt"=now() WHERE id='ak'$q$, 'CREDIT_NOTE_INVALID|INVOICE_CANCEL_WITHOUT_CREDIT_NOTE');
+  PERFORM pg_temp.expect_error('T31 avoir avec une ligne manquante refusé', $q$
+    UPDATE invoices SET status='CANCELLED' WHERE id='k';
+    INSERT INTO invoices(id,"companyId","worksiteId","clientId",number,"createdById","updatedAt",status,kind,"creditedInvoiceId","totalHT","totalVAT","totalTTC") VALUES ('ak','coA','wA','clA','AV-k','u',now(),'DRAFT','CREDIT_NOTE','k',100,20,120);
+    INSERT INTO invoice_lines(id,"invoiceId",designation,quantity,"unitPrice","vatRate","lineHT") VALUES ('x1','ak','L',1,100,20,100);
+    UPDATE invoices SET status='SENT', "sentAt"=now() WHERE id='ak'$q$, 'CREDIT_NOTE_INVALID|INVOICE_CANCEL_WITHOUT_CREDIT_NOTE');
+  PERFORM pg_temp.expect_error('T32 avoir avec une ligne en plus refusé', $q$
+    UPDATE invoices SET status='CANCELLED' WHERE id='k';
+    INSERT INTO invoices(id,"companyId","worksiteId","clientId",number,"createdById","updatedAt",status,kind,"creditedInvoiceId","totalHT","totalVAT","totalTTC") VALUES ('ak','coA','wA','clA','AV-k','u',now(),'DRAFT','CREDIT_NOTE','k',100,20,120);
+    INSERT INTO invoice_lines(id,"invoiceId",designation,quantity,"unitPrice","vatRate","lineHT",position) VALUES ('x1','ak','L',1,100,20,100,0),('x2','ak','L2',1,0,10,0,1),('x3','ak','L3',1,0,10,0,2);
+    UPDATE invoices SET status='SENT', "sentAt"=now() WHERE id='ak'$q$, 'CREDIT_NOTE_INVALID|INVOICE_CANCEL_WITHOUT_CREDIT_NOTE');
+  PERFORM pg_temp.expect_error('T33 avoir aux mêmes totaux mais taux de TVA différent refusé', $q$
+    UPDATE invoices SET status='CANCELLED' WHERE id='k';
+    INSERT INTO invoices(id,"companyId","worksiteId","clientId",number,"createdById","updatedAt",status,kind,"creditedInvoiceId","totalHT","totalVAT","totalTTC") VALUES ('ak','coA','wA','clA','AV-k','u',now(),'DRAFT','CREDIT_NOTE','k',100,20,120);
+    INSERT INTO invoice_lines(id,"invoiceId",designation,quantity,"unitPrice","vatRate","lineHT",position) VALUES ('x1','ak','L',1,100,20,100,0),('x2','ak','L2',1,0,5.5,0,1);
+    UPDATE invoices SET status='SENT', "sentAt"=now() WHERE id='ak'$q$, 'CREDIT_NOTE_INVALID|INVOICE_CANCEL_WITHOUT_CREDIT_NOTE');
+  PERFORM pg_temp.expect_error('T34 avoir avec désignation différente refusé', $q$
+    UPDATE invoices SET status='CANCELLED' WHERE id='k';
+    INSERT INTO invoices(id,"companyId","worksiteId","clientId",number,"createdById","updatedAt",status,kind,"creditedInvoiceId","totalHT","totalVAT","totalTTC") VALUES ('ak','coA','wA','clA','AV-k','u',now(),'DRAFT','CREDIT_NOTE','k',100,20,120);
+    INSERT INTO invoice_lines(id,"invoiceId",designation,quantity,"unitPrice","vatRate","lineHT",position) VALUES ('x1','ak','AUTRE',1,100,20,100,0),('x2','ak','L2',1,0,10,0,1);
+    UPDATE invoices SET status='SENT', "sentAt"=now() WHERE id='ak'$q$, 'CREDIT_NOTE_INVALID|INVOICE_CANCEL_WITHOUT_CREDIT_NOTE');
+  INSERT INTO clients(id,"companyId",name,"updatedAt") VALUES ('clA2','coA','ClA2',now());
+  PERFORM pg_temp.expect_error('T35 avoir vers un autre client refusé', $q$
+    UPDATE invoices SET status='CANCELLED' WHERE id='k';
+    INSERT INTO invoices(id,"companyId","worksiteId","clientId",number,"createdById","updatedAt",status,kind,"creditedInvoiceId","totalHT","totalVAT","totalTTC") VALUES ('ak','coA','wA','clA2','AV-k','u',now(),'DRAFT','CREDIT_NOTE','k',100,20,120);
+    INSERT INTO invoice_lines(id,"invoiceId",designation,quantity,"unitPrice","vatRate","lineHT",position) VALUES ('x1','ak','L',1,100,20,100,0),('x2','ak','L2',1,0,10,0,1);
+    UPDATE invoices SET status='SENT', "sentAt"=now() WHERE id='ak'$q$, 'CREDIT_NOTE_INVALID|INVOICE_CANCEL_WITHOUT_CREDIT_NOTE');
+  PERFORM pg_temp.check('T36 rollback complet après refus : facture toujours SENT, aucun avoir',
+    (SELECT status FROM invoices WHERE id='k')='SENT' AND NOT EXISTS (SELECT 1 FROM invoices WHERE "creditedInvoiceId"='k'), 'état');
+  PERFORM pg_temp.expect_ok('T37 avoir copie exacte (2 lignes) accepté', $q$
+    UPDATE invoices SET status='CANCELLED' WHERE id='k';
+    INSERT INTO invoices(id,"companyId","worksiteId","clientId",number,"createdById","updatedAt",status,kind,"creditedInvoiceId","totalHT","totalVAT","totalTTC") VALUES ('ak','coA','wA','clA','AV-k','u',now(),'DRAFT','CREDIT_NOTE','k',100,20,120);
+    INSERT INTO invoice_lines(id,"invoiceId",designation,quantity,"unitPrice","vatRate","lineHT",position) VALUES ('x1','ak','L',1,100,20,100,0),('x2','ak','L2',1,0,10,0,1);
+    UPDATE invoices SET status='SENT', "sentAt"=now() WHERE id='ak'$q$);
+  PERFORM pg_temp.expect_error('T38 brouillon créé avec des dates refusé', $q$INSERT INTO invoices(id,"companyId","worksiteId","clientId",number,"createdById","updatedAt",status,"sentAt") VALUES ('d1','coA','wA','clA','FAC-d1','u',now(),'DRAFT',now())$q$, 'brouillon');
   PERFORM pg_temp.expect_ok('T26 abandon d''un brouillon sans avoir', $q$UPDATE invoices SET status='CANCELLED' WHERE id='i2'$q$);
   PERFORM pg_temp.new_invoice('i3','coA','wA','clA');
   PERFORM pg_temp.expect_ok('T27 suppression d''un brouillon (et de ses lignes)', $q$DELETE FROM invoice_lines WHERE "invoiceId"='i3'; DELETE FROM invoices WHERE id='i3'$q$);
