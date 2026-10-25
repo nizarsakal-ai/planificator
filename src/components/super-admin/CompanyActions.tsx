@@ -39,7 +39,11 @@ export function CompanyActions({ companyId, isActive, companyName }: Props) {
 
     setLoadingDelete(true)
     try {
-      await deleteCompany(companyId)
+      const result = await deleteCompany(companyId)
+      if (result && "error" in result && result.error) {
+        toast.error(result.error)
+        return
+      }
       toast.success(`Entreprise "${companyName}" supprimée`)
       router.refresh()
     } catch {

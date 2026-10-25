@@ -344,6 +344,12 @@ export async function deleteChantier(worksiteId: string) {
   })
   if (!worksite) return { error: "Chantier introuvable." }
 
+  // Lot B (ADR-PLAN-003) : les factures sont des pièces conservées ; un chantier facturé ne se supprime pas.
+  const invoiceCount = await prisma.invoice.count({ where: { worksiteId, companyId: user.companyId! } })
+  if (invoiceCount > 0) {
+    return { error: "Ce chantier a des factures : il ne peut pas être supprimé. Archivez-le plutôt." }
+  }
+
   await prisma.worksite.delete({ where: { id: worksiteId } })
 
   revalidatePath("/chantiers")

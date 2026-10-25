@@ -141,10 +141,16 @@ enum QuoteStatus {
 }
 
 enum InvoiceStatus {
-  DRAFT      // Brouillon
-  SENT       // Envoyée au client
-  PAID       // Payée
-  CANCELLED  // Annulée
+  DRAFT      // Brouillon (modifiable, non émis)
+  SENT       // Émise / envoyée au client (immuable)
+  PAID       // Payée (immuable)
+  CANCELLED  // Brouillon abandonné, ou facture émise annulée PAR AVOIR (jamais de retour arrière)
+}
+
+/// Lot B minimal (ADR-PLAN-003) : une facture émise ne s'annule que par un avoir référencé.
+enum InvoiceKind {
+  INVOICE      // Facture
+  CREDIT_NOTE  // Avoir total émis sur une facture SENT/PAID
 }
 
 enum ExpenseStatus {
@@ -486,6 +492,8 @@ model Invoice {
   quoteId     String?       // devis d'origine (optionnel)
   number      String        // "FAC-2026-0001" (séquentiel, unique par entreprise)
   status      InvoiceStatus @default(DRAFT)
+  kind        InvoiceKind   @default(INVOICE)
+  creditedInvoiceId String? @unique // avoir : facture d'origine (un seul avoir total par facture)
   issueDate   DateTime      @default(now())
   dueDate     DateTime?     // échéance de paiement
   periodStart DateTime?     // début de la période facturée (= dates du chantier)
@@ -502,17 +510,21 @@ model Invoice {
   updatedAt   DateTime      @updatedAt
 
   // Relations
-  company  Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  worksite Worksite      @relation(fields: [worksiteId], references: [id], onDelete: Cascade)
+  // Lot B : pièces conservées — aucune suppression en cascade depuis la société ou le chantier.
+  company  Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  worksite Worksite      @relation(fields: [worksiteId], references: [id], onDelete: Restrict)
   client   Client        @relation(fields: [clientId], references: [id])
   quote    Quote?        @relation(fields: [quoteId], references: [id])
   lines    InvoiceLine[]
+  creditedInvoice Invoice? @relation("InvoiceCreditNote", fields: [creditedInvoiceId], references: [id], onDelete: Restrict)
+  creditNote      Invoice? @relation("InvoiceCreditNote")
 
   @@unique([companyId, number])
   @@index([companyId])
   @@index([worksiteId])
   @@index([clientId])
   @@index([status])
+  @@index([kind])
   @@map("invoices")
 }
 
@@ -540,7 +552,7 @@ model InvoiceLine {
 model DocumentCounter {
   id        String @id @default(cuid())
   companyId String
-  type      String // "QUOTE" | "INVOICE"
+  type      String // "QUOTE" | "INVOICE" | "CREDIT_NOTE"
   year      Int
   lastValue Int    @default(0)
 
