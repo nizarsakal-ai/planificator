@@ -1,4 +1,5 @@
 import { authorizeVehicleLocked } from "./vehicle-authority"
+import { isVehiclesV3Enabled } from "./v3/v3-feature-flag"
 /**
  * Vehicles V2 Lot 1: service serveur injecté, sans route publique ni connexion globale.
  * Toutes les mutations d'un véhicule partagent son verrou PostgreSQL avec V1.
@@ -163,7 +164,7 @@ export async function executeMileageCommandInTransaction(tx: Tx, truckId: string
           context = await departureContext(tx, truck, team, command)
         }
         if (command.type === "END") {
-          if (process.env.PLANIFICATOR_VEHICLES_V3_ENABLED === "true") {
+          if (isVehiclesV3Enabled()) {
             const linkedTour = await tx.vehicleTour.findFirst({ where: { mileageTripId: command.tripId, truckId, companyId: session.companyId }, select: { id: true } })
             if (linkedTour && linkedTour.id !== composedTourId) throw new MileageDomainError("TRIP_MANAGED_BY_TOUR", 409)
           }

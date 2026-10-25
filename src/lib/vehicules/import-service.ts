@@ -1,4 +1,5 @@
 import { writeVehicleAudit } from "./v3/v3-audit"
+import { isVehiclesV3Enabled } from "./v3/v3-feature-flag"
 import { z } from "zod"
 import { randomUUID } from "node:crypto"
 import type { Prisma, PrismaClient } from "@prisma/client"
@@ -10,7 +11,7 @@ import { extractImport } from "./import-extraction"
 import { readImportSource, storeImportSource } from "./import-storage"
 const importTransactionOptions={maxWait:5000,timeout:15000}
 export type ImportDeps={auth:()=>Promise<MileageSession|null>;db:PrismaClient;readSource?:(id:string)=>Promise<Buffer>;storeSource?:typeof storeImportSource}
-export async function importScope(deps:ImportDeps){if(process.env.PLANIFICATOR_VEHICLES_V3_ENABLED!=="true")throw new MileageDomainError("FEATURE_DISABLED",404);const s=requireMileageSession(await deps.auth());if(!["ADMIN","SUPER_ADMIN"].includes(s.role))throw new MileageDomainError("FORBIDDEN",403);return s}
+export async function importScope(deps:ImportDeps){if(!isVehiclesV3Enabled())throw new MileageDomainError("FEATURE_DISABLED",404);const s=requireMileageSession(await deps.auth());if(!["ADMIN","SUPER_ADMIN"].includes(s.role))throw new MileageDomainError("FORBIDDEN",403);return s}
 export async function preauthorizeImport(truckId:string,deps:ImportDeps){const scope=await importScope(deps);await deps.db.$transaction(tx=>authorizeVehicleLocked(tx,truckId,scope,"CORRECTION"),importTransactionOptions);return scope}
 export async function listImports(truckId:string,deps:ImportDeps){const s=await importScope(deps);return deps.db.$transaction(async tx=>{await authorizeVehicleLocked(tx,truckId,s,"CORRECTION");return tx.vehicleAddressImport.findMany({where:{companyId:s.companyId,truckId},orderBy:{createdAt:"desc"},take:30,select:{id:true,filename:true,sourceHash:true,revision:true,candidates:true,warnings:true,status:true,reviewedAt:true,createdAt:true}})},importTransactionOptions)}
 export async function createImport(truckId:string,input:{bytes:Buffer;mime:string;filename:string;ocrConsent:boolean},deps:ImportDeps){const s=await importScope(deps);verifyBytes(input.bytes,input.mime)

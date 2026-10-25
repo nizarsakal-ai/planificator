@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto"
+import { isVehiclesV3Enabled } from "./v3-feature-flag"
 import { Prisma } from "@prisma/client"
 import { z } from "zod"
 import { MileageDomainError } from "../mileage-domain"
-export const expenseEnabled = () => process.env.PLANIFICATOR_VEHICLES_V3_ENABLED === "true"
+export const expenseEnabled = () => isVehiclesV3Enabled()
 const decimal = (places: number, digits: number) => z.string().regex(new RegExp(`^(?:0|[1-9][0-9]{0,${digits - 1}})(?:\\.[0-9]{1,${places}})?$`)).refine(v => new Prisma.Decimal(v).gt(0))
 const money = decimal(2, 12)
 const id = z.string().trim().min(1).max(200)
