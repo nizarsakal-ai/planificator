@@ -1,4 +1,5 @@
 import { MileageDomainError } from "../mileage-domain"
+import { assertMutationOrigin } from "../request-origin"
 import { executeExpenseCommand, readExpenses, preauthorizeExpenseWrite, type ExpenseDeps } from "./expense-service"
 import { readVehicleCosts,readTripCosts } from "./cost-service"
 const headers = { "Cache-Control": "private, no-store", "Vary": "Cookie", "X-Content-Type-Options": "nosniff" }
@@ -6,17 +7,9 @@ function failure(error: unknown) {
   return Response.json({ code: error instanceof MileageDomainError ? error.code : "SERVER_ERROR", error: "Opération de dépenses refusée" }, { status: error instanceof MileageDomainError ? error.status : 500, headers })
 }
 export function assertExpenseRequest(request: Request) {
-  // Next dev may reconstruct localhost internally; Host remains the served public authority.
-  const publicUrl = new URL(request.url), host = request.headers.get("host")
-  let servedOrigin = publicUrl.origin
-  try {
-    if (host !== null) {
-      if (!host || /[\s,\\/?#@]/.test(host)) throw new Error("invalid host")
-      servedOrigin = new URL(`${publicUrl.protocol}//${host}`).origin
-    }
-  } catch { throw new MileageDomainError("INVALID_ORIGIN", 403) }
-  const origin = request.headers.get("Origin"), site = request.headers.get("Sec-Fetch-Site")
-  if (!origin || origin !== servedOrigin || (site && site !== "same-origin")) throw new MileageDomainError("INVALID_ORIGIN", 403)
+  // Même admission d'origine que les autres mutations véhicules (inclut PLANIFICATOR_TRUSTED_ORIGINS,
+  // ex. application mobile) ; les en-têtes de transfert ne donnent jamais d'autorité.
+  assertMutationOrigin(request, "INVALID_ORIGIN")
   if (request.headers.get("Content-Type")?.split(";")[0].trim().toLowerCase() !== "application/json") throw new MileageDomainError("INVALID_CONTENT_TYPE", 415)
   const length = request.headers.get("Content-Length")
   if (length!==null && (!/^(0|[1-9][0-9]*)$/.test(length) || !Number.isSafeInteger(Number(length)) || Number(length) > 32768)) throw new MileageDomainError("PAYLOAD_TOO_LARGE", 413)

@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { isVehiclesV3Enabled } from "@/lib/vehicules/v3/v3-feature-flag"
 import { TourPanel } from "@/components/vehicules/TourPanel";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
@@ -14,7 +15,7 @@ export default async function Page({ params, searchParams }: {
         revision?: string | string[];
     }>;
 }) {
-    if (process.env.PLANIFICATOR_VEHICLES_V3_ENABLED !== "true")
+    if (!isVehiclesV3Enabled())
         notFound();
     const { id } = await params;
     // Lecture V3 : administrateur de l'entreprise ou chef de l'équipe affectée, relu sous verrou partagé.
