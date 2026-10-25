@@ -71,11 +71,26 @@ Exclus du Lot A : FEC, rapprochement bancaire, OCR, Factur-X/facture électroniq
 
 Lot B minimal (factures) : automate de statuts sans retour à DRAFT, émission transactionnelle verrouillée, avoirs, suppression des cascades sur pièces émises, audit. Lots ultérieurs : FEC, TVA, banque, OCR, facture électronique, interface.
 
-## 7. Notes d'implémentation A1 (écarts et constats)
+## 7. Notes d'implémentation A1 (v2, après revue Codex NO-GO du 25/10/2026)
 
-- **Verrous** : `FOR NO KEY UPDATE` au lieu de `FOR UPDATE` sur exercice, écriture, compteur et tête de chaîne. `FOR UPDATE` entrait en interblocage (40P01) avec les `FOR KEY SHARE` posés par les FK lors de la création concurrente de brouillons. `FOR NO KEY UPDATE` reste exclusif entre validations et avec l'UPDATE d'état de l'exercice (colonne non clé) : la sérialisation validation/clôture est conservée (test « clôture concurrente »).
-- **Pas de retry** : la transaction est en READ COMMITTED avec verrous explicites dans un ordre unique (FiscalYear → JournalEntry → AccountingSequence → AccountingChainHead) ; aucun échec de sérialisation (40001) n'est attendu. Le retry borné reste à la charge de l'appelant si un niveau SERIALIZABLE est introduit plus tard.
-- **Prisma avale les erreurs levées au COMMIT** des transactions interactives (constaté sur 5.22 : la base annule, la promesse est résolue). Les contrôles différés sont donc exécutés explicitement en fin de service via `flushDeferredConstraints` (`src/lib/deferred-constraints.ts`). Un test PG fige ce comportement pour détecter une évolution de Prisma. Le Lot B (déclencheurs différés sur factures/avoirs) est concerné et reçoit le même correctif.
-- **Contre-passation** : contrôle miroir côté service (`ENTRY_REVERSAL_INVALID`, erreur typée) ET en base (déclencheur différé, testé en contournant le service).
-- **Exercices** : `openFiscalYear` / `advanceFiscalYear` (ADMIN revérifié, verrou d'exercice, audit `HistoryLog`). Chaque validation d'écriture est auditée dans la même transaction.
-- **Réserve de déploiement** : l'immutabilité suppose que le rôle SQL applicatif ne soit pas propriétaire des tables (sinon il peut désactiver les déclencheurs). À vérifier/mettre en place avant toute migration réelle ; hors périmètre du code A1.
+**Frontière de privilèges.** L'indicateur de session `planificator.accounting_engine` n'est PAS une autorisation (tout rôle peut appeler `set_config`). Les mutations protégées (passage à VALIDATED, compteurs, têtes de chaîne, changement d'état d'exercice) exigent en plus `current_user` = propriétaire des tables, ce qui n'est possible pour le rôle applicatif qu'à travers deux fonctions `SECURITY DEFINER` à `search_path` figé (`pg_temp` en dernier) : `accounting_post_entry(company, entry, user)` et `accounting_advance_fiscal_year(company, fy, to, user)`. Elles numérotent, chaînent, calculent l'empreinte, auditent (`history_logs`) et exécutent immédiatement les contrôles différés.
+
+**Défense en profondeur (même pour le propriétaire).** Au passage à VALIDATED : numéro = compteur courant, `prevEntryId/prevHash` = tête courante, empreinte recalculée en SQL (forme canonique v1 identique à `canonical.ts`, NFC via `normalize`). Tête : n'avance que vers l'écriture validée qui succède à l'ancienne tête. Contrôles différés : compteur = nombre = maximum des écritures validées (sans trou) ; tête = dernière écriture (aucun successeur) ; toute écriture validée est tête ou prédécesseur. Index uniques : un successeur par écriture, une seule origine par journal.
+
+**Révocation.** Le service verrouille FOR SHARE, jusqu'au COMMIT, les lignes d'autorité (utilisateur, fiches salarié, sociétés concernées) puis les relit. Une révocation validée avant est vue ; une révocation lancée pendant attend la fin de l'opération. Ordre global : users → employees → companies → exercice → écriture → compteur → tête. Testé à deux sessions.
+
+**Autorisation métier vs intégrité.** La base garantit l'intégrité du registre quel que soit l'appelant ; l'autorisation de l'utilisateur final (ADMIN actif de la société) reste vérifiée par le service applicatif (la base ne connaît pas l'utilisateur final).
+
+**Prérequis de déploiement.** PostgreSQL ≥ 13 (`normalize`, `gen_random_uuid`), base UTF-8 ; rôle applicatif NON propriétaire des tables comptables, avec droits DML ; migrations exécutées par le rôle propriétaire. Option de durcissement : `REVOKE EXECUTE … FROM PUBLIC` puis `GRANT` au seul rôle applicatif.
+
+**Verrous et erreurs transitoires.** `FOR NO KEY UPDATE` au lieu de `FOR UPDATE` (interblocage 40P01 avec les `FOR KEY SHARE` des FK ; sérialisation validation/clôture conservée et testée). READ COMMITTED + ordre unique : pas de 40001 attendu ; un 40P01 reste possible face à une transaction extérieure qui verrouille dans un autre ordre (ex. révocation touchant société puis utilisateur) : l'opération échoue proprement et peut être rejouée en entier par l'appelant. Aucun retry automatique en A1.
+
+**Prisma.** Prisma 5.22 avale les erreurs levées au COMMIT des transactions interactives (testé). Les fonctions SQL exécutent leurs contrôles différés avant de rendre la main ; `flushDeferredConstraints` (`src/lib/deferred-constraints.ts`) sert aux autres transactions (Lot B v4). Une transaction qui compose A1 et B doit faire son propre flush final et ne plus écrire ensuite.
+
+**Contre-passation.** Miroir contrôlé par le service (erreur typée) et par la base. `reverseEntry(…, { entryDate, fiscalYearId? })` : après clôture, la correction se passe dans l'exercice suivant (testé).
+
+**Idempotence.** Verrou consultatif transactionnel par clé source : deux créations concurrentes identiques renvoient la même écriture ; divergentes : une réussit, l'autre `SOURCE_CONFLICT` (testé). À la validation, l'empreinte du contenu courant d'un brouillon sourcé doit égaler `sourceHash` (`SOURCE_HASH_MISMATCH` sinon). Le gel en base des brouillons sourcés est reporté au lot de raccordement.
+
+**Vérificateur.** Parcours depuis la tête avec recalcul, détection de cycle, arrivée au genesis, exhaustivité (toutes les écritures validées du journal atteintes), numérotation 1..n par exercice, absence de tête avec écritures validées.
+
+**Montants.** Les lignes portent des montants positifs (débit OU crédit) : l'analyseur refuse le signe (écart assumé au motif signé du §3 bis, qui concerne les entrées API ultérieures). Partie entière ≤ 13 chiffres, soit au plus 999 999 999 999 999 centimes, sous le plafond SQL de 10^15.

@@ -216,9 +216,59 @@ CREATE UNIQUE INDEX "je_one_reversal_per_entry" ON "journal_entries"("reversalOf
 ALTER TABLE "fiscal_years" ADD CONSTRAINT "fy_dates_ck" CHECK ("endDate" > "startDate");
 ALTER TABLE "accounting_sequences" ADD CONSTRAINT "seq_positive_ck" CHECK ("lastNumber" >= 0);
 
--- Indicateur transactionnel posé par le service de validation (set_config(..., true) = local à la transaction).
-CREATE OR REPLACE FUNCTION accounting_posting_enabled() RETURNS boolean AS $$
-  SELECT coalesce(current_setting('planificator.accounting_posting', true), '') = 'on'
+-- Chaînage : au plus un successeur par écriture, une seule origine (genesis) validée par journal.
+CREATE UNIQUE INDEX "je_one_successor" ON "journal_entries"("companyId", "journalId", "prevEntryId") WHERE "prevEntryId" IS NOT NULL;
+CREATE UNIQUE INDEX "je_one_genesis" ON "journal_entries"("companyId", "journalId") WHERE "status" = 'VALIDATED' AND "prevEntryId" IS NULL;
+
+-- Contexte moteur. L'indicateur seul n'est PAS une autorisation (tout rôle peut appeler set_config) :
+-- il faut en plus s'exécuter sous le propriétaire des tables, ce qui n'est possible pour le rôle applicatif
+-- qu'à travers les fonctions SECURITY DEFINER ci-dessous (accounting_post_entry, accounting_advance_fiscal_year).
+-- Prérequis de déploiement : le rôle applicatif n'est pas propriétaire des tables comptables.
+CREATE OR REPLACE FUNCTION accounting_engine_context() RETURNS boolean AS $$
+  SELECT coalesce(current_setting('planificator.accounting_engine', true), '') = 'on'
+     AND current_user = (SELECT pg_get_userbyid(c.relowner) FROM pg_class c WHERE c.oid = 'journal_entries'::regclass)
+$$ LANGUAGE sql STABLE;
+
+-- Forme canonique v1 (identique à src/lib/accounting/engine/canonical.ts) : clés triées, aucun espace,
+-- chaînes NFC échappées comme JSON.stringify, dates ISO, horodatage UTC à la seconde, montants en chaînes.
+CREATE OR REPLACE FUNCTION accounting_json_text(t text) RETURNS text AS $$
+  SELECT CASE WHEN t IS NULL THEN 'null' ELSE to_json(normalize(t, NFC))::text END
+$$ LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION accounting_entry_canonical(e "journal_entries") RETURNS text AS $$
+  SELECT '{'
+    || '"closingEntry":' || CASE WHEN e."closingEntry" THEN 'true' ELSE 'false' END
+    || ',"companyId":' || accounting_json_text(e."companyId")
+    || ',"documentDate":' || CASE WHEN e."documentDate" IS NULL THEN 'null' ELSE '"' || to_char(e."documentDate", 'YYYY-MM-DD') || '"' END
+    || ',"documentRef":' || accounting_json_text(e."documentRef")
+    || ',"entryDate":"' || to_char(e."entryDate", 'YYYY-MM-DD') || '"'
+    || ',"fiscalYearId":' || accounting_json_text(e."fiscalYearId")
+    || ',"journalId":' || accounting_json_text(e."journalId")
+    || ',"label":' || accounting_json_text(e."label")
+    || ',"lines":' || coalesce((
+         SELECT '[' || string_agg(
+             '{"accountId":' || accounting_json_text(l."accountId")
+           || ',"creditCents":"' || l."creditCents"::text || '"'
+           || ',"debitCents":"' || l."debitCents"::text || '"'
+           || ',"label":' || accounting_json_text(l."label")
+           || ',"position":' || l."position"::text
+           || ',"vatRateBp":' || coalesce(l."vatRateBp"::text, 'null')
+           || '}', ',' ORDER BY l."position") || ']'
+         FROM "journal_entry_lines" l WHERE l."entryId" = e."id"), '[]')
+    || ',"number":' || coalesce(e."number"::text, 'null')
+    || ',"prevHash":' || accounting_json_text(e."prevHash")
+    || ',"reversalOfId":' || accounting_json_text(e."reversalOfId")
+    || ',"sourceId":' || accounting_json_text(e."sourceId")
+    || ',"sourceType":' || accounting_json_text(e."sourceType")
+    || ',"sourceVersion":' || coalesce(e."sourceVersion"::text, 'null')
+    || ',"validatedAt":' || CASE WHEN e."validatedAt" IS NULL THEN 'null' ELSE '"' || to_char(e."validatedAt", 'YYYY-MM-DD"T"HH24:MI:SS"Z"') || '"' END
+    || ',"validatedById":' || accounting_json_text(e."validatedById")
+    || ',"version":1'
+    || '}'
+$$ LANGUAGE sql STABLE;
+
+CREATE OR REPLACE FUNCTION accounting_entry_hash(e "journal_entries") RETURNS text AS $$
+  SELECT encode(sha256(convert_to(accounting_entry_canonical(e), 'UTF8')), 'hex')
 $$ LANGUAGE sql STABLE;
 
 -- Exercices : pas de chevauchement par société, états vers l'avant, dates figées dès qu'une écriture existe.
@@ -234,6 +284,9 @@ BEGIN
     END IF;
     IF NOT ((OLD."status" = NEW."status") OR (OLD."status" = 'OPEN' AND NEW."status" = 'CLOSING') OR (OLD."status" = 'CLOSING' AND NEW."status" = 'CLOSED')) THEN
       RAISE EXCEPTION 'FISCAL_YEAR_IMMUTABLE: transition % -> % interdite.', OLD."status", NEW."status";
+    END IF;
+    IF NEW."status" <> OLD."status" AND NOT accounting_engine_context() THEN
+      RAISE EXCEPTION 'FISCAL_YEAR_TRANSITION_DENIED: changement d''état réservé au service comptable.';
     END IF;
     IF (NEW."startDate" IS DISTINCT FROM OLD."startDate" OR NEW."endDate" IS DISTINCT FROM OLD."endDate")
        AND (OLD."status" <> 'OPEN' OR EXISTS (SELECT 1 FROM "journal_entries" e WHERE e."fiscalYearId" = OLD."id")) THEN
@@ -272,6 +325,8 @@ CREATE TRIGGER accounting_accounts_guard_trg BEFORE UPDATE OR DELETE ON "account
 
 -- Écritures : création en brouillon ; validation uniquement par le service ; validées immuables.
 CREATE OR REPLACE FUNCTION journal_entries_guard() RETURNS trigger AS $$
+DECLARE
+  v_last int; h record;
 BEGIN
   IF TG_OP = 'INSERT' THEN
     IF NEW."status" <> 'DRAFT' THEN
@@ -291,8 +346,23 @@ BEGIN
   IF NEW."id" IS DISTINCT FROM OLD."id" OR NEW."companyId" IS DISTINCT FROM OLD."companyId" THEN
     RAISE EXCEPTION 'ENTRY_IMMUTABLE: identifiant ou société non modifiables.';
   END IF;
-  IF NEW."status" = 'VALIDATED' AND NOT accounting_posting_enabled() THEN
-    RAISE EXCEPTION 'ENTRY_POSTING_DENIED: validation réservée au service comptable.';
+  IF NEW."status" = 'VALIDATED' THEN
+    IF NOT accounting_engine_context() THEN
+      RAISE EXCEPTION 'ENTRY_POSTING_DENIED: validation réservée au service comptable.';
+    END IF;
+    -- Cohérence indépendante du chemin : numéro = compteur courant, chaînage = tête courante, empreinte recalculée.
+    SELECT "lastNumber" INTO v_last FROM "accounting_sequences"
+      WHERE "companyId" = NEW."companyId" AND "journalId" = NEW."journalId" AND "fiscalYearId" = NEW."fiscalYearId";
+    IF v_last IS NULL OR NEW."number" IS DISTINCT FROM v_last THEN
+      RAISE EXCEPTION 'ENTRY_INTEGRITY: numéro % non attribué par le compteur.', NEW."number";
+    END IF;
+    SELECT "lastEntryId", "lastHash" INTO h FROM "accounting_chain_heads" WHERE "companyId" = NEW."companyId" AND "journalId" = NEW."journalId";
+    IF NOT FOUND OR NEW."prevHash" IS DISTINCT FROM h."lastHash" OR NEW."prevEntryId" IS DISTINCT FROM h."lastEntryId" THEN
+      RAISE EXCEPTION 'ENTRY_INTEGRITY: chaînage de l''écriture % incohérent avec la tête du journal.', NEW."number";
+    END IF;
+    IF NEW."hash" IS DISTINCT FROM accounting_entry_hash(NEW) THEN
+      RAISE EXCEPTION 'ENTRY_INTEGRITY: empreinte de l''écriture % incorrecte.', NEW."number";
+    END IF;
   END IF;
   RETURN NEW;
 END;
@@ -328,7 +398,7 @@ BEGIN
     IF NEW."lastNumber" <> 0 THEN RAISE EXCEPTION 'SEQUENCE_IMMUTABLE: une séquence démarre à 0.'; END IF;
     RETURN NEW;
   END IF;
-  IF NOT accounting_posting_enabled() OR NEW."lastNumber" <> OLD."lastNumber" + 1
+  IF NOT accounting_engine_context() OR NEW."lastNumber" <> OLD."lastNumber" + 1
      OR NEW."companyId" <> OLD."companyId" OR NEW."journalId" <> OLD."journalId" OR NEW."fiscalYearId" <> OLD."fiscalYearId" THEN
     RAISE EXCEPTION 'SEQUENCE_IMMUTABLE: incrément de 1 uniquement, par le service comptable.';
   END IF;
@@ -347,8 +417,13 @@ BEGIN
     END IF;
     RETURN NEW;
   END IF;
-  IF NOT accounting_posting_enabled() OR NEW."companyId" <> OLD."companyId" OR NEW."journalId" <> OLD."journalId" THEN
+  IF NOT accounting_engine_context() OR NEW."companyId" <> OLD."companyId" OR NEW."journalId" <> OLD."journalId" THEN
     RAISE EXCEPTION 'CHAIN_IMMUTABLE: tête de chaîne modifiable uniquement par le service comptable.';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM "journal_entries" x WHERE x."id" = NEW."lastEntryId" AND x."companyId" = NEW."companyId"
+                 AND x."journalId" = NEW."journalId" AND x."status" = 'VALIDATED'
+                 AND x."prevEntryId" IS NOT DISTINCT FROM OLD."lastEntryId" AND x."prevHash" = OLD."lastHash" AND x."hash" = NEW."lastHash") THEN
+    RAISE EXCEPTION 'CHAIN_INTEGRITY: la tête doit avancer vers l''écriture validée qui succède à l''ancienne tête.';
   END IF;
   RETURN NEW;
 END;
@@ -392,6 +467,11 @@ BEGIN
       RAISE EXCEPTION 'ENTRY_REVERSAL_INVALID: la contre-passation % n''est pas le miroir exact de l''écriture d''origine.', e."number";
     END IF;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM "accounting_chain_heads" h WHERE h."companyId" = e."companyId" AND h."journalId" = e."journalId" AND h."lastEntryId" = e."id")
+     AND NOT EXISTS (SELECT 1 FROM "journal_entries" n WHERE n."companyId" = e."companyId" AND n."journalId" = e."journalId"
+                     AND n."prevEntryId" = e."id" AND n."status" = 'VALIDATED') THEN
+    RAISE EXCEPTION 'CHAIN_INTEGRITY: écriture % hors chaîne (ni tête, ni prédécesseur).', e."number";
+  END IF;
   RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -399,3 +479,138 @@ CREATE CONSTRAINT TRIGGER journal_entries_validation_check_trg
   AFTER INSERT OR UPDATE ON "journal_entries"
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION journal_entries_validation_check();
+
+
+-- Contrôle différé des compteurs : dernier numéro = nombre = maximum des écritures validées du périmètre (sans trou).
+CREATE OR REPLACE FUNCTION accounting_sequences_check() RETURNS trigger AS $$
+DECLARE
+  v_last int; n int; mx int;
+BEGIN
+  SELECT "lastNumber" INTO v_last FROM "accounting_sequences"
+    WHERE "companyId" = NEW."companyId" AND "journalId" = NEW."journalId" AND "fiscalYearId" = NEW."fiscalYearId";
+  SELECT count(*), coalesce(max("number"), 0) INTO n, mx FROM "journal_entries"
+    WHERE "companyId" = NEW."companyId" AND "journalId" = NEW."journalId" AND "fiscalYearId" = NEW."fiscalYearId" AND "status" = 'VALIDATED';
+  IF v_last <> mx OR n <> mx THEN
+    RAISE EXCEPTION 'SEQUENCE_INTEGRITY: compteur % incohérent avec les écritures validées (% écritures, max %).', v_last, n, mx;
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+CREATE CONSTRAINT TRIGGER accounting_sequences_check_trg
+  AFTER INSERT OR UPDATE ON "accounting_sequences"
+  DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION accounting_sequences_check();
+
+-- Contrôle différé des têtes : la tête pointe la dernière écriture de la chaîne (aucun successeur validé).
+CREATE OR REPLACE FUNCTION accounting_chain_heads_check() RETURNS trigger AS $$
+DECLARE
+  h record;
+BEGIN
+  SELECT * INTO h FROM "accounting_chain_heads" WHERE "companyId" = NEW."companyId" AND "journalId" = NEW."journalId";
+  IF EXISTS (SELECT 1 FROM "journal_entries" n WHERE n."companyId" = h."companyId" AND n."journalId" = h."journalId" AND n."status" = 'VALIDATED'
+             AND n."prevEntryId" IS NOT DISTINCT FROM h."lastEntryId" AND (h."lastEntryId" IS NOT NULL OR n."prevHash" = h."lastHash")) THEN
+    RAISE EXCEPTION 'CHAIN_INTEGRITY: la tête du journal n''est pas la dernière écriture de la chaîne.';
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+CREATE CONSTRAINT TRIGGER accounting_chain_heads_check_trg
+  AFTER INSERT OR UPDATE ON "accounting_chain_heads"
+  DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION accounting_chain_heads_check();
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Seuls points d'entrée des mutations protégées (SECURITY DEFINER, search_path figé).
+-- Ils garantissent l'intégrité du registre (numéro, chaîne, empreinte, audit), quel que soit l'appelant ;
+-- l'autorisation de l'utilisateur final (ADMIN de la société, non révoqué) reste vérifiée par le service
+-- applicatif, qui verrouille les lignes d'autorité avant l'appel.
+-- ═══════════════════════════════════════════════════════════════════════════
+CREATE OR REPLACE FUNCTION accounting_post_entry(p_company_id text, p_entry_id text, p_user_id text)
+RETURNS TABLE(entry_id text, entry_number integer, entry_hash text) AS $$
+DECLARE
+  e "journal_entries"; v_fy text; v_num int; h record; v_at timestamp(3);
+BEGIN
+  SELECT "fiscalYearId" INTO v_fy FROM "journal_entries" WHERE "id" = p_entry_id AND "companyId" = p_company_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'ENTRY_NOT_FOUND: écriture introuvable pour cette société.'; END IF;
+  -- Ordre unique des verrous : exercice → écriture → compteur → tête.
+  PERFORM 1 FROM "fiscal_years" WHERE "id" = v_fy AND "companyId" = p_company_id FOR NO KEY UPDATE;
+  SELECT * INTO e FROM "journal_entries" WHERE "id" = p_entry_id AND "companyId" = p_company_id FOR NO KEY UPDATE;
+  IF e."status" = 'VALIDATED' THEN
+    RETURN QUERY SELECT e."id", e."number", e."hash";
+    RETURN;
+  END IF;
+  PERFORM set_config('planificator.accounting_engine', 'on', true);
+
+  INSERT INTO "accounting_sequences" ("companyId", "journalId", "fiscalYearId", "lastNumber")
+    VALUES (p_company_id, e."journalId", e."fiscalYearId", 0) ON CONFLICT DO NOTHING;
+  SELECT "lastNumber" INTO v_num FROM "accounting_sequences"
+    WHERE "companyId" = p_company_id AND "journalId" = e."journalId" AND "fiscalYearId" = e."fiscalYearId" FOR NO KEY UPDATE;
+  v_num := v_num + 1;
+  UPDATE "accounting_sequences" SET "lastNumber" = v_num
+    WHERE "companyId" = p_company_id AND "journalId" = e."journalId" AND "fiscalYearId" = e."fiscalYearId";
+
+  INSERT INTO "accounting_chain_heads" ("companyId", "journalId", "lastEntryId", "lastHash")
+    VALUES (p_company_id, e."journalId", NULL, encode(sha256(convert_to('GENESIS|' || p_company_id || '|' || e."journalId", 'UTF8')), 'hex'))
+    ON CONFLICT DO NOTHING;
+  SELECT "lastEntryId", "lastHash" INTO h FROM "accounting_chain_heads"
+    WHERE "companyId" = p_company_id AND "journalId" = e."journalId" FOR NO KEY UPDATE;
+
+  v_at := date_trunc('second', clock_timestamp() AT TIME ZONE 'UTC');
+  e."status" := 'VALIDATED';
+  e."number" := v_num;
+  e."validatedAt" := v_at;
+  e."validatedById" := p_user_id;
+  e."prevEntryId" := h."lastEntryId";
+  e."prevHash" := h."lastHash";
+  e."hash" := accounting_entry_hash(e);
+
+  UPDATE "journal_entries" SET "status" = e."status", "number" = e."number", "validatedAt" = e."validatedAt",
+      "validatedById" = e."validatedById", "prevEntryId" = e."prevEntryId", "prevHash" = e."prevHash", "hash" = e."hash",
+      "updatedAt" = clock_timestamp() AT TIME ZONE 'UTC'
+    WHERE "id" = e."id" AND "status" = 'DRAFT';
+  UPDATE "accounting_chain_heads" SET "lastEntryId" = e."id", "lastHash" = e."hash"
+    WHERE "companyId" = p_company_id AND "journalId" = e."journalId";
+
+  INSERT INTO "history_logs" ("id", "companyId", "actorId", "action", "entityType", "entityId", "detail", "newValue", "createdAt")
+  VALUES ('acc_' || replace(gen_random_uuid()::text, '-', ''), p_company_id, p_user_id, 'STATUS_CHANGED', 'JournalEntry', e."id",
+          'Écriture n° ' || v_num || ' validée'
+            || CASE WHEN e."reversalOfId" IS NOT NULL THEN ' (contre-passation)' ELSE '' END
+            || CASE WHEN e."closingEntry" THEN ' (OD de clôture)' ELSE '' END,
+          jsonb_build_object('status', 'VALIDATED', 'journalId', e."journalId", 'fiscalYearId', e."fiscalYearId", 'number', v_num,
+                             'hash', e."hash", 'reversalOfId', e."reversalOfId", 'closingEntry', e."closingEntry"),
+          clock_timestamp() AT TIME ZONE 'UTC');
+
+  -- Contrôles différés exécutés maintenant (Prisma n'expose pas de façon fiable une erreur levée au COMMIT).
+  SET CONSTRAINTS journal_entries_validation_check_trg, accounting_sequences_check_trg, accounting_chain_heads_check_trg IMMEDIATE;
+  SET CONSTRAINTS journal_entries_validation_check_trg, accounting_sequences_check_trg, accounting_chain_heads_check_trg DEFERRED;
+  PERFORM set_config('planificator.accounting_engine', 'off', true);
+  RETURN QUERY SELECT e."id", e."number", e."hash";
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION accounting_advance_fiscal_year(p_company_id text, p_fiscal_year_id text, p_to text, p_user_id text)
+RETURNS void AS $$
+DECLARE
+  v_from text;
+BEGIN
+  SELECT "status"::text INTO v_from FROM "fiscal_years" WHERE "id" = p_fiscal_year_id AND "companyId" = p_company_id FOR NO KEY UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'FISCAL_YEAR_NOT_FOUND: exercice introuvable pour cette société.'; END IF;
+  IF NOT ((v_from = 'OPEN' AND p_to = 'CLOSING') OR (v_from = 'CLOSING' AND p_to = 'CLOSED')) THEN
+    RAISE EXCEPTION 'FISCAL_YEAR_TRANSITION_INVALID: % -> % interdite.', v_from, p_to;
+  END IF;
+  PERFORM set_config('planificator.accounting_engine', 'on', true);
+  UPDATE "fiscal_years" SET "status" = p_to::"FiscalYearStatus" WHERE "id" = p_fiscal_year_id AND "companyId" = p_company_id;
+  INSERT INTO "history_logs" ("id", "companyId", "actorId", "action", "entityType", "entityId", "detail", "oldValue", "newValue", "createdAt")
+  VALUES ('acc_' || replace(gen_random_uuid()::text, '-', ''), p_company_id, p_user_id, 'STATUS_CHANGED', 'FiscalYear', p_fiscal_year_id,
+          'Exercice : ' || v_from || ' → ' || p_to, jsonb_build_object('status', v_from), jsonb_build_object('status', p_to),
+          clock_timestamp() AT TIME ZONE 'UTC');
+  PERFORM set_config('planificator.accounting_engine', 'off', true);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- search_path figé au schéma de la migration (pg_temp en dernier : pas de détournement par table temporaire).
+DO $$
+BEGIN
+  EXECUTE format('ALTER FUNCTION accounting_post_entry(text, text, text) SET search_path = %I, pg_temp', current_schema());
+  EXECUTE format('ALTER FUNCTION accounting_advance_fiscal_year(text, text, text, text) SET search_path = %I, pg_temp', current_schema());
+END $$;

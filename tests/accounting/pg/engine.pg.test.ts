@@ -31,6 +31,20 @@ async function draftAndPost(ctx: AccountingContext, amount: number, opts: { jour
     return postEntry(tx, ctx, d.id)
   })
 }
+type TxC = Parameters<Parameters<typeof db.$transaction>[0]>[0]
+/** Exécute fn dans une transaction, sous un rôle donné (ou le propriétaire), indicateur moteur forgé, contrôles différés forcés. */
+async function forged(role: "acc_app" | "owner", fn: (tx: TxC) => Promise<unknown>): Promise<string> {
+  try {
+    await db.$transaction(async (tx) => {
+      if (role === "acc_app") await tx.$executeRawUnsafe(`SET LOCAL ROLE acc_app`)
+      await tx.$executeRawUnsafe(`SELECT set_config('planificator.accounting_engine', 'on', true)`)
+      await fn(tx)
+      await tx.$executeRawUnsafe(`SET CONSTRAINTS ALL IMMEDIATE`)
+    })
+    return "NO_ERROR"
+  } catch (e) { return String((e as Error).message) }
+}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 async function sqlError(sql: string): Promise<string> {
   try { await db.$executeRawUnsafe(sql); return "NO_ERROR" } catch (e) { return String((e as Error).message) }
 }
@@ -79,13 +93,12 @@ describe("Validation et immutabilité", () => {
     assert.match(await sqlError(`INSERT INTO journal_entries(id,"companyId","journalId","fiscalYearId",status,"entryDate",label,"createdById","updatedAt",number,"validatedAt","validatedById",hash,"prevHash") VALUES ('dv','coA','${ids["coA:VT"]}','${ids["coA:FY"]}','VALIDATED','2026-03-01','X','admA',now(),5,now(),'admA','h','p')`), /ENTRY_IMMUTABLE/)
     ids.draftY = d.id
   })
-  it("SQL direct avec l'indicateur de validation : équilibre revérifié au COMMIT", async () => {
+  it("fonction SQL de validation appelée directement (service contourné) : équilibre revérifié", async () => {
     const d = await db.$transaction((tx) => createDraftEntry(tx, A, { journalId: ids["coA:OD"], fiscalYearId: ids["coA:FY"], entryDate: D("2026-03-04"), label: "W",
       lines: [{ accountId: ids["coA:411"], debitCents: c(5), creditCents: c(0) }, { accountId: ids["coA:706"], debitCents: c(0), creditCents: c(5) }] }))
     await db.$executeRawUnsafe(`UPDATE journal_entry_lines SET "creditCents"=4 WHERE "entryId"='${d.id}' AND "creditCents">0`)
-    const msg = await sqlError(`BEGIN; SELECT set_config('planificator.accounting_posting','on',true); UPDATE journal_entries SET status='VALIDATED', number=1, "validatedAt"=now(), "validatedById"='admA', hash='h', "prevHash"='p' WHERE id='${d.id}'; COMMIT;`)
-    await db.$executeRawUnsafe("ROLLBACK").catch(() => {})
-    assert.match(msg, /ENTRY_UNBALANCED|cannot insert multiple commands/)
+    await assert.rejects(db.$transaction((tx) => tx.$queryRaw`SELECT * FROM accounting_post_entry('coA', ${d.id}, 'admA')`), /ENTRY_UNBALANCED/)
+    assert.equal((await db.journalEntry.findUniqueOrThrow({ where: { id: d.id } })).status, "DRAFT")
   })
   it("séquences et têtes de chaîne non manipulables hors service", async () => {
     assert.match(await sqlError(`UPDATE accounting_sequences SET "lastNumber"="lastNumber"-1`), /SEQUENCE_IMMUTABLE/)
@@ -133,6 +146,25 @@ describe("Idempotence des écritures sourcées", () => {
   it("même clé + contenu différent : SOURCE_CONFLICT", async () => {
     const changed = { ...input(), label: "Autre" }
     await assert.rejects(db.$transaction((tx) => createDraftEntry(tx, A, changed)), (e: unknown) => e instanceof AccountingError && e.code === "SOURCE_CONFLICT")
+  })
+  it("créations concurrentes même clé + même contenu : une seule écriture, l'autre renvoie l'existante", async () => {
+    const inp = { ...input(), source: { type: "INVOICE", id: "inv-c", version: 1 } }
+    const [a, b] = await Promise.all([db.$transaction((tx) => createDraftEntry(tx, A, inp)), db.$transaction((tx) => createDraftEntry(tx, A, inp))])
+    assert.equal(a.id, b.id)
+    assert.deepEqual([a.existing, b.existing].sort(), [false, true])
+  })
+  it("créations concurrentes même clé + contenus divergents : une réussit, l'autre SOURCE_CONFLICT (pas d'erreur d'unicité)", async () => {
+    const one = { ...input(), source: { type: "INVOICE", id: "inv-d", version: 1 } }
+    const two = { ...one, label: "Divergent" }
+    const r = await Promise.allSettled([db.$transaction((tx) => createDraftEntry(tx, A, one)), db.$transaction((tx) => createDraftEntry(tx, A, two))])
+    assert.equal(r.filter((x) => x.status === "fulfilled").length, 1)
+    const rej = r.find((x) => x.status === "rejected") as PromiseRejectedResult
+    assert.ok(rej.reason instanceof AccountingError && rej.reason.code === "SOURCE_CONFLICT", String(rej.reason))
+  })
+  it("brouillon sourcé modifié en SQL après création : validation refusée (SOURCE_HASH_MISMATCH)", async () => {
+    const d = await db.$transaction((tx) => createDraftEntry(tx, A, { ...input(), source: { type: "INVOICE", id: "inv-m", version: 1 } }))
+    await db.$executeRawUnsafe(`UPDATE journal_entries SET label='Modifié' WHERE id='${d.id}'`)
+    await assert.rejects(db.$transaction((tx) => postEntry(tx, A, d.id)), (e: unknown) => e instanceof AccountingError && e.code === "SOURCE_HASH_MISMATCH")
   })
   it("champs source partiels refusés en base", async () => {
     assert.match(await sqlError(`INSERT INTO journal_entries(id,"companyId","journalId","fiscalYearId","entryDate",label,"createdById","updatedAt","sourceType") VALUES ('sp','coA','${ids["coA:VT"]}','${ids["coA:FY"]}','2026-03-01','X','admA',now(),'INVOICE')`), /je_source_ck/)
@@ -186,14 +218,157 @@ describe("Révocation", () => {
     const role = (await db.user.findUniqueOrThrow({ where: { id: "admB" } })).role
     assert.equal(role, "ADMIN") // transaction annulée
   })
+  it("révocation concurrente validée PENDANT l'attente de postEntry : la validation voit la révocation", async () => {
+    const d = await db.$transaction((tx) => createDraftEntry(tx, B, { journalId: ids["coB:VT"], fiscalYearId: ids["coB:FY"], entryDate: D("2026-03-07"), label: "RevC",
+      lines: [{ accountId: ids["coB:411"], debitCents: c(2), creditCents: c(0) }, { accountId: ids["coB:706"], debitCents: c(0), creditCents: c(2) }] }))
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    let locked!: () => void
+    const isLocked = new Promise<void>((r) => { locked = r })
+    const revoker = db.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: "admB" }, data: { active: false } })
+      locked()
+      await gate
+    })
+    await isLocked
+    let settled = false
+    const poster = db.$transaction((tx) => postEntry(tx, B, d.id)).finally(() => { settled = true })
+    poster.catch(() => {})
+    await sleep(400)
+    assert.equal(settled, false, "postEntry doit attendre le verrou d'autorité")
+    release()
+    await revoker
+    await assert.rejects(poster, (e: unknown) => e instanceof AccountingError && e.code === "ACCESS_REVOKED")
+    assert.equal((await db.journalEntry.findUniqueOrThrow({ where: { id: d.id } })).status, "DRAFT")
+    await db.user.update({ where: { id: "admB" }, data: { active: true } })
+  })
+  it("révocation lancée pendant une validation : elle attend la fin de la validation (sérialisation)", async () => {
+    const d = await db.$transaction((tx) => createDraftEntry(tx, B, { journalId: ids["coB:VT"], fiscalYearId: ids["coB:FY"], entryDate: D("2026-03-08"), label: "RevD",
+      lines: [{ accountId: ids["coB:411"], debitCents: c(3), creditCents: c(0) }, { accountId: ids["coB:706"], debitCents: c(0), creditCents: c(3) }] }))
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    let posted!: () => void
+    const isPosted = new Promise<void>((r) => { posted = r })
+    const poster = db.$transaction(async (tx) => { const r = await postEntry(tx, B, d.id); posted(); await gate; return r })
+    await isPosted
+    let revoked = false
+    const revoker = db.user.update({ where: { id: "admB" }, data: { active: false } }).then(() => { revoked = true })
+    await sleep(400)
+    assert.equal(revoked, false, "la révocation doit attendre la fin de la validation")
+    release()
+    const r = await poster
+    await revoker
+    assert.ok(r.number > 0)
+    await db.user.update({ where: { id: "admB" }, data: { active: true } })
+  })
+})
+
+describe("Frontière de privilèges (rôle applicatif non propriétaire, indicateur forgé)", () => {
+  before(async () => {
+    await db.$executeRawUnsafe(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'acc_app') THEN CREATE ROLE acc_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE; END IF; END $$`)
+    await db.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO acc_app`)
+    await db.$executeRawUnsafe(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO acc_app`)
+  })
+  const draft = (label: string, date: string) => db.$transaction((tx) => createDraftEntry(tx, A, { journalId: ids["coA:VT"], fiscalYearId: ids["coA:FY"], entryDate: D(date), label,
+    lines: [{ accountId: ids["coA:411"], debitCents: c(8), creditCents: c(0) }, { accountId: ids["coA:706"], debitCents: c(0), creditCents: c(8) }] }))
+  it("acc_app + indicateur : validation directe d'un brouillon refusée", async () => {
+    const d = await draft("Forge 1", "2026-03-10")
+    const msg = await forged("acc_app", (tx) => tx.$executeRawUnsafe(`UPDATE journal_entries SET status='VALIDATED', number=999, "validatedAt"=now(), "validatedById"='admA', hash='fake', "prevHash"='fake' WHERE id='${d.id}'`))
+    assert.match(msg, /ENTRY_POSTING_DENIED/)
+  })
+  it("acc_app + indicateur : incrément de compteur sans écriture refusé", async () => {
+    assert.match(await forged("acc_app", (tx) => tx.$executeRawUnsafe(`UPDATE accounting_sequences SET "lastNumber"="lastNumber"+1 WHERE "companyId"='coA' AND "journalId"='${ids["coA:VT"]}'`)), /SEQUENCE_IMMUTABLE/)
+  })
+  it("acc_app + indicateur : tête de chaîne vers une entrée absente refusée", async () => {
+    assert.match(await forged("acc_app", (tx) => tx.$executeRawUnsafe(`UPDATE accounting_chain_heads SET "lastEntryId"='INEXISTANT', "lastHash"='FAUX' WHERE "companyId"='coA' AND "journalId"='${ids["coA:VT"]}'`)), /CHAIN_IMMUTABLE/)
+  })
+  it("acc_app + indicateur : changement d'état d'exercice hors service refusé", async () => {
+    assert.match(await forged("acc_app", (tx) => tx.$executeRawUnsafe(`UPDATE fiscal_years SET status='CLOSING' WHERE id='${ids["coB:FY"]}'`)), /FISCAL_YEAR_TRANSITION_DENIED/)
+  })
+  it("propriétaire + indicateur (défense en profondeur) : faux numéro / fausse empreinte / compteur sans écriture / tête invalide refusés", async () => {
+    const d = await draft("Forge 2", "2026-03-11")
+    const seq = await db.accountingSequence.findFirstOrThrow({ where: { companyId: "coA", journalId: ids["coA:VT"], fiscalYearId: ids["coA:FY"] } })
+    const head = await db.accountingChainHead.findUniqueOrThrow({ where: { companyId_journalId: { companyId: "coA", journalId: ids["coA:VT"] } } })
+    assert.match(await forged("owner", (tx) => tx.$executeRawUnsafe(`UPDATE journal_entries SET status='VALIDATED', number=999, "validatedAt"=now(), "validatedById"='admA', hash='fake', "prevHash"='${head.lastHash}', "prevEntryId"='${head.lastEntryId}' WHERE id='${d.id}'`)), /ENTRY_INTEGRITY/)
+    assert.match(await forged("owner", async (tx) => {
+      await tx.$executeRawUnsafe(`UPDATE accounting_sequences SET "lastNumber"=${seq.lastNumber + 1} WHERE "companyId"='coA' AND "journalId"='${ids["coA:VT"]}' AND "fiscalYearId"='${ids["coA:FY"]}'`)
+      await tx.$executeRawUnsafe(`UPDATE journal_entries SET status='VALIDATED', number=${seq.lastNumber + 1}, "validatedAt"=now(), "validatedById"='admA', hash='fake', "prevHash"='${head.lastHash}', "prevEntryId"='${head.lastEntryId}' WHERE id='${d.id}'`)
+    }), /ENTRY_INTEGRITY: empreinte/)
+    assert.match(await forged("owner", (tx) => tx.$executeRawUnsafe(`UPDATE accounting_sequences SET "lastNumber"=${seq.lastNumber + 1} WHERE "companyId"='coA' AND "journalId"='${ids["coA:VT"]}' AND "fiscalYearId"='${ids["coA:FY"]}'`)), /SEQUENCE_INTEGRITY/)
+    assert.match(await forged("owner", (tx) => tx.$executeRawUnsafe(`UPDATE accounting_chain_heads SET "lastEntryId"='INEXISTANT', "lastHash"='FAUX' WHERE "companyId"='coA' AND "journalId"='${ids["coA:VT"]}'`)), /CHAIN_INTEGRITY/)
+    assert.equal((await db.journalEntry.findUniqueOrThrow({ where: { id: d.id } })).status, "DRAFT")
+  })
+  it("acc_app via le service (fonction SECURITY DEFINER) : validation acceptée, numéro, chaîne et audit cohérents", async () => {
+    const d = await draft("Par le service", "2026-03-12")
+    const r = await db.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(`SET LOCAL ROLE acc_app`)
+      return postEntry(tx, A, d.id)
+    })
+    assert.ok(r.number > 0)
+    assert.equal(await db.historyLog.count({ where: { entityType: "JournalEntry", entityId: d.id } }), 1)
+    const v = await db.$transaction((tx) => verifyChain(tx, A, ids["coA:VT"]))
+    assert.equal(v.ok, true, JSON.stringify(v))
+  })
+})
+
+describe("Forme canonique SQL = TypeScript", () => {
+  it("libellés et références difficiles (guillemets, échappements, NFD→NFC, emoji, U+2028) : empreinte SQL recalculée à l'identique en TS", async () => {
+    const tricky = 'Écriture "spéciale" \\ / \n ligne\tTab e\u0301 😀 \u2028 fin'
+    const r = await db.$transaction(async (tx) => {
+      const d = await createDraftEntry(tx, A, { journalId: ids["coA:OD"], fiscalYearId: ids["coA:FY"], entryDate: D("2026-07-01"), documentDate: D("2026-06-30"),
+        documentRef: "Réf-ü\u0308", label: tricky,
+        lines: [{ accountId: ids["coA:411"], debitCents: c(999999999999), creditCents: c(0), label: tricky, vatRateBp: 2000 }, { accountId: ids["coA:706"], debitCents: c(0), creditCents: c(999999999999) }] })
+      return postEntry(tx, A, d.id)
+    })
+    const v = await db.$transaction((tx) => verifyChain(tx, A, ids["coA:OD"]))
+    assert.equal(v.ok, true, JSON.stringify(v))
+    assert.match(r.hash, /^[0-9a-f]{64}$/)
+  })
+})
+
+describe("Plusieurs écritures et journaux dans une même transaction, en concurrence", () => {
+  it("4 transactions × 2 journaux (ordres opposés) : toutes validées, numéros contigus, chaînes intactes", async () => {
+    const one = (tx: TxC, journal: string, amount: number) => createDraftEntry(tx, A, { journalId: ids[journal], fiscalYearId: ids["coA:FY"], entryDate: D("2026-07-02"), label: "Multi",
+      lines: [{ accountId: ids["coA:411"], debitCents: c(amount), creditCents: c(0) }, { accountId: ids["coA:706"], debitCents: c(0), creditCents: c(amount) }] }).then((d) => postEntry(tx, A, d.id))
+    await Promise.all([0, 1, 2, 3].map((i) => db.$transaction(async (tx) => {
+      const order = i % 2 ? ["coA:VT", "coA:OD"] : ["coA:OD", "coA:VT"]
+      for (const j of order) await one(tx, j, 10 + i)
+    })))
+    for (const j of ["coA:VT", "coA:OD"]) {
+      const v = await db.$transaction((tx) => verifyChain(tx, A, ids[j]))
+      assert.equal(v.ok, true, JSON.stringify(v))
+    }
+  })
+})
+
+describe("Vérificateur de chaîne : altérations détectées", () => {
+  it("libellé altéré (déclencheurs désactivés par un superutilisateur) : HASH_MISMATCH ; tête reculée : UNREACHABLE_ENTRIES", async () => {
+    const head = await db.accountingChainHead.findUniqueOrThrow({ where: { companyId_journalId: { companyId: "coA", journalId: ids["coA:VT"] } } })
+    const tip = await db.journalEntry.findUniqueOrThrow({ where: { id: head.lastEntryId! } })
+    await db.$executeRawUnsafe(`ALTER TABLE journal_entries DISABLE TRIGGER USER`)
+    try {
+      await db.$executeRawUnsafe(`UPDATE journal_entries SET label='altéré' WHERE id='${tip.id}'`)
+      const v = await db.$transaction((tx) => verifyChain(tx, A, ids["coA:VT"]))
+      assert.equal(v.reason, "HASH_MISMATCH")
+      await db.$executeRawUnsafe(`UPDATE journal_entries SET label=$1 WHERE id='${tip.id}'`, tip.label)
+    } finally { await db.$executeRawUnsafe(`ALTER TABLE journal_entries ENABLE TRIGGER USER`) }
+    await db.$executeRawUnsafe(`ALTER TABLE accounting_chain_heads DISABLE TRIGGER USER`)
+    try {
+      await db.$executeRawUnsafe(`UPDATE accounting_chain_heads SET "lastEntryId"='${tip.prevEntryId}', "lastHash"='${tip.prevHash}' WHERE "companyId"='coA' AND "journalId"='${ids["coA:VT"]}'`)
+      const v = await db.$transaction((tx) => verifyChain(tx, A, ids["coA:VT"]))
+      assert.equal(v.reason, "UNREACHABLE_ENTRIES")
+      await db.$executeRawUnsafe(`UPDATE accounting_chain_heads SET "lastEntryId"='${head.lastEntryId}', "lastHash"='${head.lastHash}' WHERE "companyId"='coA' AND "journalId"='${ids["coA:VT"]}'`)
+    } finally { await db.$executeRawUnsafe(`ALTER TABLE accounting_chain_heads ENABLE TRIGGER USER`) }
+    assert.equal((await db.$transaction((tx) => verifyChain(tx, A, ids["coA:VT"]))).ok, true)
+  })
 })
 
 describe("Contre-passation", () => {
   it("miroir exact validé ; seconde contre-passation refusée ; brouillon non contre-passable", async () => {
-    const r = await db.$transaction((tx) => reverseEntry(tx, A, ids.e1, D("2026-06-01")))
+    const r = await db.$transaction((tx) => reverseEntry(tx, A, ids.e1, { entryDate: D("2026-06-01") }))
     assert.ok(r.number > 1)
-    await assert.rejects(db.$transaction((tx) => reverseEntry(tx, A, ids.e1, D("2026-06-02"))))
-    await assert.rejects(db.$transaction((tx) => reverseEntry(tx, A, ids.draftY, D("2026-06-02"))), (e: unknown) => e instanceof AccountingError && e.code === "ENTRY_NOT_VALIDATED")
+    await assert.rejects(db.$transaction((tx) => reverseEntry(tx, A, ids.e1, { entryDate: D("2026-06-02") })))
+    await assert.rejects(db.$transaction((tx) => reverseEntry(tx, A, ids.draftY, { entryDate: D("2026-06-02") })), (e: unknown) => e instanceof AccountingError && e.code === "ENTRY_NOT_VALIDATED")
   })
   it("contre-passation non miroir refusée par le service", async () => {
     const orig = await draftAndPost(A, 900, { journal: "coA:OD" })
@@ -209,10 +384,7 @@ describe("Contre-passation", () => {
     await assert.rejects(db.$transaction(async (tx) => {
       const d = await createDraftEntry(tx, A, { journalId: ids["coA:OD"], fiscalYearId: ids["coA:FY"], entryDate: D("2026-06-04"), label: "Faux miroir SQL", reversalOfId: orig.id,
         lines: [{ accountId: ids["coA:706"], debitCents: c(600), creditCents: c(0) }, { accountId: ids["coA:411"], debitCents: c(0), creditCents: c(600) }] })
-      await tx.$executeRaw`SELECT set_config('planificator.accounting_posting', 'on', true)`
-      await tx.$executeRaw`UPDATE "journal_entries" SET "status" = 'VALIDATED', "number" = 9999, "validatedAt" = now(), "validatedById" = 'admA',
-        "prevHash" = 'x', "hash" = 'y' WHERE "id" = ${d.id}`
-      await tx.$executeRawUnsafe(`SET CONSTRAINTS ALL IMMEDIATE`)
+      await tx.$queryRaw`SELECT * FROM accounting_post_entry('coA', ${d.id}, 'admA')`
     }), /ENTRY_REVERSAL_INVALID/)
     assert.equal(await db.journalEntry.count({ where: { reversalOfId: orig.id } }), 0)
   })
@@ -237,6 +409,7 @@ describe("Exercices et clôture", () => {
       return postEntry(tx, A, d.id)
     })
     assert.ok(closing.number > 0)
+    ids.closing = closing.id
     await db.$transaction((tx) => advanceFiscalYear(tx, A, ids["coA:FY"], "CLOSED"))
     await assert.rejects(db.$transaction((tx) => advanceFiscalYear(tx, A, ids["coA:FY"], "OPEN")), (e: unknown) => e instanceof AccountingError && e.code === "FISCAL_YEAR_TRANSITION_INVALID")
     const fyAudit = await db.historyLog.findMany({ where: { companyId: "coA", entityType: "FiscalYear", entityId: ids["coA:FY"] }, orderBy: { createdAt: "asc" }, select: { detail: true, actorId: true } })
@@ -248,6 +421,10 @@ describe("Exercices et clôture", () => {
   it("le nouvel exercice démarre sa propre numérotation ; la chaîne traverse les exercices", async () => {
     const r = await draftAndPost(A, 42, { fy: ids.fy2027, date: "2027-01-15" })
     assert.equal(r.number, 1)
+    // Correction postérieure à la clôture : contre-passation dans l'exercice suivant (refusée dans l'exercice clos).
+    await assert.rejects(db.$transaction((tx) => reverseEntry(tx, A, ids.closing, { entryDate: D("2026-12-31") })), (e: unknown) => e instanceof AccountingError && e.details.includes("YEAR_NOT_OPEN"))
+    const rev = await db.$transaction((tx) => reverseEntry(tx, A, ids.closing, { entryDate: D("2027-01-16"), fiscalYearId: ids.fy2027 }))
+    assert.equal(rev.number, 1)
     const v = await db.$transaction((tx) => verifyChain(tx, A, ids["coA:VT"]))
     assert.equal(v.ok, true)
     assert.ok(v.checked > 20)

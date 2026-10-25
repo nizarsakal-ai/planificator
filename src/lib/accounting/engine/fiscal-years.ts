@@ -42,12 +42,6 @@ export async function advanceFiscalYear(tx: Tx, ctx: AccountingContext, fiscalYe
   if (!fy) throw new AccountingError("FISCAL_YEAR_NOT_FOUND")
   const from = fy.status as FiscalYearStatusValue
   if (NEXT[from] !== to) throw new AccountingError("FISCAL_YEAR_TRANSITION_INVALID", [`${from}->${to}`])
-  const updated = await tx.fiscalYear.updateMany({ where: { id: fiscalYearId, companyId: ctx.companyId, status: from }, data: { status: to } })
-  if (updated.count !== 1) throw new AccountingError("FISCAL_YEAR_CONFLICT")
-  await tx.historyLog.create({
-    data: {
-      companyId: ctx.companyId, actorId: ctx.userId, action: "STATUS_CHANGED", entityType: "FiscalYear", entityId: fiscalYearId,
-      detail: `Exercice : ${from} → ${to}`, oldValue: { status: from }, newValue: { status: to },
-    },
-  })
+  // Changement d'état et audit : en base (SECURITY DEFINER), seul chemin autorisé par fiscal_years_guard.
+  await tx.$executeRaw`SELECT accounting_advance_fiscal_year(${ctx.companyId}, ${fiscalYearId}, ${to}, ${ctx.userId})`
 }
