@@ -27,6 +27,8 @@
     "test:billing:pg": "node --import tsx --test --test-concurrency=1 tests/billing/pg/lot-b-prisma-commit.pg.test.ts",
     "test:billing:c1": "node --import tsx --test tests/billing/c1/money.test.ts tests/billing/c1/quote-unit.test.ts",
     "test:billing:c1:pg": "node --import tsx --test --test-concurrency=1 tests/billing/c1/pg/quotes.pg.test.ts",
+    "test:billing:c2": "node --import tsx --test tests/billing/c2/invoice-unit.test.ts",
+    "test:billing:c2:pg": "node --import tsx --test --test-concurrency=1 tests/billing/c2/pg/invoices.pg.test.ts",
     "test:invitations": "node --import tsx --experimental-test-module-mocks --test tests/employes/invitation-superadmin.action.test.ts",
     "test:invitations:pg": "node --import tsx tests/employes/pg/invitation-superadmin-run.ts test",
     "test:navigation": "node --import tsx --test tests/navigation/nav-config.test.ts",

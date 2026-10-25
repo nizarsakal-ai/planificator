@@ -150,12 +150,24 @@ enum InvoiceStatus {
   SENT       // Émise / envoyée au client (immuable)
   PAID       // Payée (immuable)
   CANCELLED  // Brouillon abandonné, ou facture émise annulée PAR AVOIR (jamais de retour arrière)
+  PARTIAL    // Lot C2 : partiellement payée (Σ paiements entre 0 et TTC, exclus)
+}
+
+/// Lot C2 — mode de règlement d'un paiement.
+enum PaymentMethod {
+  TRANSFER
+  CHECK
+  CASH
+  CARD
+  DIRECT_DEBIT
+  OTHER
 }
 
 /// Lot B minimal (ADR-PLAN-003) : une facture émise ne s'annule que par un avoir référencé.
 enum InvoiceKind {
   INVOICE      // Facture
   CREDIT_NOTE  // Avoir total émis sur une facture SENT/PAID
+  DEPOSIT      // Lot C3 : facture d'acompte (vraie facture, déduite sur la facture de solde)
 }
 
 enum ExpenseStatus {
@@ -367,6 +379,7 @@ model Company {
   documentCounters        DocumentCounter[]
   billingSettings         BillingSettings?
   billingMailLogs         BillingMailLog[]
+  invoicePayments         InvoicePayment[]
   acquisitionMessages     AcquisitionMessage[]
   worksiteImportDrafts    WorksiteImportDraft[]
   acquisitionAttachments  AcquisitionAttachment[]
@@ -563,6 +576,12 @@ model Invoice {
   // Lot C1 : remise globale et autoliquidation (copiées du devis ; utilisées par C2–C4).
   globalDiscountBp Int     @default(0)
   vatReverseCharge Boolean @default(false)
+  // Lot C2 : objet, relances après échéance (J+30/45/60), paiements.
+  subject             String?
+  reminderDue30SentAt DateTime?
+  reminderDue45SentAt DateTime?
+  reminderDue60SentAt DateTime?
+  payments            InvoicePayment[]
 
   // Relations
   // Lot B : pièces conservées — aucune suppression en cascade depuis la société ou le chantier.
@@ -575,12 +594,42 @@ model Invoice {
   creditNote      Invoice? @relation("InvoiceCreditNote")
 
   @@unique([companyId, number])
+  @@unique([id, companyId])
   @@index([companyId])
+  @@index([companyId, status])
+  @@index([companyId, issueDate])
+  @@index([companyId, dueDate])
   @@index([worksiteId])
   @@index([clientId])
   @@index([status])
   @@index([kind])
   @@map("invoices")
+}
+
+/// Lot C2 (SPEC-BILLING-C2) — paiement d'une facture émise : append-only (contre-passation par ligne opposée),
+/// montant en centimes, FK composite (companyId, invoiceId) → même société garantie en base.
+model InvoicePayment {
+  id                String        @id @default(cuid())
+  companyId         String
+  invoiceId         String
+  amountCents       BigInt        // négatif uniquement pour une contre-passation
+  method            PaymentMethod
+  paidAt            DateTime      @db.Date
+  reference         String?
+  notes             String?
+  recordedById      String
+  reversesPaymentId String?       @unique
+  reversedAt        DateTime?
+  createdAt         DateTime      @default(now())
+
+  company  Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  invoice  Invoice        @relation(fields: [companyId, invoiceId], references: [companyId, id], onDelete: Restrict)
+  reverses InvoicePayment? @relation("PaymentReversal", fields: [reversesPaymentId], references: [id], onDelete: Restrict)
+  reversedBy InvoicePayment? @relation("PaymentReversal")
+
+  @@index([invoiceId])
+  @@index([companyId, paidAt])
+  @@map("invoice_payments")
 }
 
 model InvoiceLine {

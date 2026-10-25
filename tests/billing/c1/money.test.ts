@@ -84,8 +84,10 @@ describe("totaux de document (arrondi demi-supérieur ligne par ligne)", () => {
     const t = computeDocumentTotals([{ quantityHundredths: c(100), unitPriceCents: c(-1001), discountBp: 0, vatRateBp: 550 }], { globalDiscountBp: 0, vatReverseCharge: false })
     assert.equal(t.totalHTCents, c(-1001)); assert.equal(t.totalVATCents, c(-55))
   })
-  it("refuse taux hors liste, remise > 100 %, dépassement Decimal(10,2)", () => {
-    assert.throws(() => computeDocumentTotals([{ quantityHundredths: c(100), unitPriceCents: c(1), discountBp: 0, vatRateBp: 1960 }], { globalDiscountBp: 0, vatReverseCharge: false }), /VAT_RATE_INVALID/)
+  it("calcul : taux hérité hors liste accepté (8,5 %), taux > 100 % refusé, remise > 100 %, dépassement Decimal(10,2)", () => {
+    assert.equal(computeDocumentTotals([{ quantityHundredths: c(100), unitPriceCents: c(10000), discountBp: 0, vatRateBp: 850 }], { globalDiscountBp: 0, vatReverseCharge: false }).totalVATCents, c(850))
+    assert.throws(() => computeDocumentTotals([{ quantityHundredths: c(100), unitPriceCents: c(1), discountBp: 0, vatRateBp: 10001 }], { globalDiscountBp: 0, vatReverseCharge: false }), /VAT_RATE_INVALID/)
+    assert.equal(computeDocumentTotals([{ quantityHundredths: c(100), unitPriceCents: c(10000), discountBp: 0, vatRateBp: 2000, excludeGlobalDiscount: true }], { globalDiscountBp: 1000, vatReverseCharge: false }).totalHTCents, c(10000), "ligne hors remise globale")
     assert.throws(() => computeDocumentTotals([{ quantityHundredths: c(100), unitPriceCents: c(1), discountBp: 10001, vatRateBp: 0 }], { globalDiscountBp: 0, vatReverseCharge: false }), /PERCENT_INVALID/)
     assert.throws(() => computeDocumentTotals([{ quantityHundredths: c(10000000), unitPriceCents: c(10000000), discountBp: 0, vatRateBp: 0 }], { globalDiscountBp: 0, vatReverseCharge: false }), /AMOUNT_TOO_LARGE/)
   })

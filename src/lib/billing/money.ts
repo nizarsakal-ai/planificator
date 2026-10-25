@@ -116,7 +116,9 @@ export interface DocumentLineInput {
   quantityHundredths: bigint
   unitPriceCents: bigint        // peut être négatif (lignes de déduction d'acompte, C3)
   discountBp: number            // remise de ligne 0..10000
-  vatRateBp: number             // 0 | 210 | 550 | 1000 | 2000
+  vatRateBp: number             // saisie : 0 | 210 | 550 | 1000 | 2000 ; données anciennes : tout entier 0..10000
+  /** Lignes de déduction d'acompte (C3) : hors remise globale. */
+  excludeGlobalDiscount?: boolean
 }
 
 export interface ComputedLine {
@@ -152,12 +154,14 @@ export interface DocumentTotalsOptions {
 export function computeLine(l: DocumentLineInput, globalDiscountBp: number, vatReverseCharge: boolean): ComputedLine {
   if (!Number.isInteger(l.discountBp) || l.discountBp < 0 || l.discountBp > 10000) throw new MoneyError("PERCENT_INVALID")
   if (!Number.isInteger(globalDiscountBp) || globalDiscountBp < 0 || globalDiscountBp > 10000) throw new MoneyError("PERCENT_INVALID")
-  if (!isAllowedVatRateBp(l.vatRateBp)) throw new MoneyError("VAT_RATE_INVALID")
+  // Taux : tout entier 0..10000 en calcul (les documents anciens peuvent porter un taux hors liste, ex. 8,5 % DOM) ;
+  // la liste fermée est imposée à la saisie par parseVatRateToBp.
+  if (!Number.isInteger(l.vatRateBp) || l.vatRateBp < 0 || l.vatRateBp > 10000) throw new MoneyError("VAT_RATE_INVALID")
   if (l.quantityHundredths < BigInt(0)) throw new MoneyError("QUANTITY_INVALID")
   const grossCents = roundHalfUp(l.quantityHundredths * l.unitPriceCents, BigInt(100))
   const lineDiscount = roundHalfUp(grossCents * BigInt(l.discountBp), BigInt(10000))
   const lineHTCents = grossCents - lineDiscount
-  const globalDiscount = roundHalfUp(lineHTCents * BigInt(globalDiscountBp), BigInt(10000))
+  const globalDiscount = l.excludeGlobalDiscount ? BigInt(0) : roundHalfUp(lineHTCents * BigInt(globalDiscountBp), BigInt(10000))
   const netCents = lineHTCents - globalDiscount
   const vat = vatReverseCharge ? BigInt(0) : vatCents(netCents, l.vatRateBp)
   return { grossCents, lineHTCents, netCents, vatCents: vat, vatRateBp: l.vatRateBp }
@@ -197,8 +201,10 @@ export function storedLineToInput(l: { quantity: Prisma.Decimal | string; unitPr
   }
 }
 
-/** Taux stocké (Decimal, ex. 20.00) → points de base. Les taux hors liste (données anciennes) sont acceptés ici en lecture. */
+/** Taux stocké (Decimal, ex. 20.00) → points de base. Les taux hors liste (données anciennes) sont acceptés en lecture, bornés 0..100 %. */
 export function storedVatRateToBp(rate: Prisma.Decimal | string | number): number {
   const d = rate instanceof Prisma.Decimal ? rate : new Prisma.Decimal(rate)
-  return Number(decimalToCents(d))
+  const bp = Number(decimalToCents(d))
+  if (!Number.isInteger(bp) || bp < 0 || bp > 10000) throw new MoneyError("VAT_RATE_INVALID")
+  return bp
 }

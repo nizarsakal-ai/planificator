@@ -16,7 +16,8 @@
 
 import type { Prisma } from "@prisma/client"
 
-export type InvoiceStatusValue = "DRAFT" | "SENT" | "PAID" | "CANCELLED"
+// Lot C2 : PARTIAL (partiellement payée) — aucune transition manuelle depuis ce statut ; l'avoir total reste possible.
+export type InvoiceStatusValue = "DRAFT" | "SENT" | "PAID" | "CANCELLED" | "PARTIAL"
 export type RequestedInvoiceStatus = "SENT" | "PAID" | "CANCELLED"
 
 export const INVOICE_TRANSITIONS: Readonly<Record<InvoiceStatusValue, readonly InvoiceStatusValue[]>> = {
@@ -24,11 +25,12 @@ export const INVOICE_TRANSITIONS: Readonly<Record<InvoiceStatusValue, readonly I
   SENT: ["PAID"],
   PAID: [],
   CANCELLED: [],
+  PARTIAL: [],
 }
 
 export type LifecycleResult<T = undefined> = { ok: true; value: T } | { ok: false; error: string }
 
-const STATUSES: readonly string[] = ["DRAFT", "SENT", "PAID", "CANCELLED"]
+const STATUSES: readonly string[] = ["DRAFT", "SENT", "PAID", "CANCELLED", "PARTIAL"]
 
 /** Validation d'exécution : une Server Action reçoit des données non fiables. */
 export function parseRequestedStatus(value: unknown): RequestedInvoiceStatus | null {
@@ -196,7 +198,7 @@ export async function createCreditNoteCore(
     },
   })
   if (!original || !isStatus(original.status)) return { ok: false, error: LIFECYCLE_ERRORS.notFound }
-  if (original.kind !== "INVOICE" || (original.status !== "SENT" && original.status !== "PAID")) {
+  if (original.kind !== "INVOICE" || !["SENT", "PAID", "PARTIAL"].includes(original.status)) {
     return { ok: false, error: LIFECYCLE_ERRORS.notCreditable }
   }
   const existing = await tx.invoice.findFirst({

@@ -6,8 +6,12 @@ import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 import { createCreditNote, updateInvoiceStatus } from "@/lib/actions/invoice.actions"
 
-type Status = "DRAFT" | "SENT" | "PAID" | "CANCELLED"
-type Kind = "INVOICE" | "CREDIT_NOTE"
+import type { InvoiceKind, InvoiceStatus } from "@prisma/client"
+
+// Lot C2 : les énumérations Prisma s'élargissent (PARTIAL, DEPOSIT) ; ce composant Lot B n'offre aucune action
+// nouvelle pour ces valeurs (une facture PARTIAL ne propose que l'avoir total).
+type Status = InvoiceStatus
+type Kind = InvoiceKind
 type Action = "SENT" | "PAID" | "CANCELLED" | "CREDIT"
 
 /**
@@ -87,7 +91,7 @@ export function InvoiceStatusButtons({ id, status, kind = "INVOICE" }: { id: str
           {loading === "CANCELLED" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
         </button>
       )}
-      {(status === "SENT" || status === "PAID") && (
+      {(status === "SENT" || status === "PAID" || status === "PARTIAL") && (
         <button onClick={credit} disabled={loading !== null} className={`${btn} text-amber-600 hover:bg-amber-50`} title="Émettre un avoir">
           {loading === "CREDIT" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
         </button>

@@ -41,10 +41,10 @@ export function buyerParty(client: { name: string; address: string | null; siret
   return { name: client.name, lines }
 }
 
-export interface StoredLine { designation: string; description: string | null; unit: string; quantity: Prisma.Decimal; unitPrice: Prisma.Decimal; vatRate: Prisma.Decimal; lineHT: Prisma.Decimal; discountBp: number }
+export interface StoredLine { designation: string; description: string | null; unit: string; quantity: Prisma.Decimal; unitPrice: Prisma.Decimal; vatRate: Prisma.Decimal; lineHT: Prisma.Decimal; discountBp: number; deductsDepositId?: string | null }
 
 export function linesAndTotals(lines: StoredLine[], globalDiscountBp: number, vatReverseCharge: boolean): { pdfLines: PdfLine[]; totals: PdfTotals; raw: DocumentTotals } {
-  const inputs = lines.map((l) => ({ quantityHundredths: decimalToCents(l.quantity), unitPriceCents: decimalToCents(l.unitPrice), discountBp: l.discountBp, vatRateBp: storedVatRateToBp(l.vatRate) }))
+  const inputs = lines.map((l) => ({ quantityHundredths: decimalToCents(l.quantity), unitPriceCents: decimalToCents(l.unitPrice), discountBp: l.discountBp, vatRateBp: storedVatRateToBp(l.vatRate), excludeGlobalDiscount: !!l.deductsDepositId }))
   const raw = computeDocumentTotals(inputs, { globalDiscountBp, vatReverseCharge })
   const pdfLines = lines.map((l, i) => ({
     designation: l.designation, description: l.description, unit: l.unit, quantity: l.quantity.toFixed(2).replace(".", ",").replace(/,00$/, ""),
@@ -64,9 +64,12 @@ export function linesAndTotals(lines: StoredLine[], globalDiscountBp: number, va
 
 export const REVERSE_CHARGE_MENTION = "Autoliquidation — TVA due par le preneur (art. 283-2 nonies du CGI)."
 
-export function legalMentions(s: BillingSettingsView, opts: { vatReverseCharge: boolean; paymentTerms: string | null; kind: "quote" | "invoice" | "credit" }): string[] {
+export const VAT_EXEMPT_MENTION = "TVA non applicable, art. 293 B du CGI."
+
+export function legalMentions(s: BillingSettingsView, opts: { vatReverseCharge: boolean; paymentTerms: string | null; kind: "quote" | "invoice" | "credit"; vatExempt?: boolean }): string[] {
   const m: string[] = []
   if (opts.vatReverseCharge) m.push(REVERSE_CHARGE_MENTION)
+  if (opts.vatExempt) m.push(VAT_EXEMPT_MENTION)
   if (opts.kind === "invoice") {
     m.push(opts.paymentTerms ? `Conditions de paiement : ${opts.paymentTerms}` : `Paiement à ${s.paymentTermsDays} jours.`)
     m.push(s.latePenaltyText ?? DEFAULT_LATE_PENALTY_TEXT)
