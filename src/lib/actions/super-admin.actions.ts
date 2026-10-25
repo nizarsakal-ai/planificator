@@ -37,7 +37,15 @@ export async function deleteCompany(companyId: string) {
     return { error: "Cette entreprise possède des factures : désactivez-la au lieu de la supprimer." }
   }
 
-  await prisma.company.delete({ where: { id: companyId } })
+  try {
+    await prisma.company.delete({ where: { id: companyId } })
+  } catch (error) {
+    // Facture créée entre le contrôle et la suppression : la contrainte Restrict refuse (P2003).
+    if (typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "P2003") {
+      return { error: "Cette entreprise possède des factures : désactivez-la au lieu de la supprimer." }
+    }
+    throw error
+  }
 
   revalidatePath("/super-admin/entreprises")
   return { success: true }

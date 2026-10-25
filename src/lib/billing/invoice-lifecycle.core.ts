@@ -8,8 +8,10 @@
 // - Chaque changement est conditionné au statut lu (UPDATE … WHERE status = attendu) :
 //   une modification concurrente fait échouer l'opération au lieu de l'écraser.
 // - Un avoir est immuable dès sa création (créé brouillon puis émis dans la même transaction).
-// - Toute opération écrit une trace HistoryLog dans la même transaction.
-// La base applique les mêmes interdits (déclencheurs de la migration billing_lot_b_minimal).
+// - Chaque opération de cycle (émission, paiement, abandon, avoir, remplacement des lignes) écrit une
+//   trace HistoryLog dans la même transaction (création : voir createInvoice).
+// La base impose de son côté : création en brouillon, contenu figé hors brouillon, lignes verrouillées
+// avec leur facture, et (au COMMIT) aucune facture émise annulée sans son avoir total émis.
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { Prisma } from "@prisma/client"
@@ -114,6 +116,7 @@ export interface DraftLine {
 export interface ReplaceLinesInput {
   companyId: string
   invoiceId: string
+  actorId: string
   lines: DraftLine[]
   totals: { totalHT: number; totalVAT: number; totalTTC: number }
 }
@@ -142,6 +145,17 @@ export async function replaceDraftLinesCore(
   if (input.lines.length > 0) {
     await tx.invoiceLine.createMany({ data: input.lines.map((l) => ({ ...l, invoiceId: input.invoiceId })) })
   }
+  await tx.historyLog.create({
+    data: {
+      companyId: input.companyId,
+      actorId: input.actorId,
+      action: "UPDATED",
+      entityType: "Invoice",
+      entityId: input.invoiceId,
+      detail: `Lignes du brouillon remplacées (${input.lines.length})`,
+      newValue: { totalTTC: String(input.totals.totalTTC), lines: input.lines.length },
+    },
+  })
   return { ok: true, value: undefined }
 }
 

@@ -69,7 +69,7 @@ export async function createInvoice(input: unknown) {
 
   const invoice = await prisma.$transaction(async (tx) => {
     const number = await nextDocumentNumber(tx, user.companyId!, "INVOICE")
-    return tx.invoice.create({
+    const created = await tx.invoice.create({
       data: {
         companyId:   user.companyId!,
         worksiteId:  worksite.id,
@@ -89,6 +89,18 @@ export async function createInvoice(input: unknown) {
       },
       select: { id: true, number: true },
     })
+    await tx.historyLog.create({
+      data: {
+        companyId:  user.companyId!,
+        worksiteId: worksite.id,
+        actorId:    user.id,
+        action:     "CREATED",
+        entityType: "Invoice",
+        entityId:   created.id,
+        detail:     `Facture ${created.number} créée (brouillon)`,
+      },
+    })
+    return created
   })
 
   revalidatePath("/factures")
@@ -110,7 +122,7 @@ export async function setInvoiceLines(invoiceId: string, rawLines: unknown) {
   const totals = computeTotals(parsed.data)
 
   const result = await prisma.$transaction((tx) =>
-    replaceDraftLinesCore(tx, { companyId: user.companyId!, invoiceId, lines, totals })
+    replaceDraftLinesCore(tx, { companyId: user.companyId!, invoiceId, actorId: user.id, lines, totals })
   )
   if (!result.ok) return { error: result.error }
 

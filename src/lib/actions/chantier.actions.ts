@@ -350,7 +350,15 @@ export async function deleteChantier(worksiteId: string) {
     return { error: "Ce chantier a des factures : il ne peut pas être supprimé. Archivez-le plutôt." }
   }
 
-  await prisma.worksite.delete({ where: { id: worksiteId } })
+  try {
+    await prisma.worksite.delete({ where: { id: worksiteId } })
+  } catch (error) {
+    // Facture créée entre le contrôle et la suppression : la contrainte Restrict refuse (P2003).
+    if (typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "P2003") {
+      return { error: "Ce chantier a des factures : il ne peut pas être supprimé. Archivez-le plutôt." }
+    }
+    throw error
+  }
 
   revalidatePath("/chantiers")
   revalidatePath("/planning")

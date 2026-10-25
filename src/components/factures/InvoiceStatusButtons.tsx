@@ -22,8 +22,15 @@ export function InvoiceStatusButtons({ id, status, kind = "INVOICE" }: { id: str
     if (next === "SENT" && !window.confirm("Émettre cette facture ? Elle ne pourra plus être modifiée.")) return
     if (next === "CANCELLED" && !window.confirm("Abandonner ce brouillon ? Il restera dans l'historique.")) return
     setLoading(next)
-    const result = await updateInvoiceStatus(id, next)
-    setLoading(null)
+    let result: Awaited<ReturnType<typeof updateInvoiceStatus>>
+    try {
+      result = await updateInvoiceStatus(id, next)
+    } catch {
+      toast.error("Erreur serveur : action non effectuée.")
+      return
+    } finally {
+      setLoading(null)
+    }
     if (result?.error) {
       toast.error(result.error)
     } else {
@@ -43,8 +50,15 @@ export function InvoiceStatusButtons({ id, status, kind = "INVOICE" }: { id: str
     )
     if (reason === null) return
     setLoading("CREDIT")
-    const result = await createCreditNote(id, reason)
-    setLoading(null)
+    let result: Awaited<ReturnType<typeof createCreditNote>>
+    try {
+      result = await createCreditNote(id, reason)
+    } catch {
+      toast.error("Erreur serveur : aucun avoir émis.")
+      return
+    } finally {
+      setLoading(null)
+    }
     if (result?.error) {
       toast.error(result.error)
     } else {

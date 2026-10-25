@@ -153,16 +153,18 @@ describe("Lignes de brouillon", () => {
 
   it("brouillon : lignes remplacées et totaux mis à jour", async () => {
     const s = makeTx([inv("1", "DRAFT")], [line("1", 0), line("1", 1)])
-    const r = await replaceDraftLinesCore(s.tx, { companyId: A, invoiceId: "1", lines: [newLine], totals })
+    const r = await replaceDraftLinesCore(s.tx, { companyId: A, invoiceId: "1", actorId: "u", lines: [newLine], totals })
     assert.equal(r.ok, true)
     assert.equal(s.invoiceLines.length, 1)
     assert.equal(s.invoices[0].totalTTC, 12)
+    assert.equal(s.history.length, 1)
+    assert.equal(s.history[0].action, "UPDATED")
   })
 
   it("facture émise : refus, lignes et totaux intacts", async () => {
     for (const st of ["SENT", "PAID", "CANCELLED"]) {
       const s = makeTx([inv("1", st)], [line("1", 0)])
-      const r = await replaceDraftLinesCore(s.tx, { companyId: A, invoiceId: "1", lines: [newLine], totals })
+      const r = await replaceDraftLinesCore(s.tx, { companyId: A, invoiceId: "1", actorId: "u", lines: [newLine], totals })
       assert.deepEqual(r, { ok: false, error: LIFECYCLE_ERRORS.notDraft })
       assert.equal(s.invoiceLines.length, 1)
       assert.equal(s.invoices[0].totalTTC, 120)
@@ -172,14 +174,14 @@ describe("Lignes de brouillon", () => {
   it("émission concurrente juste avant : la modification échoue au lieu de réécrire la facture émise", async () => {
     const s = makeTx([inv("1", "DRAFT")], [line("1", 0)])
     s.hooks.beforeUpdate = () => { s.invoices[0].status = "SENT"; s.hooks.beforeUpdate = undefined }
-    const r = await replaceDraftLinesCore(s.tx, { companyId: A, invoiceId: "1", lines: [newLine], totals })
+    const r = await replaceDraftLinesCore(s.tx, { companyId: A, invoiceId: "1", actorId: "u", lines: [newLine], totals })
     assert.deepEqual(r, { ok: false, error: LIFECYCLE_ERRORS.notDraft })
     assert.equal(s.invoiceLines[0].designation, "L0")
   })
 
   it("autre société : introuvable", async () => {
     const s = makeTx([inv("1", "DRAFT", B)])
-    const r = await replaceDraftLinesCore(s.tx, { companyId: A, invoiceId: "1", lines: [newLine], totals })
+    const r = await replaceDraftLinesCore(s.tx, { companyId: A, invoiceId: "1", actorId: "u", lines: [newLine], totals })
     assert.deepEqual(r, { ok: false, error: LIFECYCLE_ERRORS.notFound })
   })
 })
@@ -239,7 +241,9 @@ describe("Garanties en base et suppressions (contrôle des sources)", () => {
   const superAdmin = readFileSync("src/lib/actions/super-admin.actions.ts", "utf8")
 
   it("migration : déclencheurs d'immutabilité des factures et lignes", () => {
-    assert.match(migration, /CREATE TRIGGER invoices_guard_issued_trg\s+BEFORE UPDATE OR DELETE ON "invoices"/)
+    assert.match(migration, /CREATE TRIGGER invoices_guard_issued_trg\s+BEFORE INSERT OR UPDATE OR DELETE ON "invoices"/)
+    assert.match(migration, /CREATE CONSTRAINT TRIGGER invoices_credit_invariant_trg\s+AFTER INSERT OR UPDATE ON "invoices"\s+DEFERRABLE INITIALLY DEFERRED/)
+    assert.match(migration, /FOR SHARE/)
     assert.match(migration, /CREATE TRIGGER invoice_lines_guard_issued_trg\s+BEFORE INSERT OR UPDATE OR DELETE ON "invoice_lines"/)
     assert.match(migration, /ON DELETE RESTRICT/)
   })
