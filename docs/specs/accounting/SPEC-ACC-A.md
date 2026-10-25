@@ -31,6 +31,20 @@ Exclus du Lot A : FEC, rapprochement bancaire, OCR, Factur-X/facture électroniq
 5. Idempotence : même source et même version ⇒ renvoie l'écriture existante si le contenu est identique, erreur sinon.
 6. TVA : au Lot A, ventilation par taux sur comptes 44571x/44566x ; l'exigibilité (débits/encaissements) est un paramètre société, utilisée au lot TVA ultérieur.
 
+## 3 bis. Précisions contractuelles (revue Codex du 25/10/2026)
+
+**Immutabilité.** Déclencheurs sur `JournalEntryLine` refusant INSERT, UPDATE et DELETE dès que l'écriture parente — ancienne OU nouvelle en cas de changement de `entryId` — est VALIDATED ; sur `JournalEntry` : refus de toute modification d'une écriture VALIDATED et de la transition VALIDATED→DRAFT ; la transition DRAFT→VALIDATED n'est permise que par la fonction de validation (variable de session transactionnelle positionnée par le service). Le rôle SQL applicatif n'est pas propriétaire des tables et ne peut ni désactiver les déclencheurs ni exécuter de DDL. Tests SQL directs pour chaque cas.
+
+**Exercices et clôture.** États OPEN → CLOSING → CLOSED, sans retour. En OPEN : validation de toute écriture datée dans l'exercice. En CLOSING : seules les écritures du journal OD portant `closingEntry = true`, validées par un ADMIN, sont permises (audit dédié). En CLOSED : aucune validation. La date comptable doit appartenir à l'exercice ; les numéros suivent l'ordre de validation (pas l'ordre des dates) ; une écriture datée dans une période antérieure de l'exercice OUVERT reste permise et est tracée. Validation et changement d'état de l'exercice prennent le même verrou (ligne `FiscalYear` FOR UPDATE) : une clôture concurrente attend ou fait échouer la validation, jamais d'état mixte.
+
+**Idempotence.** Les quatre champs source sont tout-ou-rien (CHECK : tous NULL pour une écriture manuelle, tous renseignés sinon) ; l'unicité ne s'applique qu'aux écritures sourcées. La clé est réservée dès la création du brouillon. Empreinte = SHA-256 de la forme canonique v1 (ci-dessous) du contenu métier ; même clé + même empreinte ⇒ retour de l'existant ; empreinte différente ⇒ erreur `SOURCE_CONFLICT`, sans retry. Deux validations concurrentes de la même écriture : la seconde attend le verrou puis constate VALIDATED et renvoie l'état, sans second numéro.
+
+**Montants et entrées.** Entrées API en chaînes décimales strictes (`^-?\d{1,13}(\.\d{1,2})?$`), converties en centimes BigInt ; plafond 10^15 centimes par ligne ; quantités en millièmes (BigInt), taux de TVA en points de base (entier) ; arrondi « demi supérieur » appliqué à la valeur absolue puis signe réappliqué ; les lignes stockent des montants positifs (débit OU crédit). Contre-passation = inversion exacte débit/crédit des lignes d'origine, sans recalcul.
+
+**Chaînage.** Forme canonique v1 : objet JSON aux clés triées, encodage UTF-8 NFC, aucun espace ; dates ISO `YYYY-MM-DD`, horodatages UTC ISO à la seconde ; montants en chaînes de centimes ; `null` explicites ; lignes triées par `position` ; champs : version, companyId, journalId, fiscalYearId, number, entryDate, documentDate, documentRef, label, validatedAt, validatedById, sourceType/Id/Version, reversalOfId, lignes, prevHash. Tête de chaîne stockée dans `AccountingChainHead(companyId, journalId, lastEntryId, lastHash)` ; genesis `prevHash = sha256("GENESIS|" + companyId + "|" + journalId)` ; la chaîne traverse les exercices. Ordre de verrouillage unique : FiscalYear → AccountingSequence → AccountingChainHead ; compteur et tête créés atomiquement (INSERT … ON CONFLICT DO NOTHING puis SELECT FOR UPDATE) ; retry borné (3) sur échec de sérialisation. Un vecteur de test de référence (entrée canonique + hash attendu) est versionné avec A1-a.
+
+**Contexte d'accès.** Le service reçoit le contexte autorisé (`companyId`, `userId`) issu de `requireAccountingAdmin` et le réutilise pour toute la transaction ; il revérifie dans la transaction que l'utilisateur dispose toujours d'une appartenance ADMIN active pour cette société (protection contre une révocation concurrente). Le repli silencieux de société du résolveur est interdit pour une saisie : si la société active diffère de celle de l'écran de saisie, l'opération est refusée.
+
 ## 4. Découpage A1
 
 - **A1-a — validateur pur** (`validateEntry`) : entièrement déterministe, sans base ; calcul et contrôle en centimes.
@@ -46,7 +60,9 @@ Exclus du Lot A : FEC, rapprochement bancaire, OCR, Factur-X/facture électroniq
 - Numérotation sans trou sous 20 validations concurrentes et après rollback forcé.
 - Double soumission (même clé) : une seule écriture ; clé identique et contenu différent : erreur.
 - Clôture concurrente d'une validation : état cohérent (soit validée avant clôture, soit refusée).
-- Révocation de l'accès entre deux requêtes : opération refusée.
+- Révocation de l'accès entre deux requêtes ET pendant une transaction : opération refusée.
+- Insertion, modification, suppression ou déplacement de lignes d'une écriture validée par SQL direct : refusés.
+- Écriture incohérente de tenant (compte/journal d'une autre société) par SQL direct : refusée par les FK composites.
 - Aucune lecture inter-société (balance, grand livre, export).
 - Vérificateur de chaîne : détecte toute altération simulée.
 - `test:accounting` et tests PG verts ; aucune nouvelle erreur `tsc` ; revue Codex GO.
