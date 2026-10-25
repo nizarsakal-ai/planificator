@@ -391,9 +391,15 @@ describe("Transactions multi-sociétés en ordres opposés (interblocage possibl
     const post = (tx: TxC, ctx: AccountingContext, amount: number) => createDraftEntry(tx, ctx, { journalId: ids[`${ctx.companyId}:OD`], fiscalYearId: ids[`${ctx.companyId}:FY`],
       entryDate: D("2026-07-03"), label: "Croisé",
       lines: [{ accountId: ids[`${ctx.companyId}:411`], debitCents: c(amount), creditCents: c(0) }, { accountId: ids[`${ctx.companyId}:706`], debitCents: c(0), creditCents: c(amount) }] }).then((d) => postEntry(tx, ctx, d.id))
+    const retried: unknown[] = []
     const results = await Promise.allSettled([0, 1, 2, 3, 4, 5].map((i) => runAccountingTransaction(db, async (tx) => {
       for (const ctx of i % 2 ? [A, B] : [B, A]) { await post(tx, ctx, 20 + i); await sleep(20) }
-    }, { maxAttempts: 8, timeoutMs: 60000, maxWaitMs: 60000 })))
+    }, { maxAttempts: 8, timeoutMs: 60000, maxWaitMs: 60000, onRetry: (e) => retried.push(e) })))
+    // Chaque reprise provient d'un interblocage structuré (P2010 + SQLSTATE 40P01) ou d'un P2034.
+    for (const e of retried) {
+      const x = e as { code?: string; meta?: { code?: string } }
+      assert.ok(x.code === "P2034" || (x.code === "P2010" && x.meta?.code === "40P01"), JSON.stringify({ code: x.code, meta: x.meta?.code }))
+    }
     assert.deepEqual(results.map((r) => r.status), Array(6).fill("fulfilled"), JSON.stringify(results.filter((r) => r.status === "rejected").map((r) => String((r as PromiseRejectedResult).reason).slice(0, 200))))
     for (const [ctx, j] of [[A, "coA:OD"], [B, "coB:OD"]] as const) {
       const v = await db.$transaction((tx) => verifyChain(tx, ctx, ids[j]))

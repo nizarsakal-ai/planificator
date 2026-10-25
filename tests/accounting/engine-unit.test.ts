@@ -101,25 +101,47 @@ describe("flushDeferredConstraints (garde d'identifiant)", () => {
 })
 
 describe("runAccountingTransaction / erreurs transitoires", () => {
-  it("rejoue uniquement 40P01/40001/P2034, jamais une erreur métier ; borne le nombre d'essais", async () => {
-    const { isTransientConcurrencyError, runAccountingTransaction } = await import("@/lib/accounting/engine/transaction")
+  const prisma = (code: string, meta?: Record<string, unknown>, message = "x") => Object.assign(new Error(message), { name: "PrismaClientKnownRequestError", code, meta })
+  it("classification sur codes structurés uniquement", async () => {
+    const { isTransientConcurrencyError: t } = await import("@/lib/accounting/engine/transaction")
     const { AccountingError } = await import("@/lib/accounting/engine/posting")
-    assert.equal(isTransientConcurrencyError(new Error("ERROR: deadlock detected (40P01)")), true)
-    assert.equal(isTransientConcurrencyError({ code: "P2034", message: "Transaction failed due to a write conflict or a deadlock" }), true)
-    assert.equal(isTransientConcurrencyError(new AccountingError("SOURCE_CONFLICT")), false)
-    assert.equal(isTransientConcurrencyError(new Error("ENTRY_UNBALANCED")), false)
+    // Forme réellement observée pour un interblocage dans une requête brute Prisma.
+    assert.equal(t(prisma("P2010", { code: "40P01", message: "ERROR: deadlock detected" })), true)
+    assert.equal(t(prisma("P2010", { code: "40001" })), true)
+    assert.equal(t(prisma("P2034", undefined, "write conflict")), true)
+    // Contre-exemples de la revue Codex v3.
+    assert.equal(t({ code: "40P01", message: "victime" }), true)
+    assert.equal(t(prisma("P2010", { code: "P0001" }, "ERROR: REGLE_METIER: référence 40P01 invalide")), false)
+    assert.equal(t(new AccountingError("SOURCE_CONFLICT")), false)
+    // Aucun repli textuel ; codes non transitoires refusés ; cause examinée.
+    assert.equal(t(new Error("deadlock detected 40P01")), false)
+    assert.equal(t({ code: "23505" }), false)
+    assert.equal(t(prisma("P2002", { target: ["x"] })), false)
+    assert.equal(t(new Error("wrapper", { cause: { code: "40001" } })), true)
+    assert.equal(t(new Error("wrapper", { cause: new AccountingError("X") })), false)
+  })
+  it("reprise bornée de la transaction entière ; jamais d'erreur métier ; onRetry appelé", async () => {
+    const { runAccountingTransaction } = await import("@/lib/accounting/engine/transaction")
+    const { AccountingError } = await import("@/lib/accounting/engine/posting")
+    const deadlock = () => prisma("P2010", { code: "40P01" })
     let calls = 0
-    const fake = { $transaction: async (fn: (tx: unknown) => Promise<unknown>) => { calls++; if (calls < 3) throw new Error("deadlock detected"); return fn({}) } }
-    const r = await runAccountingTransaction(fake as never, async () => "ok")
-    assert.equal(r, "ok")
+    const seen: number[] = []
+    const fake = { $transaction: async (fn: (tx: unknown) => Promise<unknown>) => { calls++; if (calls < 3) throw deadlock(); return fn({}) } }
+    assert.equal(await runAccountingTransaction(fake as never, async () => "ok", { onRetry: (_e, a) => seen.push(a) }), "ok")
     assert.equal(calls, 3)
+    assert.deepEqual(seen, [1, 2])
     calls = 0
-    const always = { $transaction: async () => { calls++; throw new Error("deadlock detected") } }
-    await assert.rejects(runAccountingTransaction(always as never, async () => "x", { maxAttempts: 2 }), /deadlock/)
+    const always = { $transaction: async () => { calls++; throw deadlock() } }
+    await assert.rejects(runAccountingTransaction(always as never, async () => "x", { maxAttempts: 2 }), (e: unknown) => (e as { meta?: { code?: string } }).meta?.code === "40P01")
     assert.equal(calls, 2)
     calls = 0
     const business = { $transaction: async () => { calls++; throw new AccountingError("SOURCE_CONFLICT") } }
     await assert.rejects(runAccountingTransaction(business as never, async () => "x"), (e: unknown) => e instanceof AccountingError)
     assert.equal(calls, 1)
+    calls = 0
+    const sqlBusiness = { $transaction: async () => { calls++; throw prisma("P2010", { code: "P0001" }, "40P01 dans un message métier") } }
+    await assert.rejects(runAccountingTransaction(sqlBusiness as never, async () => "x"))
+    assert.equal(calls, 1)
+    await assert.rejects(runAccountingTransaction(fake as never, async () => "x", { maxAttempts: 0 }), RangeError)
   })
 })
