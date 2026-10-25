@@ -35,7 +35,7 @@ export default async function FactureDetailPage({ params }: { params: Promise<{ 
           <h1 className="flex items-center gap-3 text-2xl font-bold text-slate-900">{inv.number} <InvoiceStatusBadge status={inv.status} kind={inv.kind} overdue={inv.overdue} /></h1>
           {inv.subject && <p className="text-slate-600">{inv.subject}</p>}
         </div>
-        <InvoiceActions id={inv.id} status={inv.status} kind={inv.kind} hasEmail={!!inv.client.email} payable={inv.payable} />
+        <InvoiceActions id={inv.id} status={inv.status} kind={inv.kind} hasEmail={!!inv.client.email} payable={inv.payable} hasQuote={!!inv.quoteId} />
       </div>
       {blockers.length > 0 && <Card className="border-amber-300"><CardContent className="p-4 text-sm text-amber-800"><p className="font-medium">Avant émission, corrigez :</p><ul className="list-disc pl-5">{blockers.map((b) => <li key={b.code}>{b.message}</li>)}</ul></CardContent></Card>}
 
@@ -75,6 +75,7 @@ export default async function FactureDetailPage({ params }: { params: Promise<{ 
           <tbody>{inv.payments.map((p) => <tr key={p.id} className={`border-t ${p.reversedAt ? "text-slate-400 line-through" : ""}`}><td className="py-1">{fmtDate(p.paidAt)}</td><td className="py-1">{PAYMENT_METHOD_LABEL[p.method] ?? p.method}{p.reversesPaymentId ? " (annulation)" : ""}</td><td className="py-1">{p.reference ?? p.notes ?? ""}</td><td className="py-1 text-right tabular-nums">{formatEuro(p.amountCents)}</td><td className="py-1 text-right">{!p.reversedAt && !p.reversesPaymentId && inv.status !== "CANCELLED" ? <ReversePaymentButton paymentId={p.id} /> : null}</td></tr>)}</tbody></table>
       </CardContent></Card>}
 
+      {inv.depositDeductions.length > 0 && <Card><CardContent className="p-4 text-sm"><p className="mb-1 font-medium text-slate-700">Acomptes déduits</p><ul className="space-y-1">{inv.depositDeductions.map((d) => <li key={d.depositInvoiceId} className="flex justify-between"><Link className="underline" href={`/factures/${d.depositInvoiceId}`}>{d.deposit.number} du {fmtDate(d.deposit.issueDate)}</Link><span className="tabular-nums">−{formatEuro(d.amountTTCCents)} TTC</span></li>)}</ul></CardContent></Card>}
       {(inv.notes || inv.paymentTerms) && <Card><CardContent className="p-4 text-sm">{inv.paymentTerms && <p><span className="font-medium">Conditions de paiement :</span> {inv.paymentTerms}</p>}{inv.notes && <p className="mt-1 whitespace-pre-line text-slate-600">{inv.notes}</p>}</CardContent></Card>}
       <Card><CardContent className="p-4 text-sm"><p className="mb-2 font-medium text-slate-700">Courriers et relances</p>
         <p className="text-xs text-slate-500">Relances automatiques : {[inv.reminderDue30SentAt && "J+30", inv.reminderDue45SentAt && "J+45", inv.reminderDue60SentAt && "J+60"].filter(Boolean).join(", ") || "aucune"}</p>

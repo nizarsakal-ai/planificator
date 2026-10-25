@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { issueInvoiceAction, reversePaymentAction, sendInvoiceAction, sendInvoiceReminderAction } from "@/lib/actions/invoice-c2.actions"
+import { applyDepositDeductionsAction } from "@/lib/actions/deposit.actions"
 import { createCreditNote, updateInvoiceStatus } from "@/lib/actions/invoice.actions"
 
 type R = { ok: boolean; error?: string } & Record<string, unknown>
@@ -24,7 +25,7 @@ export function useBillingAction() {
   return { busy, act }
 }
 
-export function InvoiceActions({ id, status, kind, hasEmail, payable }: { id: string; status: string; kind: string; hasEmail: boolean; payable: boolean }) {
+export function InvoiceActions({ id, status, kind, hasEmail, payable, hasQuote = false }: { id: string; status: string; kind: string; hasEmail: boolean; payable: boolean; hasQuote?: boolean }) {
   const { busy, act } = useBillingAction()
   const B = (key: string, label: string, onClick: () => void, variant: "default" | "outline" | "destructive" = "outline") => (
     <Button key={key} size="sm" variant={variant} disabled={busy !== null} onClick={onClick}>{busy === key && <Loader2 className="h-4 w-4 animate-spin" />}{label}</Button>
@@ -32,7 +33,8 @@ export function InvoiceActions({ id, status, kind, hasEmail, payable }: { id: st
   const buttons: React.ReactNode[] = []
   if (kind !== "CREDIT_NOTE") {
     if (status === "DRAFT") {
-      buttons.push(<Button key="edit" size="sm" variant="outline" asChild><Link href={`/factures/${id}/modifier`}>Modifier</Link></Button>)
+      if (kind === "INVOICE") buttons.push(<Button key="edit" size="sm" variant="outline" asChild><Link href={`/factures/${id}/modifier`}>Modifier</Link></Button>)
+      if (kind === "INVOICE" && hasQuote) buttons.push(B("ded", "Recalculer les déductions d'acomptes", () => void act("ded", () => applyDepositDeductionsAction(id), (r) => `Déductions recalculées (${r.deposits} acompte${Number(r.deposits) > 1 ? "s" : ""}).`)))
       buttons.push(B("issue", "Émettre (numéroter)", () => { if (window.confirm("Émettre cette facture ? Un numéro légal définitif sera attribué et le contenu ne sera plus modifiable.")) void act("issue", () => issueInvoiceAction(id), (r) => `Facture ${r.number} émise.`) }, "default"))
       buttons.push(B("cancel", "Abandonner le brouillon", () => { if (window.confirm("Abandonner ce brouillon ? Il restera dans l'historique.")) void act("cancel", () => updateInvoiceStatus(id, "CANCELLED").then((r) => ("error" in r && r.error ? { ok: false, error: r.error } : { ok: true })), () => "Brouillon abandonné.") }, "destructive"))
     }

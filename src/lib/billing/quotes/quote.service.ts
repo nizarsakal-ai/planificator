@@ -190,6 +190,12 @@ export async function convertQuote(db: Db, ctx: QuoteContext, quoteId: string, n
       companyId: ctx.companyId, quoteId, actorId: ctx.userId, now, paymentTermsDays: s.paymentTermsDays,
       nextDraftNumber: (t) => nextDocumentNumber(t, ctx.companyId, "INVOICE_DRAFT", now.getUTCFullYear()), lockQuote: lockQuoteRow,
     })
+    if (r.ok && !r.value.existing) {
+      // Lot C3 : déduction automatique des acomptes émis sur la facture de solde créée.
+      const { applyDepositDeductionsCore } = await import("@/lib/billing/invoices/deposit.service")
+      const d = await applyDepositDeductionsCore(tx, ctx, r.value.invoiceId)
+      if (!d.ok) throw new Error(`DEPOSIT_DEDUCTION_FAILED: ${d.error}`)
+    }
     if (r.ok) await flushDeferredConstraints(tx)
     return r
   })

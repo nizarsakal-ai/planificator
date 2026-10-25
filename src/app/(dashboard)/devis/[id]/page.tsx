@@ -9,6 +9,11 @@ import { Card, CardContent } from "@/components/ui/card"
 import { QuoteStatusBadge } from "@/components/devis/QuoteStatusBadge"
 import { QuoteActions } from "@/components/devis/QuoteActions"
 import { ClientBillingIdsForm } from "@/components/devis/ClientBillingIdsForm"
+import { DepositDialog } from "@/components/factures/DepositDialog"
+import { InvoiceStatusBadge } from "@/components/factures/InvoiceStatusBadge"
+import { listQuoteDeposits } from "@/lib/billing/invoices/deposit.service"
+import { getBillingSettings } from "@/lib/billing/settings"
+import { decimalToCents, formatEuro } from "@/lib/billing/money"
 
 export const metadata: Metadata = { title: "Devis" }
 const MAIL_KIND: Record<string, string> = { QUOTE_SENT: "Envoi du devis", QUOTE_REMINDER_J3: "Relance J+3", QUOTE_REMINDER_J7: "Relance J+7", QUOTE_REMINDER_J15: "Relance J+15" }
@@ -22,6 +27,11 @@ export default async function DevisDetailPage({ params }: { params: Promise<{ id
   if (!q) notFound()
   const { pdfLines, totals } = linesAndTotals(q.lines, q.globalDiscountBp, q.vatReverseCharge)
   const invoice = q.invoices.find((i) => i.kind === "INVOICE") ?? null
+  const [deposits, settings] = await Promise.all([listQuoteDeposits(prisma, ctx.companyId, q.id), getBillingSettings(prisma, ctx.companyId)])
+  const depositsTTC = deposits.filter((d) => d.status !== "CANCELLED").reduce((s, d) => s + d.ttcCents, BigInt(0))
+  const depositRemaining = decimalToCents(q.totalTTC) - depositsTTC
+  const finalIssued = !!invoice && invoice.status !== "DRAFT"
+  const canDeposit = (q.status === "ACCEPTED" || q.status === "CONVERTED") && !finalIssued && depositRemaining > BigInt(0)
 
   return (
     <div className="space-y-4">
@@ -80,6 +90,12 @@ export default async function DevisDetailPage({ params }: { params: Promise<{ id
         </div>
       </CardContent></Card>
 
+      <Card><CardContent className="p-4 text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-slate-700">Acomptes</p>{canDeposit && <DepositDialog quoteId={q.id} defaultPercent={String(Math.round(settings.defaultDepositBp / 100))} remainingLabel={formatEuro(depositRemaining)} />}</div>
+        {deposits.length === 0 ? <p className="mt-1 text-slate-400">Aucun acompte.</p> : (
+          <ul className="mt-2 space-y-1">{deposits.map((d) => <li key={d.id} className="flex flex-wrap items-center justify-between gap-2"><span><Link className="underline" href={`/factures/${d.id}`}>{d.number}</Link>{d.depositBp ? ` (${d.depositBp / 100} %)` : ""} · <InvoiceStatusBadge status={d.status} /></span><span className="tabular-nums">{formatEuro(d.ttcCents)} TTC · payé {formatEuro(d.paidCents)}</span></li>)}</ul>
+        )}
+      </CardContent></Card>
       {(q.notes || q.paymentTerms) && <Card><CardContent className="p-4 text-sm">{q.paymentTerms && <p><span className="font-medium">Conditions de paiement :</span> {q.paymentTerms}</p>}{q.notes && <p className="mt-1 whitespace-pre-line text-slate-600">{q.notes}</p>}</CardContent></Card>}
 
       <Card><CardContent className="p-4 text-sm">

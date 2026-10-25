@@ -19,11 +19,12 @@ export default async function ModifierFacturePage({ params }: { params: Promise<
   const initial = {
     worksiteId: inv.worksite.id, quoteId: inv.quoteId, dueDate: inv.dueDate ? inv.dueDate.toISOString().slice(0, 10) : "", subject: inv.subject ?? "", notes: inv.notes ?? "", paymentTerms: inv.paymentTerms ?? "",
     globalDiscount: inv.globalDiscountBp ? bpToPercentString(inv.globalDiscountBp) : "", vatReverseCharge: inv.vatReverseCharge,
-    lines: inv.lines.map((l) => ({ articleId: l.articleId, designation: l.designation, description: l.description ?? "", unit: l.unit, quantity: dec(l.quantity), unitPrice: l.unitPrice.toFixed(2), discount: l.discountBp ? bpToPercentString(l.discountBp) : "", vatRate: bpToPercentString(storedVatRateToBp(l.vatRate)) })),
+    lines: inv.lines.filter((l) => !l.deductsDepositId).map((l) => ({ articleId: l.articleId, designation: l.designation, description: l.description ?? "", unit: l.unit, quantity: dec(l.quantity), unitPrice: l.unitPrice.toFixed(2), discount: l.discountBp ? bpToPercentString(l.discountBp) : "", vatRate: bpToPercentString(storedVatRateToBp(l.vatRate)) })),
   }
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold text-slate-900">Modifier le brouillon {inv.number}</h1>
+      {inv.lines.some((l) => l.deductsDepositId) && <p className="text-sm text-slate-600">Les lignes de déduction d&apos;acomptes ({inv.lines.filter((l) => l.deductsDepositId).length}) ne sont pas modifiables ici : elles sont régénérées automatiquement à l&apos;enregistrement.</p>}
       <InvoiceForm mode="edit" invoiceId={inv.id} initial={initial} worksites={options.worksites} articles={options.articles} />
     </div>
   )

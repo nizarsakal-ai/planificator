@@ -46,7 +46,7 @@ export interface IssueInvoiceInput {
   nextLegalNumber: (tx: Prisma.TransactionClient, year: number) => Promise<string>
   lockInvoice: (tx: Prisma.TransactionClient, invoiceId: string, companyId: string) => Promise<void>
   /** Contrôles supplémentaires sous verrou (C3 : acomptes) ; message d'erreur ou null. */
-  extraChecks?: (tx: Prisma.TransactionClient, invoice: { id: string; kind: string; quoteId: string | null; totalTTCCents: bigint }) => Promise<string | null>
+  extraChecks?: (tx: Prisma.TransactionClient, invoice: { id: string; kind: string; quoteId: string | null; totalTTCCents: bigint; vatReverseCharge: boolean }) => Promise<string | null>
 }
 
 /**
@@ -61,7 +61,7 @@ export async function issueInvoiceCore(tx: Prisma.TransactionClient, input: Issu
     select: {
       id: true, status: true, kind: true, number: true, dueDate: true, worksiteId: true, globalDiscountBp: true, vatReverseCharge: true, quoteId: true, totalTTC: true,
       company: { select: { name: true, address: true, siret: true } }, client: { select: { name: true, address: true } },
-      lines: { select: { quantity: true, unitPrice: true, vatRate: true, discountBp: true } },
+      lines: { select: { quantity: true, unitPrice: true, vatRate: true, discountBp: true, deductsDepositId: true } },
     },
   })
   if (!inv) return { ok: false, error: INVOICE_C2_ERRORS.notFound }
@@ -73,7 +73,7 @@ export async function issueInvoiceCore(tx: Prisma.TransactionClient, input: Issu
   let totals
   try {
     totals = computeDocumentTotals(
-      inv.lines.map((l) => ({ quantityHundredths: decimalToCents(l.quantity), unitPriceCents: decimalToCents(l.unitPrice), discountBp: l.discountBp, vatRateBp: storedVatRateToBp(l.vatRate) })),
+      inv.lines.map((l) => ({ quantityHundredths: decimalToCents(l.quantity), unitPriceCents: decimalToCents(l.unitPrice), discountBp: l.discountBp, vatRateBp: storedVatRateToBp(l.vatRate), excludeGlobalDiscount: !!l.deductsDepositId })),
       { globalDiscountBp: inv.globalDiscountBp, vatReverseCharge: inv.vatReverseCharge },
     )
   } catch (e) {
@@ -82,7 +82,7 @@ export async function issueInvoiceCore(tx: Prisma.TransactionClient, input: Issu
   }
   if (totals.totalTTCCents < BigInt(0)) return { ok: false, error: "Émission impossible : total TTC négatif." }
   if (input.extraChecks) {
-    const err = await input.extraChecks(tx, { id: inv.id, kind: inv.kind, quoteId: inv.quoteId, totalTTCCents: totals.totalTTCCents })
+    const err = await input.extraChecks(tx, { id: inv.id, kind: inv.kind, quoteId: inv.quoteId, totalTTCCents: totals.totalTTCCents, vatReverseCharge: inv.vatReverseCharge })
     if (err) return { ok: false, error: err }
   }
   const issueDate = new Date(Date.UTC(input.now.getUTCFullYear(), input.now.getUTCMonth(), input.now.getUTCDate()))
@@ -100,6 +100,11 @@ export async function issueInvoiceCore(tx: Prisma.TransactionClient, input: Issu
   })
   // Le compteur légal a déjà été consommé : un conflit ici doit annuler toute la transaction (jamais de trou).
   if (updated.count !== 1) throw new Error(`INVOICE_CONFLICT: ${INVOICE_C2_ERRORS.conflict}`)
+  // Solde nul (acomptes = 100 %) : rien à encaisser ⇒ soldée dans la même transaction (aucune relance).
+  if (totals.totalTTCCents === BigInt(0)) {
+    const paid = await tx.invoice.updateMany({ where: { id: inv.id, companyId: input.companyId, status: "SENT" }, data: { status: "PAID", paidAt: input.now } })
+    if (paid.count !== 1) throw new Error(`INVOICE_CONFLICT: ${INVOICE_C2_ERRORS.conflict}`)
+  }
   await tx.historyLog.create({
     data: {
       companyId: input.companyId, worksiteId: inv.worksiteId, actorId: input.actorId, action: "STATUS_CHANGED", entityType: "Invoice", entityId: inv.id,

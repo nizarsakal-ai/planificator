@@ -169,9 +169,9 @@ export async function convertQuoteCore(tx: Prisma.TransactionClient, input: Conv
     where: { companyId: input.companyId, quoteId: quote.id, kind: "INVOICE", status: { not: "CANCELLED" } },
     select: { id: true, number: true },
   })
-  if (quote.status === "CONVERTED" && existing) return { ok: true, value: { invoiceId: existing.id, invoiceNumber: existing.number, existing: true } }
-  if (quote.status !== "ACCEPTED") return { ok: false, error: QUOTE_ERRORS.notAccepted }
   if (existing) return { ok: true, value: { invoiceId: existing.id, invoiceNumber: existing.number, existing: true } }
+  // Devis déjà converti dont le brouillon de solde a été abandonné : une nouvelle facture de solde peut être créée.
+  if (quote.status !== "ACCEPTED" && quote.status !== "CONVERTED") return { ok: false, error: QUOTE_ERRORS.notAccepted }
 
   const number = await input.nextDraftNumber(tx)
   const dueDate = new Date(input.now.getTime() + input.paymentTermsDays * 86_400_000)
@@ -187,12 +187,14 @@ export async function convertQuoteCore(tx: Prisma.TransactionClient, input: Conv
     },
     select: { id: true, number: true },
   })
-  const t = await transitionQuoteCore(tx, {
-    companyId: input.companyId, quoteId: quote.id, to: "CONVERTED", actorId: input.actorId, now: input.now,
-    detail: `Devis ${quote.number} converti en facture ${invoice.number}`,
-  })
-  // La facture a déjà été écrite : un échec ici doit annuler la transaction entière (jamais de facture orpheline).
-  if (!t.ok) throw new Error(`QUOTE_CONVERT_CONFLICT: ${t.error}`)
+  if (quote.status === "ACCEPTED") {
+    const t = await transitionQuoteCore(tx, {
+      companyId: input.companyId, quoteId: quote.id, to: "CONVERTED", actorId: input.actorId, now: input.now,
+      detail: `Devis ${quote.number} converti en facture ${invoice.number}`,
+    })
+    // La facture a déjà été écrite : un échec ici doit annuler la transaction entière (jamais de facture orpheline).
+    if (!t.ok) throw new Error(`QUOTE_CONVERT_CONFLICT: ${t.error}`)
+  }
   await tx.historyLog.create({
     data: {
       companyId: input.companyId, worksiteId: quote.worksiteId, actorId: input.actorId, action: "CREATED", entityType: "Invoice", entityId: invoice.id,

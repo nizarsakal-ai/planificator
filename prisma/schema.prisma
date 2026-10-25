@@ -380,6 +380,7 @@ model Company {
   billingSettings         BillingSettings?
   billingMailLogs         BillingMailLog[]
   invoicePayments         InvoicePayment[]
+  invoiceDepositDeductions InvoiceDepositDeduction[]
   acquisitionMessages     AcquisitionMessage[]
   worksiteImportDrafts    WorksiteImportDraft[]
   acquisitionAttachments  AcquisitionAttachment[]
@@ -558,7 +559,7 @@ model Invoice {
   number      String        // "FAC-2026-0001" (séquentiel, unique par entreprise)
   status      InvoiceStatus @default(DRAFT)
   kind        InvoiceKind   @default(INVOICE)
-  creditedInvoiceId String? @unique // avoir : facture d'origine (un seul avoir total par facture)
+  creditedInvoiceId String?       // avoir : facture d'origine (Lot C4 : index unique partiel « un seul avoir TOTAL », plusieurs PARTIAL)
   issueDate   DateTime      @default(now())
   dueDate     DateTime?     // échéance de paiement
   periodStart DateTime?     // début de la période facturée (= dates du chantier)
@@ -582,6 +583,14 @@ model Invoice {
   reminderDue45SentAt DateTime?
   reminderDue60SentAt DateTime?
   payments            InvoicePayment[]
+  // Lot C3 : acomptes (pourcentage demandé ; déductions sur la facture de solde).
+  depositBp           Int?
+  depositDeductions   InvoiceDepositDeduction[] @relation("FinalInvoiceDeductions")
+  deductedBy          InvoiceDepositDeduction[] @relation("DepositInvoiceDeductions")
+  deductionLines      InvoiceLine[]             @relation("LineDeductsDeposit")
+  // Lot C4 : avoirs partiels (TOTAL = Lot B, PARTIAL = plafonné au restant créditable).
+  creditScope         InvoiceCreditScope?
+  creditReason        String?
 
   // Relations
   // Lot B : pièces conservées — aucune suppression en cascade depuis la société ou le chantier.
@@ -590,11 +599,12 @@ model Invoice {
   client   Client        @relation(fields: [clientId], references: [id])
   quote    Quote?        @relation(fields: [quoteId], references: [id], onDelete: Restrict)
   lines    InvoiceLine[]
-  creditedInvoice Invoice? @relation("InvoiceCreditNote", fields: [creditedInvoiceId], references: [id], onDelete: Restrict)
-  creditNote      Invoice? @relation("InvoiceCreditNote")
+  creditedInvoice Invoice?  @relation("InvoiceCreditNote", fields: [creditedInvoiceId], references: [id], onDelete: Restrict)
+  creditNotes     Invoice[] @relation("InvoiceCreditNote") // Lot C4 : plusieurs avoirs partiels ; un seul TOTAL (index partiel SQL)
 
   @@unique([companyId, number])
   @@unique([id, companyId])
+  @@index([creditedInvoiceId])
   @@index([companyId])
   @@index([companyId, status])
   @@index([companyId, issueDate])
@@ -645,13 +655,39 @@ model InvoiceLine {
   position    Int     @default(0)
   description String?                 // Lot C1
   discountBp  Int     @default(0)     // Lot C1 : remise de ligne en points de base
+  deductsDepositId String?            // Lot C3 : ligne de déduction d'un acompte (facture de solde)
 
   // Relations
   invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   article Article? @relation(fields: [articleId], references: [id], onDelete: Restrict)
+  deductsDeposit Invoice? @relation("LineDeductsDeposit", fields: [deductsDepositId], references: [id], onDelete: Restrict)
 
   @@index([invoiceId])
+  @@index([deductsDepositId])
   @@map("invoice_lines")
+}
+
+/// Lot C3 (SPEC-BILLING-C3) — un acompte émis n'est déduit qu'une fois, sur une facture de solde du même devis.
+model InvoiceDepositDeduction {
+  id               String   @id @default(cuid())
+  companyId        String
+  finalInvoiceId   String
+  depositInvoiceId String   @unique
+  amountTTCCents   BigInt
+  createdAt        DateTime @default(now())
+
+  company      Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  finalInvoice Invoice @relation("FinalInvoiceDeductions", fields: [companyId, finalInvoiceId], references: [companyId, id], onDelete: Restrict)
+  deposit      Invoice @relation("DepositInvoiceDeductions", fields: [companyId, depositInvoiceId], references: [companyId, id], onDelete: Restrict)
+
+  @@index([finalInvoiceId])
+  @@map("invoice_deposit_deductions")
+}
+
+/// Lot C4 — portée d'un avoir.
+enum InvoiceCreditScope {
+  TOTAL
+  PARTIAL
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

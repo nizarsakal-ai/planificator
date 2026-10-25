@@ -93,7 +93,8 @@ export async function getInvoiceDetail(db: Db, companyId: string, invoiceId: str
       worksite: { select: { id: true, name: true } }, company: { select: { name: true, address: true, siret: true } },
       quote: { select: { id: true, number: true } },
       creditedInvoice: { select: { id: true, number: true } },
-      lines: { orderBy: { position: "asc" }, select: { id: true, articleId: true, designation: true, description: true, unit: true, quantity: true, unitPrice: true, vatRate: true, lineHT: true, discountBp: true, position: true } },
+      lines: { orderBy: { position: "asc" }, select: { id: true, articleId: true, designation: true, description: true, unit: true, quantity: true, unitPrice: true, vatRate: true, lineHT: true, discountBp: true, position: true, deductsDepositId: true } },
+      depositDeductions: { select: { depositInvoiceId: true, amountTTCCents: true, deposit: { select: { number: true, issueDate: true, status: true } } } },
       payments: { orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }], select: { id: true, amountCents: true, method: true, paidAt: true, reference: true, notes: true, reversesPaymentId: true, reversedAt: true, createdAt: true } },
     },
   })
@@ -104,7 +105,7 @@ export async function getInvoiceDetail(db: Db, companyId: string, invoiceId: str
   ])
   const ttc = decimalToCents(inv.totalTTC)
   const paid = inv.payments.reduce((s, p) => s + p.amountCents, BigInt(0))
-  const payable = inv.kind !== "CREDIT_NOTE" && (inv.status === "SENT" || inv.status === "PARTIAL")
+  const payable = inv.kind !== "CREDIT_NOTE" && (inv.status === "SENT" || inv.status === "PARTIAL") && ttc > BigInt(0)
   const settledOutside = inv.status === "PAID" && paid < ttc
   return { ...inv, creditNotes, mails, totalTTCCents: ttc, paidCents: settledOutside ? ttc : paid, remainingCents: payable ? ttc - paid : BigInt(0), settledOutside, overdue: isOverdue(inv, todayUtc(now)), payable }
 }

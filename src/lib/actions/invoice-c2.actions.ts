@@ -16,6 +16,7 @@ function integrityMessage(error: unknown): string | null {
   const code = /\b(INVOICE_[A-Z_]+|CREDIT_NOTE_INVALID|PAYMENT_[A-Z_]+)\b/.exec(message)?.[1]
   if (!code) return null
   if (code === "INVOICE_CONFLICT") return "La facture a été modifiée entre-temps. Rechargez la page."
+  if (code === "INVOICE_DEPOSIT_DEDUCTED") return "Cet acompte est déduit sur une facture de solde émise : établissez l'avoir sur la facture de solde."
   if (code === "PAYMENT_EXCEEDS_TOTAL") return "Paiement refusé : le total des paiements dépasserait le montant de la facture."
   if (code.startsWith("PAYMENT_")) return "Paiement refusé par les contrôles d'intégrité."
   return "Opération refusée : une facture émise n'est plus modifiable."

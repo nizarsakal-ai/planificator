@@ -10,11 +10,12 @@ export async function buildInvoicePdfData(db: Db, companyId: string, invoiceId: 
   const inv = await db.invoice.findFirst({
     where: { id: invoiceId, companyId },
     select: {
-      number: true, status: true, kind: true, issueDate: true, dueDate: true, periodStart: true, periodEnd: true, subject: true, notes: true, paymentTerms: true, globalDiscountBp: true, vatReverseCharge: true, totalTTC: true,
+      number: true, status: true, kind: true, issueDate: true, dueDate: true, periodStart: true, periodEnd: true, subject: true, notes: true, paymentTerms: true, globalDiscountBp: true, vatReverseCharge: true, totalTTC: true, creditReason: true, depositBp: true,
+      depositDeductions: { select: { amountTTCCents: true, deposit: { select: { number: true, issueDate: true } } } },
       company: { select: { name: true, address: true, siret: true, email: true, phone: true } },
       client: { select: { name: true, address: true, siret: true, vatNumber: true, email: true } },
       worksite: { select: { name: true } }, quote: { select: { number: true } }, creditedInvoice: { select: { number: true, issueDate: true } },
-      lines: { orderBy: { position: "asc" }, select: { designation: true, description: true, unit: true, quantity: true, unitPrice: true, vatRate: true, lineHT: true, discountBp: true } },
+      lines: { orderBy: { position: "asc" }, select: { designation: true, description: true, unit: true, quantity: true, unitPrice: true, vatRate: true, lineHT: true, discountBp: true, deductsDepositId: true } },
       payments: { where: { reversesPaymentId: null, reversedAt: null }, orderBy: { paidAt: "asc" }, select: { amountCents: true, method: true, paidAt: true } },
     },
   })
@@ -42,7 +43,9 @@ export async function buildInvoicePdfData(db: Db, companyId: string, invoiceId: 
     else rows.push(`Reste à payer : ${formatEuro(ttc - paid)}`)
     extraBlocks.push({ title: inv.payments.length ? "Règlements reçus" : "Règlement", rows })
   }
-  if (isCredit && inv.creditedInvoice) extraBlocks.push({ title: "Avoir", rows: [`Avoir sur la facture ${inv.creditedInvoice.number} du ${fmtDate(inv.creditedInvoice.issueDate)}.`, "Montant à déduire de la prochaine facture ou à rembourser."] })
+  if (isCredit && inv.creditedInvoice) extraBlocks.push({ title: "Avoir", rows: [`Avoir sur la facture ${inv.creditedInvoice.number} du ${fmtDate(inv.creditedInvoice.issueDate)}.`, inv.creditReason ? `Motif : ${inv.creditReason}` : "Montant à déduire de la prochaine facture ou à rembourser."] })
+  if (inv.depositDeductions.length > 0) extraBlocks.push({ title: "Acomptes déduits", rows: inv.depositDeductions.map((d) => `Facture d'acompte ${d.deposit.number} du ${fmtDate(d.deposit.issueDate)} : ${formatEuro(d.amountTTCCents)} TTC`) })
+  if (isDeposit && inv.quote) extraBlocks.push({ title: "Acompte", rows: [`${inv.depositBp ? `Acompte de ${inv.depositBp / 100} %` : "Acompte"} sur le devis ${inv.quote.number}. Le solde sera facturé à l'issue des prestations, déduction faite du présent acompte.`] })
   return {
     title: draft ? `${title} (brouillon — non émise)` : title, number: inv.number, meta,
     seller: sellerParty(inv.company, settings), buyer: buyerParty(inv.client), subject: inv.subject, lines: pdfLines, totals,

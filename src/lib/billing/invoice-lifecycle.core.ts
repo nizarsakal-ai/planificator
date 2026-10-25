@@ -77,14 +77,19 @@ export async function transitionInvoiceCore(
     select: { id: true, status: true, kind: true, number: true, worksiteId: true },
   })
   if (!invoice || !isStatus(invoice.status)) return { ok: false, error: LIFECYCLE_ERRORS.notFound }
-  if (invoice.kind !== "INVOICE") return { ok: false, error: LIFECYCLE_ERRORS.creditNoteImmutable }
+  // Lot C3 : un acompte (DEPOSIT) suit le même automate ; un avoir reste immuable.
+  if (invoice.kind === "CREDIT_NOTE") return { ok: false, error: LIFECYCLE_ERRORS.creditNoteImmutable }
   const from = invoice.status
   if (input.to === "CANCELLED" && from !== "DRAFT") return { ok: false, error: LIFECYCLE_ERRORS.cancelIssued }
   if (!canTransition(from, input.to)) return { ok: false, error: LIFECYCLE_ERRORS.forbidden }
   if (input.to === "SENT" && invoice.number.startsWith(PROVISIONAL_NUMBER_PREFIX)) return { ok: false, error: LIFECYCLE_ERRORS.provisionalNumber }
+  // Lot C3 : l'abandon d'un brouillon de facture de solde libère ses déductions d'acomptes (les acomptes redeviennent déductibles).
+  if (input.to === "CANCELLED" && invoice.kind === "INVOICE") {
+    await tx.invoiceDepositDeduction.deleteMany({ where: { companyId: input.companyId, finalInvoiceId: invoice.id } })
+  }
 
   const updated = await tx.invoice.updateMany({
-    where: { id: invoice.id, companyId: input.companyId, status: from, kind: "INVOICE" },
+    where: { id: invoice.id, companyId: input.companyId, status: from, kind: invoice.kind },
     data: {
       status: input.to,
       ...(input.to === "SENT" ? { sentAt: input.now } : {}),
@@ -198,7 +203,7 @@ export async function createCreditNoteCore(
     },
   })
   if (!original || !isStatus(original.status)) return { ok: false, error: LIFECYCLE_ERRORS.notFound }
-  if (original.kind !== "INVOICE" || !["SENT", "PAID", "PARTIAL"].includes(original.status)) {
+  if ((original.kind !== "INVOICE" && original.kind !== "DEPOSIT") || !["SENT", "PAID", "PARTIAL"].includes(original.status)) {
     return { ok: false, error: LIFECYCLE_ERRORS.notCreditable }
   }
   const existing = await tx.invoice.findFirst({
@@ -206,12 +211,18 @@ export async function createCreditNoteCore(
     select: { id: true },
   })
   if (existing) return { ok: false, error: LIFECYCLE_ERRORS.alreadyCredited }
+  const DEPOSIT_DEDUCTED = "Cet acompte est déduit sur une facture de solde émise : établissez l'avoir sur la facture de solde."
+  const deductedOnIssuedFinal = () => tx.invoiceDepositDeduction.findFirst({ where: { companyId: input.companyId, depositInvoiceId: original.id, finalInvoice: { status: { not: "DRAFT" } } }, select: { id: true } })
+  if (original.kind === "DEPOSIT" && (await deductedOnIssuedFinal())) return { ok: false, error: DEPOSIT_DEDUCTED }
 
   const cancelled = await tx.invoice.updateMany({
-    where: { id: original.id, companyId: input.companyId, status: original.status, kind: "INVOICE" },
+    where: { id: original.id, companyId: input.companyId, status: original.status, kind: original.kind },
     data: { status: "CANCELLED" },
   })
   if (cancelled.count !== 1) return { ok: false, error: LIFECYCLE_ERRORS.conflict }
+  // Lot C3 : relecture sous verrou (l'UPDATE ci-dessus verrouille l'acompte) — une émission concurrente du solde,
+  // qui verrouille les acomptes déduits, est ainsi sérialisée ; un conflit détecté après écriture annule la transaction.
+  if (original.kind === "DEPOSIT" && (await deductedOnIssuedFinal())) throw new Error(`INVOICE_DEPOSIT_DEDUCTED: ${DEPOSIT_DEDUCTED}`)
 
   const number = await input.nextNumber(tx)
   // Créé en brouillon (lignes autorisées par la base), puis émis dans la même transaction.
@@ -223,6 +234,7 @@ export async function createCreditNoteCore(
       quoteId: original.quoteId,
       number,
       kind: "CREDIT_NOTE",
+      creditScope: "TOTAL",
       creditedInvoiceId: original.id,
       status: "DRAFT",
       periodStart: original.periodStart,

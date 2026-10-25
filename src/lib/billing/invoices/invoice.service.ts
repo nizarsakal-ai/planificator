@@ -11,6 +11,7 @@ import { invoiceReminderMail, invoiceSentMail } from "@/lib/billing/mail/templat
 import { getBillingSettings } from "@/lib/billing/settings"
 import type { LifecycleResult } from "@/lib/billing/quotes/quote-lifecycle.core"
 import { INVOICE_C2_ERRORS, issueInvoiceCore, recordPaymentCore, replaceInvoiceDraftCore, reversePaymentCore, type InvoiceDraftLine, type PaymentStatus } from "./invoice-c2.core"
+import { depositIssueChecks } from "./deposit.service"
 import type { ParsedInvoice } from "./invoice-schemas"
 
 export interface InvoiceContext { companyId: string; userId: string }
@@ -78,7 +79,14 @@ export async function updateDraftInvoice(db: Db, ctx: InvoiceContext, invoiceId:
   if (!refs.ok) return refs
   return db.$transaction(async (tx) => {
     const r = await replaceInvoiceDraftCore(tx, { companyId: ctx.companyId, invoiceId, actorId: ctx.userId, header: { ...toHeader(parsed), worksiteId: parsed.worksiteId, clientId: refs.value.clientId, quoteId: parsed.quoteId }, lines: toLines(parsed) })
-    if (r.ok) await flushDeferredConstraints(tx)
+    if (!r.ok) return r
+    // Facture de solde : les déductions d'acomptes (lignes retirées par le remplacement) sont régénérées.
+    if (parsed.quoteId) {
+      const { applyDepositDeductionsCore } = await import("./deposit.service")
+      const d = await applyDepositDeductionsCore(tx, ctx, invoiceId)
+      if (!d.ok) return d
+    }
+    await flushDeferredConstraints(tx)
     return r
   })
 }
@@ -89,6 +97,7 @@ export async function issueInvoice(db: Db, ctx: InvoiceContext, invoiceId: strin
     const r = await issueInvoiceCore(tx, {
       companyId: ctx.companyId, invoiceId, actorId: ctx.userId, now, paymentTermsDays: s.paymentTermsDays,
       nextLegalNumber: (t, year) => nextDocumentNumber(t, ctx.companyId, "INVOICE", year), lockInvoice: lockInvoiceRow,
+      extraChecks: (t, inv) => depositIssueChecks(t, ctx.companyId, inv),
     })
     if (r.ok) await flushDeferredConstraints(tx)
     return r
@@ -143,7 +152,7 @@ export async function runInvoiceReminders(db: Db, now: Date, limit = 200): Promi
   for (const { step, column } of STEPS) {
     const threshold = new Date(now.getTime() - step * 86_400_000)
     const due = await db.invoice.findMany({
-      where: { status: { in: ["SENT", "PARTIAL"] }, kind: { not: "CREDIT_NOTE" }, dueDate: { lte: threshold }, [column]: null, client: { email: { not: null } } },
+      where: { status: { in: ["SENT", "PARTIAL"] }, kind: { not: "CREDIT_NOTE" }, totalTTC: { gt: 0 }, dueDate: { lte: threshold }, [column]: null, client: { email: { not: null } } },
       select: { id: true, companyId: true, number: true, dueDate: true, totalTTC: true, client: { select: { name: true, email: true } }, company: { select: { name: true } }, payments: { select: { amountCents: true } } },
       take: limit,
     })
