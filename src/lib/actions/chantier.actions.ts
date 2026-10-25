@@ -344,7 +344,21 @@ export async function deleteChantier(worksiteId: string) {
   })
   if (!worksite) return { error: "Chantier introuvable." }
 
-  await prisma.worksite.delete({ where: { id: worksiteId } })
+  // Lot B (ADR-PLAN-003) : les factures sont des pièces conservées ; un chantier facturé ne se supprime pas.
+  const invoiceCount = await prisma.invoice.count({ where: { worksiteId, companyId: user.companyId! } })
+  if (invoiceCount > 0) {
+    return { error: "Ce chantier a des factures : il ne peut pas être supprimé. Archivez-le plutôt." }
+  }
+
+  try {
+    await prisma.worksite.delete({ where: { id: worksiteId } })
+  } catch (error) {
+    // Facture créée entre le contrôle et la suppression : la contrainte Restrict refuse (P2003).
+    if (typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "P2003") {
+      return { error: "Ce chantier a des factures : il ne peut pas être supprimé. Archivez-le plutôt." }
+    }
+    throw error
+  }
 
   revalidatePath("/chantiers")
   revalidatePath("/planning")

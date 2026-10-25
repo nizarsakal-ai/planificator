@@ -3,6 +3,8 @@ import { redirect } from "next/navigation"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { Navbar } from "@/components/layout/Navbar"
 import { InstallPrompt } from "@/components/pwa/InstallPrompt"
+import { isAccountingModuleEnabled } from "@/lib/accounting/accounting-feature-flag"
+import { isAccountingNavVisible } from "@/lib/accounting/access/accounting-access.core"
 import type { Role } from "@prisma/client"
 
 export default async function DashboardLayout({
@@ -19,8 +21,14 @@ export default async function DashboardLayout({
   // Les clients ont leur propre portail
   if (role === "CLIENT") redirect("/mes-chantiers")
 
-  // Objet utilisateur avec le rôle frais depuis la DB
-  const user = { ...session.user, role, companyId }
+  // Rôle et société ACTIFS issus de la session (résolus par l'appartenance multi-société dans le callback JWT)
+  // Lien « Comptabilité » : affichage seulement (flag lu côté serveur) ; la page applique sa propre garde.
+  const accountingNavVisible = isAccountingNavVisible({
+    enabled: isAccountingModuleEnabled(),
+    role,
+    companyId,
+  })
+  const user = { ...session.user, role, companyId, accountingNavVisible }
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">

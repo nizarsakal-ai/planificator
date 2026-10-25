@@ -145,10 +145,16 @@ enum QuoteStatus {
 }
 
 enum InvoiceStatus {
-  DRAFT      // Brouillon
-  SENT       // Envoyée au client
-  PAID       // Payée
-  CANCELLED  // Annulée
+  DRAFT      // Brouillon (modifiable, non émis)
+  SENT       // Émise / envoyée au client (immuable)
+  PAID       // Payée (immuable)
+  CANCELLED  // Brouillon abandonné, ou facture émise annulée PAR AVOIR (jamais de retour arrière)
+}
+
+/// Lot B minimal (ADR-PLAN-003) : une facture émise ne s'annule que par un avoir référencé.
+enum InvoiceKind {
+  INVOICE      // Facture
+  CREDIT_NOTE  // Avoir total émis sur une facture SENT/PAID
 }
 
 enum ExpenseStatus {
@@ -350,6 +356,13 @@ model Company {
   articles                Article[]
   quotes                  Quote[]
   invoices                Invoice[]
+  accountingAccounts      AccountingAccount[]
+  accountingJournals      AccountingJournal[]
+  fiscalYears             FiscalYear[]
+  journalEntries          JournalEntry[]
+  journalEntryLines       JournalEntryLine[]
+  accountingSequences     AccountingSequence[]
+  accountingChainHeads    AccountingChainHead[]
   documentCounters        DocumentCounter[]
   acquisitionMessages     AcquisitionMessage[]
   worksiteImportDrafts    WorksiteImportDraft[]
@@ -503,6 +516,8 @@ model Invoice {
   quoteId     String?       // devis d'origine (optionnel)
   number      String        // "FAC-2026-0001" (séquentiel, unique par entreprise)
   status      InvoiceStatus @default(DRAFT)
+  kind        InvoiceKind   @default(INVOICE)
+  creditedInvoiceId String? @unique // avoir : facture d'origine (un seul avoir total par facture)
   issueDate   DateTime      @default(now())
   dueDate     DateTime?     // échéance de paiement
   periodStart DateTime?     // début de la période facturée (= dates du chantier)
@@ -519,17 +534,21 @@ model Invoice {
   updatedAt   DateTime      @updatedAt
 
   // Relations
-  company  Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  worksite Worksite      @relation(fields: [worksiteId], references: [id], onDelete: Cascade)
+  // Lot B : pièces conservées — aucune suppression en cascade depuis la société ou le chantier.
+  company  Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  worksite Worksite      @relation(fields: [worksiteId], references: [id], onDelete: Restrict)
   client   Client        @relation(fields: [clientId], references: [id])
-  quote    Quote?        @relation(fields: [quoteId], references: [id])
+  quote    Quote?        @relation(fields: [quoteId], references: [id], onDelete: Restrict)
   lines    InvoiceLine[]
+  creditedInvoice Invoice? @relation("InvoiceCreditNote", fields: [creditedInvoiceId], references: [id], onDelete: Restrict)
+  creditNote      Invoice? @relation("InvoiceCreditNote")
 
   @@unique([companyId, number])
   @@index([companyId])
   @@index([worksiteId])
   @@index([clientId])
   @@index([status])
+  @@index([kind])
   @@map("invoices")
 }
 
@@ -547,7 +566,7 @@ model InvoiceLine {
 
   // Relations
   invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  article Article? @relation(fields: [articleId], references: [id])
+  article Article? @relation(fields: [articleId], references: [id], onDelete: Restrict)
 
   @@index([invoiceId])
   @@map("invoice_lines")
@@ -557,7 +576,7 @@ model InvoiceLine {
 model DocumentCounter {
   id        String @id @default(cuid())
   companyId String
-  type      String // "QUOTE" | "INVOICE"
+  type      String // "QUOTE" | "INVOICE" | "CREDIT_NOTE"
   year      Int
   lastValue Int    @default(0)
 
@@ -2181,6 +2200,170 @@ model AgentGatewayControl {
   @@map("agent_gateway_control")
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPTABILITÉ — Lot A1 (ADR-PLAN-003, SPEC-ACC-A) : partie double, multi-société.
+// Montants en centimes (BigInt). Écritures validées immuables (déclencheurs SQL de la
+// migration accounting_a1_engine). Toutes les relations : onDelete Restrict, FK composites
+// (companyId, id) pour garantir l'appartenance à la même société.
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum FiscalYearStatus {
+  OPEN
+  CLOSING
+  CLOSED
+}
+
+enum JournalEntryStatus {
+  DRAFT
+  VALIDATED
+}
+
+enum AccountingJournalKind {
+  SALES      // VT
+  PURCHASES  // HA
+  BANK       // BQ
+  MISC       // OD
+}
+
+model AccountingAccount {
+  id        String   @id @default(cuid())
+  companyId String
+  number    String   // numéro PCG (ex. 411000)
+  label     String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  company Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  lines   JournalEntryLine[]
+
+  @@unique([companyId, number])
+  @@unique([companyId, id])
+  @@map("accounting_accounts")
+}
+
+model AccountingJournal {
+  id        String                @id @default(cuid())
+  companyId String
+  code      String                // VT, HA, BQ, OD
+  label     String
+  kind      AccountingJournalKind
+  createdAt DateTime              @default(now())
+
+  company    Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  entries    JournalEntry[]
+  sequences  AccountingSequence[]
+  chainHeads AccountingChainHead[]
+
+  @@unique([companyId, code])
+  @@unique([companyId, id])
+  @@map("accounting_journals")
+}
+
+model FiscalYear {
+  id        String           @id @default(cuid())
+  companyId String
+  startDate DateTime         @db.Date
+  endDate   DateTime         @db.Date
+  status    FiscalYearStatus @default(OPEN)
+  createdAt DateTime         @default(now())
+
+  company   Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  entries   JournalEntry[]
+  sequences AccountingSequence[]
+
+  @@unique([companyId, id])
+  @@index([companyId, startDate])
+  @@map("fiscal_years")
+}
+
+model AccountingSequence {
+  companyId    String
+  journalId    String
+  fiscalYearId String
+  lastNumber   Int    @default(0)
+
+  company    Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  journal    AccountingJournal @relation(fields: [companyId, journalId], references: [companyId, id], onDelete: Restrict)
+  fiscalYear FiscalYear        @relation(fields: [companyId, fiscalYearId], references: [companyId, id], onDelete: Restrict)
+
+  @@id([companyId, journalId, fiscalYearId])
+  @@map("accounting_sequences")
+}
+
+model AccountingChainHead {
+  companyId   String
+  journalId   String
+  lastEntryId String?
+  lastHash    String
+
+  company Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  journal AccountingJournal @relation(fields: [companyId, journalId], references: [companyId, id], onDelete: Restrict)
+
+  @@id([companyId, journalId])
+  @@map("accounting_chain_heads")
+}
+
+model JournalEntry {
+  id            String             @id @default(cuid())
+  companyId     String
+  journalId     String
+  fiscalYearId  String
+  status        JournalEntryStatus @default(DRAFT)
+  entryDate     DateTime           @db.Date
+  documentDate  DateTime?          @db.Date
+  documentRef   String?
+  label         String
+  closingEntry  Boolean            @default(false)
+  number        Int?
+  validatedAt   DateTime?
+  validatedById String?
+  sourceType    String?
+  sourceId      String?
+  sourceVersion Int?
+  sourceHash    String?
+  reversalOfId  String?
+  prevEntryId   String?
+  prevHash      String?
+  hash          String?
+  createdById   String
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  company    Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  journal    AccountingJournal  @relation(fields: [companyId, journalId], references: [companyId, id], onDelete: Restrict)
+  fiscalYear FiscalYear         @relation(fields: [companyId, fiscalYearId], references: [companyId, id], onDelete: Restrict)
+  reversalOf JournalEntry?      @relation("EntryReversal", fields: [companyId, reversalOfId], references: [companyId, id], onDelete: Restrict)
+  reversedBy JournalEntry[]     @relation("EntryReversal")
+  lines      JournalEntryLine[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, journalId, fiscalYearId, number])
+  @@unique([companyId, sourceType, sourceId, sourceVersion])
+  @@index([companyId, status])
+  @@index([companyId, fiscalYearId])
+  @@map("journal_entries")
+}
+
+model JournalEntryLine {
+  id          String  @id @default(cuid())
+  companyId   String
+  entryId     String
+  accountId   String
+  position    Int
+  label       String?
+  debitCents  BigInt  @default(0)
+  creditCents BigInt  @default(0)
+  vatRateBp   Int?    // taux de TVA en points de base (2000 = 20 %)
+
+  company Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  entry   JournalEntry      @relation(fields: [companyId, entryId], references: [companyId, id], onDelete: Restrict)
+  account AccountingAccount @relation(fields: [companyId, accountId], references: [companyId, id], onDelete: Restrict)
+
+  @@unique([entryId, position])
+  @@index([companyId, accountId])
+  @@map("journal_entry_lines")
+}
 
 model VehicleExpense {
   id                    String                     @id @default(cuid())

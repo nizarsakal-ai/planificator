@@ -12,6 +12,7 @@ import { PlanificatorLogo } from "@/components/brand/PlanificatorLogo"
 import {
   getNavItems,
   getActiveNavHref,
+  withAccountingNavItem,
   ROLE_LABELS,
   type NavItem,
 } from "@/lib/navigation/nav-config"
@@ -26,6 +27,8 @@ interface SidebarUser {
   image?: string | null
   role: Role
   companyId: string | null
+  /** Calculé côté serveur (flag + rôle + société) ; affichage seulement, pas une autorisation. */
+  accountingNavVisible?: boolean
 }
 
 // ─── Composant NavItem ────────────────────────────────────────────────────────
@@ -62,7 +65,7 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 
 export function Sidebar({ user }: { user: SidebarUser }) {
   const pathname = usePathname()
-  const navItems = getNavItems(user.role)
+  const navItems = withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true)
   const activeHref = getActiveNavHref(navItems, pathname)
 
   return (

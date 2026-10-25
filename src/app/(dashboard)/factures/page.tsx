@@ -22,6 +22,7 @@ const STATUS_META: Record<string, { label: string; className: string }> = {
   PAID:      { label: "Payée",     className: "bg-green-50 text-green-600" },
   CANCELLED: { label: "Annulée",   className: "bg-red-50 text-red-500" },
 }
+const CREDIT_NOTE_META = { label: "Avoir émis", className: "bg-amber-50 text-amber-700" }
 
 export default async function FacturesPage() {
   const session = await auth()
@@ -35,7 +36,7 @@ export default async function FacturesPage() {
       where:   { companyId },
       orderBy: { createdAt: "desc" },
       select: {
-        id: true, number: true, status: true, totalTTC: true,
+        id: true, number: true, status: true, kind: true, totalTTC: true,
         periodStart: true, periodEnd: true, sentAt: true,
         worksite: { select: { name: true } },
         client:   { select: { name: true } },
@@ -57,6 +58,7 @@ export default async function FacturesPage() {
     id:          inv.id,
     number:      inv.number,
     status:      inv.status,
+    kind:        inv.kind,
     totalTTC:    inv.totalTTC.toNumber(),
     periodStart: inv.periodStart,
     periodEnd:   inv.periodEnd,
@@ -82,9 +84,9 @@ export default async function FacturesPage() {
   }))
 
   const kpi = {
-    draft: invoices.filter((i) => i.status === "DRAFT").length,
-    sent:  invoices.filter((i) => i.status === "SENT").length,
-    paid:  invoices.filter((i) => i.status === "PAID").length,
+    draft: invoices.filter((i) => i.kind === "INVOICE" && i.status === "DRAFT").length,
+    sent:  invoices.filter((i) => i.kind === "INVOICE" && i.status === "SENT").length,
+    paid:  invoices.filter((i) => i.kind === "INVOICE" && i.status === "PAID").length,
   }
 
   return (
@@ -148,7 +150,7 @@ export default async function FacturesPage() {
                 </thead>
                 <tbody>
                   {invoices.map((inv) => {
-                    const meta = STATUS_META[inv.status] ?? STATUS_META.DRAFT
+                    const meta = inv.kind === "CREDIT_NOTE" ? CREDIT_NOTE_META : (STATUS_META[inv.status] ?? STATUS_META.DRAFT)
                     return (
                       <tr key={inv.id} className="border-b last:border-0 hover:bg-slate-50/60">
                         <td className="px-4 py-3 font-mono text-xs text-slate-600">{inv.number}</td>
@@ -160,7 +162,7 @@ export default async function FacturesPage() {
                             : "—"}
                         </td>
                         <td className="px-4 py-3 text-right tabular-nums font-medium text-slate-800">
-                          {eur.format(inv.totalTTC)}
+                          {inv.kind === "CREDIT_NOTE" ? `− ${eur.format(inv.totalTTC)}` : eur.format(inv.totalTTC)}
                         </td>
                         <td className="px-4 py-3">
                           <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${meta.className}`}>
@@ -168,7 +170,7 @@ export default async function FacturesPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3">
-                          <InvoiceStatusButtons id={inv.id} status={inv.status} />
+                          <InvoiceStatusButtons id={inv.id} status={inv.status} kind={inv.kind} />
                         </td>
                       </tr>
                     )

@@ -82,4 +82,4 @@ Un ADR **DOIT** contenir au minimum (ES-001-§21.2) :
 
 | ID | Titre | Statut |
 |----|-------|--------|
-| — | Aucun ADR pour l’instant | — |
+| [ADR-PLAN-003](ADR-PLAN-003-comptabilite-partie-double.md) | Comptabilité en partie double native, multi-société | Proposé |
