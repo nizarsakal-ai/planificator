@@ -39,6 +39,11 @@ export async function getBillingSettings(db: Db, companyId: string): Promise<Bil
   }
 }
 
+/** Variante pour les écrans comptables : contexte de session uniquement. */
+export function getBillingSettingsFor(db: Db, ctx: { companyId: string }): Promise<BillingSettingsView> {
+  return getBillingSettings(db, ctx.companyId)
+}
+
 /** SIREN = 9 premiers chiffres du SIRET (après suppression des espaces). */
 export function sirenFromSiret(siret: string | null | undefined): string | null {
   const digits = (siret ?? "").replace(/\s/g, "")

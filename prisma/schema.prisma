@@ -381,6 +381,13 @@ model Company {
   billingMailLogs         BillingMailLog[]
   invoicePayments         InvoicePayment[]
   invoiceDepositDeductions InvoiceDepositDeduction[]
+  accountingDocumentPostings AccountingDocumentPosting[]
+  suppliers               Supplier[]
+  supplierInvoices        SupplierInvoice[]
+  supplierInvoiceFiles    SupplierInvoiceFile[]
+  bankStatementImports    BankStatementImport[]
+  bankTransactions        BankTransaction[]
+  vatDeclarations         VatDeclaration[]
   acquisitionMessages     AcquisitionMessage[]
   worksiteImportDrafts    WorksiteImportDraft[]
   acquisitionAttachments  AcquisitionAttachment[]
@@ -591,6 +598,8 @@ model Invoice {
   // Lot C4 : avoirs partiels (TOTAL = Lot B, PARTIAL = plafonné au restant créditable).
   creditScope         InvoiceCreditScope?
   creditReason        String?
+  // Lot C5 : rapprochement bancaire.
+  bankTransactions    BankTransaction[] @relation("BankMatchedInvoice")
 
   // Relations
   // Lot B : pièces conservées — aucune suppression en cascade depuis la société ou le chantier.
@@ -636,6 +645,7 @@ model InvoicePayment {
   invoice  Invoice        @relation(fields: [companyId, invoiceId], references: [companyId, id], onDelete: Restrict)
   reverses InvoicePayment? @relation("PaymentReversal", fields: [reversesPaymentId], references: [id], onDelete: Restrict)
   reversedBy InvoicePayment? @relation("PaymentReversal")
+  bankTransaction BankTransaction? // Lot C5
 
   @@index([invoiceId])
   @@index([companyId, paidAt])
@@ -2415,6 +2425,8 @@ model AccountingAccount {
 
   company Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
   lines   JournalEntryLine[]
+  supplierDefaults Supplier[]        // Lot C5
+  supplierInvoices SupplierInvoice[] // Lot C5
 
   @@unique([companyId, number])
   @@unique([companyId, id])
@@ -2515,6 +2527,7 @@ model JournalEntry {
   reversalOf JournalEntry?      @relation("EntryReversal", fields: [companyId, reversalOfId], references: [companyId, id], onDelete: Restrict)
   reversedBy JournalEntry[]     @relation("EntryReversal")
   lines      JournalEntryLine[]
+  documentPostings AccountingDocumentPosting[] // Lot C5
 
   @@unique([companyId, id])
   @@unique([companyId, journalId, fiscalYearId, number])
@@ -2889,4 +2902,190 @@ model VehicleCartographyCache {
  company Company @relation(fields:[companyId],references:[id],onDelete:Cascade)
  @@index([expiresAt],map:"vehicle_cartography_cache_expiresAt_idx")
  @@map("vehicle_cartography_cache")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPTABILITÉ — Lot C5 (SPEC-BILLING-C5) : lien pièce ↔ écriture, fournisseurs, factures fournisseurs (OCR), banque,
+// déclarations de TVA. Tout porte companyId ; FK Restrict ; FK composites vers les tables comptables A1.
+// ═══════════════════════════════════════════════════════════════════════════
+
+model AccountingDocumentPosting {
+  id            String   @id @default(cuid())
+  companyId     String
+  sourceType    String   // INVOICE | CREDIT_NOTE | DEPOSIT | PAYMENT | SUPPLIER_INVOICE
+  sourceId      String
+  sourceVersion Int      @default(1)
+  entryId       String
+  createdAt     DateTime @default(now())
+
+  company Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  entry   JournalEntry @relation(fields: [companyId, entryId], references: [companyId, id], onDelete: Restrict)
+
+  @@unique([companyId, sourceType, sourceId, sourceVersion])
+  @@index([companyId, entryId])
+  @@map("accounting_document_postings")
+}
+
+model Supplier {
+  id                      String   @id @default(cuid())
+  companyId               String
+  name                    String
+  siret                   String?
+  vatNumber               String?
+  email                   String?
+  address                 String?
+  defaultExpenseAccountId String?
+  active                  Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  company               Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  defaultExpenseAccount AccountingAccount? @relation(fields: [companyId, defaultExpenseAccountId], references: [companyId, id], onDelete: Restrict)
+  invoices              SupplierInvoice[]
+
+  @@unique([companyId, siret])
+  @@index([companyId, name])
+  @@map("suppliers")
+}
+
+enum SupplierInvoiceStatus {
+  PENDING
+  VALIDATED
+  REJECTED
+}
+
+model SupplierInvoiceFile {
+  id           String   @id @default(cuid())
+  companyId    String
+  sha256       String
+  mime         String
+  size         Int
+  data         Bytes
+  originalName String
+  createdAt    DateTime @default(now())
+
+  company  Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  invoices SupplierInvoice[]
+
+  @@unique([companyId, sha256])
+  @@map("supplier_invoice_files")
+}
+
+model SupplierInvoice {
+  id               String                @id @default(cuid())
+  companyId        String
+  supplierId       String?
+  supplierName     String
+  siret            String?
+  number           String
+  date             DateTime              @db.Date
+  dueDate          DateTime?             @db.Date
+  totalHTCents     BigInt
+  vatCents         BigInt
+  totalTTCCents    BigInt
+  vatRateBp        Int?
+  category         String?
+  expenseAccountId String?
+  status           SupplierInvoiceStatus @default(PENDING)
+  fileId           String?
+  ocrProvider      String?
+  ocrRaw           Json?
+  ocrConfidence    Json?
+  validatedAt      DateTime?
+  validatedById    String?
+  paidAt           DateTime?             @db.Date
+  notes            String?
+  createdById      String
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  company        Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  supplier       Supplier?            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  expenseAccount AccountingAccount?   @relation(fields: [companyId, expenseAccountId], references: [companyId, id], onDelete: Restrict)
+  file           SupplierInvoiceFile? @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  bankTransactions BankTransaction[]
+
+  @@index([companyId, status])
+  @@index([companyId, date])
+  @@index([companyId, supplierId])
+  @@map("supplier_invoices")
+}
+
+model BankStatementImport {
+  id           String   @id @default(cuid())
+  companyId    String
+  fileName     String
+  sha256       String
+  rowCount     Int
+  mapping      Json
+  importedById String
+  createdAt    DateTime @default(now())
+
+  company      Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  transactions BankTransaction[]
+
+  @@unique([companyId, sha256])
+  @@map("bank_statement_imports")
+}
+
+enum BankTransactionStatus {
+  PENDING
+  MATCHED
+  IGNORED
+}
+
+model BankTransaction {
+  id                       String                @id @default(cuid())
+  companyId                String
+  importId                 String
+  date                     DateTime              @db.Date
+  label                    String
+  amountCents              BigInt
+  reference                String?
+  fingerprint              String
+  status                   BankTransactionStatus @default(PENDING)
+  matchedInvoiceId         String?
+  matchedPaymentId         String?
+  matchedSupplierInvoiceId String?
+  matchedAt                DateTime?
+  notes                    String?
+  createdAt                DateTime              @default(now())
+
+  company                Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  import                 BankStatementImport @relation(fields: [importId], references: [id], onDelete: Restrict)
+  matchedInvoice         Invoice?            @relation("BankMatchedInvoice", fields: [companyId, matchedInvoiceId], references: [companyId, id], onDelete: Restrict)
+  matchedPayment         InvoicePayment?     @relation(fields: [matchedPaymentId], references: [id], onDelete: Restrict)
+  matchedSupplierInvoice SupplierInvoice?    @relation(fields: [matchedSupplierInvoiceId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, fingerprint])
+  @@unique([matchedPaymentId])
+  @@index([companyId, status])
+  @@index([companyId, date])
+  @@map("bank_transactions")
+}
+
+enum VatDeclarationStatus {
+  DRAFT
+  DECLARED
+}
+
+model VatDeclaration {
+  id              String               @id @default(cuid())
+  companyId       String
+  periodStart     DateTime             @db.Date
+  periodEnd       DateTime             @db.Date
+  basis           VatRegime
+  collectedCents  BigInt
+  deductibleCents BigInt
+  dueCents        BigInt
+  details         Json
+  status          VatDeclarationStatus @default(DECLARED)
+  declaredAt      DateTime?
+  createdById     String
+  createdAt       DateTime             @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, periodStart, periodEnd])
+  @@map("vat_declarations")
 }

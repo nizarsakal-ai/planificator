@@ -33,15 +33,25 @@ describe("/comptabilite (A2) — protection côté serveur de chaque écran (pas
     assert.deepEqual(UI_FILES, [
       `${UI_DIR}/balance/export/route.ts`,
       `${UI_DIR}/balance/page.tsx`,
+      `${UI_DIR}/banque/page.tsx`,
       `${UI_DIR}/ecritures/[id]/page.tsx`,
       `${UI_DIR}/ecritures/nouvelle/page.tsx`,
       `${UI_DIR}/ecritures/page.tsx`,
       `${UI_DIR}/exercices/page.tsx`,
+      `${UI_DIR}/factures/page.tsx`,
+      `${UI_DIR}/fec/export/route.ts`,
+      `${UI_DIR}/fec/page.tsx`,
+      `${UI_DIR}/fournisseurs/[id]/fichier/route.ts`,
+      `${UI_DIR}/fournisseurs/[id]/page.tsx`,
+      `${UI_DIR}/fournisseurs/nouvelle/page.tsx`,
+      `${UI_DIR}/fournisseurs/page.tsx`,
       `${UI_DIR}/grand-livre/export/route.ts`,
       `${UI_DIR}/grand-livre/page.tsx`,
       `${UI_DIR}/layout.tsx`,
       `${UI_DIR}/page.tsx`,
       `${UI_DIR}/plan/page.tsx`,
+      `${UI_DIR}/tableau-de-bord/page.tsx`,
+      `${UI_DIR}/tva/page.tsx`,
     ])
   })
 
@@ -85,6 +95,10 @@ describe("/comptabilite (A2) — protection côté serveur de chaque écran (pas
   })
 
   it("les Server Actions passent toutes par requireAccountingAdmin() et le moteur transactionnel", () => {
+    const srcC5 = code("src/lib/actions/accounting-c5.actions.ts")
+    assert.match(srcC5, /^"use server"/m)
+    assert.match(srcC5, /await requireAccountingAdmin\(\)/)
+    assert.doesNotMatch(srcC5, /companyId:\s*(raw|input|p\.data|body)/, "C5 : companyId jamais issu de l'entrée")
     const src = code("src/lib/accounting/actions/accounting.actions.ts")
     assert.match(src, /^"use server"/m)
     assert.match(src, /await requireAccountingAdmin\(\)/)
@@ -140,8 +154,13 @@ describe("flag — jamais exposé au navigateur", () => {
   })
 })
 
+// Lot C5 (SPEC-BILLING-C5) : la couche de raccordement src/lib/accounting/c5/ lit les pièces de facturation et écrit
+// ses propres tables (lien pièce ↔ écriture, fournisseurs, banque, TVA) ; le grand livre (journal_entries, lignes,
+// séquences, têtes de chaîne) n'est écrit QUE par le moteur A1 (createDraftEntry/postEntry).
+const C5_DIR = "src/lib/accounting/c5/"
 describe("A1 — périmètre du moteur comptable (aucun branchement facture, aucune écriture hors service)", () => {
   const A1_MIGRATION = "20261025200000_accounting_a1_engine"
+  const C5_MIGRATION = "20261026040000_accounting_c5"
   // transaction.ts n'écrit rien lui-même : il ouvre la transaction ($transaction) du moteur.
   const ENGINE_WRITERS = ["src/lib/accounting/engine/admin.ts", "src/lib/accounting/engine/fiscal-years.ts", "src/lib/accounting/engine/posting.ts", "src/lib/accounting/engine/setup.ts", "src/lib/accounting/engine/transaction.ts"]
 
@@ -149,7 +168,7 @@ describe("A1 — périmètre du moteur comptable (aucun branchement facture, auc
     const schema = read("prisma/schema.prisma")
     const found = [...schema.matchAll(/^(model|enum)\s+(Accounting\w*|Journal\w*|Ledger\w*|Fiscal\w*|Posting\w*|ChartOf\w*|VatRate\w*)/gm)].map((m) => m[2]).sort()
     assert.deepEqual(found, [
-      "AccountingAccount", "AccountingChainHead", "AccountingJournal", "AccountingJournalKind", "AccountingSequence",
+      "AccountingAccount", "AccountingChainHead", "AccountingDocumentPosting", "AccountingJournal", "AccountingJournalKind", "AccountingSequence",
       "FiscalYear", "FiscalYearStatus", "JournalEntry", "JournalEntryLine", "JournalEntryStatus",
     ])
     const entryModel = schema.slice(schema.indexOf("model JournalEntry {"), schema.indexOf("}", schema.indexOf("model JournalEntry {")))
@@ -160,7 +179,7 @@ describe("A1 — périmètre du moteur comptable (aucun branchement facture, auc
     const dirs = readdirSync(join(ROOT, "prisma/migrations"))
     assert.deepEqual(
       dirs.filter((d) => /accounting|comptabilit|ledger|fiscal_|posting|chart_of_accounts|_fec(_|$)|_vat(_|$)|_tva(_|$)/i.test(d)),
-      [A1_MIGRATION]
+      [A1_MIGRATION, C5_MIGRATION]
     )
   })
 
@@ -168,6 +187,14 @@ describe("A1 — périmètre du moteur comptable (aucun branchement facture, auc
     assert.ok(ACCOUNTING_LIB_FILES.length > 0)
     for (const file of ACCOUNTING_LIB_FILES) {
       const src = code(file)
+      if (file.startsWith(C5_DIR)) {
+        // Raccordement : jamais d'écriture directe au grand livre ni aux pièces de facturation (lecture seule), jamais de SQL brut d'écriture.
+        assert.doesNotMatch(src, /\b(prisma|tx|db)\.(journalEntry|journalEntryLine|accountingSequence|accountingChainHead|accountingJournal|fiscalYear)\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\(/, `${file} : grand livre écrit par le moteur uniquement`)
+        assert.doesNotMatch(src, /\b(prisma|tx|db)\.(invoice|invoiceLine|invoicePayment|quote|quoteLine|documentCounter)\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\(/, `${file} : pièces de facturation en lecture seule`)
+        assert.doesNotMatch(src, /\b(INSERT|UPDATE|DELETE)\s+(INTO\s+|FROM\s+)?"/, `${file} : aucun SQL brut d'écriture`)
+        assert.doesNotMatch(src, /from\s+["'][^"']*(acquisition|booking|gmail|openai)[^"']*["']/i, file)
+        continue
+      }
       if (!ENGINE_WRITERS.includes(file)) {
         assert.doesNotMatch(src, /\b(prisma|tx|db)\.\w+\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\(|\$executeRaw|\$transaction|\b(INSERT|UPDATE|DELETE)\s+(INTO\s+|FROM\s+)?"/, file)
       }
@@ -186,6 +213,16 @@ describe("A1 — périmètre du moteur comptable (aucun branchement facture, auc
       "src/lib/accounting/access/accounting-access.ts",
       "src/lib/accounting/accounting-feature-flag.ts",
       "src/lib/accounting/actions/accounting.actions.ts",
+      "src/lib/accounting/c5/auto-post.ts",
+      "src/lib/accounting/c5/bank-import.ts",
+      "src/lib/accounting/c5/bank.service.ts",
+      "src/lib/accounting/c5/dashboard.ts",
+      "src/lib/accounting/c5/fec.ts",
+      "src/lib/accounting/c5/ocr-provider.ts",
+      "src/lib/accounting/c5/postings.ts",
+      "src/lib/accounting/c5/supplier-invoice.service.ts",
+      "src/lib/accounting/c5/vat-declaration.ts",
+      "src/lib/accounting/c5/vat.ts",
       "src/lib/accounting/engine/admin.ts",
       "src/lib/accounting/engine/canonical.ts",
       "src/lib/accounting/engine/fiscal-years.ts",

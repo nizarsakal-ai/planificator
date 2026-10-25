@@ -11,8 +11,15 @@ const ITEMS = [
   { href: "/comptabilite/grand-livre", label: "Grand livre" },
   { href: "/comptabilite/plan", label: "Plan comptable" },
   { href: "/comptabilite/exercices", label: "Exercices" },
+  // Lot C5 (SPEC-BILLING-C5) : modules annoncés « à venir » par A2, désormais livrés.
+  { href: "/comptabilite/tableau-de-bord", label: "Tableau de bord" },
+  { href: "/comptabilite/factures", label: "Écritures depuis les factures" },
+  { href: "/comptabilite/tva", label: "TVA" },
+  { href: "/comptabilite/fec", label: "Export FEC" },
+  { href: "/comptabilite/banque", label: "Banque et rapprochement" },
+  { href: "/comptabilite/fournisseurs", label: "Factures fournisseurs" },
 ]
-// Place réservée aux modules suivants (SPEC-ACC-A2 §6) : visibles, non cliquables.
+// Place réservée aux modules suivants (SPEC-ACC-A2 §6) : liste vide depuis le Lot C5.
 
 export function AccountingNav() {
   const pathname = usePathname()

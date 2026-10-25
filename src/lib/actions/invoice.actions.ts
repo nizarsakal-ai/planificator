@@ -212,6 +212,9 @@ export async function createCreditNote(invoiceId: string, reason?: unknown) {
     throw error
   }
   if (!result.ok) return { error: result.error }
+  // Lot C5 : écriture de l'avoir (si l'auto-génération comptable est activée ; jamais bloquant).
+  const { autoPostIfEnabled } = await import("@/lib/accounting/c5/auto-post")
+  await autoPostIfEnabled(prisma, { companyId: user.companyId!, userId: user.id }, "INVOICE", result.value.id)
 
   revalidatePath("/factures")
   return { success: true, id: result.value.id, number: result.value.number }

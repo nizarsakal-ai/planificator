@@ -7,6 +7,7 @@ import { BillingAccessError, billingAccessMessage, requireBillingAdmin } from "@
 import { MoneyError, parseEuroInputToCents, parseQuantityToHundredths } from "@/lib/billing/money"
 import { createPartialCreditNote } from "@/lib/billing/invoices/credit-note.service"
 import type { CreditRequest } from "@/lib/billing/invoices/credit-note.core"
+import { autoPostIfEnabled } from "@/lib/accounting/c5/auto-post"
 
 type Result<T = Record<never, never>> = ({ ok: true } & T) | { ok: false; error: string }
 const idSchema = z.string().trim().min(1).max(64)
@@ -31,6 +32,7 @@ export async function createPartialCreditNoteAction(invoiceId: unknown, raw: unk
     const c = await requireBillingAdmin()
     const r = await createPartialCreditNote(prisma, { companyId: c.companyId, userId: c.userId }, id.data, request, p.data.reason, new Date())
     if (!r.ok) return { ok: false, error: r.error }
+    await autoPostIfEnabled(prisma, { companyId: c.companyId, userId: c.userId }, "INVOICE", r.value.id)
     revalidatePath("/factures", "layout"); revalidatePath("/comptabilite", "layout")
     return { ok: true, id: r.value.id, number: r.value.number, originStatus: r.value.originStatus }
   } catch (error) {

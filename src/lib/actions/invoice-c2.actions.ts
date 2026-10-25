@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma"
 import { BillingAccessError, billingAccessMessage, requireBillingAdmin } from "@/lib/billing/access"
 import { parseInvoiceForm, parsePaymentForm } from "@/lib/billing/invoices/invoice-schemas"
 import { createDraftInvoice, issueInvoice, recordPayment, reversePayment, sendInvoiceMail, sendManualReminder, updateDraftInvoice } from "@/lib/billing/invoices/invoice.service"
+import { autoPostIfEnabled } from "@/lib/accounting/c5/auto-post"
 
 type Result<T = Record<never, never>> = ({ ok: true } & T) | { ok: false; error: string }
 const idSchema = z.string().trim().min(1).max(64)
@@ -57,7 +58,7 @@ export async function updateInvoiceC2Action(invoiceId: unknown, raw: unknown): P
 export async function issueInvoiceAction(invoiceId: unknown): Promise<Result<{ number: string }>> {
   const id = idSchema.safeParse(invoiceId)
   if (!id.success) return { ok: false, error: "Facture introuvable." }
-  const r = await run((ctx) => issueInvoice(prisma, ctx, id.data, new Date()))
+  const r = await run(async (ctx) => { const x = await issueInvoice(prisma, ctx, id.data, new Date()); if (x.ok) await autoPostIfEnabled(prisma, ctx, "INVOICE", id.data); return x })
   return r.ok ? { ok: true, number: r.value.number } : r
 }
 
@@ -73,7 +74,7 @@ export async function recordPaymentAction(invoiceId: unknown, raw: unknown): Pro
   if (!id.success) return { ok: false, error: "Facture introuvable." }
   const p = parsePaymentForm(raw)
   if (!p.ok) return { ok: false, error: p.error }
-  const r = await run((ctx) => recordPayment(prisma, ctx, id.data, p.value, new Date()))
+  const r = await run(async (ctx) => { const x = await recordPayment(prisma, ctx, id.data, p.value, new Date()); if (x.ok) await autoPostIfEnabled(prisma, ctx, "PAYMENT", x.value.paymentId); return x })
   return r.ok ? { ok: true, status: r.value.status, remaining: r.value.remainingCents.toString() } : r
 }
 
@@ -81,7 +82,11 @@ export async function reversePaymentAction(paymentId: unknown, reason: unknown):
   const id = idSchema.safeParse(paymentId)
   if (!id.success) return { ok: false, error: "Paiement introuvable." }
   const motive = typeof reason === "string" ? reason.trim().slice(0, 500) : ""
-  const r = await run((ctx) => reversePayment(prisma, ctx, id.data, motive || null, new Date()))
+  const r = await run(async (ctx) => {
+    const x = await reversePayment(prisma, ctx, id.data, motive || null, new Date())
+    if (x.ok) { const rev = await prisma.invoicePayment.findFirst({ where: { companyId: ctx.companyId, reversesPaymentId: id.data }, select: { id: true } }); if (rev) await autoPostIfEnabled(prisma, ctx, "PAYMENT", rev.id) }
+    return x
+  })
   return r.ok ? { ok: true, status: r.value.status } : r
 }
 

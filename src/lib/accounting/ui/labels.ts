@@ -2,7 +2,7 @@
 const dateFrFmt = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" })
 
 /** Modules réservés (SPEC-ACC-A2 §6) : affichés « à venir », non cliquables. Constante hors module client pour être lisible côté serveur. */
-export const UPCOMING_MODULES: readonly string[] = ["Export FEC", "TVA", "Banque et rapprochement", "Écritures depuis les factures"]
+export const UPCOMING_MODULES: readonly string[] = [] // Lot C5 : Export FEC, TVA, Banque et rapprochement, Écritures depuis les factures livrés.
 
 export const FISCAL_YEAR_STATUS: Record<string, string> = { OPEN: "Ouvert", CLOSING: "En clôture", CLOSED: "Clôturé" }
 export const ENTRY_STATUS: Record<string, string> = { DRAFT: "Brouillon", VALIDATED: "Validée" }
