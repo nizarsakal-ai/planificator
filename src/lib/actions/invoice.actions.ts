@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
 import { createInvoiceSchema, invoiceLineSchema, type InvoiceLineInput } from "@/lib/validations/invoice"
 import { nextDocumentNumber } from "@/lib/billing/numbering"
+import { businessYear } from "@/lib/billing/business-day"
 import { flushDeferredConstraints } from "@/lib/deferred-constraints"
 import { computeLineHT, computeTotals } from "@/lib/billing/totals"
 import {
@@ -28,6 +29,7 @@ function billingIntegrityError(error: unknown): string | null {
   if (code.startsWith("PAYMENT_")) return "Opération refusée : des paiements sont enregistrés sur cette facture (utilisez la fiche facture)."
   if (code === "CREDIT_NOTE_INVALID") return "Avoir refusé : il doit reprendre exactement la facture d'origine."
   if (code === "INVOICE_CANCEL_WITHOUT_CREDIT_NOTE") return "Une facture émise ne s'annule que par un avoir."
+  if (code.startsWith("DEPOSIT_DEDUCTION_")) return "Déductions d'acomptes incohérentes : recalculez-les (facturation complète) avant d'émettre."
   return "Opération refusée : une facture émise n'est plus modifiable."
 }
 
@@ -84,6 +86,8 @@ export async function createInvoice(input: unknown) {
   const totals = computeTotals(data.lines)
 
   const invoice = await prisma.$transaction(async (tx) => {
+    // S2 (ordre global) : le devis lié est verrouillé AVANT le compteur (sinon : compteur puis KEY SHARE du devis, ordre inverse de l'émission d'un solde).
+    if (data.quoteId) await tx.$queryRaw`SELECT 1 FROM "quotes" WHERE "id" = ${data.quoteId} AND "companyId" = ${user.companyId!} FOR NO KEY UPDATE`
     const number = await nextDocumentNumber(tx, user.companyId!, "INVOICE")
     const created = await tx.invoice.create({
       data: {
@@ -169,7 +173,7 @@ export async function updateInvoiceStatus(invoiceId: string, status: unknown) {
   let result
   try {
     result = await prisma.$transaction(async (tx) => {
-      const r = await transitionInvoiceCore(tx, { companyId: user.companyId!, invoiceId, to, actorId: user.id, now: new Date() })
+      const r = await transitionInvoiceCore(tx, { companyId: user.companyId!, invoiceId, to, actorId: user.id, now: new Date(), nextNumber: (t, year) => nextDocumentNumber(t, user.companyId!, "INVOICE", year) })
       if (r.ok) await flushDeferredConstraints(tx)
       return r
     })
@@ -199,7 +203,7 @@ export async function createCreditNote(invoiceId: string, reason?: unknown) {
         actorId: user.id,
         reason: motive || null,
         now: new Date(),
-        nextNumber: (t) => nextDocumentNumber(t, user.companyId!, "CREDIT_NOTE"),
+        nextNumber: (t, at) => nextDocumentNumber(t, user.companyId!, "CREDIT_NOTE", businessYear(at)),
       })
       // Prisma avale les erreurs levées au COMMIT : les invariants différés (avoir = copie exacte,
       // annulation par avoir uniquement) sont évalués ici, avant le COMMIT.

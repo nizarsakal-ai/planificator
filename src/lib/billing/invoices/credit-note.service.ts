@@ -11,6 +11,8 @@ import { enablePaymentsContext, lockInvoiceRow } from "./invoice.service"
 import { statusForPaid, sumPayments } from "./invoice-c2.core"
 import { computeCreditLines, type CreditRequest } from "./credit-note.core"
 import { captureDocumentSnapshot } from "@/lib/billing/pdf/document-snapshot"
+import { decisionClock } from "@/lib/billing/clock"
+import { businessDay } from "@/lib/billing/business-day"
 
 type Db = PrismaClient
 export interface CreditContext { companyId: string; userId: string }
@@ -38,6 +40,7 @@ export async function creditedPartialCents(tx: Prisma.TransactionClient | Db, co
 export async function createPartialCreditNote(db: Db, ctx: CreditContext, invoiceId: string, request: CreditRequest, reason: string, now: Date): Promise<LifecycleResult<{ id: string; number: string; ttcCents: bigint; originStatus: string }>> {
   const motive = reason.trim().slice(0, 500)
   if (motive.length < 3) return { ok: false, error: CREDIT_ERRORS.reason }
+  const decide = decisionClock(now) // S3 : créée avant le verrou
   return db.$transaction(async (tx) => {
     await enablePaymentsContext(tx)
     await lockInvoiceRow(tx, invoiceId, ctx.companyId)
@@ -70,11 +73,14 @@ export async function createPartialCreditNote(db: Db, ctx: CreditContext, invoic
     if (o.status === "PAID" && paidBefore === BigInt(0) && already === BigInt(0) && ttc > BigInt(0)) return { ok: false, error: CREDIT_ERRORS.settledOutside }
     if (paidBefore + already + computed.totals.totalTTCCents > ttc) return { ok: false, error: CREDIT_ERRORS.exceedsPaid }
 
-    const number = await nextDocumentNumber(tx, ctx.companyId, "CREDIT_NOTE", now.getUTCFullYear())
+    // Correctif S3 : instant de décision relu après le verrou ; date d'émission de l'avoir = jour civil Europe/Paris ; série AV = son année.
+    const at = decide()
+    const issueDate = businessDay(at)
+    const number = await nextDocumentNumber(tx, ctx.companyId, "CREDIT_NOTE", issueDate.getUTCFullYear())
     const note = await tx.invoice.create({
       data: {
         companyId: ctx.companyId, worksiteId: o.worksiteId, clientId: o.clientId, quoteId: o.quoteId, number, kind: "CREDIT_NOTE", creditScope: "PARTIAL", creditedInvoiceId: o.id, creditReason: motive,
-        status: "DRAFT", issueDate: now, periodStart: o.periodStart, periodEnd: o.periodEnd, paymentTerms: o.paymentTerms,
+        status: "DRAFT", issueDate, periodStart: o.periodStart, periodEnd: o.periodEnd, paymentTerms: o.paymentTerms,
         globalDiscountBp: request.kind === "LINES" ? o.globalDiscountBp : 0, vatReverseCharge: o.vatReverseCharge,
         totalHT: centsToDecimalString(computed.totals.totalHTCents), totalVAT: centsToDecimalString(computed.totals.totalVATCents), totalTTC: centsToDecimalString(computed.totals.totalTTCCents),
         notes: `Avoir partiel sur la facture ${o.number} — ${motive}`, createdById: ctx.userId,
@@ -82,7 +88,7 @@ export async function createPartialCreditNote(db: Db, ctx: CreditContext, invoic
       },
       select: { id: true, number: true },
     })
-    const issued = await tx.invoice.updateMany({ where: { id: note.id, companyId: ctx.companyId, status: "DRAFT", kind: "CREDIT_NOTE" }, data: { status: "SENT", sentAt: now } })
+    const issued = await tx.invoice.updateMany({ where: { id: note.id, companyId: ctx.companyId, status: "DRAFT", kind: "CREDIT_NOTE" }, data: { status: "SENT", sentAt: at } })
     if (issued.count !== 1) throw new Error("CREDIT_NOTE_ISSUE_FAILED")
     // Correctif P2-03 : l'avoir est une nouvelle pièce émise, à l'identité documentaire figée.
     await captureDocumentSnapshot(tx, ctx.companyId, note.id)
@@ -92,7 +98,7 @@ export async function createPartialCreditNote(db: Db, ctx: CreditContext, invoic
     const remaining = ttc - paid - (already + computed.totals.totalTTCCents)
     let originStatus = o.status
     if (remaining <= BigInt(0) && (o.status === "SENT" || o.status === "PARTIAL")) {
-      const u = await tx.invoice.updateMany({ where: { id: o.id, companyId: ctx.companyId, status: o.status }, data: { status: "PAID", paidAt: now } })
+      const u = await tx.invoice.updateMany({ where: { id: o.id, companyId: ctx.companyId, status: o.status }, data: { status: "PAID", paidAt: at } })
       if (u.count !== 1) throw new Error("INVOICE_STATUS_CONFLICT")
       originStatus = "PAID"
     }

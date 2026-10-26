@@ -13,6 +13,10 @@ import type { LifecycleResult } from "@/lib/billing/quotes/quote-lifecycle.core"
 import { LifecycleAbort, withLifecycleAbort } from "@/lib/billing/lifecycle-abort"
 import { INVOICE_C2_ERRORS, issueInvoiceCore, recordPaymentCore, replaceInvoiceDraftCore, reversePaymentCore, type InvoiceDraftLine, type PaymentStatus } from "./invoice-c2.core"
 import { depositIssueChecks } from "./deposit.service"
+import { lockQuoteRow } from "@/lib/billing/quotes/quote.service"
+import { businessYear } from "@/lib/billing/business-day"
+import { isTransientConcurrencyError } from "@/lib/accounting/engine/transaction"
+import { decisionClock } from "@/lib/billing/clock"
 import type { ParsedInvoice } from "./invoice-schemas"
 
 export interface InvoiceContext { companyId: string; userId: string }
@@ -71,11 +75,11 @@ export async function createDraftInvoice(db: Db, ctx: InvoiceContext, parsed: Pa
     // Le devis lié est verrouillé (aucune facture existante à verrouiller avant : ordre facture → devis respecté) : sérialise avec
     // convertQuote/createDraftInvoice concurrents ; contrôle « déjà lié » relu sous verrou, l'index unique partiel reste le filet.
     if (parsed.quoteId) {
-      await tx.$queryRaw`SELECT 1 FROM "quotes" WHERE "id" = ${parsed.quoteId} AND "companyId" = ${ctx.companyId} FOR UPDATE`
+      await lockQuoteRow(tx, parsed.quoteId, ctx.companyId)
       const linked = await tx.invoice.findFirst({ where: { companyId: ctx.companyId, quoteId: parsed.quoteId, kind: "INVOICE", status: { not: "CANCELLED" } }, select: { id: true } })
       if (linked) return null
     }
-    const number = await nextDocumentNumber(tx, ctx.companyId, "INVOICE_DRAFT", now.getUTCFullYear())
+    const number = await nextDocumentNumber(tx, ctx.companyId, "INVOICE_DRAFT", businessYear(now))
     const inv = await tx.invoice.create({
       data: {
         companyId: ctx.companyId, worksiteId: parsed.worksiteId, clientId: refs.value.clientId, quoteId: parsed.quoteId, number, status: "DRAFT", kind: "INVOICE",
@@ -100,12 +104,21 @@ export async function createDraftInvoice(db: Db, ctx: InvoiceContext, parsed: Pa
 export async function updateDraftInvoice(db: Db, ctx: InvoiceContext, invoiceId: string, parsed: ParsedInvoice): Promise<LifecycleResult> {
   const refs = await checkReferences(db, ctx, { ...parsed, currentInvoiceId: invoiceId } as ParsedInvoice)
   if (!refs.ok) return refs
-  return withLifecycleAbort(() => db.$transaction(async (tx) => {
-    // Ordre global des verrous (voir deposit.service.ts) : FACTURE → DEVIS → ACOMPTES. La facture d'abord (comme issueInvoiceCore), puis le
-    // devis lié ; une émission concurrente tenant la facture est attendue, puis la modification est refusée (plus un brouillon) — jamais d'interblocage.
+  return withLifecycleAbort(() => withLockRetry(() => db.$transaction(async (tx) => {
+    // Ordre global des verrous (correctif S2, voir deposit.service.ts) : DEVIS → FACTURE → ACOMPTES. Les devis concernés (ancien lien lu
+    // sans verrou, nouveau lien) sont verrouillés d'abord par identifiant croissant, puis la facture ; une émission concurrente tenant le
+    // devis et la facture est attendue, puis la modification est refusée (plus un brouillon) — jamais d'interblocage.
+    const pre = await tx.invoice.findFirst({ where: { id: invoiceId, companyId: ctx.companyId }, select: { quoteId: true } })
+    const quoteIds = [...new Set([pre?.quoteId ?? null, parsed.quoteId ?? null].filter((q): q is string => !!q))].sort()
+    for (const q of quoteIds) await lockQuoteRow(tx, q, ctx.companyId)
     await lockInvoiceRow(tx, invoiceId, ctx.companyId)
+    const cur = await tx.invoice.findFirst({ where: { id: invoiceId, companyId: ctx.companyId }, select: { quoteId: true, status: true, kind: true, _count: { select: { depositDeductions: true, lines: { where: { deductsDepositId: { not: null } } } } } } })
+    if (!cur) return { ok: false as const, error: INVOICE_C2_ERRORS.notFound }
+    if ((cur.quoteId ?? null) !== (pre?.quoteId ?? null)) return { ok: false as const, error: INVOICE_C2_ERRORS.conflict } // lien changé entre la lecture et le verrou
+    // Correctif S1 : une facture de solde qui déduit des acomptes émis garde son devis — ni retrait, ni changement (sinon la liaison
+    // financière survivrait sans ligne de déduction). Refus AVANT toute écriture ; l'abandon du brouillon libère les acomptes.
+    if ((cur._count.depositDeductions > 0 || cur._count.lines > 0) && (parsed.quoteId ?? null) !== (cur.quoteId ?? null)) return { ok: false as const, error: INVOICE_C2_ERRORS.quoteLocked }
     if (parsed.quoteId) {
-      await tx.$queryRaw`SELECT 1 FROM "quotes" WHERE "id" = ${parsed.quoteId} AND "companyId" = ${ctx.companyId} FOR UPDATE`
       // Audit A2 : contrôle « devis déjà lié » SOUS verrou du devis (l'index unique partiel reste le filet).
       const linked = await tx.invoice.findFirst({ where: { companyId: ctx.companyId, quoteId: parsed.quoteId, kind: "INVOICE", status: { not: "CANCELLED" }, id: { not: invoiceId } }, select: { id: true } })
       if (linked) throw new LifecycleAbort(QUOTE_ALREADY_LINKED)
@@ -120,20 +133,36 @@ export async function updateDraftInvoice(db: Db, ctx: InvoiceContext, invoiceId:
     }
     await flushDeferredConstraints(tx)
     return r
-  }).catch((e) => { if (isOneFinalPerQuoteViolation(e)) throw new LifecycleAbort(QUOTE_ALREADY_LINKED); throw e }))
+  }).catch((e) => { if (isOneFinalPerQuoteViolation(e)) throw new LifecycleAbort(QUOTE_ALREADY_LINKED); throw e })))
 }
 
-export async function issueInvoice(db: Db, ctx: InvoiceContext, invoiceId: string, now: Date): Promise<LifecycleResult<{ number: string }>> {
+/**
+ * Correctif S2 (défense en profondeur) : l'ordre global des verrous prévient l'interblocage ; si PostgreSQL en détectait malgré tout un
+ * (40P01, remonté par Prisma en P2034), la transaction entière est rejouée (bornée) après rollback — jamais une erreur brute.
+ */
+export async function withLockRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  for (let i = 1; ; i++) {
+    try { return await fn() } catch (e) {
+      // Interblocage/sérialisation remontés par Prisma en P2034 OU en P2010 (requête brute, SET CONSTRAINTS) avec SQLSTATE 40P01/40001 :
+      // même détection que le moteur comptable (isTransientConcurrencyError).
+      if (!isTransientConcurrencyError(e) || i >= attempts) throw e
+      await new Promise((r) => setTimeout(r, 20 * i + Math.floor(Math.random() * 30)))
+    }
+  }
+}
+
+export async function issueInvoice(db: Db, ctx: InvoiceContext, invoiceId: string, now: Date, clock?: () => Date): Promise<LifecycleResult<{ number: string }>> {
+  const decide = decisionClock(now, clock) // horloge de décision créée dès l'entrée (le temps des lectures préalables compte)
   const s = await getBillingSettings(db, ctx.companyId)
-  const r = await db.$transaction(async (tx) => {
+  const r = await withLockRetry(() => db.$transaction(async (tx) => {
     const r = await issueInvoiceCore(tx, {
-      companyId: ctx.companyId, invoiceId, actorId: ctx.userId, now, paymentTermsDays: s.paymentTermsDays,
-      nextLegalNumber: (t, year) => nextDocumentNumber(t, ctx.companyId, "INVOICE", year), lockInvoice: lockInvoiceRow,
+      companyId: ctx.companyId, invoiceId, actorId: ctx.userId, now, clock: decide, paymentTermsDays: s.paymentTermsDays,
+      nextLegalNumber: (t, year) => nextDocumentNumber(t, ctx.companyId, "INVOICE", year), lockInvoice: lockInvoiceRow, lockQuote: lockQuoteRow,
       extraChecks: (t, inv) => depositIssueChecks(t, ctx.companyId, inv),
     })
     if (r.ok) await flushDeferredConstraints(tx)
     return r
-  })
+  }))
   return r.ok ? { ok: true, value: { number: r.value.number } } : r
 }
 

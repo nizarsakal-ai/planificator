@@ -3,6 +3,7 @@ import type { Prisma, PrismaClient } from "@prisma/client"
 import { decimalToCents } from "@/lib/billing/money"
 import { DocumentIntegrityError, recomputeDocumentTotals, storedTotalsMatch } from "@/lib/billing/document-integrity"
 import { computeVat } from "./vat"
+import { businessDay } from "@/lib/billing/business-day"
 
 type Db = PrismaClient | Prisma.TransactionClient
 
@@ -19,7 +20,9 @@ export interface DashboardData {
 
 export async function accountingDashboard(db: Db, ctx: { companyId: string }, now: Date, vatRegime: "DEBITS" | "ENCAISSEMENTS"): Promise<DashboardData> {
   const companyId = ctx.companyId
-  const y = now.getUTCFullYear(), m = now.getUTCMonth()
+  // S3 (même famille) : « aujourd'hui », mois et année courants = jour civil Europe/Paris de l'instant.
+  const todayDay = businessDay(now)
+  const y = todayDay.getUTCFullYear(), m = todayDay.getUTCMonth()
   const yearStart = new Date(Date.UTC(y, 0, 1)), monthStart = new Date(Date.UTC(y, m, 1))
   const start12 = new Date(Date.UTC(y, m - 11, 1))
   const docs = await db.invoice.findMany({
@@ -40,7 +43,7 @@ export async function accountingDashboard(db: Db, ctx: { companyId: string }, no
     if (buckets.has(key)) buckets.set(key, (buckets.get(key) ?? BigInt(0)) + ht)
   }
   const open = await db.invoice.findMany({ where: { companyId, status: { in: ["SENT", "PARTIAL"] }, kind: { not: "CREDIT_NOTE" } }, select: { totalTTC: true, dueDate: true, payments: { select: { amountCents: true } }, creditNotes: { where: { creditScope: "PARTIAL", status: { not: "CANCELLED" } }, select: { totalTTC: true } } } })
-  const today = new Date(Date.UTC(y, m, now.getUTCDate()))
+  const today = todayDay
   let remaining = BigInt(0), overdueCount = 0
   // Reste dû = TTC − paiements − avoirs partiels (règle C2/C4).
   for (const i of open) { remaining += decimalToCents(i.totalTTC) - i.payments.reduce((s, p) => s + p.amountCents, BigInt(0)) - i.creditNotes.reduce((s, c) => s + decimalToCents(c.totalTTC), BigInt(0)); if (i.dueDate && i.dueDate < today) overdueCount++ }

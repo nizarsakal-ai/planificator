@@ -141,7 +141,13 @@ export async function computeVat(db: Db, ctx: { companyId: string }, periodStart
         if (e.date < periodStart || e.date > end) return
         inPeriodEvents++
         if (e.event.kind === "PAYMENT") payments++
-        else if (allocated[i].parts.length > 0) adjustments++
+        else if (allocated[i].parts.length > 0) {
+          adjustments++
+          // Cycle R3 (réserve fiscale R1 de la revue Codex) : la réaffectation par taux d'un encaissement ANTÉRIEUR à l'avoir est une
+          // hypothèse non validée par l'expert-comptable ⇒ signalée comme hors contrat : la déclaration de la période est refusée (R5)
+          // tant que la règle n'est pas validée. Le calcul reste affiché (aperçu) ; rien n'est figé.
+          warnings.push(`Avoir ${e.number} sur la facture ${inv.number} après encaissement (facture multi-taux) : réaffectation de la TVA encaissée par taux à la date de l'avoir — règle en attente de validation par l'expert-comptable ; la déclaration de cette période est refusée jusqu'à validation.`)
+        }
         for (const part of allocated[i].parts) addRow(map, part.vatRateBp, part.baseCents, part.vatCents)
         if (allocated[i].excessCents > BigInt(0) && !excessWarned) {
           excessWarned = true

@@ -17,6 +17,8 @@
 import type { Prisma } from "@prisma/client"
 import { captureDocumentSnapshot, type SnapshotCapture } from "@/lib/billing/pdf/document-snapshot"
 import { centsToDecimalString, computeDocumentTotals, decimalToCents, storedVatRateToBp } from "@/lib/billing/money"
+import { decisionClock } from "@/lib/billing/clock"
+import { businessDay } from "@/lib/billing/business-day"
 
 // Lot C2 : PARTIAL (partiellement payée) — aucune transition manuelle depuis ce statut ; l'avoir total reste possible.
 export type InvoiceStatusValue = "DRAFT" | "SENT" | "PAID" | "CANCELLED" | "PARTIAL"
@@ -57,6 +59,9 @@ export const LIFECYCLE_ERRORS = {
   notCreditable: "Seule une facture émise (envoyée ou payée) peut faire l'objet d'un avoir.",
   alreadyCredited: "Cette facture a déjà un avoir.",
   provisionalNumber: "Cette facture porte un numéro provisoire : émettez-la depuis sa fiche (numéro légal attribué à l'émission).",
+  quoteHasDeposits: "Ce devis porte des acomptes : la facture de solde s'émet depuis la facturation complète (déduction des acomptes), pas par ce chemin.",
+  hasDeductions: "Cette facture de solde déduit des acomptes : modifiez-la depuis la facturation complète (les déductions sont recalculées), pas par ce chemin.",
+  yearMismatch: "Le numéro de cette facture appartient à une année antérieure : émission refusée (la pièce doit porter un numéro de la série de l'année d'émission).",
 } as const
 
 /** Lot C : brouillon à numéro provisoire (créé par la facturation complète) — jamais émis par ce chemin. */
@@ -78,6 +83,12 @@ export interface TransitionInput {
   captureSnapshot?: SnapshotCapture
   /** Correctif R2 : verrou du parent AVANT la lecture qui nourrit le recalcul (défaut = FOR UPDATE réel). */
   lockInvoice?: InvoiceLock
+  /**
+   * S3 : si l'année civile Europe/Paris de l'émission diffère de celle du numéro FAC-AAAA déjà attribué (brouillon Lot B d'une année
+   * antérieure), la pièce est RENUMÉROTÉE dans la série de l'année d'émission par ce fournisseur (comme issueInvoiceCore) ; l'ancien numéro
+   * reste un trou documenté. Sans fournisseur, l'émission est refusée (jamais une pièce FAC-2026 datée 2027).
+   */
+  nextNumber?: (tx: Prisma.TransactionClient, year: number) => Promise<string>
 }
 
 export async function transitionInvoiceCore(
@@ -87,12 +98,26 @@ export async function transitionInvoiceCore(
   // Correctif R2 (revue Codex R2 du 26/10/2026) : le parent est verrouillé AVANT toute lecture — même protocole que la modification
   // des lignes (UPDATE conditionnel) et que l'émission Lot C (lockInvoiceRow). Une modification concurrente du brouillon attend ou a
   // déjà commité : les lignes et l'en-tête lus ici sont la version finale, le recalcul écrit à l'émission ne peut plus être périmé.
+  const decide = decisionClock(input.now) // S3 : créée avant le verrou
+  // S2 (ordre global DEVIS → FACTURE) : si la facture est liée à un devis, le devis est verrouillé AVANT la facture (lecture non verrouillée
+  // du lien, relu ensuite). Même famille (audit R3, #2) : une facture liée à un devis porteur d'acomptes ne s'émet pas par ce chemin
+  // (aucune déduction possible ici ⇒ double facturation) ; sans acompte, le chemin reste disponible.
+  let lockedQuoteId: string | null = null
+  if (input.to === "SENT") {
+    const pre = await tx.invoice.findFirst({ where: { id: input.invoiceId, companyId: input.companyId }, select: { quoteId: true } })
+    if (pre?.quoteId) { await tx.$queryRaw`SELECT 1 FROM "quotes" WHERE "id" = ${pre.quoteId} AND "companyId" = ${input.companyId} FOR NO KEY UPDATE`; lockedQuoteId = pre.quoteId }
+  }
   await (input.lockInvoice ?? lockInvoiceForUpdate)(tx, input.invoiceId, input.companyId)
   const invoice = await tx.invoice.findFirst({
     where: { id: input.invoiceId, companyId: input.companyId },
-    select: { id: true, status: true, kind: true, number: true, worksiteId: true, globalDiscountBp: true, vatReverseCharge: true, lines: { select: { quantity: true, unitPrice: true, vatRate: true, discountBp: true, deductsDepositId: true } } },
+    select: { id: true, status: true, kind: true, number: true, worksiteId: true, quoteId: true, globalDiscountBp: true, vatReverseCharge: true, lines: { select: { quantity: true, unitPrice: true, vatRate: true, discountBp: true, deductsDepositId: true } } },
   })
   if (!invoice || !isStatus(invoice.status)) return { ok: false, error: LIFECYCLE_ERRORS.notFound }
+  if (input.to === "SENT" && (invoice.quoteId ?? null) !== lockedQuoteId) return { ok: false, error: LIFECYCLE_ERRORS.conflict }
+  if (input.to === "SENT" && invoice.kind === "INVOICE" && invoice.quoteId) {
+    const deposits = await tx.invoice.count({ where: { companyId: input.companyId, quoteId: invoice.quoteId, kind: "DEPOSIT", status: { not: "CANCELLED" } } })
+    if (deposits > 0) return { ok: false, error: LIFECYCLE_ERRORS.quoteHasDeposits }
+  }
   // Correctif P1-01 (chemin Lot B) : à l'émission, les totaux sont RECALCULÉS depuis les lignes avec le moteur centimes et écrits
   // dans la même instruction que la transition — les totaux persistés d'une pièce émise sont toujours égaux au recalcul.
   let issuedTotals: { totalHT: string; totalVAT: string; totalTTC: string } | null = null
@@ -113,12 +138,23 @@ export async function transitionInvoiceCore(
 
   // La transition conditionnelle est la PREMIÈRE écriture : un conflit ici n'a rien modifié (correctif P1-06, même règle partout :
   // aucune réponse d'échec après une mutation).
+  // Correctif S3 : instant de décision relu après le verrou ; date d'émission = jour civil Paris ; série = année de ce jour.
+  const at = decide()
+  let number = invoice.number
+  if (input.to === "SENT") {
+    const year = businessDay(at).getUTCFullYear()
+    const legacyYear = /^FAC-(\d{4})-/.exec(invoice.number)?.[1]
+    if (legacyYear && legacyYear !== String(year)) {
+      if (!input.nextNumber) return { ok: false, error: LIFECYCLE_ERRORS.yearMismatch }
+      number = await input.nextNumber(tx, year)
+    }
+  }
   const updated = await tx.invoice.updateMany({
     where: { id: invoice.id, companyId: input.companyId, status: from, kind: invoice.kind },
     data: {
       status: input.to,
-      ...(input.to === "SENT" ? { sentAt: input.now, ...issuedTotals } : {}),
-      ...(input.to === "PAID" ? { paidAt: input.now } : {}),
+      ...(input.to === "SENT" ? { sentAt: at, issueDate: businessDay(at), number, ...issuedTotals } : {}),
+      ...(input.to === "PAID" ? { paidAt: at } : {}),
     },
   })
   if (updated.count !== 1) return { ok: false, error: LIFECYCLE_ERRORS.conflict }
@@ -137,9 +173,9 @@ export async function transitionInvoiceCore(
       action: "STATUS_CHANGED",
       entityType: "Invoice",
       entityId: invoice.id,
-      detail: `Facture ${invoice.number} : ${from} → ${input.to}`,
-      oldValue: { status: from },
-      newValue: { status: input.to },
+      detail: `Facture ${number} : ${from} → ${input.to}${number !== invoice.number ? ` (renumérotée depuis ${invoice.number} : série de l'année d'émission)` : ""}`,
+      oldValue: { status: from, number: invoice.number },
+      newValue: { status: input.to, number },
     },
   })
   return { ok: true, value: undefined }
@@ -173,6 +209,11 @@ export async function replaceDraftLinesCore(
   tx: Prisma.TransactionClient,
   input: ReplaceLinesInput
 ): Promise<LifecycleResult> {
+  // Même famille S1 (audit R3, #5) : un brouillon de solde qui déduit des acomptes ne se modifie pas par ce chemin (les lignes de
+  // déduction seraient effacées, la liaison conservée) — refus AVANT toute écriture, sous verrou de la facture (pas de lecture non protégée).
+  await lockInvoiceForUpdate(tx, input.invoiceId, input.companyId)
+  const deductions = await tx.invoiceDepositDeduction.count({ where: { companyId: input.companyId, finalInvoiceId: input.invoiceId } })
+  if (deductions > 0) return { ok: false, error: LIFECYCLE_ERRORS.hasDeductions }
   const locked = await tx.invoice.updateMany({
     where: { id: input.invoiceId, companyId: input.companyId, status: "DRAFT", kind: "INVOICE" },
     data: { totalHT: input.totals.totalHT, totalVAT: input.totals.totalVAT, totalTTC: input.totals.totalTTC },
@@ -208,7 +249,8 @@ export interface CreditNoteInput {
   actorId: string
   reason: string | null
   now: Date
-  nextNumber: (tx: Prisma.TransactionClient) => Promise<string>
+  /** Numéro AV ; `at` = instant de décision relu après le verrou (série annuelle = année civile Europe/Paris de cet instant, S3). */
+  nextNumber: (tx: Prisma.TransactionClient, at: Date) => Promise<string>
   /** Correctif P2-03 : figement documentaire de l'avoir émis (injectable pour les tests sans base ; défaut = snapshot réel). */
   captureSnapshot?: SnapshotCapture
   /** Correctif R2 (même famille) : verrou de l'origine avant la lecture copiée dans l'avoir (défaut = FOR UPDATE réel). */
@@ -226,6 +268,7 @@ export async function createCreditNoteCore(
 ): Promise<LifecycleResult<{ id: string; number: string }>> {
   // R2 (même famille) : l'origine est verrouillée avant la lecture dont l'avoir est la copie exacte (sérialisation avec paiements,
   // avoirs partiels et émission concurrents ; le contenu d'une pièce émise est figé en base, le statut est relu sous verrou).
+  const decide = decisionClock(input.now) // S3 : créée avant le verrou
   await (input.lockInvoice ?? lockInvoiceForUpdate)(tx, input.invoiceId, input.companyId)
   const original = await tx.invoice.findFirst({
     where: { id: input.invoiceId, companyId: input.companyId },
@@ -264,7 +307,8 @@ export async function createCreditNoteCore(
   // qui verrouille les acomptes déduits, est ainsi sérialisée ; un conflit détecté après écriture annule la transaction.
   if (original.kind === "DEPOSIT" && (await deductedOnIssuedFinal())) throw new Error(`INVOICE_DEPOSIT_DEDUCTED: ${DEPOSIT_DEDUCTED}`)
 
-  const number = await input.nextNumber(tx)
+  const at = decide()
+  const number = await input.nextNumber(tx, at)
   // Créé en brouillon (lignes autorisées par la base), puis émis dans la même transaction.
   const note = await tx.invoice.create({
     data: {
@@ -277,7 +321,7 @@ export async function createCreditNoteCore(
       creditScope: "TOTAL",
       creditedInvoiceId: original.id,
       status: "DRAFT",
-      issueDate: input.now, // date d'émission de l'avoir = instant de la décision (déterministe, comme l'avoir partiel C4)
+      issueDate: businessDay(at), // S3 : date d'émission de l'avoir = jour civil Europe/Paris de l'instant de décision (relu après verrou)
       periodStart: original.periodStart,
       periodEnd: original.periodEnd,
       totalHT: original.totalHT,
@@ -294,7 +338,7 @@ export async function createCreditNoteCore(
   })
   const issued = await tx.invoice.updateMany({
     where: { id: note.id, companyId: input.companyId, status: "DRAFT", kind: "CREDIT_NOTE" },
-    data: { status: "SENT", sentAt: input.now },
+    data: { status: "SENT", sentAt: at },
   })
   if (issued.count !== 1) throw new Error("CREDIT_NOTE_ISSUE_FAILED")
   // Correctif P2-03 : l'avoir est une nouvelle pièce avec sa propre identité d'émission figée.

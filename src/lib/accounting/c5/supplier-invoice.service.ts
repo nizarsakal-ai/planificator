@@ -39,8 +39,9 @@ export async function storeSupplierFile(db: Db, ctx: AccountingContext, data: Bu
   const mime = sniffMime(data)
   if (!mime) return { ok: false, error: SUPPLIER_ERRORS.fileType }
   const sha256 = createHash("sha256").update(data).digest("hex")
-  const existing = await db.supplierInvoiceFile.findFirst({ where: { companyId: ctx.companyId, sha256 }, select: { id: true, invoices: { select: { id: true }, take: 1 } } })
-  // Fichier déjà stocké mais jamais rattaché (formulaire abandonné) : réutilisé ; rattaché à une facture : doublon refusé.
+  const existing = await db.supplierInvoiceFile.findFirst({ where: { companyId: ctx.companyId, sha256 }, select: { id: true, invoices: { where: { status: { not: "REJECTED" } }, select: { id: true }, take: 1 } } })
+  // Fichier déjà stocké mais jamais rattaché (formulaire abandonné) ou rattaché seulement à une facture REJETÉE : réutilisé ;
+  // rattaché à une facture en cours/validée : doublon refusé (audit R3, #8).
   if (existing) return existing.invoices.length ? { ok: false, error: SUPPLIER_ERRORS.duplicateFile } : { ok: true, value: { fileId: existing.id, mime, size: data.length, sha256, duplicate: true } }
   const f = await db.supplierInvoiceFile.create({ data: { companyId: ctx.companyId, sha256, mime, size: data.length, data, originalName: originalName.slice(0, 200) }, select: { id: true } })
   return { ok: true, value: { fileId: f.id, mime, size: data.length, sha256, duplicate: false } }

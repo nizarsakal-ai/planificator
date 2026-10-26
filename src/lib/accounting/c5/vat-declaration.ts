@@ -15,6 +15,7 @@ import type { AccountingContext } from "@/lib/accounting/engine/posting"
 import type { LifecycleResult } from "@/lib/billing/quotes/quote-lifecycle.core"
 import { computeVat } from "./vat"
 import { serverNow } from "@/lib/billing/clock"
+import { businessDay } from "@/lib/billing/business-day"
 
 type Db = PrismaClient
 
@@ -29,7 +30,7 @@ export async function declareVat(db: Db, ctx: AccountingContext, periodStart: Da
   if (periodEnd < periodStart) return { ok: false, error: "La fin de période précède le début." }
   if ((periodEnd.getTime() - periodStart.getTime()) / 86_400_000 > 370) return { ok: false, error: "Période trop longue (12 mois maximum)." }
   // Même famille (C1 de l'audit R2) : une période non terminée ne se fige pas (montants incomplets) ; « aujourd'hui » = horloge serveur.
-  const today = serverNow(); const todayDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()))
+  const todayDay = businessDay(serverNow()) // jour civil Europe/Paris (S3)
   if (periodEnd >= todayDay) return { ok: false, error: VAT_DECLARATION_ERRORS.notEnded }
   for (let attempt = 1; ; attempt++) {
   try {

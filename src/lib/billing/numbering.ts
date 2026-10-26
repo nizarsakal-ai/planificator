@@ -7,6 +7,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { Prisma } from "@prisma/client"
+import { businessYear } from "@/lib/billing/business-day"
+import { serverNow } from "@/lib/billing/clock"
 
 // Lot C : INVOICE_DRAFT = numéro PROVISOIRE d'un brouillon de facture (le numéro légal FAC est attribué à l'émission).
 export type DocumentType = "QUOTE" | "INVOICE" | "CREDIT_NOTE" | "INVOICE_DRAFT"
@@ -27,7 +29,8 @@ export async function nextDocumentNumber(
   tx: Prisma.TransactionClient,
   companyId: string,
   type: DocumentType,
-  year = new Date().getFullYear()
+  // Correctif S3 : série annuelle = année civile Europe/Paris de l'horloge serveur (jamais l'année locale du serveur ni l'année UTC).
+  year = businessYear(serverNow())
 ): Promise<string> {
   const counter = await tx.documentCounter.upsert({
     where:  { companyId_type_year: { companyId, type, year } },

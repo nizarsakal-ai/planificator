@@ -5,11 +5,15 @@ import { decimalToCents } from "@/lib/billing/money"
 type Db = PrismaClient | Prisma.TransactionClient
 const STATUSES = ["DRAFT", "SENT", "PARTIAL", "PAID", "CANCELLED"] as const
 
+import { businessDay } from "@/lib/billing/business-day"
+import { serverNow } from "@/lib/billing/clock"
+
 export interface InvoiceListFilters { search?: string; status?: string; overdue?: boolean; clientId?: string; from?: string; to?: string; kind?: string; page?: number }
 export const INVOICES_PAGE_SIZE = 50
 
-export function todayUtc(now: Date = new Date()): Date {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+/** « Aujourd'hui » des échéances = jour civil Europe/Paris (S3, même famille) ; le nom historique est conservé pour les appelants. */
+export function todayUtc(now: Date = serverNow()): Date {
+  return businessDay(now)
 }
 
 export function isOverdue(inv: { status: string; dueDate: Date | null; kind: string }, today: Date): boolean {

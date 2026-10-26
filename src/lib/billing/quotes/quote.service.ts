@@ -10,7 +10,8 @@ import { centsToDecimalString, decimalToCents, formatEuro, hundredthsToDecimalSt
 import { sendBillingMail } from "@/lib/billing/mail/send"
 import { quoteReminderMail, quoteSentMail } from "@/lib/billing/mail/templates"
 import { appBaseUrl, getBillingSettings } from "@/lib/billing/settings"
-import { decisionInstant } from "@/lib/billing/clock"
+import { decisionClock } from "@/lib/billing/clock"
+import { businessDay, businessYear } from "@/lib/billing/business-day"
 import { buildCsv, type CsvCell } from "@/lib/accounting/ui/csv"
 import {
   QUOTE_ERRORS, convertQuoteCore, replaceQuoteDraftCore, transitionQuoteCore,
@@ -118,7 +119,7 @@ export async function duplicateQuote(db: Db, ctx: QuoteContext, quoteId: string,
   })
   if (!src) return { ok: false, error: QUOTE_ERRORS.notFound }
   const s = await getBillingSettings(db, ctx.companyId)
-  const issueDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const issueDate = businessDay(now) // S3 : jour civil Europe/Paris
   const created = await db.$transaction(async (tx) => {
     const number = await nextDocumentNumber(tx, ctx.companyId, "QUOTE", issueDate.getUTCFullYear())
     const q = await tx.quote.create({
@@ -146,6 +147,7 @@ export interface SendQuoteResult { status: string; signatureUrl: string }
  * écriture conditionnelle sur la ligne (verrou de ligne), partageant le protocole de la signature/du refus par jeton.
  */
 export async function sendQuote(db: Db, ctx: QuoteContext, quoteId: string, now: Date, clock?: () => Date): Promise<LifecycleResult<SendQuoteResult>> {
+  const decide = decisionClock(now, clock) // R3 : créée dès l'entrée de la requête ; relue après le verrou (le temps réel d'attente compte)
   const q = await db.quote.findFirst({
     where: { id: quoteId, companyId: ctx.companyId },
     select: { id: true, number: true, status: true, validUntil: true, totalTTC: true, client: { select: { name: true, email: true } }, company: { select: { name: true } } },
@@ -159,8 +161,7 @@ export async function sendQuote(db: Db, ctx: QuoteContext, quoteId: string, now:
   const r = await db.$transaction(async (tx) => {
     // Relecture sous verrou de la validité et du statut : la décision ET l'expiration du jeton dérivent de la validité relue sous verrou.
     await lockQuoteRow(tx, quoteId, ctx.companyId)
-    // R3 : l'instant de décision est relu APRÈS l'acquisition du verrou (le temps réel a pu passer pendant l'attente).
-    const decidedAt = decisionInstant(now, clock)
+    const decidedAt = decide()
     // Même famille que R2 : le contenu du courrier (montant, validité, destinataire) est celui relu SOUS VERROU, pas la lecture initiale.
     const cur = await tx.quote.findFirst({ where: { id: quoteId, companyId: ctx.companyId }, select: { status: true, validUntil: true, totalTTC: true, number: true, client: { select: { name: true, email: true } }, company: { select: { name: true } } } })
     if (!cur || cur.status !== q.status) return { ok: false as const, error: QUOTE_ERRORS.conflict }
@@ -198,8 +199,13 @@ export async function expireQuote(db: Db, ctx: QuoteContext, quoteId: string, no
   return r.ok ? { ok: true, value: undefined } : r
 }
 
+/**
+ * Verrou métier du devis (premier verrou de l'ordre global DEVIS → FACTURE → ACOMPTES, S2). `FOR NO KEY UPDATE` : exclusif entre
+ * décisions métier (émission, conversion, acompte, modification de solde), mais compatible avec les verrous KEY SHARE que posent les
+ * clés étrangères des pièces insérées (avoir sur un acompte, lignes de déduction) — aucune arête « pièce → devis » par simple INSERT.
+ */
 export async function lockQuoteRow(tx: Prisma.TransactionClient, quoteId: string, companyId: string): Promise<void> {
-  await tx.$queryRaw`SELECT 1 FROM "quotes" WHERE "id" = ${quoteId} AND "companyId" = ${companyId} FOR UPDATE`
+  await tx.$queryRaw`SELECT 1 FROM "quotes" WHERE "id" = ${quoteId} AND "companyId" = ${companyId} FOR NO KEY UPDATE`
 }
 
 export async function convertQuote(db: Db, ctx: QuoteContext, quoteId: string, now: Date): Promise<LifecycleResult<{ invoiceId: string; invoiceNumber: string; existing: boolean }>> {
@@ -207,7 +213,7 @@ export async function convertQuote(db: Db, ctx: QuoteContext, quoteId: string, n
   return db.$transaction(async (tx) => {
     const r = await convertQuoteCore(tx, {
       companyId: ctx.companyId, quoteId, actorId: ctx.userId, now, paymentTermsDays: s.paymentTermsDays,
-      nextDraftNumber: (t) => nextDocumentNumber(t, ctx.companyId, "INVOICE_DRAFT", now.getUTCFullYear()), lockQuote: lockQuoteRow,
+      nextDraftNumber: (t) => nextDocumentNumber(t, ctx.companyId, "INVOICE_DRAFT", businessYear(now)), lockQuote: lockQuoteRow,
     })
     if (r.ok && !r.value.existing) {
       // Lot C3 : déduction automatique des acomptes émis sur la facture de solde créée.
@@ -262,14 +268,15 @@ async function lockQuoteByTokenHash(tx: Prisma.TransactionClient, hash: string):
 const decisionSelect = { id: true, companyId: true, createdById: true, number: true, status: true, validUntil: true, signatureTokenExpiresAt: true } as const
 
 /**
- * Correctif R3 (revue Codex R2) : l'instant de la décision est RELU après l'acquisition du verrou (`decisionInstant`) ; l'expiration
+ * Correctif R3 (revue Codex R2) : l'instant de la décision est RELU après l'acquisition du verrou (`decisionClock`) ; l'expiration
  * du jeton, la validité métier et la garde atomique de la transition se réfèrent à cet instant, jamais au `now` capturé à l'entrée
  * de la requête (le temps réel écoulé pendant l'attente du verrou compte).
  */
 async function readQuoteForDecision(tx: Prisma.TransactionClient, hash: string, startedAt: Date, clock?: () => Date): Promise<LifecycleResult<{ id: string; companyId: string; createdById: string; number: string; decidedAt: Date }>> {
+  const decide = decisionClock(startedAt, clock) // créée AVANT le verrou
   const id = await lockQuoteByTokenHash(tx, hash)
   if (!id) return { ok: false, error: QUOTE_ERRORS.tokenInvalid }
-  const decidedAt = decisionInstant(startedAt, clock)
+  const decidedAt = decide()
   const q = await tx.quote.findFirst({ where: { id, signatureTokenHash: hash }, select: decisionSelect })
   if (!q || !q.signatureTokenExpiresAt || q.signatureTokenExpiresAt < decidedAt) return { ok: false, error: QUOTE_ERRORS.tokenInvalid }
   if (!isQuoteValidAt(q.validUntil, decidedAt)) return { ok: false, error: QUOTE_ERRORS.expired }
@@ -319,7 +326,7 @@ export async function refuseQuoteByToken(db: Db, token: unknown, input: TokenDec
 export interface ImportReport { imported: { reference: string; number: string }[]; skipped: { reference: string; reason: string }[]; invalid: { reference: string; rows: number[]; errors: string[] }[]; fatal?: string }
 
 export async function importQuotes(db: Db, ctx: QuoteContext, text: string, now: Date): Promise<ImportReport> {
-  const today = now.toISOString().slice(0, 10)
+  const today = businessDay(now).toISOString().slice(0, 10) // S3 : jour civil Europe/Paris
   const parsed = parseQuoteImport(text, today)
   const report: ImportReport = { imported: [], skipped: [], invalid: parsed.invalid, fatal: parsed.fatal }
   if (parsed.fatal) return report
@@ -379,6 +386,7 @@ const STEPS: readonly { step: 3 | 7 | 15; column: "reminderJ3SentAt" | "reminder
  *    et le courrier de relance le rappelle sans nouveau lien).
  */
 export async function runQuoteReminders(db: Db, now: Date, limit = 200): Promise<ReminderRunReport> {
+  const runClock = decisionClock(now) // instant courant de l'exécution (longue) : `now` avancé du temps réellement écoulé, créée dès l'entrée
   // P2-04 : « aujourd'hui » = jour civil en Europe/Paris ; un devis est périmé dès que validUntil < ce jour (fin de validité révolue).
   const today = calendarDayIn(now)
   const toExpire = await db.quote.findMany({ where: { status: "SENT", validUntil: { lt: today } }, select: { id: true, companyId: true, createdById: true }, take: limit })
@@ -407,7 +415,7 @@ export async function runQuoteReminders(db: Db, now: Date, limit = 200): Promise
     // Même protocole que P1-05/R3 : la relance est conditionnée au hachage lu (un renvoi committé entre-temps l'emporte : aucun jeton
     // frais écrasé) et l'expiration est évaluée à l'instant courant du traitement, pas au début d'une exécution longue.
     const where: Record<string, unknown> = { id: q.id, companyId: q.companyId, status: "SENT", [top.column]: null, signatureTokenHash: q.signatureTokenHash }
-    const at = decisionInstant(now)
+    const at = runClock()
     const tokenExpired = !q.signatureTokenExpiresAt || q.signatureTokenExpiresAt < at
     let signatureUrl: string | null = null
     if (tokenExpired) {

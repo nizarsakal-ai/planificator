@@ -7,10 +7,13 @@ import type { Prisma } from "@prisma/client"
 import { MoneyError, centsToDecimalString, computeDocumentTotals, decimalToCents, storedVatRateToBp } from "@/lib/billing/money"
 import type { LifecycleResult } from "@/lib/billing/quotes/quote-lifecycle.core"
 import { captureDocumentSnapshot, type SnapshotCapture } from "@/lib/billing/pdf/document-snapshot"
+import { decisionClock } from "@/lib/billing/clock"
+import { addBusinessDays, businessDay } from "@/lib/billing/business-day"
 
 export const INVOICE_C2_ERRORS = {
   notFound: "Facture introuvable.",
   notDraft: "Seule une facture brouillon peut être émise ou modifiée.",
+  quoteLocked: "Cette facture de solde déduit des acomptes émis de son devis : le devis lié ne peut être ni retiré ni changé. Abandonnez ce brouillon (les acomptes redeviennent déductibles) et créez une nouvelle facture.",
   notInvoice: "Seule une facture (pas un avoir) peut être émise.",
   noLines: "Une facture doit comporter au moins une ligne.",
   conflict: "La facture a été modifiée entre-temps. Rechargez la page.",
@@ -46,6 +49,13 @@ export interface IssueInvoiceInput {
   paymentTermsDays: number
   nextLegalNumber: (tx: Prisma.TransactionClient, year: number) => Promise<string>
   lockInvoice: (tx: Prisma.TransactionClient, invoiceId: string, companyId: string) => Promise<void>
+  /**
+   * Correctif S2 : ordre global des verrous DEVIS → FACTURE → ACOMPTES. Si fourni, le devis lié (lu avant tout verrou) est verrouillé
+   * AVANT la facture ; la facture est relue sous verrou et un changement de devis entre-temps est un conflit (aucune écriture).
+   */
+  lockQuote?: (tx: Prisma.TransactionClient, quoteId: string, companyId: string) => Promise<void>
+  /** Correctif S3 : horloge serveur relue après les verrous (défaut : horloge réelle / de test) pour la date d'émission et la série. */
+  clock?: () => Date
   /** Contrôles supplémentaires sous verrou (C3 : acomptes) ; message d'erreur ou null. */
   extraChecks?: (tx: Prisma.TransactionClient, invoice: { id: string; kind: string; quoteId: string | null; totalTTCCents: bigint; vatReverseCharge: boolean }) => Promise<string | null>
   /** Correctif P2-03 : figement documentaire à l'émission (injectable pour les tests sans base ; défaut = snapshot réel). */
@@ -58,7 +68,18 @@ export interface IssueInvoiceInput {
  * échéance = émission + délai si absente. Conditionnel sur status = DRAFT.
  */
 export async function issueInvoiceCore(tx: Prisma.TransactionClient, input: IssueInvoiceInput): Promise<LifecycleResult<{ number: string; issueDate: Date; dueDate: Date }>> {
+  const decide = decisionClock(input.now, input.clock) // S3 : créée AVANT les verrous, relue après
+  // S2 : devis d'abord (lecture non verrouillée du lien, puis verrou du devis), facture ensuite, acomptes enfin (depositIssueChecks).
+  let lockedQuoteId: string | null = null
+  if (input.lockQuote) {
+    const pre = await tx.invoice.findFirst({ where: { id: input.invoiceId, companyId: input.companyId }, select: { quoteId: true } })
+    if (pre?.quoteId) { await input.lockQuote(tx, pre.quoteId, input.companyId); lockedQuoteId = pre.quoteId }
+  }
   await input.lockInvoice(tx, input.invoiceId, input.companyId)
+  // Même famille (audit R3, #7) : les fiches client et société sont lues sous verrou partagé — les contrôles d'émission et le snapshot
+  // figent la même version (une modification concurrente de la fiche attend la fin de l'émission).
+  await tx.$queryRaw`SELECT 1 FROM "clients" c JOIN "invoices" i ON i."clientId" = c."id" WHERE i."id" = ${input.invoiceId} FOR SHARE OF c`
+  await tx.$queryRaw`SELECT 1 FROM "companies" WHERE "id" = ${input.companyId} FOR SHARE`
   const inv = await tx.invoice.findFirst({
     where: { id: input.invoiceId, companyId: input.companyId },
     select: {
@@ -70,6 +91,8 @@ export async function issueInvoiceCore(tx: Prisma.TransactionClient, input: Issu
   if (!inv) return { ok: false, error: INVOICE_C2_ERRORS.notFound }
   if (inv.kind === "CREDIT_NOTE") return { ok: false, error: INVOICE_C2_ERRORS.notInvoice }
   if (inv.status !== "DRAFT") return { ok: false, error: INVOICE_C2_ERRORS.notDraft }
+  // Le devis lié a changé entre la lecture non verrouillée et le verrou : l'ordre des verrous n'est plus garanti ⇒ conflit (aucune écriture).
+  if (input.lockQuote && (inv.quoteId ?? null) !== lockedQuoteId) return { ok: false, error: INVOICE_C2_ERRORS.conflict }
   const blockers = issueBlockers({ company: inv.company, client: inv.client, lineCount: inv.lines.length })
   if (blockers.length) return { ok: false, error: `Émission impossible : ${blockers.map((b) => b.message).join(" ")}` }
 
@@ -88,16 +111,19 @@ export async function issueInvoiceCore(tx: Prisma.TransactionClient, input: Issu
     const err = await input.extraChecks(tx, { id: inv.id, kind: inv.kind, quoteId: inv.quoteId, totalTTCCents: totals.totalTTCCents, vatReverseCharge: inv.vatReverseCharge })
     if (err) return { ok: false, error: err }
   }
-  const issueDate = new Date(Date.UTC(input.now.getUTCFullYear(), input.now.getUTCMonth(), input.now.getUTCDate()))
-  const dueDate = inv.dueDate && inv.dueDate >= issueDate ? inv.dueDate : new Date(issueDate.getTime() + input.paymentTermsDays * 86_400_000)
+  // Correctif S3 : instant de décision relu APRÈS les verrous ; date d'émission = jour civil Europe/Paris de cet instant ; série = son année.
+  const at = decide()
+  const issueDate = businessDay(at)
+  const year = issueDate.getUTCFullYear()
+  const dueDate = inv.dueDate && inv.dueDate >= issueDate ? inv.dueDate : addBusinessDays(issueDate, input.paymentTermsDays)
   // Brouillon hérité du Lot B déjà numéroté FAC-AAAA-… : numéro conservé seulement si son année est celle de l'émission
   // (sinon nouveau numéro de l'année courante ; l'ancien reste un trou documenté de la série du Lot B).
   const legacyYear = /^FAC-(\d{4})-/.exec(inv.number)?.[1]
-  const number = LEGAL_NUMBER.test(inv.number) && legacyYear === String(issueDate.getUTCFullYear()) ? inv.number : await input.nextLegalNumber(tx, issueDate.getUTCFullYear())
+  const number = LEGAL_NUMBER.test(inv.number) && legacyYear === String(year) ? inv.number : await input.nextLegalNumber(tx, year)
   const updated = await tx.invoice.updateMany({
     where: { id: inv.id, companyId: input.companyId, status: "DRAFT" },
     data: {
-      status: "SENT", sentAt: input.now, issueDate, dueDate, number,
+      status: "SENT", sentAt: at, issueDate, dueDate, number,
       totalHT: centsToDecimalString(totals.totalHTCents), totalVAT: centsToDecimalString(totals.totalVATCents), totalTTC: centsToDecimalString(totals.totalTTCCents),
     },
   })
@@ -105,7 +131,7 @@ export async function issueInvoiceCore(tx: Prisma.TransactionClient, input: Issu
   if (updated.count !== 1) throw new Error(`INVOICE_CONFLICT: ${INVOICE_C2_ERRORS.conflict}`)
   // Solde nul (acomptes = 100 %) : rien à encaisser ⇒ soldée dans la même transaction (aucune relance).
   if (totals.totalTTCCents === BigInt(0)) {
-    const paid = await tx.invoice.updateMany({ where: { id: inv.id, companyId: input.companyId, status: "SENT" }, data: { status: "PAID", paidAt: input.now } })
+    const paid = await tx.invoice.updateMany({ where: { id: inv.id, companyId: input.companyId, status: "SENT" }, data: { status: "PAID", paidAt: at } })
     if (paid.count !== 1) throw new Error(`INVOICE_CONFLICT: ${INVOICE_C2_ERRORS.conflict}`)
   }
   // Correctif P2-03 : identités vendeur/acheteur, mentions, conditions, pied de page et références figés avec la pièce émise.
@@ -203,6 +229,7 @@ export interface ReversePaymentInput {
 
 /** Contre-passation d'un paiement : ligne opposée (append-only), statut recalculé, paidAt effacé si PAID quitté. */
 export async function reversePaymentCore(tx: Prisma.TransactionClient, input: ReversePaymentInput): Promise<LifecycleResult<{ status: PaymentStatus }>> {
+  const decide = decisionClock(input.now) // S3 : créée avant les verrous
   await input.enablePaymentsContext(tx)
   const p = await tx.invoicePayment.findFirst({ where: { id: input.paymentId, companyId: input.companyId }, select: { id: true, invoiceId: true, amountCents: true, method: true, reversesPaymentId: true, reversedAt: true } })
   if (!p) return { ok: false, error: INVOICE_C2_ERRORS.paymentNotFound }
@@ -212,10 +239,11 @@ export async function reversePaymentCore(tx: Prisma.TransactionClient, input: Re
   const inv = await tx.invoice.findFirst({ where: { id: p.invoiceId, companyId: input.companyId }, select: { id: true, status: true, number: true, worksiteId: true, totalTTC: true } })
   if (!inv) return { ok: false, error: INVOICE_C2_ERRORS.notFound }
   if (inv.status === "CANCELLED") return { ok: false, error: "Facture annulée par avoir : le remboursement des paiements reçus se traite depuis l'avoir." }
-  const marked = await tx.invoicePayment.updateMany({ where: { id: p.id, companyId: input.companyId, reversedAt: null }, data: { reversedAt: input.now } })
+  const at = decide()
+  const marked = await tx.invoicePayment.updateMany({ where: { id: p.id, companyId: input.companyId, reversedAt: null }, data: { reversedAt: at } })
   if (marked.count !== 1) return { ok: false, error: INVOICE_C2_ERRORS.alreadyReversed }
   await tx.invoicePayment.create({
-    data: { companyId: input.companyId, invoiceId: p.invoiceId, amountCents: -p.amountCents, method: p.method, paidAt: new Date(Date.UTC(input.now.getUTCFullYear(), input.now.getUTCMonth(), input.now.getUTCDate())), reference: null, notes: input.reason, recordedById: input.actorId, reversesPaymentId: p.id },
+    data: { companyId: input.companyId, invoiceId: p.invoiceId, amountCents: -p.amountCents, method: p.method, paidAt: businessDay(at), reference: null, notes: input.reason, recordedById: input.actorId, reversesPaymentId: p.id }, // S3 (même famille) : jour civil Europe/Paris à l'instant de décision
   })
   const paid = await sumPayments(tx, input.companyId, inv.id)
   const status = statusForPaid(paid, decimalToCents(inv.totalTTC), await sumPartialCredits(tx, input.companyId, inv.id))

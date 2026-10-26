@@ -9,6 +9,7 @@ import { MoneyError, bpToPercentString, centsToDecimalString, computeDocumentTot
 import { getBillingSettings } from "@/lib/billing/settings"
 import type { LifecycleResult } from "@/lib/billing/quotes/quote-lifecycle.core"
 import { lockQuoteRow } from "@/lib/billing/quotes/quote.service"
+import { addBusinessDays, businessDay, businessYear } from "@/lib/billing/business-day"
 import { buildDeductionLines, computeDepositLines, depositDesignation, depositTotal, type DepositRequest, type IssuedDeposit } from "./deposit.core"
 
 type Db = PrismaClient
@@ -25,6 +26,7 @@ export const DEPOSIT_ERRORS = {
   depositDraft: "Un acompte de ce devis est encore en brouillon : émettez-le ou abandonnez-le avant d'émettre le solde.",
   depositNotDeducted: "Des acomptes émis ne sont pas déduits : recalculez les déductions avant d'émettre le solde.",
   deductionMismatch: "Les déductions d'acomptes ne correspondent plus aux acomptes émis : recalculez-les.",
+  orphanDeductions: "Cette facture porte des déductions d'acomptes sans devis lié ou sans ligne correspondante : émission refusée (recalculez les déductions ou abandonnez le brouillon).",
 } as const
 
 const quoteSummarySelect = {
@@ -62,11 +64,11 @@ export async function createDepositInvoice(db: Db, ctx: DepositContext, quoteId:
     if (t.ttcCents <= BigInt(0)) return { ok: false, error: "Montant d'acompte invalide." }
     const already = await depositsTotalCents(tx, ctx.companyId, quoteId)
     if (already + t.ttcCents > totals.totalTTCCents) return { ok: false, error: DEPOSIT_ERRORS.ceiling }
-    const number = await nextDocumentNumber(tx, ctx.companyId, "INVOICE_DRAFT", now.getUTCFullYear())
+    const number = await nextDocumentNumber(tx, ctx.companyId, "INVOICE_DRAFT", businessYear(now))
     const inv = await tx.invoice.create({
       data: {
         companyId: ctx.companyId, worksiteId: q.worksiteId, clientId: q.clientId, quoteId: q.id, number, status: "DRAFT", kind: "DEPOSIT",
-        issueDate: now, dueDate: new Date(now.getTime() + s.paymentTermsDays * 86_400_000), periodStart: q.worksite.startDate, periodEnd: q.worksite.endDate,
+        issueDate: now, dueDate: addBusinessDays(businessDay(now), s.paymentTermsDays), periodStart: q.worksite.startDate, periodEnd: q.worksite.endDate, // S3 : échéance = jour civil Paris + délai (recalculée à l'émission si antérieure)
         subject: `Acompte sur le devis ${q.number}`, paymentTerms: q.paymentTerms, vatReverseCharge: q.vatReverseCharge, globalDiscountBp: 0,
         depositBp: request.kind === "PERCENT" ? request.bp : null, createdById: ctx.userId,
         totalHT: centsToDecimalString(t.htCents), totalVAT: centsToDecimalString(t.vatCents), totalTTC: centsToDecimalString(t.ttcCents),
@@ -144,11 +146,22 @@ export async function applyDepositDeductions(db: Db, ctx: DepositContext, finalI
  * - acompte (DEPOSIT) : plafond revérifié (Σ acomptes non annulés ≤ TTC du devis) sous verrou du devis.
  */
 export async function depositIssueChecks(tx: Tx, companyId: string, invoice: { id: string; kind: string; quoteId: string | null; totalTTCCents: bigint; vatReverseCharge: boolean }): Promise<string | null> {
-  if (!invoice.quoteId) return null
+  if (!invoice.quoteId) {
+    // Correctif S1 : sans devis lié, aucune liaison d'acompte ni ligne de déduction ne doit subsister (sinon la pièce affirmerait un
+    // acompte déduit en facturant l'intégralité). Contrôle aussi imposé en base (contrainte différée invoice_deductions_consistency).
+    if (invoice.kind !== "INVOICE") return null
+    const orphans = await tx.invoiceDepositDeduction.count({ where: { companyId, finalInvoiceId: invoice.id } })
+    const lines = await tx.invoiceLine.count({ where: { invoiceId: invoice.id, deductsDepositId: { not: null } } })
+    return orphans > 0 || lines > 0 ? DEPOSIT_ERRORS.orphanDeductions : null
+  }
   if (invoice.kind === "INVOICE") {
-    // ORDRE GLOBAL DES VERROUS (facturation) : FACTURE (lockInvoiceRow, premier) → DEVIS (lockQuoteRow) → ACOMPTES (FOR UPDATE).
-    // issueInvoiceCore tient la facture avant d'appeler ces contrôles ; updateDraftInvoice verrouille la facture puis le devis ;
-    // createDepositInvoice/convertQuote/createDraftInvoice ne tiennent aucune facture existante avant le devis. Aucun chemin ne prend devis → facture existante.
+    // ORDRE GLOBAL DES VERROUS (facturation, correctif S2) : DEVIS (lockQuoteRow) → FACTURE (lockInvoiceRow) → ACOMPTES (FOR UPDATE).
+    // issueInvoiceCore verrouille le devis lié puis la facture avant d'appeler ces contrôles (pour un acompte comme pour un solde) ;
+    // updateDraftInvoice verrouille les devis puis la facture ; createDepositInvoice/convertQuote/createDraftInvoice ne tiennent aucune
+    // facture avant le devis ; avoirs, paiements et chemin Lot B ne verrouillent que la facture (leurs INSERT référençant le devis posent
+    // un KEY SHARE, compatible avec le FOR NO KEY UPDATE de lockQuoteRow : aucune arête pièce → devis ; le contrôle différé du plafond ne
+    // verrouille le devis que sur changement de montant/devis/nature, migration 063000). Le verrou du devis ci-dessous est ré-entrant
+    // (déjà tenu par l'appelant) : il reste pour les appelants qui ne le tiendraient pas.
     // Même famille que R2 (audit A1) : verrou du devis AVANT les contrôles — la création d'un acompte (createDepositInvoice, qui
     // verrouille le devis puis vérifie « solde émis ») est sérialisée avec l'émission du solde : plus d'acompte créé pendant l'émission.
     await lockQuoteRow(tx, invoice.quoteId, companyId)

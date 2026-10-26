@@ -11,10 +11,17 @@ export function serverNow(): Date {
   return override ? override() : new Date()
 }
 
-/** Instant de décision : l'horloge relue après le verrou, jamais antérieure au début de la requête (horloge non monotone). */
-export function decisionInstant(startedAt: Date, clock?: () => Date): Date {
-  const now = clock ? clock() : serverNow()
-  return now.getTime() >= startedAt.getTime() ? now : startedAt
+/**
+ * Horloge de décision (correctifs R3/S3, précisée au cycle R3). À créer AVANT l'acquisition des verrous : `decide()` renvoie
+ * l'instant de début de requête (`startedAt`) AVANCÉ du temps réellement écoulé depuis la création de l'horloge (attente du verrou
+ * incluse). Ainsi la décision n'est jamais datée d'un instant figé avant l'attente, et un instant de requête simulé (tests, rejeux
+ * avec un `now` passé) conserve sa chronologie : le temps écoulé s'ajoute à `startedAt`, il ne le remplace pas par l'heure réelle.
+ * Horloge non monotone ⇒ écoulement négatif ignoré (jamais antérieur au début de requête).
+ */
+export function decisionClock(startedAt: Date, clock?: () => Date): () => Date {
+  const read = clock ?? serverNow
+  const t0 = read().getTime()
+  return () => new Date(startedAt.getTime() + Math.max(0, read().getTime() - t0))
 }
 
 export function setBillingClockForTests(clock: (() => Date) | null): void {

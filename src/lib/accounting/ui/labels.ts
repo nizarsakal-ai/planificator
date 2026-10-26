@@ -1,3 +1,4 @@
+import { businessDay } from "@/lib/time/business-day"
 // Libellés partagés des écrans Comptabilité (pur, sans dépendance serveur).
 const dateFrFmt = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" })
 
@@ -26,7 +27,7 @@ export function pickFiscalYear<T extends { id: string; status: string }>(years: 
 
 /** Jour (AAAA-MM-JJ, UTC) par défaut pour une saisie dans l'exercice : aujourd'hui s'il est dans l'exercice, sinon son début. */
 export function defaultDayInYear(year: { startDate: Date; endDate: Date }, now: Date = new Date()): string {
-  const today = now.toISOString().slice(0, 10)
+  const today = businessDay(now).toISOString().slice(0, 10) // S3 : jour civil Europe/Paris
   const start = year.startDate.toISOString().slice(0, 10)
   const end = year.endDate.toISOString().slice(0, 10)
   return today >= start && today <= end ? today : start
@@ -34,5 +35,5 @@ export function defaultDayInYear(year: { startDate: Date; endDate: Date }, now: 
 
 /** Exercice contenant aujourd'hui (comparaison par jour), sinon le premier de la liste. */
 export function yearContainingToday<T extends { startDate: Date; endDate: Date }>(years: readonly T[], now: Date = new Date()): T | undefined {
-  return years.find((y) => defaultDayInYear(y, now) === now.toISOString().slice(0, 10)) ?? years[0]
+  return years.find((y) => defaultDayInYear(y, now) === businessDay(now).toISOString().slice(0, 10)) ?? years[0]
 }

@@ -14,7 +14,8 @@ const idSchema = z.string().trim().min(1).max(64)
 
 function integrityMessage(error: unknown): string | null {
   const message = error instanceof Error ? error.message : ""
-  const code = /\b(INVOICE_[A-Z_]+|CREDIT_NOTE_INVALID|PAYMENT_[A-Z_]+)\b/.exec(message)?.[1]
+  const code = /\b(INVOICE_[A-Z_]+|CREDIT_NOTE_INVALID|PAYMENT_[A-Z_]+|DEPOSIT_DEDUCTION_[A-Z_]+)\b/.exec(message)?.[1]
+  if (code?.startsWith("DEPOSIT_DEDUCTION_")) return "Déductions d'acomptes incohérentes : recalculez-les avant d'émettre."
   if (!code) return null
   if (code === "INVOICE_CONFLICT") return "La facture a été modifiée entre-temps. Rechargez la page."
   if (code === "INVOICE_DEPOSIT_DEDUCTED") return "Cet acompte est déduit sur une facture de solde émise : établissez l'avoir sur la facture de solde."

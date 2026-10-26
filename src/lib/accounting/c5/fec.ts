@@ -2,6 +2,7 @@
 import type { Prisma, PrismaClient } from "@prisma/client"
 import type { AccountingContext } from "@/lib/accounting/engine/posting"
 import { sirenFromSiret } from "@/lib/billing/settings"
+import { businessDay } from "@/lib/billing/business-day"
 
 type Db = PrismaClient | Prisma.TransactionClient
 export const FEC_HEADER = ["JournalCode", "JournalLib", "EcritureNum", "EcritureDate", "CompteNum", "CompteLib", "CompAuxNum", "CompAuxLib", "PieceRef", "PieceDate", "EcritureLib", "Debit", "Credit", "EcritureLet", "DateLet", "ValidDate", "Montantdevise", "Idevise"] as const
@@ -31,7 +32,7 @@ export async function buildFec(db: Db, ctx: AccountingContext, fiscalYearId: str
       rows.push([
         fecText(e.journal.code), fecText(e.journal.label), String(e.number ?? ""), fecDate(e.entryDate), fecText(l.account.number), fecText(l.account.label), "", "",
         fecText(e.documentRef) || String(e.number ?? ""), fecDate(e.documentDate ?? e.entryDate), fecText(l.label ?? e.label), fecAmount(l.debitCents), fecAmount(l.creditCents), "", "",
-        e.validatedAt ? fecDate(e.validatedAt) : fecDate(e.entryDate), "", "",
+        e.validatedAt ? fecDate(businessDay(e.validatedAt)) : fecDate(e.entryDate), "", "", // ValidDate : jour civil Europe/Paris de l'instant de validation (S3)
       ].join("|"))
     }
   }
