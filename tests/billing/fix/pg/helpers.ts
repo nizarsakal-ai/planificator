@@ -4,12 +4,19 @@
 //   barrières explicites (commit / rollback) pour les scénarios de concurrence à deux sessions.
 // - appClient : client connecté avec le RÔLE APPLICATIF non propriétaire (DATABASE_URL_APP, créé par le lanceur de base jetable).
 import { PrismaClient, type Prisma } from "@prisma/client"
+import { setBillingClockForTests } from "@/lib/billing/clock"
 
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL requis (base PostgreSQL jetable migrée)")
 
 export const A = { companyId: "coA", userId: "admA" }
 export const B = { companyId: "coB", userId: "admB" }
 export const NOW = new Date("2026-03-10T10:00:00Z")
+/**
+ * Correctif R3 : horloge serveur déterministe dans les tests (par défaut NOW), à appeler EXPLICITEMENT dans `before` de chaque suite
+ * (aucun effet de bord à l'import : un script de reproduction qui importe ces outils garde l'horloge réelle). Un test de passage du
+ * temps réel la remplace (setBillingClockForTests(() => new Date())) puis la restaure.
+ */
+export function useTestClock(at: Date = NOW): void { setBillingClockForTests(() => at) }
 export const D = (s: string) => new Date(`${s}T00:00:00Z`)
 export const js = (v: unknown) => JSON.stringify(v, (_, x) => (typeof x === "bigint" ? x.toString() : x))
 

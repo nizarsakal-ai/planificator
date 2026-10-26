@@ -5,10 +5,11 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import { calendarDayIn, isQuoteValidAt, quoteValidityEnd, timeZoneOffsetMs } from "@/lib/billing/quotes/quote-validity"
 import { signatureExpiry } from "@/lib/billing/quotes/quote-signature"
-import { allocateReceiptsVat } from "@/lib/accounting/c5/vat"
+import { allocateReceiptsVat, allocateReceiptsVatEvents, type VatEvent } from "@/lib/accounting/c5/vat"
 import { computeDocumentTotals } from "@/lib/billing/money"
 import { bankExternalFingerprint, bankFingerprint, guessBankMapping, parseBankCsv } from "@/lib/accounting/c5/bank-import"
 import { DocumentIntegrityError, assertStoredTotalsMatch, recomputeDocumentTotals } from "@/lib/billing/document-integrity"
+import { decisionInstant, serverNow, setBillingClockForTests } from "@/lib/billing/clock"
 import { QUOTE_ERRORS, transitionQuoteCore } from "@/lib/billing/quotes/quote-lifecycle.core"
 import type { Prisma } from "@prisma/client"
 
@@ -55,6 +56,58 @@ describe("P1-02 — allocation cumulative de la TVA sur encaissements", () => {
     const p60 = allocateReceiptsVat(single, [{ amountCents: BigInt(6000) }])
     assert.deepEqual(p60[0], [{ vatRateBp: 2000, baseCents: BigInt(5000), vatCents: BigInt(1000) }])
     assert.deepEqual(allocateReceiptsVat({ ...single, totalTTCCents: BigInt(0) }, [{ amountCents: BigInt(1) }]), [[]])
+  })
+})
+
+describe("R1 — allocation par événements, nette des avoirs ciblés (oracles indépendants)", () => {
+  const L = (price: number, bp: number) => ({ quantityHundredths: BigInt(100), unitPriceCents: BigInt(price), discountBp: 0, vatRateBp: bp })
+  const original = computeDocumentTotals([L(10000, 2000), L(10000, 1000)], { globalDiscountBp: 0, vatReverseCharge: false }) // 230 TTC : 20 + 10
+  const creditA = computeDocumentTotals([L(10000, 2000)], { globalDiscountBp: 0, vatReverseCharge: false }) // 120 TTC
+  const creditB = computeDocumentTotals([L(10000, 1000)], { globalDiscountBp: 0, vatReverseCharge: false }) // 110 TTC
+  const vat = (ev: ReturnType<typeof allocateReceiptsVatEvents>, bp: number) => ev.flatMap((e) => e.parts).filter((p) => p.vatRateBp === bp).reduce((s, p) => s + p.vatCents, BigInt(0))
+  const pay = (c: number): VatEvent => ({ kind: "PAYMENT", amountCents: BigInt(c) })
+  it("reproduction Codex : avoir A puis 110 € ⇒ 10 @10 %, 0 @20 % ; inverse : avoir B puis 120 € ⇒ 20 @20 % ; aucun excès", () => {
+    const r = allocateReceiptsVatEvents(original, [{ kind: "CREDIT", totals: creditA }, pay(11000)])
+    assert.equal(vat(r, 1000), BigInt(1000)); assert.equal(vat(r, 2000), BigInt(0)); assert.deepEqual(r.map((e) => e.excessCents), [BigInt(0), BigInt(0)])
+    assert.deepEqual(r[1].parts, [{ vatRateBp: 1000, baseCents: BigInt(10000), vatCents: BigInt(1000) }])
+    const inv = allocateReceiptsVatEvents(original, [{ kind: "CREDIT", totals: creditB }, pay(12000)])
+    assert.equal(vat(inv, 2000), BigInt(2000)); assert.equal(vat(inv, 1000), BigInt(0))
+  })
+  it("paiement avant l'avoir : 50 € (4,35 @20 ; 2,17 @10) puis avoir A ⇒ réaffectation (−4,35 ; +2,38) puis 60 € ⇒ +5,45 : Σ = 10 @10, 0 @20", () => {
+    const r = allocateReceiptsVatEvents(original, [pay(5000), { kind: "CREDIT", totals: creditA }, pay(6000)])
+    assert.deepEqual(r[0].parts.map((p) => [p.vatRateBp, p.vatCents]), [[1000, BigInt(217)], [2000, BigInt(435)]])
+    assert.deepEqual(r[1].parts.map((p) => [p.vatRateBp, p.vatCents]), [[1000, BigInt(238)], [2000, BigInt(-435)]])
+    assert.deepEqual(r[2].parts.map((p) => [p.vatRateBp, p.vatCents]), [[1000, BigInt(545)]])
+    assert.equal(vat(r, 1000), BigInt(1000)); assert.equal(vat(r, 2000), BigInt(0))
+  })
+  it("plusieurs avoirs, fractions non divisibles, contre-passation : Σ parts = TVA nette exacte par taux ; mono-taux : avoir après paiement ⇒ aucune part", () => {
+    const half = computeDocumentTotals([{ ...L(10000, 2000), quantityHundredths: BigInt(50) }], { globalDiscountBp: 0, vatReverseCharge: false }) // 60 TTC
+    // Net final = A/2 : 60 TTC, TVA 10 @20 ; mouvements 33,33 − 33,33 + 33,33 + 26,67 = 60,00 ; le cumul ne dépasse jamais le net courant (plafond C4).
+    const r = allocateReceiptsVatEvents(original, [pay(3333), { kind: "CREDIT", totals: half }, { kind: "CREDIT", totals: creditB }, pay(-3333), pay(3333), pay(2667)])
+    assert.equal(vat(r, 2000), BigInt(1000)); assert.equal(vat(r, 1000), BigInt(0)); assert.ok(r.every((e) => e.excessCents === BigInt(0)))
+    const mono = computeDocumentTotals([L(10000, 2000)], { globalDiscountBp: 0, vatReverseCharge: false })
+    const m = allocateReceiptsVatEvents(mono, [pay(6000), { kind: "CREDIT", totals: computeDocumentTotals([L(5000, 2000)], { globalDiscountBp: 0, vatReverseCharge: false }) }])
+    assert.deepEqual(m[1].parts, []); assert.equal(vat(m, 2000), BigInt(1000))
+  })
+  it("hors contrat : avoir total après encaissement ⇒ excès = encaissé, aucune part ; avoir partiel au-delà du reste (héritage) ⇒ excès = dépassement, allocation gelée", () => {
+    const total = allocateReceiptsVatEvents(original, [pay(23000), { kind: "CREDIT", totals: original }])
+    assert.deepEqual(total[1], { parts: [], excessCents: BigInt(23000) }); assert.equal(vat(total, 2000), BigInt(2000))
+    const over = allocateReceiptsVatEvents(original, [pay(20000), { kind: "CREDIT", totals: creditA }]) // net 110, encaissé 200 ⇒ excès 90 : allocation GELÉE (aucune part à l'avoir)
+    assert.equal(over[1].excessCents, BigInt(9000)); assert.deepEqual(over[1].parts, []); assert.equal(vat(over, 2000), BigInt(1739)); assert.equal(vat(over, 1000), BigInt(870))
+    // Compatibilité : l'ancienne allocation cumulative reste un cas particulier (sans avoir).
+    assert.deepEqual(allocateReceiptsVat(original, [{ amountCents: BigInt(11500) }, { amountCents: BigInt(11500) }]).flat().map((p) => p.vatCents), [BigInt(500), BigInt(1000), BigInt(500), BigInt(1000)]) // ordre = taux croissants (vatSummary)
+  })
+})
+
+describe("R3 — horloge de décision", () => {
+  it("decisionInstant = horloge relue, jamais antérieure au début de requête ; horloge de test fixée puis restaurée", () => {
+    const start = d("2026-03-10T10:00:00Z")
+    assert.equal(decisionInstant(start, () => d("2026-03-10T10:00:01Z")).toISOString(), "2026-03-10T10:00:01.000Z")
+    assert.equal(decisionInstant(start, () => d("2026-03-10T09:00:00Z")).toISOString(), start.toISOString(), "horloge non monotone ⇒ max")
+    setBillingClockForTests(() => d("2030-01-01T00:00:00Z"))
+    assert.equal(serverNow().toISOString(), "2030-01-01T00:00:00.000Z"); assert.equal(decisionInstant(start).toISOString(), "2030-01-01T00:00:00.000Z")
+    setBillingClockForTests(null)
+    assert.ok(Math.abs(serverNow().getTime() - Date.now()) < 1000)
   })
 })
 

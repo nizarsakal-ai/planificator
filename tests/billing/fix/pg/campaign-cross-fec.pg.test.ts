@@ -5,6 +5,7 @@
 import assert from "node:assert/strict"
 import { after, before, describe, it } from "node:test"
 import { PrismaClient } from "@prisma/client"
+import { setBillingClockForTests } from "@/lib/billing/clock"
 import { RecordingMailer, setBillingMailerForTests } from "@/lib/billing/mail/mailer"
 import { ensureBaseReferential } from "@/lib/accounting/engine/setup"
 import { openFiscalYear } from "@/lib/accounting/engine/fiscal-years"
@@ -23,7 +24,7 @@ import { computeVat } from "@/lib/accounting/c5/vat"
 import { declareVat } from "@/lib/accounting/c5/vat-declaration"
 import { buildFec } from "@/lib/accounting/c5/fec"
 import { decimalToCents } from "@/lib/billing/money"
-import { A, D, NOW, js, seedCompanies } from "./helpers"
+import { A, D, NOW, js, seedCompanies, useTestClock } from "./helpers"
 
 const db = new PrismaClient()
 const db2 = new PrismaClient()
@@ -31,6 +32,7 @@ const ids: Record<string, string> = {}
 const c = (v: { toFixed: (n: number) => string }) => decimalToCents(v.toFixed(2))
 
 before(async () => {
+  useTestClock() // R3 : horloge de décision déterministe (= NOW)
   setBillingMailerForTests(new RecordingMailer()); await seedCompanies(db)
   await db.$transaction((tx) => ensureBaseReferential(tx, A)); await db.$transaction((tx) => openFiscalYear(tx, A, { startDate: D("2026-01-01"), endDate: D("2026-12-31") }))
 })
@@ -112,7 +114,8 @@ describe("Campagne E — parcours croisé", () => {
     const share = (vat: bigint) => (BigInt(30000) * vat + c(fin.totalTTC) / BigInt(2)) / c(fin.totalTTC)
     void share
     assert.ok(enc.collectedCents > BigInt(0) && enc.collectedCents < c(fin.totalVAT), js(enc)); assert.equal(enc.payments, 3)
-    const decl = await declareVat(db, A, D("2026-03-01"), D("2026-03-31"), "DEBITS"); assert.ok(decl.ok && decl.value.dueCents === deb.dueCents)
+    setBillingClockForTests(() => new Date("2026-06-01T10:00:00Z")) // la période déclarée doit être terminée (C1)
+    const decl = await declareVat(db, A, D("2026-03-01"), D("2026-03-31"), "DEBITS"); assert.ok(decl.ok && decl.value.dueCents === deb.dueCents, JSON.stringify(decl, (_, x) => (typeof x === "bigint" ? x.toString() : x)))
     const fy = await db.fiscalYear.findFirstOrThrow({ where: { companyId: "coA" } })
     const fec = await buildFec(db, A, fy.id); assert.ok(fec); if (!fec) return
     const rows = fec.content.trim().split("\r\n")

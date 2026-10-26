@@ -15,7 +15,8 @@ import { flushDeferredConstraints } from "@/lib/deferred-constraints"
 import { computeVat } from "@/lib/accounting/c5/vat"
 import { declareVat } from "@/lib/accounting/c5/vat-declaration"
 import { accountingDashboard } from "@/lib/accounting/c5/dashboard"
-import { A, B, D, js, seedCompanies } from "./helpers"
+import { A, B, D, NOW, js, seedCompanies, useTestClock } from "./helpers"
+import { setBillingClockForTests } from "@/lib/billing/clock"
 import { issuedInvoice } from "./fixtures"
 
 const db = new PrismaClient()
@@ -27,10 +28,11 @@ const byRate = (v: { collected: { vatRateBp: number; vatCents: bigint }[] }) => 
 const inv120 = (ctx = A, w = "wA") => issuedInvoice(db, ctx, w, [{ designation: "P", quantity: "1", unitPrice: "100", vatRate: "20" }], { now: new Date("2026-03-05T10:00:00Z") })
 
 before(async () => {
+  useTestClock() // R3 : horloge de décision déterministe (= NOW)
   setBillingMailerForTests(new RecordingMailer()); await seedCompanies(db)
   for (const ctx of [A, B]) { await db.$transaction((tx) => ensureBaseReferential(tx, ctx)); await db.$transaction((tx) => openFiscalYear(tx, ctx, { startDate: D("2026-01-01"), endDate: D("2026-12-31") })) }
 })
-after(async () => { setBillingMailerForTests(null); await db.$disconnect() })
+after(async () => { setBillingMailerForTests(null); setBillingClockForTests(() => NOW); await db.$disconnect() })
 
 describe("P1-02 — oracles", () => {
   it("facture 120 TTC impayée + avoir 60 TTC, aucun mouvement ⇒ 0 € (jamais −10) ; paiement ultérieur du solde 60 ⇒ 10 €, sans nouvelle déduction de l'avoir ; débits = 20 − 10", async () => {
@@ -80,19 +82,23 @@ describe("P1-02 — oracles", () => {
     const rev = await reversePayment(db, A, p, "erreur", new Date("2026-03-12T10:00:00Z")); assert.ok(rev.ok)
     const after = await enc(A)
     assert.equal(after.collectedCents - before.collectedCents, BigInt(-2000)); assert.equal(after.payments - before.payments, 1)
-    // Avoir total sur une facture encaissée (le paiement reste) : TVA encaissée inchangée, situation signalée.
+    // Avoir total sur une facture encaissée (le paiement reste) : TVA encaissée inchangée, situation signalée dans la période de l'avoir
+    // (mai : R5 refuse alors la déclaration de mai, pas celle de mars dont l'encaissement reste acquis).
     const inv2 = await inv120(); await pay(A, inv2, 12000, "2026-03-13")
     const mid = await enc(A)
-    const t = await db.$transaction(async (tx) => { const r = await createCreditNoteCore(tx, { companyId: "coA", invoiceId: inv2, actorId: "admA", reason: "annulation", now: new Date("2026-03-14T10:00:00Z"), nextNumber: (x) => nextDocumentNumber(x, "coA", "CREDIT_NOTE", 2026) }); if (r.ok) await flushDeferredConstraints(tx); return r }); assert.ok(t.ok)
+    const t = await db.$transaction(async (tx) => { const r = await createCreditNoteCore(tx, { companyId: "coA", invoiceId: inv2, actorId: "admA", reason: "annulation", now: new Date("2026-05-14T10:00:00Z"), nextNumber: (x) => nextDocumentNumber(x, "coA", "CREDIT_NOTE", 2026) }); if (r.ok) await flushDeferredConstraints(tx); return r }); assert.ok(t.ok)
     const end = await enc(A)
-    assert.equal(end.collectedCents, mid.collectedCents, "aucune régularisation inventée sans remboursement effectif")
-    assert.ok(end.warnings.some((w) => /remboursement effectif/.test(w)), js(end.warnings))
+    assert.equal(end.collectedCents, mid.collectedCents, "aucune régularisation inventée sans remboursement effectif"); assert.deepEqual(end.warnings, [])
+    const may = await enc(A, [D("2026-05-01"), D("2026-05-31")] as const)
+    assert.ok(may.warnings.some((w) => /remboursement effectif/.test(w)), js(may.warnings)); assert.equal(may.collectedCents, BigInt(0))
+    assert.equal((await declareVat(db, A, D("2026-05-01"), D("2026-05-31"), "ENCAISSEMENTS")).ok, false, "R5 : la période de l'avoir hors contrat n'est pas déclarable")
     assert.equal((await reversePayment(db, A, (await db.invoicePayment.findFirstOrThrow({ where: { invoiceId: inv2 } })).id, "rembourser", new Date())).ok, false, "le remboursement après avoir total est un parcours refusé explicitement")
   })
   it("périodes différentes : paiement en mars, contre-passation en avril ⇒ +20 en mars, −20 en avril ; déclaration de mars figée, inchangée par l'événement d'avril ; DÉBITS inchangé ; B isolée ; tableau de bord = aperçu = déclaration", async () => {
     const inv = await inv120()
     const p = await pay(A, inv, 12000, "2026-03-25")
     const mar = await enc(A)
+    setBillingClockForTests(() => new Date("2026-06-01T10:00:00Z")) // une déclaration ne se fige qu'après la fin de la période (C1)
     const decl = await declareVat(db, A, MAR[0], MAR[1], "ENCAISSEMENTS"); assert.ok(decl.ok, js(decl)); if (!decl.ok) return
     const stored = await db.vatDeclaration.findUniqueOrThrow({ where: { id: decl.value.id } })
     assert.equal(stored.collectedCents, mar.collectedCents)

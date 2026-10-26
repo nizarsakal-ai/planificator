@@ -18,7 +18,7 @@ import { ensureBaseReferential } from "@/lib/accounting/engine/setup"
 import { openFiscalYear } from "@/lib/accounting/engine/fiscal-years"
 import { getInvoiceDetail } from "@/lib/billing/invoices/invoice-queries"
 import { formatEuro } from "@/lib/billing/money"
-import { A, D, NOW, js, seedCompanies, sqlError } from "./helpers"
+import { A, D, NOW, js, seedCompanies, sqlError, useTestClock } from "./helpers"
 import { acceptedQuote, finalDraft, issue, issuedDeposit, issuedInvoice } from "./fixtures"
 
 const db = new PrismaClient()
@@ -26,6 +26,7 @@ const totalNote = (invoiceId: string) => db.$transaction(async (tx) => { const r
 const cents = (v: { toFixed: (n: number) => string }) => BigInt(v.toFixed(2).replace(".", ""))
 
 before(async () => {
+  useTestClock() // R3 : horloge de décision déterministe (= NOW)
   setBillingMailerForTests(new RecordingMailer())
   await seedCompanies(db)
   await db.$transaction((tx) => ensureBaseReferential(tx, A))

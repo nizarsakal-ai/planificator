@@ -12,7 +12,7 @@ import { createCreditNoteCore } from "@/lib/billing/invoice-lifecycle.core"
 import { nextDocumentNumber } from "@/lib/billing/numbering"
 import { flushDeferredConstraints } from "@/lib/deferred-constraints"
 import { NO_SNAPSHOT_MENTION, buildInvoicePdfData } from "@/lib/billing/pdf/invoice-pdf"
-import { A, NOW, js, seedCompanies, sqlError } from "./helpers"
+import { A, NOW, js, seedCompanies, sqlError, useTestClock } from "./helpers"
 import { acceptedQuote, finalDraft, issue, issuedDeposit, issuedInvoice } from "./fixtures"
 
 const db = new PrismaClient()
@@ -24,7 +24,7 @@ async function mutateMasters(tag: string) {
   await db.billingSettings.upsert({ where: { companyId: "coA" }, create: { companyId: "coA", iban: `FR76 ${tag}`, invoiceFooter: `Pied ${tag}`, latePenaltyText: `Pénalités ${tag}`, legalForm: `SAS ${tag}`, vatNumber: `FR12 ${tag}` }, update: { iban: `FR76 ${tag}`, invoiceFooter: `Pied ${tag}`, latePenaltyText: `Pénalités ${tag}`, legalForm: `SAS ${tag}`, vatNumber: `FR12 ${tag}` } })
 }
 
-before(async () => { setBillingMailerForTests(new RecordingMailer()); await seedCompanies(db); await mutateMasters("v1") })
+before(async () => { useTestClock(); setBillingMailerForTests(new RecordingMailer()); await seedCompanies(db); await mutateMasters("v1") })
 after(async () => { setBillingMailerForTests(null); await db.$disconnect() })
 
 describe("P2-03 — snapshot documentaire", () => {

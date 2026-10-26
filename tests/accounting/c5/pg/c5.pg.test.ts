@@ -3,6 +3,7 @@
 import assert from "node:assert/strict"
 import { after, before, describe, it } from "node:test"
 import { PrismaClient } from "@prisma/client"
+import { setBillingClockForTests } from "@/lib/billing/clock"
 import { RecordingMailer, setBillingMailerForTests } from "@/lib/billing/mail/mailer"
 import { ensureBaseReferential } from "@/lib/accounting/engine/setup"
 import { openFiscalYear } from "@/lib/accounting/engine/fiscal-years"
@@ -42,6 +43,7 @@ async function balance(ctx: typeof A, number: string) {
 }
 
 before(async () => {
+  setBillingClockForTests(() => new Date("2026-06-15T10:00:00Z")) // R3 : horloge de décision déterministe ; postérieure aux périodes déclarées (C1)
   // Le rapprochement avec une facture client enregistre un paiement C2 : il exige la facturation complète (drapeau).
   process.env.BILLING_COMPLETE_ENABLED = "true"
   setBillingMailerForTests(new RecordingMailer())
@@ -107,9 +109,10 @@ describe("Tableau de bord, TVA, FEC", () => {
     const p = await recordPayment(db, A, ids.inv, { amountCents: BigInt(60000), method: "CHECK", paidAt: now, reference: null, notes: null }, now)
     assert.ok(p.ok)
     const e = await computeVat(db, A, D("2026-03-01"), D("2026-03-31"), "ENCAISSEMENTS")
-    // P1-02 : encaissements = mouvements de trésorerie seulement (+31 000, −31 000, +60 000 sur TTC 131 000, TVA 20 000 @20 % + 1 000 @10 %),
-    // allocation cumulative par taux : 4 733 − 4 733 + 9 160 (20 %) et 237 − 237 + 458 (10 %) = 9 618 ; l'avoir (non encaissé) n'est PLUS déduit.
-    assert.equal(e.collectedCents, BigInt(9618)); assert.deepEqual(e.collected.map((r) => [r.vatRateBp, r.vatCents]), [[1000, BigInt(458)], [2000, BigInt(9160)]]); assert.equal(e.payments, 3); assert.equal(e.documents, 1)
+    // P1-02 + R1 : encaissements = mouvements de trésorerie (+31 000, −31 000, +60 000) alloués sur la facture NETTE de l'avoir ciblé
+    // (Finitions 100 HT @10 % annulée ⇒ net 120 000 TTC : base 100 000 @20 %, TVA 20 000 ; plus rien au taux 10 %) :
+    // 5 167 − 5 167 + arrondi(60 000 × 20 000 / 120 000) = 10 000 @20 % ; 0 @10 % (poste annulé : aucune TVA collectée pour lui).
+    assert.equal(e.collectedCents, BigInt(10000)); assert.deepEqual(e.collected.map((r) => [r.vatRateBp, r.vatCents]), [[2000, BigInt(10000)]]); assert.equal(e.payments, 3); assert.equal(e.documents, 1)
     const decl = await declareVat(db, A, D("2026-03-01"), D("2026-03-31"), "DEBITS")
     assert.ok(decl.ok && decl.value.dueCents === BigInt(20000))
     assert.equal((await declareVat(db, A, D("2026-03-01"), D("2026-03-31"), "DEBITS")).ok, false)
@@ -137,7 +140,8 @@ describe("Banque et factures fournisseurs", () => {
     assert.ok(i1.ok && i1.value.imported === 3)
     assert.deepEqual(await importBankStatement(db, A, csv, "releve.csv", m), { ok: false, error: "Ce relevé a déjà été importé." })
     const i2 = await importBankStatement(db, A, csv + "14/03/2026;AUTRE;1,00;X4\n", "releve2.csv", m)
-    assert.ok(i2.ok && i2.value.imported === 1 && i2.value.duplicates === 3)
+    // R4 : sans identifiant bancaire, les 3 lignes déjà connues d'un relevé antérieur sont des COLLISIONS conservées (à résoudre), pas des doublons certains.
+    assert.ok(i2.ok && i2.value.imported === 1 && i2.value.duplicates === 0 && i2.value.collisions === 3, JSON.stringify(i2))
     delete process.env.BILLING_COMPLETE_ENABLED
     const off = await autoReconcile(db, A)
     assert.equal(off.matched, 0, "sans drapeau C2 : aucun paiement créé par le rapprochement")
@@ -146,7 +150,7 @@ describe("Banque et factures fournisseurs", () => {
     assert.equal(r.matched, 1); assert.equal(await db.invoicePayment.count({ where: { invoiceId: open } }), 1)
     assert.equal((await db.invoice.findUniqueOrThrow({ where: { id: open } })).status, "PAID")
     const again = await autoReconcile(db, A); assert.equal(again.matched, 0)
-    const pending = await db.bankTransaction.findFirstOrThrow({ where: { companyId: "coA", status: "PENDING", amountCents: BigInt(9999) } })
+    const pending = await db.bankTransaction.findFirstOrThrow({ where: { companyId: "coA", status: "PENDING", amountCents: BigInt(9999), collisionOfId: null } })
     const manual = await matchTransaction(db, A, pending.id, { invoiceId: ids.inv })
     assert.equal(manual.ok, true)
     assert.equal(await db.bankTransaction.count({ where: { companyId: "coB" } }), 0)

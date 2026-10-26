@@ -9,7 +9,7 @@ import { openFiscalYear } from "@/lib/accounting/engine/fiscal-years"
 import { importBankStatement, matchTransaction } from "@/lib/accounting/c5/bank.service"
 import { createSupplierInvoice, storeSupplierFile, validateSupplierInvoice } from "@/lib/accounting/c5/supplier-invoice.service"
 import { recordPayment } from "@/lib/billing/invoices/invoice.service"
-import { A, B, D, NOW, appClient, js, seedCompanies, sqlError } from "./helpers"
+import { A, B, D, NOW, appClient, js, seedCompanies, sqlError, useTestClock } from "./helpers"
 import { acceptedQuote, issuedInvoice } from "./fixtures"
 
 const db = new PrismaClient()
@@ -18,6 +18,7 @@ const FK = /23503|foreign key|violates/
 const ids: Record<string, string> = {}
 
 before(async () => {
+  useTestClock() // R3 : horloge de décision déterministe (= NOW)
   process.env.BILLING_COMPLETE_ENABLED = "true"; setBillingMailerForTests(new RecordingMailer()); await seedCompanies(db)
   for (const ctx of [A, B]) { await db.$transaction((tx) => ensureBaseReferential(tx, ctx)); await db.$transaction((tx) => openFiscalYear(tx, ctx, { startDate: D("2026-01-01"), endDate: D("2026-12-31") })) }
   // Objets de A et de B.

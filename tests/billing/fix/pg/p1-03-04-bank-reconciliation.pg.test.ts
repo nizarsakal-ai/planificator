@@ -13,7 +13,7 @@ import { runAccountingTransaction } from "@/lib/accounting/engine/transaction"
 import { BANK_ERRORS, autoReconcile, importBankStatement, matchTransaction, setBankReconcileHooksForTests } from "@/lib/accounting/c5/bank.service"
 import { postMissingDocuments, postPaymentEntry } from "@/lib/accounting/c5/postings"
 import { createSupplierInvoice, validateSupplierInvoice } from "@/lib/accounting/c5/supplier-invoice.service"
-import { A, B, D, NOW, holdTransaction, js, seedCompanies, sqlError, waitFor, waitingSessions } from "./helpers"
+import { A, B, D, NOW, holdTransaction, js, seedCompanies, sqlError, waitFor, waitingSessions, useTestClock } from "./helpers"
 import { issuedInvoice } from "./fixtures"
 
 const db = new PrismaClient()
@@ -36,6 +36,7 @@ const state = async (txId: string) => { const t = await db.bankTransaction.findU
 const paymentsOf = (invoiceId: string) => db.invoicePayment.findMany({ where: { invoiceId }, select: { amountCents: true, bankTransactionId: true } })
 
 before(async () => {
+  useTestClock() // R3 : horloge de décision déterministe (= NOW)
   process.env.BILLING_COMPLETE_ENABLED = "true"
   setBillingMailerForTests(new RecordingMailer())
   await seedCompanies(db)

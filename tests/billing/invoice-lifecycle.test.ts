@@ -32,6 +32,8 @@ function makeTx(seed: Row[], lines: Row[] = []) {
   let seq = 0
   const hooks: { beforeUpdate?: () => void } = {}
   const tx = {
+    // Correctif R2 : le cœur verrouille le parent (SELECT … FOR UPDATE) avant la lecture ; sans base, le verrou est un no-op.
+    $queryRaw: async () => [],
     invoice: {
       findFirst: async ({ where, select }: { where: Record<string, unknown>; select?: Record<string, unknown> }) => {
         const row = invoices.find((r) => matches(r, where))

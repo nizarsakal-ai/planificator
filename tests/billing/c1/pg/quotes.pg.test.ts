@@ -3,6 +3,7 @@
 import assert from "node:assert/strict"
 import { after, before, describe, it } from "node:test"
 import { PrismaClient } from "@prisma/client"
+import { setBillingClockForTests } from "@/lib/billing/clock"
 import { RecordingMailer, setBillingMailerForTests } from "@/lib/billing/mail/mailer"
 import { parseQuoteForm } from "@/lib/billing/quotes/quote-schemas"
 import { hashSignatureToken } from "@/lib/billing/quotes/quote-signature"
@@ -23,6 +24,7 @@ const form = (over: Record<string, unknown> = {}) => ({ worksiteId: "wA", issueD
 const parsed = (over: Record<string, unknown> = {}) => { const r = parseQuoteForm(form(over)); if (!r.ok) throw new Error(r.error); return r.value }
 
 before(async () => {
+  setBillingClockForTests(() => now) // R3 : horloge de décision déterministe dans les tests
   setBillingMailerForTests(mailer)
   await db.$executeRawUnsafe(`INSERT INTO companies(id,name,slug,siret,address,"updatedAt") VALUES ('coA','Société A','a','12345678900012','1 rue A',now()),('coB','Société B','b',NULL,NULL,now())`)
   await db.$executeRawUnsafe(`INSERT INTO users(id,email,password,role,"companyId","updatedAt") VALUES ('admA','a@x','x','ADMIN','coA',now()),('admB','b@x','x','ADMIN','coB',now())`)

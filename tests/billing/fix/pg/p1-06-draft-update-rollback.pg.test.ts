@@ -10,7 +10,7 @@ import { issueInvoice, updateDraftInvoice } from "@/lib/billing/invoices/invoice
 import { issueInvoiceCore, replaceInvoiceDraftCore } from "@/lib/billing/invoices/invoice-c2.core"
 import { DEPOSIT_ERRORS, depositIssueChecks } from "@/lib/billing/invoices/deposit.service"
 import { nextDocumentNumber } from "@/lib/billing/numbering"
-import { A, NOW, holdTransaction, js, seedCompanies, waitFor, waitingSessions } from "./helpers"
+import { A, NOW, holdTransaction, js, seedCompanies, waitFor, waitingSessions, useTestClock } from "./helpers"
 import { acceptedQuote, finalDraft, issuedDeposit } from "./fixtures"
 
 const db = new PrismaClient()
@@ -27,7 +27,7 @@ async function snapshot(invoiceId: string) {
   return js({ inv: { ...inv, updatedAt: undefined }, ls, ded, hist, counters })
 }
 
-before(async () => { setBillingMailerForTests(new RecordingMailer()); await seedCompanies(db) })
+before(async () => { useTestClock(); setBillingMailerForTests(new RecordingMailer()); await seedCompanies(db) })
 after(async () => { setBillingMailerForTests(null); await db.$disconnect(); await db2.$disconnect() })
 
 describe("P1-06 — modification refusée d'une facture de solde", () => {

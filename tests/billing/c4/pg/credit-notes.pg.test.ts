@@ -3,6 +3,7 @@
 import assert from "node:assert/strict"
 import { after, before, describe, it } from "node:test"
 import { PrismaClient } from "@prisma/client"
+import { setBillingClockForTests } from "@/lib/billing/clock"
 import { RecordingMailer, setBillingMailerForTests } from "@/lib/billing/mail/mailer"
 import { parseInvoiceForm } from "@/lib/billing/invoices/invoice-schemas"
 import { createDraftInvoice, issueInvoice, recordPayment } from "@/lib/billing/invoices/invoice.service"
@@ -30,6 +31,7 @@ async function issued(lines: { designation: string; quantity: string; unitPrice:
 const totalNote = (tx: Parameters<Parameters<typeof db.$transaction>[0]>[0], invoiceId: string) => createCreditNoteCore(tx, { companyId: "coA", invoiceId, actorId: "admA", reason: null, now, nextNumber: (t) => nextDocumentNumber(t, "coA", "CREDIT_NOTE", 2026) })
 
 before(async () => {
+  setBillingClockForTests(() => now) // R3 : horloge de décision déterministe dans les tests
   setBillingMailerForTests(new RecordingMailer())
   await db.$executeRawUnsafe(`INSERT INTO companies(id,name,slug,siret,address,"updatedAt") VALUES ('coA','Société A','a','12345678900012','1 rue A',now()),('coB','Société B','b','98765432100011','2 rue B',now())`)
   await db.$executeRawUnsafe(`INSERT INTO users(id,email,password,role,"companyId","updatedAt") VALUES ('admA','a@x','x','ADMIN','coA',now()),('admB','b@x','x','ADMIN','coB',now())`)

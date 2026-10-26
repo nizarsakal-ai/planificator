@@ -11,7 +11,7 @@ import { CREDIT_ERRORS, createPartialCreditNote } from "@/lib/billing/invoices/c
 import { createCreditNoteCore } from "@/lib/billing/invoice-lifecycle.core"
 import { nextDocumentNumber } from "@/lib/billing/numbering"
 import { flushDeferredConstraints } from "@/lib/deferred-constraints"
-import { A, NOW, appClient, currentRole, holdTransaction, js, seedCompanies, sqlError } from "./helpers"
+import { A, NOW, appClient, currentRole, holdTransaction, js, seedCompanies, sqlError, useTestClock } from "./helpers"
 import { acceptedQuote, issuedDeposit, issuedInvoice } from "./fixtures"
 
 const owner = new PrismaClient()
@@ -31,6 +31,7 @@ function sqlPartialNote(tx: Prisma.TransactionClient, originId: string, noteId: 
 const attempt = (client: PrismaClient, fn: (tx: Prisma.TransactionClient) => Promise<void>) => client.$transaction(async (tx) => { await fn(tx); await flushDeferredConstraints(tx) })
 
 before(async () => {
+  useTestClock() // R3 : horloge de décision déterministe (= NOW)
   setBillingMailerForTests(new RecordingMailer())
   await seedCompanies(owner)
   assert.equal(await currentRole(app), "planificator_app_test")

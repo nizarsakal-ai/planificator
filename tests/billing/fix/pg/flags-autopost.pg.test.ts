@@ -7,13 +7,14 @@ import { PrismaClient } from "@prisma/client"
 import { RecordingMailer, setBillingMailerForTests } from "@/lib/billing/mail/mailer"
 import { ensureBaseReferential } from "@/lib/accounting/engine/setup"
 import { openFiscalYear } from "@/lib/accounting/engine/fiscal-years"
-import { A, D, seedCompanies } from "./helpers"
+import { A, D, seedCompanies, useTestClock } from "./helpers"
 import { issuedInvoice } from "./fixtures"
 
 const db = new PrismaClient()
 mock.module("@/lib/accounting/access/accounting-access", { namedExports: { requireAccountingAdmin: async () => ({ companyId: "coA", userId: "admA", role: "ADMIN" }), resolveAccountingAccessForRequest: async () => ({ ok: true, context: { companyId: "coA", userId: "admA", role: "ADMIN" } }) } })
 
 before(async () => {
+  useTestClock() // R3 : horloge de décision déterministe (= NOW)
   process.env.BILLING_COMPLETE_ENABLED = "true"; process.env.ACCOUNTING_MODULE_ENABLED = "true"; delete process.env.ACCOUNTING_AUTO_POSTING_ENABLED
   setBillingMailerForTests(new RecordingMailer()); await seedCompanies(db)
   await db.$transaction((tx) => ensureBaseReferential(tx, A)); await db.$transaction((tx) => openFiscalYear(tx, A, { startDate: D("2026-01-01"), endDate: D("2026-12-31") }))

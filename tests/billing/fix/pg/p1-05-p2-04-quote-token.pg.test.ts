@@ -11,7 +11,7 @@ import { QUOTE_ERRORS, transitionQuoteCore } from "@/lib/billing/quotes/quote-li
 import { createQuote, getQuoteForSignature, refuseQuoteByToken, runQuoteReminders, sendQuote, signQuoteByToken } from "@/lib/billing/quotes/quote.service"
 import { generateSignatureToken, hashSignatureToken } from "@/lib/billing/quotes/quote-signature"
 import { quoteValidityEnd } from "@/lib/billing/quotes/quote-validity"
-import { A, holdTransaction, js, seedCompanies, waitFor, waitingSessions } from "./helpers"
+import { A, holdTransaction, js, seedCompanies, waitFor, waitingSessions, useTestClock } from "./helpers"
 
 const db = new PrismaClient()
 const db2 = new PrismaClient()
@@ -21,7 +21,7 @@ const tokenOf = (r: { ok: true; value: { signatureUrl: string } } | { ok: false 
 async function sentQuote(validUntil: string | "" = "2026-12-31", issueDate = "2026-03-10", now = NOW): Promise<{ id: string; token: string }> {
   const p = parseQuoteForm({ worksiteId: "wA", issueDate, validUntil, lines: [{ designation: "T", quantity: "1", unitPrice: "100", vatRate: "20" }] }); if (!p.ok) throw new Error(p.error)
   const q = await createQuote(db, A, p.value); if (!q.ok) throw new Error(q.error)
-  const s = await sendQuote(db, A, q.value.id, now)
+  const s = await sendQuote(db, A, q.value.id, now, () => now) // R3 : horloge de décision = instant du scénario
   return { id: q.value.id, token: tokenOf(s) }
 }
 const audits = (id: string) => db.historyLog.count({ where: { entityId: id, action: "STATUS_CHANGED", detail: { contains: "signé en ligne" } } })
@@ -29,7 +29,7 @@ const row = (id: string) => db.quote.findUniqueOrThrow({ where: { id }, select: 
 /** Verrou de la ligne portant le jeton, tenu sur la connexion 2 (même protocole que la décision/le renvoi). */
 async function lockRow(id: string) { const h = await holdTransaction(db2); await h.tx.$queryRawUnsafe(`SELECT 1 FROM quotes WHERE id = '${id}' FOR UPDATE`); return h }
 
-before(async () => { setBillingMailerForTests(mailer); await seedCompanies(db) })
+before(async () => { useTestClock(); setBillingMailerForTests(mailer); await seedCompanies(db) })
 after(async () => { setBillingMailerForTests(null); await db.$disconnect(); await db2.$disconnect() })
 
 describe("P1-05 — courses à deux sessions (barrières explicites)", () => {

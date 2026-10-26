@@ -3,6 +3,7 @@
 import assert from "node:assert/strict"
 import { after, before, describe, it } from "node:test"
 import { PrismaClient } from "@prisma/client"
+import { setBillingClockForTests } from "@/lib/billing/clock"
 import { RecordingMailer, setBillingMailerForTests } from "@/lib/billing/mail/mailer"
 import { parseQuoteForm } from "@/lib/billing/quotes/quote-schemas"
 import { acceptQuoteManually, convertQuote, createQuote, sendQuote } from "@/lib/billing/quotes/quote.service"
@@ -24,6 +25,7 @@ const ids: Record<string, string> = {}
 async function sqlError(sql: string): Promise<string> { try { await db.$executeRawUnsafe(sql); return "NO_ERROR" } catch (e) { return String((e as Error).message) } }
 
 before(async () => {
+  setBillingClockForTests(() => now) // R3 : horloge de décision déterministe dans les tests
   setBillingMailerForTests(new RecordingMailer())
   await db.$executeRawUnsafe(`INSERT INTO companies(id,name,slug,siret,address,"updatedAt") VALUES ('coA','Société A','a','12345678900012','1 rue A',now()),('coB','Société B','b','98765432100011','2 rue B',now())`)
   await db.$executeRawUnsafe(`INSERT INTO users(id,email,password,role,"companyId","updatedAt") VALUES ('admA','a@x','x','ADMIN','coA',now()),('admB','b@x','x','ADMIN','coB',now())`)

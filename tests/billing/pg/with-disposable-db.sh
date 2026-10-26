@@ -22,7 +22,7 @@ printf 'DROP DATABASE IF EXISTS "%s" WITH (FORCE);' "$DB" | npx prisma db execut
 printf 'CREATE DATABASE "%s";' "$DB" | npx prisma db execute --url "$ADMIN" --stdin >/dev/null
 export DATABASE_URL="$BASE/$DB"
 if ! npx prisma migrate deploy >"$LOG" 2>&1; then echo "MIGRATION ECHEC ($LOG)"; tail -30 "$LOG"; exit 1; fi
-N=$(grep -cE "^(Applying migration|└─ |  └─ )|migration\.sql|^[0-9]{14}_" "$LOG" || true)
+N=$(grep -cE "^Applying migration " "$LOG" || true)   # une ligne « Applying migration <nom> » par migration réellement appliquée
 echo "base jetable $DB ($HOST:$PORT) : migrations appliquées = $N"
 # Rôle applicatif NON propriétaire (docs/runbooks/DB-APP-ROLE.md) : DML seulement, EXECUTE sur les fonctions SECURITY DEFINER du moteur A1.
 printf "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='%s') THEN CREATE ROLE %s LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT; END IF; END \$\$;" "$APP_ROLE" "$APP_ROLE" | npx prisma db execute --url "$ADMIN" --stdin >/dev/null

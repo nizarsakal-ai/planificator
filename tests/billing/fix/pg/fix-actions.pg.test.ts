@@ -10,7 +10,7 @@ import { openFiscalYear } from "@/lib/accounting/engine/fiscal-years"
 import { parseQuoteForm } from "@/lib/billing/quotes/quote-schemas"
 import { createQuote, sendQuote } from "@/lib/billing/quotes/quote.service"
 import { importBankStatement } from "@/lib/accounting/c5/bank.service"
-import { A, B, D, NOW, seedCompanies } from "./helpers"
+import { A, B, D, NOW, seedCompanies, useTestClock } from "./helpers"
 import { issuedInvoice } from "./fixtures"
 
 const db = new PrismaClient()
@@ -28,6 +28,7 @@ mock.module("@/lib/billing/access", { namedExports: {
 
 const ids: Record<string, string> = {}
 before(async () => {
+  useTestClock() // R3 : horloge de décision déterministe (= NOW)
   setBillingMailerForTests(new RecordingMailer()); await seedCompanies(db)
   for (const ctx of [A, B]) { await db.$transaction((tx) => ensureBaseReferential(tx, ctx)); await db.$transaction((tx) => openFiscalYear(tx, ctx, { startDate: D("2026-01-01"), endDate: D("2026-12-31") })) }
   const p = parseQuoteForm({ worksiteId: "wA", issueDate: "2026-03-10", validUntil: "2026-12-31", lines: [{ designation: "T", quantity: "1", unitPrice: "100", vatRate: "20" }] }); if (!p.ok) throw new Error(p.error)

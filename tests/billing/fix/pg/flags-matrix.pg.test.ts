@@ -17,7 +17,7 @@ import { BANK_ERRORS, importBankStatement, matchTransaction } from "@/lib/accoun
 import { postMissingDocuments } from "@/lib/accounting/c5/postings"
 import { transitionInvoiceCore } from "@/lib/billing/invoice-lifecycle.core"
 import { listInvoices } from "@/lib/billing/invoices/invoice-queries"
-import { A, B, D, NOW, js, seedCompanies, sqlError } from "./helpers"
+import { A, B, D, NOW, js, seedCompanies, sqlError, useTestClock } from "./helpers"
 import { issuedInvoice } from "./fixtures"
 
 const db = new PrismaClient()
@@ -34,6 +34,7 @@ const deps = (over: Partial<AccountingAccessDeps> = {}): AccountingAccessDeps =>
 })
 
 before(async () => {
+  useTestClock() // R3 : horloge de décision déterministe (= NOW)
   setFlags({}); setBillingMailerForTests(new RecordingMailer()); await seedCompanies(db)
   for (const ctx of [A, B]) { await db.$transaction((tx) => ensureBaseReferential(tx, ctx)); await db.$transaction((tx) => openFiscalYear(tx, ctx, { startDate: D("2026-01-01"), endDate: D("2026-12-31") })) }
   ids.invA = await issuedInvoice(db, A, "wA", [{ designation: "P", quantity: "1", unitPrice: "100", vatRate: "20" }])
