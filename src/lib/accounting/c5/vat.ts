@@ -19,7 +19,9 @@
 //   reste figée ; un événement enregistré plus tard apparaît dans la période de sa date, jamais rétroactivement ;
 // - NON COUVERT (refus explicite, voir DECISIONS) : encaissement conservé au-delà de la facture nette (avoir total après paiement,
 //   ou données héritées) ⇒ remboursement non modélisé ⇒ `warnings` ; aucune régularisation inventée ; la déclaration (R5) est REFUSÉE
-//   tant qu'un tel cas existe dans la période.
+//   tant qu'un tel cas existe dans la période. Cycle R4 (T2) : la réaffectation après encaissement antérieur et le cas « paiement et avoir
+//   ciblé le même jour » (chronologie au jour non prouvée) sont détectés structurellement et refusés conservatoirement ; un écart avec une
+//   période déjà déclarée est signalé.
 import type { Prisma, PrismaClient } from "@prisma/client"
 import { assertStoredTotalsMatch, recomputeDocumentTotals } from "@/lib/billing/document-integrity"
 import { centsToDecimalString, roundHalfUp, type DocumentTotals } from "@/lib/billing/money"
@@ -136,17 +138,25 @@ export async function computeVat(db: Db, ctx: { companyId: string }, periodStart
         ...inv.creditNotes.map((c): Ev => ({ at: day(c.issueDate), rank: 0, createdAt: c.createdAt, id: c.id, date: c.issueDate, number: c.number, event: { kind: "CREDIT", totals: checkedTotals(c) } })),
       ].sort((a, b) => a.at - b.at || a.rank - b.rank || a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
       const allocated = allocateReceiptsVatEvents(totals, evs.map((e) => e.event))
+      // T2 (cycle R4) : la catégorie « avoir ciblé après encaissement antérieur, facture multi-taux » est détectée STRUCTURELLEMENT
+      // (chronologie des dates métier), indépendamment du résultat de l'allocation et de l'ordre de tri des événements d'un même jour :
+      // - encaissement à une date STRICTEMENT antérieure à l'avoir ⇒ réaffectation (hors contrat tant que non validée) ;
+      // - paiement et avoir le MÊME jour ⇒ chronologie non prouvée (les dates de paiement sont au jour) ⇒ ambigu ⇒ refus conservatoire ;
+      //   l'ordre de tri (avoir avant paiement) reste une convention de calcul, jamais une preuve, et n'est pas inversé silencieusement.
+      const multiRate = totals.vatSummary.filter((v) => v.baseCents !== BigInt(0)).length > 1
       let inPeriodEvents = 0, excessWarned = false
       evs.forEach((e, i) => {
         if (e.date < periodStart || e.date > end) return
         inPeriodEvents++
         if (e.event.kind === "PAYMENT") payments++
-        else if (allocated[i].parts.length > 0) {
-          adjustments++
-          // Cycle R3 (réserve fiscale R1 de la revue Codex) : la réaffectation par taux d'un encaissement ANTÉRIEUR à l'avoir est une
-          // hypothèse non validée par l'expert-comptable ⇒ signalée comme hors contrat : la déclaration de la période est refusée (R5)
-          // tant que la règle n'est pas validée. Le calcul reste affiché (aperçu) ; rien n'est figé.
-          warnings.push(`Avoir ${e.number} sur la facture ${inv.number} après encaissement (facture multi-taux) : réaffectation de la TVA encaissée par taux à la date de l'avoir — règle en attente de validation par l'expert-comptable ; la déclaration de cette période est refusée jusqu'à validation.`)
+        else {
+          if (allocated[i].parts.length > 0) adjustments++
+          if (multiRate && e.event.totals.totalTTCCents < totals.totalTTCCents) {
+            const priorPaid = evs.filter((p) => p.event.kind === "PAYMENT" && p.at < e.at).reduce((s2, p) => s2 + (p.event.kind === "PAYMENT" ? p.event.amountCents : BigInt(0)), BigInt(0))
+            const sameDay = evs.filter((p) => p.event.kind === "PAYMENT" && p.at === e.at).length
+            if (priorPaid !== BigInt(0)) warnings.push(`Avoir ${e.number} sur la facture ${inv.number} après encaissement antérieur (facture multi-taux) : réaffectation de la TVA encaissée par taux à la date de l'avoir — règle en attente de validation par l'expert-comptable ; la déclaration de cette période est refusée jusqu'à validation.`)
+            if (sameDay > 0) warnings.push(`Avoir ${e.number} et ${sameDay} paiement(s) de la facture ${inv.number} le même jour (${e.date.toISOString().slice(0, 10)}) : chronologie encaissement/avoir non prouvée (dates au jour) — catégorie fiscale ambiguë, déclaration de cette période refusée conservatoirement jusqu'à décision de l'expert-comptable.`)
+          }
         }
         for (const part of allocated[i].parts) addRow(map, part.vatRateBp, part.baseCents, part.vatCents)
         if (allocated[i].excessCents > BigInt(0) && !excessWarned) {
@@ -162,6 +172,27 @@ export async function computeVat(db: Db, ctx: { companyId: string }, periodStart
   const deductible = supplier.reduce((s, r) => s + r.vatCents, BigInt(0))
   const collected = [...map.values()].sort((a, b) => a.vatRateBp - b.vatRateBp)
   const collectedCents = collected.reduce((s, r) => s + r.vatCents, BigInt(0))
+  // T2 : période(s) déjà déclarée(s) CHEVAUCHANT la période calculée — un événement saisi tardivement (paiement antidaté, avoir, pièce,
+  // facture fournisseur) daté dans une période déclarée est signalé STRUCTURELLEMENT (création/émission postérieure à la déclaration), quel
+  // que soit l'effet sur les totaux ; l'écart de totaux sur une période identique est aussi signalé. La déclaration figée n'est jamais
+  // réécrite ; la régularisation relève d'une période ultérieure, à traiter avec l'expert-comptable.
+  const declaredPeriods = await db.vatDeclaration.findMany({ where: { companyId, periodStart: { lte: end }, periodEnd: { gte: periodStart } }, select: { periodStart: true, periodEnd: true, basis: true, collectedCents: true, deductibleCents: true, declaredAt: true } })
+  for (const d of declaredPeriods) {
+    const dEnd = new Date(Date.UTC(d.periodEnd.getUTCFullYear(), d.periodEnd.getUTCMonth(), d.periodEnd.getUTCDate(), 23, 59, 59, 999))
+    const label = `${d.periodStart.toISOString().slice(0, 10)} → ${d.periodEnd.toISOString().slice(0, 10)}${d.declaredAt ? `, déclarée le ${d.declaredAt.toISOString().slice(0, 10)}` : ""}`
+    if (d.declaredAt) {
+      const latePayments = d.basis === "ENCAISSEMENTS" ? await db.invoicePayment.count({ where: { companyId, paidAt: { gte: d.periodStart, lte: dEnd }, createdAt: { gt: d.declaredAt } } }) : 0
+      const lateReversals = d.basis === "ENCAISSEMENTS" ? await db.invoicePayment.count({ where: { companyId, paidAt: { gte: d.periodStart, lte: dEnd }, reversedAt: { gt: d.declaredAt } } }) : 0
+      const lateCredits = await db.invoice.count({ where: { companyId, kind: "CREDIT_NOTE", status: { in: ["SENT", "PAID"] }, issueDate: { gte: d.periodStart, lte: dEnd }, sentAt: { gt: d.declaredAt } } })
+      const lateDocs = d.basis === "DEBITS" ? await db.invoice.count({ where: { companyId, kind: { not: "CREDIT_NOTE" }, status: { in: ["SENT", "PARTIAL", "PAID", "CANCELLED"] }, issueDate: { gte: d.periodStart, lte: dEnd }, sentAt: { gt: d.declaredAt } } }) : 0
+      const lateSuppliers = await db.supplierInvoice.count({ where: { companyId, status: "VALIDATED", date: { gte: d.periodStart, lte: dEnd }, validatedAt: { gt: d.declaredAt } } })
+      const late = latePayments + lateReversals + lateCredits + lateDocs + lateSuppliers
+      if (late > 0) warnings.push(`Période déjà déclarée (${label}, ${d.basis}) : ${late} événement(s) saisi(s) après la déclaration et daté(s) dans cette période (paiements ${latePayments}, contre-passations ${lateReversals}, avoirs ${lateCredits}, pièces ${lateDocs}, factures fournisseurs ${lateSuppliers}) — la déclaration figée n'est pas réécrite ; régularisation à traiter sur une période ultérieure avec l'expert-comptable.`)
+    }
+    if (d.basis === basis && d.periodStart.getTime() === periodStart.getTime() && d.periodEnd.getTime() === periodEnd.getTime() && (d.collectedCents !== collectedCents || d.deductibleCents !== deductible)) {
+      warnings.push(`Période déjà déclarée (${label}) : le recalcul (${centsToDecimalString(collectedCents)} € collectés, ${centsToDecimalString(deductible)} € déductibles) diffère de la déclaration figée (${centsToDecimalString(d.collectedCents)} € / ${centsToDecimalString(d.deductibleCents)} €) — la déclaration n'est pas réécrite.`)
+    }
+  }
   return { basis, periodStart, periodEnd, collected, collectedCents, deductibleCents: deductible, dueCents: collectedCents - deductible, documents, payments, adjustments, supplierInvoices: supplier.length, warnings }
 }
 

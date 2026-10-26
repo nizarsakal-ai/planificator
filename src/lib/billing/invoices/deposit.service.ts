@@ -109,6 +109,10 @@ export async function applyDepositDeductionsCore(tx: Tx, ctx: DepositContext, fi
   })
   if (!inv) return { ok: false, error: "Facture introuvable." }
   if (inv.status !== "DRAFT" || inv.kind !== "INVOICE" || !inv.quoteId) return { ok: false, error: DEPOSIT_ERRORS.notFinalDraft }
+  // R4 (revue indépendante) : les acomptes du devis sont verrouillés en partage AVANT la lecture (ordre DEVIS → FACTURE → ACOMPTES) :
+  // un avoir concurrent sur un acompte (FOR UPDATE) est attendu, et son annulation relue — sans ce verrou, le garde BEFORE INSERT lisait
+  // l'ancien statut et une affectation active vers un acompte annulé pouvait être posée (la contrainte différée la rejette aussi au COMMIT).
+  await tx.$queryRaw`SELECT 1 FROM "invoices" WHERE "companyId" = ${ctx.companyId} AND "quoteId" = ${inv.quoteId} AND "kind"::text = 'DEPOSIT' FOR SHARE`
   const deposits = await issuedDeposits(tx, ctx.companyId, inv.quoteId)
   const keep = inv.lines.filter((l) => !l.deductsDepositId)
   const deductions = buildDeductionLines(deposits)
@@ -172,7 +176,7 @@ export async function depositIssueChecks(tx: Tx, companyId: string, invoice: { i
     const deposits = await issuedDeposits(tx, companyId, invoice.quoteId)
     const flags = await tx.invoice.findMany({ where: { companyId, id: { in: deposits.map((d) => d.id) } }, select: { vatReverseCharge: true } })
     if (flags.some((f) => f.vatReverseCharge !== invoice.vatReverseCharge)) return "L'autoliquidation de la facture de solde doit être identique à celle des acomptes déduits."
-    const deducted = await tx.invoiceDepositDeduction.findMany({ where: { companyId, finalInvoiceId: invoice.id }, select: { depositInvoiceId: true } })
+    const deducted = await tx.invoiceDepositDeduction.findMany({ where: { companyId, finalInvoiceId: invoice.id, releasedAt: null }, select: { depositInvoiceId: true } }) // T1 : affectations actives seulement
     const deductedIds = new Set(deducted.map((d) => d.depositInvoiceId))
     if (deposits.some((d) => !deductedIds.has(d.id))) return DEPOSIT_ERRORS.depositNotDeducted
     if (deducted.some((d) => !deposits.find((x) => x.id === d.depositInvoiceId))) return DEPOSIT_ERRORS.deductionMismatch

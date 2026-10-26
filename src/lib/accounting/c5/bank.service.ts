@@ -133,10 +133,11 @@ export async function matchCandidates(db: Db, ctx: { companyId: string }, txId: 
     const invoices = open.invoices
       .map((i) => ({ ...i, exact: i.remainingCents === t.amountCents, refMatch: !!(t.reference ?? "").toUpperCase().includes(i.number.toUpperCase()) || t.label.toUpperCase().includes(i.number.toUpperCase()), dateMatch: dayDiff(t.date, i.dueDate ?? i.issueDate) <= MATCH_TOLERANCE_DAYS }))
       .sort((a, b) => Number(b.exact) - Number(a.exact) || Number(b.refMatch) - Number(a.refMatch) || Number(b.dateMatch) - Number(a.dateMatch))
-    return { transaction: t, invoices, supplierInvoices: [] as (OpenSupplier & { exact: boolean })[] }
+    return { transaction: t, invoices, supplierInvoices: [] as (OpenSupplier & { exact: boolean; refMatch: boolean; dateMatch: boolean })[] }
   }
   const abs = -t.amountCents
-  return { transaction: t, invoices: [] as (OpenInvoice & { exact: boolean; refMatch: boolean; dateMatch: boolean })[], supplierInvoices: open.suppliers.map((s) => ({ ...s, exact: s.totalTTCCents === abs })).sort((a, b) => Number(b.exact) - Number(a.exact)) }
+  // Même famille (audit R4, T2 #1) : comme pour les factures client, l'automate exige référence/libellé OU date à ± tolérance, pas le seul montant.
+  return { transaction: t, invoices: [] as (OpenInvoice & { exact: boolean; refMatch: boolean; dateMatch: boolean })[], supplierInvoices: open.suppliers.map((s) => ({ ...s, exact: s.totalTTCCents === abs, refMatch: !!(t.reference ?? "").toUpperCase().includes(s.number.toUpperCase()) || t.label.toUpperCase().includes(s.number.toUpperCase()), dateMatch: dayDiff(t.date, s.date) <= MATCH_TOLERANCE_DAYS })).sort((a, b) => Number(b.exact) - Number(a.exact) || Number(b.refMatch) - Number(a.refMatch)) }
 }
 
 export interface ReconcileReport { matched: number; unmatched: number; ambiguous: number; errors: { transactionId: string; error: string }[] }
@@ -149,13 +150,26 @@ export async function autoReconcile(db: Db, ctx: AccountingContext, limit = 500)
   const pending = await db.bankTransaction.findMany({ where: { companyId: ctx.companyId, status: "PENDING" }, orderBy: { date: "asc" }, take: limit, select: { id: true, identityAmbiguous: true, collisionOfId: true, collisionResolution: true } })
   const report: ReconcileReport = { matched: 0, unmatched: 0, ambiguous: 0, errors: [] }
   let items = await loadOpenItems(db, ctx)
+  // Même famille (audit R4, T2 #2) : une pièce convoitée par PLUSIEURS opérations en attente (même montant exact, référence ou date) n'est
+  // rapprochée par aucune — le résultat ne dépend plus de l'ordre de traitement ; résolution manuelle.
+  const eligible = pending.filter((p) => !(p.identityAmbiguous || (p.collisionOfId && !p.collisionResolution)))
+  const contested = new Map<string, number>()
+  const prepass = new Map<string, Awaited<ReturnType<typeof matchCandidates>>>()
+  for (const p of eligible) {
+    const c = await matchCandidates(db, ctx, p.id, items)
+    prepass.set(p.id, c)
+    if (!c) continue
+    for (const i of c.invoices.filter((i) => i.exact && (i.refMatch || i.dateMatch))) contested.set(`inv:${i.id}`, (contested.get(`inv:${i.id}`) ?? 0) + 1)
+    for (const s0 of c.supplierInvoices.filter((s0) => s0.exact && (s0.refMatch || s0.dateMatch))) contested.set(`sup:${s0.id}`, (contested.get(`sup:${s0.id}`) ?? 0) + 1)
+  }
   for (const p of pending) {
     // P2-01 : identité ambiguë ⇒ jamais automatique ; R4 : collision non résolue ⇒ jamais automatique (ambiguë par construction).
     if (p.identityAmbiguous || (p.collisionOfId && !p.collisionResolution)) { report.ambiguous++; continue }
-    const c = await matchCandidates(db, ctx, p.id, items)
+    // Candidats de la pré-passe réutilisés tant qu'aucun rapprochement n'a modifié les pièces ouvertes (sinon recalcul).
+    const c = report.matched === 0 ? prepass.get(p.id) ?? null : await matchCandidates(db, ctx, p.id, items)
     if (!c) continue
-    const exactInv = c.invoices.filter((i) => i.exact && (i.refMatch || i.dateMatch))
-    const exactSup = c.supplierInvoices.filter((s) => s.exact)
+    const exactInv = c.invoices.filter((i) => i.exact && (i.refMatch || i.dateMatch) && (contested.get(`inv:${i.id}`) ?? 0) <= 1)
+    const exactSup = c.supplierInvoices.filter((s0) => s0.exact && (s0.refMatch || s0.dateMatch) && (contested.get(`sup:${s0.id}`) ?? 0) <= 1)
     try {
       const target = exactInv.length === 1 ? { invoiceId: exactInv[0].id } : exactSup.length === 1 && c.transaction.amountCents < BigInt(0) ? { supplierInvoiceId: exactSup[0].id } : null
       if (!target) { report.unmatched++; continue }

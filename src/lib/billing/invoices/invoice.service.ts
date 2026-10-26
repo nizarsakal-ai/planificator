@@ -227,14 +227,19 @@ export async function runInvoiceReminders(db: Db, now: Date, limit = 200): Promi
       take: limit,
     })
     let sent = 0
+    const remainingOf = (i: { totalTTC: Prisma.Decimal; payments: { amountCents: bigint }[]; creditNotes: { totalTTC: Prisma.Decimal }[] }) => decimalToCents(i.totalTTC) - i.payments.reduce((s2, p) => s2 + p.amountCents, BigInt(0)) - i.creditNotes.reduce((s2, c) => s2 + decimalToCents(c.totalTTC), BigInt(0))
     for (const inv of due) {
       const to = inv.client.email?.trim()
       if (!to || !inv.dueDate) continue
+      // Même famille (audit R4, T2 #4) : le palier n'est réclamé que s'il reste quelque chose à relancer (jamais « brûlé » sans courrier) ;
+      // le reste dû du courrier est RELU après la réclamation (un paiement committé entre-temps est pris en compte).
+      if (remainingOf(inv) <= BigInt(0)) continue
       const claimed = await db.invoice.updateMany({ where: { id: inv.id, companyId: inv.companyId, status: { in: ["SENT", "PARTIAL"] }, [column]: null }, data: { [column]: now } })
       if (claimed.count !== 1) continue
       const ttc = decimalToCents(inv.totalTTC)
-      const remaining = ttc - inv.payments.reduce((s, p) => s + p.amountCents, BigInt(0)) - inv.creditNotes.reduce((s, c) => s + decimalToCents(c.totalTTC), BigInt(0))
-      if (remaining <= BigInt(0)) continue
+      const fresh = await db.invoice.findFirst({ where: { id: inv.id }, select: { totalTTC: true, payments: { select: { amountCents: true } }, creditNotes: { where: { creditScope: "PARTIAL", status: { not: "CANCELLED" } }, select: { totalTTC: true } } } })
+      const remaining = fresh ? remainingOf(fresh) : remainingOf(inv)
+      if (remaining <= BigInt(0)) { await db.invoice.updateMany({ where: { id: inv.id, companyId: inv.companyId, [column]: now }, data: { [column]: null } }); continue } // soldée entre-temps : palier rendu, aucun courrier
       const daysLate = Math.floor((now.getTime() - inv.dueDate.getTime()) / 86_400_000)
       const mail = invoiceReminderMail({ step, daysLate, companyName: inv.company.name, clientName: inv.client.name, invoiceNumber: inv.number, totalTTC: formatEuro(ttc), remaining: formatEuro(remaining), dueDate: dateFr.format(inv.dueDate) })
       await sendBillingMail(db, { companyId: inv.companyId, kind: `INVOICE_REMINDER_${step}`, documentType: "Invoice", documentId: inv.id }, { to, ...mail })

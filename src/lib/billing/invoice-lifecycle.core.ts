@@ -157,7 +157,9 @@ export async function transitionInvoiceCore(
       ...(input.to === "PAID" ? { paidAt: at } : {}),
     },
   })
-  if (updated.count !== 1) return { ok: false, error: LIFECYCLE_ERRORS.conflict }
+  // Même famille (audit R4, T1 #7) : si un numéro légal vient d'être consommé (renumérotation), un conflit doit annuler la transaction
+  // entière (jamais de trou dans la série) ; sans numéro consommé, le conflit reste un simple résultat (aucune écriture).
+  if (updated.count !== 1) { if (number !== invoice.number) throw new Error(`INVOICE_CONFLICT: ${LIFECYCLE_ERRORS.conflict}`); return { ok: false, error: LIFECYCLE_ERRORS.conflict } }
   // Lot C3 : l'abandon d'un brouillon de facture de solde libère ses déductions d'acomptes (les acomptes redeviennent déductibles).
   if (input.to === "CANCELLED" && invoice.kind === "INVOICE") {
     await tx.invoiceDepositDeduction.deleteMany({ where: { companyId: input.companyId, finalInvoiceId: invoice.id } })
@@ -295,9 +297,15 @@ export async function createCreditNoteCore(
   })
   if (existing) return { ok: false, error: existing.creditScope === "PARTIAL" ? "Des avoirs partiels existent sur cette facture : utilisez un avoir partiel du reste créditable." : LIFECYCLE_ERRORS.alreadyCredited }
   const DEPOSIT_DEDUCTED = "Cet acompte est déduit sur une facture de solde émise : établissez l'avoir sur la facture de solde."
-  const deductedOnIssuedFinal = () => tx.invoiceDepositDeduction.findFirst({ where: { companyId: input.companyId, depositInvoiceId: original.id, finalInvoice: { status: { not: "DRAFT" } } }, select: { id: true } })
-  if (original.kind === "DEPOSIT" && (await deductedOnIssuedFinal())) return { ok: false, error: DEPOSIT_DEDUCTED }
+  const DEPOSIT_DEDUCTED_DRAFT = "Cet acompte est affecté à un brouillon de facture de solde : abandonnez ce brouillon (ou retirez-y l'acompte) avant d'établir l'avoir."
+  // T1 (cycle R4) : seule une affectation ACTIVE (releasedAt NULL) bloque l'avoir sur l'acompte — vers un solde émis (avoir à établir sur le
+  // solde) ou vers un brouillon (à abandonner d'abord : une seule affectation active, jamais d'avoir sur un acompte encore affecté) ; la trace
+  // libérée d'un solde annulé par avoir total ne bloque plus rien (l'acompte redevient affectable une fois, ou créditable).
+  const activeAllocation = () => tx.invoiceDepositDeduction.findFirst({ where: { companyId: input.companyId, depositInvoiceId: original.id, releasedAt: null }, select: { id: true, finalInvoice: { select: { status: true } } } })
+  const deductedOnIssuedFinal = async () => { const a = await activeAllocation(); return a ? (a.finalInvoice.status === "DRAFT" ? "DRAFT" : "ISSUED") : null }
+  if (original.kind === "DEPOSIT") { const a = await deductedOnIssuedFinal(); if (a) return { ok: false, error: a === "DRAFT" ? DEPOSIT_DEDUCTED_DRAFT : DEPOSIT_DEDUCTED } }
 
+  const at = decide()
   const cancelled = await tx.invoice.updateMany({
     where: { id: original.id, companyId: input.companyId, status: original.status, kind: original.kind },
     data: { status: "CANCELLED" },
@@ -306,8 +314,15 @@ export async function createCreditNoteCore(
   // Lot C3 : relecture sous verrou (l'UPDATE ci-dessus verrouille l'acompte) — une émission concurrente du solde,
   // qui verrouille les acomptes déduits, est ainsi sérialisée ; un conflit détecté après écriture annule la transaction.
   if (original.kind === "DEPOSIT" && (await deductedOnIssuedFinal())) throw new Error(`INVOICE_DEPOSIT_DEDUCTED: ${DEPOSIT_DEDUCTED}`)
+  // (une reconversion concurrente verrouille les acomptes du devis en partage avant de poser ses affectations : elle attend cet avoir et
+  // relit l'annulation ; en défense, la contrainte différée refuse au COMMIT toute affectation active vers un acompte non émis/annulé)
+  // T1 : l'annulation intégrale d'une facture de solde LIBÈRE ses affectations d'acomptes (trace conservée, datée) : chaque acompte non
+  // annulé redevient affectable une seule fois à un nouveau solde du même devis (sans nouvel encaissement) ou créditable.
+  if (original.kind === "INVOICE") {
+    const released = await tx.invoiceDepositDeduction.updateMany({ where: { companyId: input.companyId, finalInvoiceId: original.id, releasedAt: null }, data: { releasedAt: at } })
+    if (released.count > 0) await tx.historyLog.create({ data: { companyId: input.companyId, worksiteId: original.worksiteId, actorId: input.actorId, action: "UPDATED", entityType: "Invoice", entityId: original.id, detail: `Annulation du solde ${original.number} : ${released.count} affectation(s) d'acompte libérée(s) (trace conservée)`, newValue: { releasedDeductions: released.count } } })
+  }
 
-  const at = decide()
   const number = await input.nextNumber(tx, at)
   // Créé en brouillon (lignes autorisées par la base), puis émis dans la même transaction.
   const note = await tx.invoice.create({

@@ -29,6 +29,8 @@ function billingIntegrityError(error: unknown): string | null {
   if (code.startsWith("PAYMENT_")) return "Opération refusée : des paiements sont enregistrés sur cette facture (utilisez la fiche facture)."
   if (code === "CREDIT_NOTE_INVALID") return "Avoir refusé : il doit reprendre exactement la facture d'origine."
   if (code === "INVOICE_CANCEL_WITHOUT_CREDIT_NOTE") return "Une facture émise ne s'annule que par un avoir."
+  if (code === "INVOICE_CONFLICT") return "La facture a été modifiée entre-temps. Rechargez la page."
+  if (code === "INVOICE_DEPOSIT_DEDUCTED") return "Cet acompte est déduit sur une facture de solde émise : établissez l'avoir sur la facture de solde."
   if (code.startsWith("DEPOSIT_DEDUCTION_")) return "Déductions d'acomptes incohérentes : recalculez-les (facturation complète) avant d'émettre."
   return "Opération refusée : une facture émise n'est plus modifiable."
 }

@@ -689,15 +689,19 @@ model InvoiceDepositDeduction {
   id               String   @id @default(cuid())
   companyId        String
   finalInvoiceId   String
-  depositInvoiceId String   @unique
+  depositInvoiceId String
   amountTTCCents   BigInt
   createdAt        DateTime @default(now())
+  // Cycle R4 (T1) : affectation ACTIVE (releasedAt NULL) vs trace HISTORIQUE libérée (releasedAt posé quand le solde émis est annulé par
+  // avoir total). Une seule affectation active par acompte (index unique partiel SQL) ; la trace n'est jamais supprimée ni réécrite.
+  releasedAt       DateTime?
 
   company      Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   finalInvoice Invoice @relation("FinalInvoiceDeductions", fields: [companyId, finalInvoiceId], references: [companyId, id], onDelete: Restrict)
   deposit      Invoice @relation("DepositInvoiceDeductions", fields: [companyId, depositInvoiceId], references: [companyId, id], onDelete: Restrict)
 
   @@index([finalInvoiceId])
+  @@index([depositInvoiceId])
   @@map("invoice_deposit_deductions")
 }
 
