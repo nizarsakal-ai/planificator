@@ -75,8 +75,9 @@ describe("jeton de signature", () => {
   })
   it("expiration : fin de validité du devis si future, sinon +30 jours ; IP hachée", () => {
     const now = new Date("2026-03-01T10:00:00Z")
-    assert.equal(signatureExpiry(new Date("2026-03-15T00:00:00Z"), now).toISOString(), "2026-03-15T23:59:59.999Z")
-    assert.equal(signatureExpiry(new Date("2026-02-01T00:00:00Z"), now).toISOString(), "2026-03-31T10:00:00.000Z")
+    // P2-04 : fin de validité = premier instant du lendemain en Europe/Paris (15/03 : heure d'hiver, UTC+1) ; validité passée ⇒ aucun jeton.
+    assert.equal(signatureExpiry(new Date("2026-03-15T00:00:00Z"), now).toISOString(), "2026-03-15T23:00:00.000Z")
+    assert.throws(() => signatureExpiry(new Date("2026-02-01T00:00:00Z"), now), /QUOTE_EXPIRED/)
     assert.equal(signatureExpiry(null, now).toISOString(), "2026-03-31T10:00:00.000Z")
     assert.match(hashIp("203.0.113.9", "secret") ?? "", /^[0-9a-f]{64}$/); assert.equal(hashIp(null, "secret"), null)
     assert.equal(hashIp("203.0.113.9", undefined), null, "sans secret serveur : aucune empreinte")

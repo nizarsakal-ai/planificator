@@ -91,7 +91,8 @@ describe("Envoi, signature par jeton, refus, expiration", () => {
     assert.match(token, /^[A-Za-z0-9_-]{43}$/)
     ids.token1 = token
     const q = await db.quote.findUniqueOrThrow({ where: { id: ids.q1 } })
-    assert.equal(q.status, "SENT"); assert.equal(q.signatureTokenHash, hashSignatureToken(token)); assert.equal(q.signatureTokenExpiresAt?.toISOString(), "2026-04-10T23:59:59.999Z")
+    assert.equal(q.status, "SENT"); assert.equal(q.signatureTokenHash, hashSignatureToken(token)); // P2-04 : expiration du jeton = fin du jour civil de validité en Europe/Paris (10/04/2026, heure d'été : 22:00 UTC).
+    assert.equal(q.signatureTokenExpiresAt?.toISOString(), "2026-04-10T22:00:00.000Z")
     assert.equal(mailer.sent.length, before + 1); assert.ok(mailer.sent.at(-1)?.text.includes(token))
     const log = await db.billingMailLog.findFirst({ where: { documentId: ids.q1 } })
     assert.equal(log?.status, "SIMULATED"); assert.equal(log?.kind, "QUOTE_SENT")

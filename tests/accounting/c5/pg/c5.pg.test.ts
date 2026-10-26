@@ -107,8 +107,9 @@ describe("Tableau de bord, TVA, FEC", () => {
     const p = await recordPayment(db, A, ids.inv, { amountCents: BigInt(60000), method: "CHECK", paidAt: now, reference: null, notes: null }, now)
     assert.ok(p.ok)
     const e = await computeVat(db, A, D("2026-03-01"), D("2026-03-31"), "ENCAISSEMENTS")
-    // Paiements de la période : +31 000 −31 000 +60 000 = 60 000 sur TTC 131 000 ⇒ TVA ≈ 60 000 × 21 000 / 131 000 = 9 618 ; moins l'avoir émis (TVA 1 000) ⇒ ≈ 8 618
-    assert.ok(e.collectedCents > BigInt(8500) && e.collectedCents < BigInt(8700), String(e.collectedCents)); assert.equal(e.payments, 3); assert.equal(e.documents, 1)
+    // P1-02 : encaissements = mouvements de trésorerie seulement (+31 000, −31 000, +60 000 sur TTC 131 000, TVA 20 000 @20 % + 1 000 @10 %),
+    // allocation cumulative par taux : 4 733 − 4 733 + 9 160 (20 %) et 237 − 237 + 458 (10 %) = 9 618 ; l'avoir (non encaissé) n'est PLUS déduit.
+    assert.equal(e.collectedCents, BigInt(9618)); assert.deepEqual(e.collected.map((r) => [r.vatRateBp, r.vatCents]), [[1000, BigInt(458)], [2000, BigInt(9160)]]); assert.equal(e.payments, 3); assert.equal(e.documents, 1)
     const decl = await declareVat(db, A, D("2026-03-01"), D("2026-03-31"), "DEBITS")
     assert.ok(decl.ok && decl.value.dueCents === BigInt(20000))
     assert.equal((await declareVat(db, A, D("2026-03-01"), D("2026-03-31"), "DEBITS")).ok, false)

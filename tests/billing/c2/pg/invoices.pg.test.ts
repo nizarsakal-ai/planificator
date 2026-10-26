@@ -189,7 +189,8 @@ describe("Non-régression Lot B", () => {
     assert.equal(det?.remainingCents, BigInt(0)); assert.equal(det?.paidCents, BigInt(12000)); assert.equal(det?.settledOutside, true)
     assert.ok((await listInvoices(db, "coA", { status: "PAID" })).rows.every((r) => r.remainingCents === BigInt(0)))
     const pdf = await buildInvoicePdfData(db, "coA", d.value.id)
-    assert.ok(pdf?.extraBlocks?.some((b) => b.rows.some((r) => /acquittée/.test(r))))
+    // P2-03 : le suivi des règlements est une annexe distincte de la pièce émise (`settlement`), jamais figée.
+    assert.ok(pdf?.settlement?.rows.some((r) => /acquittée/.test(r)))
     assert.ok(!pdf?.extraBlocks?.some((b) => b.rows.some((r) => /Reste à payer/.test(r))))
     assert.ok((await sendInvoiceMail(db, A, d.value.id)).ok)
     assert.ok(mailer.sent.at(-1)?.text.includes("Reste à payer : 0,00"))

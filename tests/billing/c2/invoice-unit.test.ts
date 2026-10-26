@@ -89,7 +89,7 @@ const A = "coA", B = "coB"
 const line = { quantity: new Prisma.Decimal("1.00"), unitPrice: new Prisma.Decimal("100.00"), vatRate: new Prisma.Decimal("20.00"), discountBp: 0 }
 const invoice = (id: string, status: string, over: Record<string, unknown> = {}): Row => ({ id, companyId: A, status, kind: "INVOICE", number: `PROV-2026-000${id}`, dueDate: null, worksiteId: "w", globalDiscountBp: 0, vatReverseCharge: false, totalTTC: new Prisma.Decimal("120.00"), lines: [line], ...over })
 const noLock = async () => {}
-const issueInput = { companyId: A, actorId: "u", now, paymentTermsDays: 30, nextLegalNumber: async (_t: unknown, y: number) => `FAC-${y}-0007`, lockInvoice: noLock }
+const issueInput = { companyId: A, actorId: "u", now, paymentTermsDays: 30, nextLegalNumber: async (_t: unknown, y: number) => `FAC-${y}-0007`, lockInvoice: noLock, captureSnapshot: async () => {} }
 
 describe("émission", () => {
   it("DRAFT → SENT : numéro légal, date d'émission = jour, échéance = +30 j, totaux recalculés depuis les lignes", async () => {
