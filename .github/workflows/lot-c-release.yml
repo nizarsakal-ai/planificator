@@ -1,0 +1,117 @@
+name: Lot C release gates
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'prisma/**'
+      - 'tests/**'
+      - 'package*.json'
+      - 'next.config.*'
+      - 'tsconfig*.json'
+      - '.github/workflows/lot-c-release.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: lot-c-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  release-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      DATABASE_URL: postgresql://postgres@127.0.0.1:5432/postgres
+      TEST_PG_ADMIN_URL: postgresql://postgres@127.0.0.1:5432/postgres
+      AUTH_SECRET: synthetic-ci-not-a-production-secret
+      BILLING_COMPLETE_ENABLED: 'false'
+      BILLING_MAIL_ENABLED: 'false'
+      BILLING_REMINDERS_ENABLED: 'false'
+      BILLING_OCR_ENABLED: 'false'
+      ACCOUNTING_AUTO_POSTING_ENABLED: 'false'
+      ACCOUNTING_MODULE_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Locked dependencies and Prisma client
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx --no-install prisma generate
+          mkdir -p ci-evidence
+          echo "TMPDIR=$PWD/ci-evidence" >> "$GITHUB_ENV"
+          node --version | tee ci-evidence/node-version.log
+      - name: Unit tests
+        env:
+          NODE_ENV: test
+        run: |
+          set -o pipefail
+          for suite in test:accounting test:accounting:c5 test:billing test:billing:c1 test:billing:c2 test:billing:c3 test:billing:c4 test:billing:fix test:navigation; do
+            npm run -s "$suite" | tee "ci-evidence/${suite//:/_}.log"
+          done
+      - name: PostgreSQL corrective and concurrency tests
+        env:
+          NODE_ENV: test
+        run: |
+          set -o pipefail
+          npm run -s test:billing:fix:pg | tee ci-evidence/fix-pg-summary.log
+      - name: PostgreSQL non-regression
+        env:
+          NODE_ENV: test
+        run: |
+          set -o pipefail
+          for suite in test:accounting:pg test:accounting:c5:pg test:billing:pg test:billing:c1:pg test:billing:c2:pg test:billing:c3:pg test:billing:c4:pg; do
+            name="ci_${suite//:/_}"
+            sh tests/billing/pg/with-disposable-db.sh "$name" npm run -s "$suite" | tee "ci-evidence/${name}.log"
+          done
+      - name: Legacy migration and precheck scenarios
+        env:
+          NODE_ENV: test
+        run: |
+          set -o pipefail
+          npm run -s test:billing:fix:legacy:pg | tee ci-evidence/legacy.log
+      - name: No new type diagnostics (known debt is explicit)
+        shell: bash
+        run: |
+          set +e
+          npx --no-install tsc --noEmit --incremental false > ci-evidence/typecheck.log 2>&1
+          rc=$?
+          set -e
+          python3 - "$rc" <<'PY'
+          import json, pathlib, sys
+          if int(sys.argv[1]) not in (0, 2):
+              raise SystemExit('Type checker infrastructure failed')
+          baseline = json.loads(pathlib.Path('tests/accounting/ci/typecheck-baseline.json').read_text())['knownDiagnostics']
+          actual = [line for line in pathlib.Path('ci-evidence/typecheck.log').read_text().splitlines() if 'error TS' in line]
+          new = sorted(set(actual) - set(baseline))
+          print(f'Global typecheck: {len(actual)} diagnostics; baseline {len(baseline)}; new {len(new)}. This is a debt gate, not a clean typecheck.')
+          if new:
+              print('\n'.join(new))
+              raise SystemExit(1)
+          PY
+      - name: Production build with synthetic configuration
+        run: |
+          set -o pipefail
+          npm run build | tee ci-evidence/build.log
+      - name: Archive synthetic evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lot-c-release-evidence
+          path: ci-evidence/
+          retention-days: 7
