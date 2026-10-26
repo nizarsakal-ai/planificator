@@ -114,6 +114,8 @@ describe("dates", () => {
     assert.equal(defaultDayInYear(y, new Date("2026-12-31T18:30:00Z")), "2026-12-31")
     assert.equal(defaultDayInYear(y, new Date("2027-01-01T00:00:01Z")), "2026-01-01")
     const y2 = { startDate: new Date("2027-01-01T00:00:00Z"), endDate: new Date("2027-12-31T00:00:00Z") }
-    assert.equal(yearContainingToday([y2, y], new Date("2026-12-31T23:00:00Z")), y)
+    assert.equal(yearContainingToday([y2, y], new Date("2026-12-31T22:00:00Z")), y) // 31/12 23:00 à Paris : encore 2026
+    assert.equal(yearContainingToday([y2, y], new Date("2026-12-31T23:00:00Z")), y2) // S3 : 1er janvier 00:00 à Paris ⇒ exercice 2027 (jour civil Europe/Paris)
+    assert.equal(defaultDayInYear(y2, new Date("2026-12-31T23:30:00Z")), "2027-01-01")
   })
 })

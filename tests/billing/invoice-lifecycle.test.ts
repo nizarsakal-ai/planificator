@@ -4,6 +4,7 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import { readFileSync } from "node:fs"
 import type { Prisma } from "@prisma/client"
+import { setBillingClockForTests } from "@/lib/billing/clock"
 import {
   INVOICE_TRANSITIONS,
   LIFECYCLE_ERRORS,
@@ -34,7 +35,9 @@ function makeTx(seed: Row[], lines: Row[] = []) {
   const tx = {
     // Correctif R2 : le cœur verrouille le parent (SELECT … FOR UPDATE) avant la lecture ; sans base, le verrou est un no-op.
     $queryRaw: async () => [],
+    invoiceDepositDeduction: { count: async () => 0 }, // S1 (même famille) : aucune déduction dans ces scénarios Lot B
     invoice: {
+      count: async () => 0,
       findFirst: async ({ where, select }: { where: Record<string, unknown>; select?: Record<string, unknown> }) => {
         const row = invoices.find((r) => matches(r, where))
         if (!row) return null
@@ -80,6 +83,7 @@ const inv = (id: string, status: string, companyId = A, extra: Record<string, un
   periodStart: null, periodEnd: null, totalHT: 100, totalVAT: 20, totalTTC: 120, paymentTerms: null, creditedInvoiceId: null, ...extra,
 })
 const now = new Date("2026-10-25T12:00:00Z")
+setBillingClockForTests(() => now) // R3/S3 : horloge de décision déterministe (= now) pour les horodatages et dates d'émission
 const line = (invoiceId: string, position: number): Row => ({
   id: `x-${invoiceId}-${position}`, invoiceId, articleId: null, designation: `L${position}`, unit: "u", quantity: 1, unitPrice: 50, vatRate: 20, lineHT: 50, position,
 })
@@ -108,7 +112,7 @@ describe("Automate de statuts", () => {
     const r = await transitionInvoiceCore(s.tx, { companyId: A, invoiceId: "1", to: "SENT", actorId: "u", now, captureSnapshot: noSnapshot })
     assert.deepEqual(r, { ok: true, value: undefined })
     assert.equal(s.invoices[0].status, "SENT")
-    assert.equal(s.invoices[0].sentAt, now)
+    assert.equal((s.invoices[0].sentAt as Date).toISOString(), now.toISOString()) // S3 : instant de décision (nouvel objet Date, même valeur)
     assert.equal(s.history.length, 1)
     assert.equal(s.history[0].action, "STATUS_CHANGED")
   })
@@ -200,7 +204,7 @@ describe("Avoirs", () => {
     assert.equal(r.ok, true)
     const note = s.invoices.find((x) => x.kind === "CREDIT_NOTE")!
     assert.equal(note.status, "SENT")
-    assert.equal(note.sentAt, now)
+    assert.equal((note.sentAt as Date).toISOString(), now.toISOString())
     assert.equal(note.creditedInvoiceId, "1")
     assert.equal(note.number, "AV-2026-0001")
     assert.equal(note.totalTTC, 120)

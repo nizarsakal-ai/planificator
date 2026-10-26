@@ -15,8 +15,7 @@ import { flushDeferredConstraints } from "@/lib/deferred-constraints"
 import { computeVat } from "@/lib/accounting/c5/vat"
 import { declareVat } from "@/lib/accounting/c5/vat-declaration"
 import { accountingDashboard } from "@/lib/accounting/c5/dashboard"
-import { A, B, D, NOW, js, seedCompanies, useTestClock } from "./helpers"
-import { setBillingClockForTests } from "@/lib/billing/clock"
+import { A, AFTER_PERIODS, B, D, NOW, js, seedCompanies, useTestClock, withClock } from "./helpers"
 import { issuedInvoice } from "./fixtures"
 
 const db = new PrismaClient()
@@ -32,7 +31,7 @@ before(async () => {
   setBillingMailerForTests(new RecordingMailer()); await seedCompanies(db)
   for (const ctx of [A, B]) { await db.$transaction((tx) => ensureBaseReferential(tx, ctx)); await db.$transaction((tx) => openFiscalYear(tx, ctx, { startDate: D("2026-01-01"), endDate: D("2026-12-31") })) }
 })
-after(async () => { setBillingMailerForTests(null); setBillingClockForTests(() => NOW); await db.$disconnect() })
+after(async () => { setBillingMailerForTests(null); useTestClock(NOW); await db.$disconnect() })
 
 describe("P1-02 — oracles", () => {
   it("facture 120 TTC impayée + avoir 60 TTC, aucun mouvement ⇒ 0 € (jamais −10) ; paiement ultérieur du solde 60 ⇒ 10 €, sans nouvelle déduction de l'avoir ; débits = 20 − 10", async () => {
@@ -91,15 +90,14 @@ describe("P1-02 — oracles", () => {
     assert.equal(end.collectedCents, mid.collectedCents, "aucune régularisation inventée sans remboursement effectif"); assert.deepEqual(end.warnings, [])
     const may = await enc(A, [D("2026-05-01"), D("2026-05-31")] as const)
     assert.ok(may.warnings.some((w) => /remboursement effectif/.test(w)), js(may.warnings)); assert.equal(may.collectedCents, BigInt(0))
-    assert.equal((await declareVat(db, A, D("2026-05-01"), D("2026-05-31"), "ENCAISSEMENTS")).ok, false, "R5 : la période de l'avoir hors contrat n'est pas déclarable")
+    assert.equal((await withClock(AFTER_PERIODS, () => declareVat(db, A, D("2026-05-01"), D("2026-05-31"), "ENCAISSEMENTS"))).ok, false, "R5 : la période de l'avoir hors contrat n'est pas déclarable")
     assert.equal((await reversePayment(db, A, (await db.invoicePayment.findFirstOrThrow({ where: { invoiceId: inv2 } })).id, "rembourser", new Date())).ok, false, "le remboursement après avoir total est un parcours refusé explicitement")
   })
   it("périodes différentes : paiement en mars, contre-passation en avril ⇒ +20 en mars, −20 en avril ; déclaration de mars figée, inchangée par l'événement d'avril ; DÉBITS inchangé ; B isolée ; tableau de bord = aperçu = déclaration", async () => {
     const inv = await inv120()
     const p = await pay(A, inv, 12000, "2026-03-25")
     const mar = await enc(A)
-    setBillingClockForTests(() => new Date("2026-06-01T10:00:00Z")) // une déclaration ne se fige qu'après la fin de la période (C1)
-    const decl = await declareVat(db, A, MAR[0], MAR[1], "ENCAISSEMENTS"); assert.ok(decl.ok, js(decl)); if (!decl.ok) return
+    const decl = await withClock(AFTER_PERIODS, () => declareVat(db, A, MAR[0], MAR[1], "ENCAISSEMENTS")); assert.ok(decl.ok, js(decl)); if (!decl.ok) return // une déclaration ne se fige qu'après la fin de la période (C1)
     const stored = await db.vatDeclaration.findUniqueOrThrow({ where: { id: decl.value.id } })
     assert.equal(stored.collectedCents, mar.collectedCents)
     const aprBefore = await enc(A, APR)
@@ -121,6 +119,6 @@ describe("P1-02 — oracles", () => {
     const dash = await accountingDashboard(db, A, new Date("2026-03-31T12:00:00Z"), "ENCAISSEMENTS")
     const preview = await enc(A)
     assert.equal(dash.vat.collectedCents, preview.collectedCents)
-    const declB = await declareVat(db, B, MAR[0], MAR[1], "ENCAISSEMENTS"); assert.ok(declB.ok && declB.value.dueCents === BigInt(2000))
+    const declB = await withClock(AFTER_PERIODS, () => declareVat(db, B, MAR[0], MAR[1], "ENCAISSEMENTS")); assert.ok(declB.ok && declB.value.dueCents === BigInt(2000))
   })
 })

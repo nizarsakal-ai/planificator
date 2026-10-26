@@ -17,6 +17,12 @@ export const NOW = new Date("2026-03-10T10:00:00Z")
  * temps réel la remplace (setBillingClockForTests(() => new Date())) puis la restaure.
  */
 export function useTestClock(at: Date = NOW): void { setBillingClockForTests(() => at) }
+/** Exécute `fn` avec l'horloge serveur fixée à `at` (ex. « aujourd'hui » postérieur à une période à déclarer), puis la restaure (NOW). */
+export async function withClock<T>(at: Date, fn: () => Promise<T>, restore: Date = NOW): Promise<T> {
+  setBillingClockForTests(() => at)
+  try { return await fn() } finally { setBillingClockForTests(() => restore) }
+}
+export const AFTER_PERIODS = new Date("2026-10-26T10:00:00Z")
 export const D = (s: string) => new Date(`${s}T00:00:00Z`)
 export const js = (v: unknown) => JSON.stringify(v, (_, x) => (typeof x === "bigint" ? x.toString() : x))
 
@@ -69,5 +75,14 @@ export async function waitFor(cond: () => Promise<boolean>, ms = 5000, step = 25
 /** Nombre de sessions PostgreSQL en attente de verrou sur cette base (preuve qu'une requête concurrente est bloquée). */
 export async function waitingSessions(db: PrismaClient): Promise<number> {
   const r = await db.$queryRaw<{ n: bigint }[]>`SELECT count(*)::bigint AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`
+  return Number(r[0].n)
+}
+
+/**
+ * Nombre de sessions en attente d'un verrou de LIGNE d'une table donnée — prouve SUR QUOI une session attend. Une attente de ligne
+ * apparaît dans pg_locks comme un verrou `tuple` (accordé) sur la relation, tenu par une session dont wait_event_type = 'Lock'.
+ */
+export async function waitingOnTable(db: PrismaClient, table: string): Promise<number> {
+  const r = await db.$queryRaw<{ n: bigint }[]>`SELECT count(DISTINCT l.pid)::bigint AS n FROM pg_locks l JOIN pg_class c ON c.oid = l.relation JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.locktype = 'tuple' AND c.relname = ${table} AND a.wait_event_type = 'Lock'`
   return Number(r[0].n)
 }

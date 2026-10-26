@@ -63,8 +63,8 @@ describe("A1 — acompte et émission du solde sérialisés par le verrou du dev
   })
 })
 
-describe("Ordre des verrous facture → devis → acomptes (revue interne, constat 1)", () => {
-  it("émission du solde tenue (facture puis devis verrouillés) ; modification concurrente du brouillon lié au devis ⇒ attend puis refusée « plus un brouillon » ; aucun interblocage", async () => {
+describe("Ordre des verrous devis → facture → acomptes (revue interne, constat 1 ; S2)", () => {
+  it("émission du solde tenue (devis puis facture verrouillés) ; modification concurrente du brouillon lié au devis ⇒ attend (sur le devis) puis refusée « plus un brouillon » ; aucun interblocage", async () => {
     const quoteId = await acceptedQuote(db, A, "wA", L)
     const final = await finalDraft(db, A, quoteId)
     const h = await holdTransaction(db2)
@@ -73,7 +73,7 @@ describe("Ordre des verrous facture → devis → acomptes (revue interne, const
     const form = parseInvoiceForm({ worksiteId: "wA", quoteId, lines: [{ designation: "Prestation", quantity: "1", unitPrice: "1200", vatRate: "20" }] }); assert.ok(form.ok); if (!form.ok) return
     let settled = false
     const updating = updateDraftInvoice(db, A, final, form.value).then((r) => { settled = true; return r })
-    assert.ok(await waitFor(async () => (await waitingSessions(db)) >= 1), "la modification attend le verrou de la facture (pris en premier)"); assert.equal(settled, false)
+    assert.ok(await waitFor(async () => (await waitingSessions(db)) >= 1), "la modification attend le verrou du devis (pris en premier, S2)"); assert.equal(settled, false)
     await h.commit()
     const r = await updating
     assert.equal(r.ok, false); assert.match((r as { error: string }).error, /brouillon/)

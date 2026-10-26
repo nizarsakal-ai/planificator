@@ -43,7 +43,7 @@ async function balance(ctx: typeof A, number: string) {
 }
 
 before(async () => {
-  setBillingClockForTests(() => new Date("2026-06-15T10:00:00Z")) // R3 : horloge de décision déterministe ; postérieure aux périodes déclarées (C1)
+  setBillingClockForTests(() => now) // R3/S3 : horloge de décision déterministe (= now) ; les déclarations fixent une horloge postérieure à la période
   // Le rapprochement avec une facture client enregistre un paiement C2 : il exige la facturation complète (drapeau).
   process.env.BILLING_COMPLETE_ENABLED = "true"
   setBillingMailerForTests(new RecordingMailer())
@@ -113,9 +113,11 @@ describe("Tableau de bord, TVA, FEC", () => {
     // (Finitions 100 HT @10 % annulée ⇒ net 120 000 TTC : base 100 000 @20 %, TVA 20 000 ; plus rien au taux 10 %) :
     // 5 167 − 5 167 + arrondi(60 000 × 20 000 / 120 000) = 10 000 @20 % ; 0 @10 % (poste annulé : aucune TVA collectée pour lui).
     assert.equal(e.collectedCents, BigInt(10000)); assert.deepEqual(e.collected.map((r) => [r.vatRateBp, r.vatCents]), [[2000, BigInt(10000)]]); assert.equal(e.payments, 3); assert.equal(e.documents, 1)
+    setBillingClockForTests(() => new Date("2026-06-15T10:00:00Z")) // une déclaration ne se fige qu'après la fin de la période (C1)
     const decl = await declareVat(db, A, D("2026-03-01"), D("2026-03-31"), "DEBITS")
-    assert.ok(decl.ok && decl.value.dueCents === BigInt(20000))
+    assert.ok(decl.ok && decl.value.dueCents === BigInt(20000), JSON.stringify(decl, (_, x) => (typeof x === "bigint" ? x.toString() : x)))
     assert.equal((await declareVat(db, A, D("2026-03-01"), D("2026-03-31"), "DEBITS")).ok, false)
+    setBillingClockForTests(() => now)
     assert.equal(await db.vatDeclaration.count({ where: { companyId: "coB" } }), 0)
   })
   it("FEC : 18 colonnes, écritures validées seulement, ordre chronologique, nom SIRENFECAAAAMMJJ.txt, équilibré", async () => {

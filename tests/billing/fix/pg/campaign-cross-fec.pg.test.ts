@@ -114,8 +114,8 @@ describe("Campagne E — parcours croisé", () => {
     const share = (vat: bigint) => (BigInt(30000) * vat + c(fin.totalTTC) / BigInt(2)) / c(fin.totalTTC)
     void share
     assert.ok(enc.collectedCents > BigInt(0) && enc.collectedCents < c(fin.totalVAT), js(enc)); assert.equal(enc.payments, 3)
-    setBillingClockForTests(() => new Date("2026-06-01T10:00:00Z")) // la période déclarée doit être terminée (C1)
-    const decl = await declareVat(db, A, D("2026-03-01"), D("2026-03-31"), "DEBITS"); assert.ok(decl.ok && decl.value.dueCents === deb.dueCents, JSON.stringify(decl, (_, x) => (typeof x === "bigint" ? x.toString() : x)))
+    setBillingClockForTests(() => new Date("2026-06-01T10:00:00Z")) // la période déclarée doit être terminée (C1) ; restaurée juste après
+    const decl = await declareVat(db, A, D("2026-03-01"), D("2026-03-31"), "DEBITS"); setBillingClockForTests(() => NOW); assert.ok(decl.ok && decl.value.dueCents === deb.dueCents, JSON.stringify(decl, (_, x) => (typeof x === "bigint" ? x.toString() : x)))
     const fy = await db.fiscalYear.findFirstOrThrow({ where: { companyId: "coA" } })
     const fec = await buildFec(db, A, fy.id); assert.ok(fec); if (!fec) return
     const rows = fec.content.trim().split("\r\n")

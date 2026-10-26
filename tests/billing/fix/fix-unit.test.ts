@@ -9,7 +9,7 @@ import { allocateReceiptsVat, allocateReceiptsVatEvents, type VatEvent } from "@
 import { computeDocumentTotals } from "@/lib/billing/money"
 import { bankExternalFingerprint, bankFingerprint, guessBankMapping, parseBankCsv } from "@/lib/accounting/c5/bank-import"
 import { DocumentIntegrityError, assertStoredTotalsMatch, recomputeDocumentTotals } from "@/lib/billing/document-integrity"
-import { decisionInstant, serverNow, setBillingClockForTests } from "@/lib/billing/clock"
+import { decisionClock, serverNow, setBillingClockForTests } from "@/lib/billing/clock"
 import { QUOTE_ERRORS, transitionQuoteCore } from "@/lib/billing/quotes/quote-lifecycle.core"
 import type { Prisma } from "@prisma/client"
 
@@ -100,12 +100,15 @@ describe("R1 — allocation par événements, nette des avoirs ciblés (oracles 
 })
 
 describe("R3 — horloge de décision", () => {
-  it("decisionInstant = horloge relue, jamais antérieure au début de requête ; horloge de test fixée puis restaurée", () => {
+  it("decisionClock : début de requête avancé du temps réellement écoulé (attente de verrou), jamais antérieur au début ; chronologie simulée conservée ; horloge de test fixée puis restaurée", () => {
     const start = d("2026-03-10T10:00:00Z")
-    assert.equal(decisionInstant(start, () => d("2026-03-10T10:00:01Z")).toISOString(), "2026-03-10T10:00:01.000Z")
-    assert.equal(decisionInstant(start, () => d("2026-03-10T09:00:00Z")).toISOString(), start.toISOString(), "horloge non monotone ⇒ max")
+    let t = d("2030-01-01T00:00:00Z")
+    const decide = decisionClock(start, () => t)
+    assert.equal(decide().toISOString(), start.toISOString(), "aucun temps écoulé ⇒ instant de début (un `now` simulé n'est pas remplacé par l'heure réelle)")
+    t = d("2030-01-01T00:00:00.700Z"); assert.equal(decide().toISOString(), "2026-03-10T10:00:00.700Z", "700 ms d'attente ⇒ début + 700 ms")
+    t = d("2029-12-31T23:00:00Z"); assert.equal(decide().toISOString(), start.toISOString(), "horloge non monotone ⇒ jamais avant le début")
     setBillingClockForTests(() => d("2030-01-01T00:00:00Z"))
-    assert.equal(serverNow().toISOString(), "2030-01-01T00:00:00.000Z"); assert.equal(decisionInstant(start).toISOString(), "2030-01-01T00:00:00.000Z")
+    assert.equal(serverNow().toISOString(), "2030-01-01T00:00:00.000Z"); assert.equal(decisionClock(start)().toISOString(), start.toISOString())
     setBillingClockForTests(null)
     assert.ok(Math.abs(serverNow().getTime() - Date.now()) < 1000)
   })

@@ -188,7 +188,7 @@ describe("drapeaux, accès, navigation, courriers", () => {
   it("Lot B : l'émission d'une facture à numéro provisoire est refusée (numéro légal à l'émission, C2)", async () => {
     const { transitionInvoiceCore, LIFECYCLE_ERRORS } = await import("@/lib/billing/invoice-lifecycle.core")
     const inv: Row = { id: "i1", companyId: A, status: "DRAFT", kind: "INVOICE", number: "PROV-2026-0001", worksiteId: "w" }
-    const tx = { $queryRaw: async () => [] /* R2 : verrou du parent (no-op sans base) */, invoice: { findFirst: async () => inv, updateMany: async () => { throw new Error("ne doit pas écrire") } }, historyLog: { create: async () => ({}) } } as unknown as Prisma.TransactionClient
+    const tx = { $queryRaw: async () => [] /* R2 : verrou du parent (no-op sans base) */, invoice: { findFirst: async () => inv, count: async () => 0, updateMany: async () => { throw new Error("ne doit pas écrire") } }, invoiceDepositDeduction: { count: async () => 0 }, historyLog: { create: async () => ({}) } } as unknown as Prisma.TransactionClient
     assert.deepEqual(await transitionInvoiceCore(tx, { companyId: A, invoiceId: "i1", to: "SENT", actorId: "u", now }), { ok: false, error: LIFECYCLE_ERRORS.provisionalNumber })
   })
   it("numérotation : préfixe provisoire PROV pour les brouillons de facture", async () => {

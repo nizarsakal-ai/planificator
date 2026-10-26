@@ -14,7 +14,7 @@ import { nextDocumentNumber } from "@/lib/billing/numbering"
 import { flushDeferredConstraints } from "@/lib/deferred-constraints"
 import { computeVat } from "@/lib/accounting/c5/vat"
 import { declareVat } from "@/lib/accounting/c5/vat-declaration"
-import { A, D, js, seedCompanies, useTestClock } from "./helpers"
+import { A, AFTER_PERIODS, D, js, seedCompanies, useTestClock, withClock } from "./helpers"
 import { issuedInvoice } from "./fixtures"
 
 const db = new PrismaClient()
@@ -29,7 +29,7 @@ const lineOf = async (inv: string, designation: string) => (await db.invoiceLine
 const creditLine = async (inv: string, designation: string, day: string, qtyHundredths = 100) => { const r = await createPartialCreditNote(db, A, inv, { kind: "LINES", items: [{ lineId: await lineOf(inv, designation), quantityHundredths: BigInt(qtyHundredths) }] }, `annulation ${designation}`, new Date(`${day}T10:00:00Z`)); if (!r.ok) throw new Error(r.error); return r.value }
 // Les factures sont isolées par période de test (mars / avril / mai) pour des oracles absolus.
 
-before(async () => { setBillingMailerForTests(new RecordingMailer()); useTestClock(new Date("2026-10-26T10:00:00Z")); await seedCompanies(db) }) // horloge postérieure aux périodes déclarées (C1)
+before(async () => { setBillingMailerForTests(new RecordingMailer()); useTestClock(); await seedCompanies(db) }) // horloge = NOW (les pièces sont datées à l'instant de décision) ; les déclarations utilisent withClock(AFTER_PERIODS)
 after(async () => { setBillingMailerForTests(null); await db.$disconnect() })
 
 describe("R1 — allocation nette des avoirs ciblés (reproduction Codex et variantes)", () => {
@@ -76,11 +76,15 @@ describe("R1 — paiement partiel avant/après l'avoir : réaffectation datée d
     await pay(inv, 5000, "2026-06-10")
     const jun = await enc(JUN)
     assert.deepEqual(byRate(jun), { 1000: 217, 2000: 435 }, js(jun)) // arrondi(50×20/230)=4,35 ; arrondi(50×10/230)=2,17
-    const declJun = await declareVat(db, A, JUN[0], JUN[1], "ENCAISSEMENTS"); assert.ok(declJun.ok, js(declJun))
+    const declJun = await withClock(AFTER_PERIODS, () => declareVat(db, A, JUN[0], JUN[1], "ENCAISSEMENTS")); assert.ok(declJun.ok, js(declJun))
     await creditLine(inv, "A20", "2026-07-03")
     const julAfterCredit = await enc(JUL)
     // Réaffectation datée de l'avoir : cible nette (B seul : 110 TTC, 10 TVA) pour 50 € encaissés ⇒ 4,55 @10, 0 @20 ; parts = 4,55 − 2,17 = +2,38 ; 0 − 4,35 = −4,35.
     assert.deepEqual(byRate(julAfterCredit), { 1000: 238, 2000: -435 }, js(julAfterCredit)); assert.equal(julAfterCredit.adjustments, 1); assert.equal(julAfterCredit.payments, 0)
+    // Cycle R3 (réserve fiscale Codex) : la réaffectation est signalée hors contrat tant que l'expert-comptable ne l'a pas validée ⇒ la
+    // déclaration de juillet est REFUSÉE ; l'aperçu reste calculé. Juin (sans réaffectation) reste déclaré.
+    assert.equal(julAfterCredit.warnings.length, 1, js(julAfterCredit.warnings)); assert.match(julAfterCredit.warnings[0], /réaffectation .* en attente de validation/)
+    const declJul = await withClock(AFTER_PERIODS, () => declareVat(db, A, JUL[0], JUL[1], "ENCAISSEMENTS")); assert.equal(declJul.ok, false); assert.match((declJul as { error: string }).error, /hors contrat fiscal/)
     await pay(inv, 6000, "2026-07-12")
     const jul = await enc(JUL)
     assert.deepEqual(byRate(jul), { 1000: 783, 2000: -435 }, js(jul)) // +5,45 @10 (10 − 4,55)
@@ -93,7 +97,7 @@ describe("R1 — paiement partiel avant/après l'avoir : réaffectation datée d
     const mono = await issuedInvoice(db, A, "wA", [{ designation: "P", quantity: "1", unitPrice: "100", vatRate: "20" }], { now: new Date("2026-08-02T10:00:00Z") })
     await pay(mono, 6000, "2026-08-05")
     const cn = await createPartialCreditNote(db, A, mono, { kind: "AMOUNT_HT", cents: BigInt(5000) }, "non réalisé", new Date("2026-08-20T10:00:00Z")); assert.ok(cn.ok)
-    const aug = await enc(AUG); assert.deepEqual(byRate(aug), { 2000: 1000 }); assert.equal(aug.adjustments, 0, "parts nulles ⇒ aucune réaffectation comptée")
+    const aug = await enc(AUG); assert.deepEqual(byRate(aug), { 2000: 1000 }); assert.equal(aug.adjustments, 0, "parts nulles ⇒ aucune réaffectation comptée"); assert.deepEqual(aug.warnings, [], "mono-taux : aucune réaffectation, aucun avertissement")
   })
   it("avoir total après encaissement (hors contrat) : aucune TVA fabriquée ni réaffectation, avertissement explicite citant le montant encaissé au-delà de la facture nette", async () => {
     const SEP = [D("2026-09-01"), D("2026-09-30")] as const

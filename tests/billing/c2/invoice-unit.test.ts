@@ -2,6 +2,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import { Prisma } from "@prisma/client"
+import { setBillingClockForTests } from "@/lib/billing/clock"
 import { parseInvoiceForm, parsePaymentForm } from "@/lib/billing/invoices/invoice-schemas"
 import { INVOICE_C2_ERRORS, LEGAL_NUMBER, issueBlockers, issueInvoiceCore, recordPaymentCore, replaceInvoiceDraftCore, reversePaymentCore, statusForPaid } from "@/lib/billing/invoices/invoice-c2.core"
 import { invoiceWhere, isOverdue, todayUtc } from "@/lib/billing/invoices/invoice-queries"
@@ -9,6 +10,7 @@ import { invoiceFiltersFromParams } from "@/lib/billing/invoices/invoice-filters
 
 const c = (n: number) => BigInt(n)
 const now = new Date("2026-03-10T10:00:00Z")
+setBillingClockForTests(() => now) // R3/S3 : horloge de décision déterministe (= now) pour les horodatages et dates d'émission
 
 describe("schémas", () => {
   it("facture : lignes converties, TTC négatif refusé, champ inconnu refusé", () => {
@@ -68,6 +70,7 @@ function makeTx(invoices: Row[], payments: Row[] = []) {
   const inv = invoices.map((r) => ({ ...r })); const pay = payments.map((r) => ({ ...r })); const lines: Row[] = []; const history: Row[] = []
   let seq = 0; const hooks: { beforeUpdate?: () => void } = {}
   const tx = {
+    $queryRaw: async () => [], // verrous partagés client/société (no-op sans base)
     invoice: {
       findFirst: async ({ where }: { where: Record<string, unknown> }) => { const r = inv.find((x) => matches(x, where)); return r ? { ...r, company: { name: "S", address: "1 rue", siret: "12345678900012" }, client: { name: "C", address: "2 rue" }, lines: (r.lines as unknown[]) ?? [] } : null },
       // Avoirs partiels (C4) : aucun dans ces scénarios.
@@ -96,7 +99,7 @@ describe("émission", () => {
     const { tx, inv, history } = makeTx([invoice("1", "DRAFT", { totalTTC: new Prisma.Decimal("1.00") })])
     const r = await issueInvoiceCore(tx, { ...issueInput, invoiceId: "1" })
     assert.deepEqual(r, { ok: true, value: { number: "FAC-2026-0007", issueDate: new Date("2026-03-10T00:00:00.000Z"), dueDate: new Date("2026-04-09T00:00:00.000Z") } })
-    assert.equal(inv[0].status, "SENT"); assert.equal(inv[0].number, "FAC-2026-0007"); assert.equal(inv[0].totalTTC, "120.00"); assert.equal(inv[0].totalVAT, "20.00"); assert.equal(inv[0].sentAt, now)
+    assert.equal(inv[0].status, "SENT"); assert.equal(inv[0].number, "FAC-2026-0007"); assert.equal(inv[0].totalTTC, "120.00"); assert.equal(inv[0].totalVAT, "20.00"); assert.equal((inv[0].sentAt as Date).toISOString(), now.toISOString())
     assert.equal(history[0].action, "STATUS_CHANGED")
   })
   it("brouillon déjà numéroté FAC (chemin Lot B) : numéro conservé si même année, renuméroté sinon ; échéance future conservée", async () => {
