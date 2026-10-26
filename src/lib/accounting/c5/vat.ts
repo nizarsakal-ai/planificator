@@ -6,18 +6,23 @@
 // l'encaissement ; art. 272-1 : la taxe perçue n'est imputée/restituée qu'en cas d'annulation/résiliation/impayé définitif
 // justifiée par la rectification de la facture) :
 // - l'ÉVÉNEMENT d'exigibilité est le mouvement de trésorerie (paiement ; contre-passation = mouvement inverse) ; un avoir n'est
-//   PAS un encaissement : il réduit le reste dû et n'entre dans la base des encaissements que par l'absence de paiement futur ;
-// - la TVA d'un mouvement est répartie par taux au prorata de la facture, par ALLOCATION CUMULATIVE sur l'historique des
-//   mouvements de la facture : part(k) = arrondi(cumul_k × TVA_taux / TTC) − arrondi(cumul_{k−1} × TVA_taux / TTC). La somme des parts
-//   au terme du règlement vaut exactement la TVA de la facture par taux (aucune dérive d'arrondi, quel que soit le fractionnement),
-//   une contre-passation produit la part négative exacte du paiement annulé (régularisation reliée à un événement et à une base antérieure) ;
-// - le calcul est déterministe (ordre : date de paiement, création, identifiant) ; une déclaration enregistrée reste figée ; un mouvement
-//   enregistré plus tard (contre-passation) apparaît dans la période de sa date, jamais rétroactivement dans une déclaration passée ;
-// - NON COUVERT (refus explicite, voir DECISIONS) : remboursement d'un encaissement après avoir total (aucun mouvement de remboursement
-//   n'existe) ⇒ signalé dans `warnings`, aucune régularisation inventée.
+//   PAS un encaissement : il réduit le reste dû et n'entre pas dans la base des encaissements ;
+// - correctif R1 (revue Codex R2 du 26/10/2026) : l'assiette d'allocation est la facture NETTE de ses avoirs partiels émis
+//   (base et TVA par taux, avoir par avoir) — un avoir ciblé sur un poste annule ce poste (et sa TVA) de l'assiette. Les
+//   événements d'une facture (paiements, contre-passations, avoirs) sont ordonnés chronologiquement ; la part d'un mouvement k
+//   est part(k) = arrondi(min(cumul_k, TTC_net_k) × TVA_taux_net_k / TTC_net_k) − Σ parts déjà attribuées au taux. Un avoir émis
+//   APRÈS des encaissements produit une RÉAFFECTATION par taux datée de l'avoir (reliée à l'événement et aux parts antérieures),
+//   jamais une réécriture d'une période antérieure ; la somme des parts au terme du règlement vaut exactement la TVA nette par taux.
+//   Un avoir partiel ne porte jamais sur une somme encaissée (plafond C4 : avoir ≤ reste à payer) : la réaffectation ne régularise
+//   que la ventilation par taux d'un encaissement conservé, pas une restitution ;
+// - le calcul est déterministe (ordre : jour, avoir avant paiement le même jour, création, identifiant) ; une déclaration enregistrée
+//   reste figée ; un événement enregistré plus tard apparaît dans la période de sa date, jamais rétroactivement ;
+// - NON COUVERT (refus explicite, voir DECISIONS) : encaissement conservé au-delà de la facture nette (avoir total après paiement,
+//   ou données héritées) ⇒ remboursement non modélisé ⇒ `warnings` ; aucune régularisation inventée ; la déclaration (R5) est REFUSÉE
+//   tant qu'un tel cas existe dans la période.
 import type { Prisma, PrismaClient } from "@prisma/client"
 import { assertStoredTotalsMatch, recomputeDocumentTotals } from "@/lib/billing/document-integrity"
-import { roundHalfUp, type DocumentTotals } from "@/lib/billing/money"
+import { centsToDecimalString, roundHalfUp, type DocumentTotals } from "@/lib/billing/money"
 
 type Db = PrismaClient | Prisma.TransactionClient
 export interface VatRateRow { vatRateBp: number; baseCents: bigint; vatCents: bigint }
@@ -25,7 +30,9 @@ export interface VatComputation {
   basis: "DEBITS" | "ENCAISSEMENTS"; periodStart: Date; periodEnd: Date
   collected: VatRateRow[]; collectedCents: bigint; deductibleCents: bigint; dueCents: bigint
   documents: number; payments: number; supplierInvoices: number
-  /** Situations hors contrat, signalées explicitement (jamais corrigées silencieusement). */
+  /** R1 : avoirs partiels de la période ayant réaffecté par taux des encaissements antérieurs (régularisations datées de l'avoir). */
+  adjustments: number
+  /** Situations hors contrat, signalées explicitement (jamais corrigées silencieusement) ; R5 : bloquent l'enregistrement d'une déclaration. */
   warnings: string[]
 }
 
@@ -42,28 +49,53 @@ function checkedTotals(d: DocRow): DocumentTotals {
   return assertStoredTotalsMatch(d, recomputeDocumentTotals(d))
 }
 
+export type VatEvent =
+  | { kind: "PAYMENT"; amountCents: bigint }
+  | { kind: "CREDIT"; totals: DocumentTotals }
+export interface VatEventParts { parts: VatRateRow[]; /** encaissement conservé au-delà de la facture nette (remboursement non modélisé) */ excessCents: bigint }
+
 /**
- * Allocation cumulative de la TVA (et de la base) d'une facture sur ses mouvements de trésorerie ordonnés.
- * Renvoie, pour chaque mouvement, sa part par taux ; Σ parts = TVA de la facture quand Σ mouvements = TTC.
+ * Allocation de la TVA (et de la base) d'une facture sur ses ÉVÉNEMENTS ordonnés (paiements, contre-passations, avoirs).
+ * L'assiette est la facture nette des avoirs émis jusqu'à l'événement ; cible par taux = arrondi(min(cumul, TTC net) × montant net du
+ * taux / TTC net) ; la part de l'événement = cible − déjà attribué. Un avoir après encaissement réaffecte par taux (parts de l'avoir) ;
+ * Σ parts = TVA nette par taux dès que Σ mouvements = TTC net. TTC net ≤ 0 ou cumul > TTC net ⇒ allocation gelée (aucune part), `excessCents` > 0.
  */
-export function allocateReceiptsVat(totals: DocumentTotals, movements: readonly { amountCents: bigint }[]): { vatRateBp: number; baseCents: bigint; vatCents: bigint }[][] {
-  const ttc = totals.totalTTCCents
-  const out: { vatRateBp: number; baseCents: bigint; vatCents: bigint }[][] = []
-  if (ttc <= BigInt(0)) return movements.map(() => [])
-  let cum = BigInt(0)
-  const prev = new Map<number, { base: bigint; vat: bigint }>()
-  for (const m of movements) {
-    cum += m.amountCents
-    const parts: { vatRateBp: number; baseCents: bigint; vatCents: bigint }[] = []
-    for (const v of totals.vatSummary) {
-      const p = prev.get(v.vatRateBp) ?? { base: BigInt(0), vat: BigInt(0) }
-      const base = roundHalfUp(cum * v.baseCents, ttc), vat = roundHalfUp(cum * v.vatCents, ttc)
-      parts.push({ vatRateBp: v.vatRateBp, baseCents: base - p.base, vatCents: vat - p.vat })
-      prev.set(v.vatRateBp, { base, vat })
+export function allocateReceiptsVatEvents(original: DocumentTotals, events: readonly VatEvent[]): VatEventParts[] {
+  const net = new Map<number, { base: bigint; vat: bigint }>()
+  for (const v of original.vatSummary) net.set(v.vatRateBp, { base: v.baseCents, vat: v.vatCents })
+  const allocated = new Map<number, { base: bigint; vat: bigint }>()
+  let netTTC = original.totalTTCCents, cum = BigInt(0)
+  const out: VatEventParts[] = []
+  for (const e of events) {
+    if (e.kind === "CREDIT") {
+      for (const v of e.totals.vatSummary) {
+        const n = net.get(v.vatRateBp) ?? { base: BigInt(0), vat: BigInt(0) }
+        net.set(v.vatRateBp, { base: n.base - v.baseCents, vat: n.vat - v.vatCents })
+      }
+      netTTC -= e.totals.totalTTCCents
+    } else cum += e.amountCents
+    const parts: VatRateRow[] = []
+    const excess = cum > netTTC && cum > BigInt(0) ? cum - (netTTC > BigInt(0) ? netTTC : BigInt(0)) : BigInt(0)
+    // Encaissement conservé au-delà de la facture nette (avoir total après paiement, données héritées) : hors contrat ⇒ allocation GELÉE
+    // (aucune part, ni positive ni négative : aucune régularisation inventée), l'excès est signalé à l'appelant.
+    if (netTTC > BigInt(0) && excess === BigInt(0)) {
+      const eff = cum
+      for (const [bp, n] of net) {
+        const prev = allocated.get(bp) ?? { base: BigInt(0), vat: BigInt(0) }
+        const base = roundHalfUp(eff * n.base, netTTC), vat = roundHalfUp(eff * n.vat, netTTC)
+        if (base !== prev.base || vat !== prev.vat) parts.push({ vatRateBp: bp, baseCents: base - prev.base, vatCents: vat - prev.vat })
+        allocated.set(bp, { base, vat })
+      }
     }
-    out.push(parts)
+    out.push({ parts, excessCents: excess })
   }
   return out
+}
+
+/** Compatibilité (tests P1-02) : allocation cumulative sans avoir = cas particulier de l'allocation par événements. */
+export function allocateReceiptsVat(totals: DocumentTotals, movements: readonly { amountCents: bigint }[]): { vatRateBp: number; baseCents: bigint; vatCents: bigint }[][] {
+  if (totals.totalTTCCents <= BigInt(0)) return movements.map(() => [])
+  return allocateReceiptsVatEvents(totals, movements.map((m) => ({ kind: "PAYMENT" as const, amountCents: m.amountCents }))).map((e) => totals.vatSummary.map((v) => e.parts.find((p) => p.vatRateBp === v.vatRateBp) ?? { vatRateBp: v.vatRateBp, baseCents: BigInt(0), vatCents: BigInt(0) }))
 }
 
 export async function computeVat(db: Db, ctx: { companyId: string }, periodStart: Date, periodEnd: Date, basis: "DEBITS" | "ENCAISSEMENTS"): Promise<VatComputation> {
@@ -71,7 +103,7 @@ export async function computeVat(db: Db, ctx: { companyId: string }, periodStart
   const end = new Date(Date.UTC(periodEnd.getUTCFullYear(), periodEnd.getUTCMonth(), periodEnd.getUTCDate(), 23, 59, 59, 999))
   const map = new Map<number, VatRateRow>()
   const warnings: string[] = []
-  let documents = 0, payments = 0
+  let documents = 0, payments = 0, adjustments = 0
   if (basis === "DEBITS") {
     const docs = await db.invoice.findMany({ where: { companyId, status: { in: ["SENT", "PARTIAL", "PAID", "CANCELLED"] }, sentAt: { not: null }, issueDate: { gte: periodStart, lte: end } }, select: docSelect })
     for (const d of docs) {
@@ -81,32 +113,49 @@ export async function computeVat(db: Db, ctx: { companyId: string }, periodStart
       for (const v of totals.vatSummary) addRow(map, v.vatRateBp, sign * v.baseCents, sign * v.vatCents)
     }
   } else {
-    // Factures ayant au moins un mouvement de trésorerie dans la période ; l'allocation cumulative exige TOUS leurs mouvements.
+    // Factures ayant un mouvement de trésorerie OU un avoir émis dans la période ; l'allocation par événements exige TOUT leur historique.
     const inPeriod = await db.invoicePayment.findMany({ where: { companyId, paidAt: { gte: periodStart, lte: end } }, select: { invoiceId: true }, distinct: ["invoiceId"] })
-    const ids = inPeriod.map((p) => p.invoiceId)
+    const creditedInPeriod = await db.invoice.findMany({ where: { companyId, kind: "CREDIT_NOTE", status: { in: ["SENT", "PAID"] }, issueDate: { gte: periodStart, lte: end }, creditedInvoiceId: { not: null } }, select: { creditedInvoiceId: true }, distinct: ["creditedInvoiceId"] })
+    const ids = [...new Set([...inPeriod.map((p) => p.invoiceId), ...creditedInPeriod.map((c) => c.creditedInvoiceId as string)])]
     const invoices = ids.length === 0 ? [] : await db.invoice.findMany({
-      where: { companyId, id: { in: ids } },
-      select: { ...docSelect, payments: { orderBy: [{ paidAt: "asc" }, { createdAt: "asc" }, { id: "asc" }], select: { id: true, amountCents: true, paidAt: true } } },
+      where: { companyId, id: { in: ids }, kind: { not: "CREDIT_NOTE" } },
+      select: {
+        ...docSelect,
+        payments: { select: { id: true, amountCents: true, paidAt: true, createdAt: true } },
+        creditNotes: { where: { kind: "CREDIT_NOTE", status: { in: ["SENT", "PAID"] } }, select: { ...docSelect, issueDate: true, createdAt: true } },
+      },
       orderBy: { number: "asc" },
     })
+    const day = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
     for (const inv of invoices) {
       const totals = checkedTotals(inv)
-      const parts = allocateReceiptsVat(totals, inv.payments)
-      inv.payments.forEach((p, i) => {
-        if (p.paidAt < periodStart || p.paidAt > end) return
-        payments++
-        for (const part of parts[i]) addRow(map, part.vatRateBp, part.baseCents, part.vatCents)
+      // Chronologie déterministe : jour, avoir avant paiement le même jour, création, identifiant.
+      type Ev = { at: number; rank: number; createdAt: Date; id: string; date: Date; event: VatEvent; number: string }
+      const evs: Ev[] = [
+        ...inv.payments.map((p): Ev => ({ at: day(p.paidAt), rank: 1, createdAt: p.createdAt, id: p.id, date: p.paidAt, number: "", event: { kind: "PAYMENT", amountCents: p.amountCents } })),
+        ...inv.creditNotes.map((c): Ev => ({ at: day(c.issueDate), rank: 0, createdAt: c.createdAt, id: c.id, date: c.issueDate, number: c.number, event: { kind: "CREDIT", totals: checkedTotals(c) } })),
+      ].sort((a, b) => a.at - b.at || a.rank - b.rank || a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      const allocated = allocateReceiptsVatEvents(totals, evs.map((e) => e.event))
+      let inPeriodEvents = 0, excessWarned = false
+      evs.forEach((e, i) => {
+        if (e.date < periodStart || e.date > end) return
+        inPeriodEvents++
+        if (e.event.kind === "PAYMENT") payments++
+        else if (allocated[i].parts.length > 0) adjustments++
+        for (const part of allocated[i].parts) addRow(map, part.vatRateBp, part.baseCents, part.vatCents)
+        if (allocated[i].excessCents > BigInt(0) && !excessWarned) {
+          excessWarned = true
+          const origin = e.event.kind === "CREDIT" ? `Avoir ${e.number} sur la facture ${inv.number} déjà encaissée` : `Facture ${inv.number} (mouvement du ${e.date.toISOString().slice(0, 10)})`
+          warnings.push(`${origin} : ${centsToDecimalString(allocated[i].excessCents)} € encaissés au-delà de la facture nette de ses avoirs — la régularisation de la TVA encaissée n'intervient qu'au remboursement effectif (mouvement de trésorerie non pris en charge par le module) — à traiter avec l'expert-comptable.`)
+        }
       })
-      documents++
+      if (inPeriodEvents > 0) documents++
     }
-    // Hors contrat : avoir total sur une facture qui a reçu des encaissements (remboursement non pris en charge).
-    const refundPending = await db.invoice.findMany({ where: { companyId, kind: "CREDIT_NOTE", creditScope: "TOTAL", status: { in: ["SENT", "PAID"] }, issueDate: { gte: periodStart, lte: end }, creditedInvoice: { payments: { some: {} } } }, select: { number: true, creditedInvoice: { select: { number: true } } } })
-    for (const n of refundPending) warnings.push(`Avoir total ${n.number} sur la facture ${n.creditedInvoice?.number ?? "?"} déjà encaissée : la régularisation de la TVA encaissée n'intervient qu'au remboursement effectif (mouvement de trésorerie non pris en charge par le module) — à traiter avec l'expert-comptable.`)
   }
   const supplier = await db.supplierInvoice.findMany({ where: { companyId, status: "VALIDATED", date: { gte: periodStart, lte: end } }, select: { vatCents: true } })
   const deductible = supplier.reduce((s, r) => s + r.vatCents, BigInt(0))
   const collected = [...map.values()].sort((a, b) => a.vatRateBp - b.vatRateBp)
   const collectedCents = collected.reduce((s, r) => s + r.vatCents, BigInt(0))
-  return { basis, periodStart, periodEnd, collected, collectedCents, deductibleCents: deductible, dueCents: collectedCents - deductible, documents, payments, supplierInvoices: supplier.length, warnings }
+  return { basis, periodStart, periodEnd, collected, collectedCents, deductibleCents: deductible, dueCents: collectedCents - deductible, documents, payments, adjustments, supplierInvoices: supplier.length, warnings }
 }
 

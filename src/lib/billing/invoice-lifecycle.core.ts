@@ -62,6 +62,12 @@ export const LIFECYCLE_ERRORS = {
 /** Lot C : brouillon à numéro provisoire (créé par la facturation complète) — jamais émis par ce chemin. */
 export const PROVISIONAL_NUMBER_PREFIX = "PROV-"
 
+/** Verrou de la ligne de facture (même protocole que le Lot C : `lockInvoiceRow`), injectable pour les tests sans base. */
+export type InvoiceLock = (tx: Prisma.TransactionClient, invoiceId: string, companyId: string) => Promise<void>
+export const lockInvoiceForUpdate: InvoiceLock = async (tx, invoiceId, companyId) => {
+  await tx.$queryRaw`SELECT 1 FROM "invoices" WHERE "id" = ${invoiceId} AND "companyId" = ${companyId} FOR UPDATE`
+}
+
 export interface TransitionInput {
   companyId: string
   invoiceId: string
@@ -70,12 +76,18 @@ export interface TransitionInput {
   now: Date
   /** Correctif P2-03 : figement documentaire à l'émission (injectable pour les tests sans base ; défaut = snapshot réel). */
   captureSnapshot?: SnapshotCapture
+  /** Correctif R2 : verrou du parent AVANT la lecture qui nourrit le recalcul (défaut = FOR UPDATE réel). */
+  lockInvoice?: InvoiceLock
 }
 
 export async function transitionInvoiceCore(
   tx: Prisma.TransactionClient,
   input: TransitionInput
 ): Promise<LifecycleResult> {
+  // Correctif R2 (revue Codex R2 du 26/10/2026) : le parent est verrouillé AVANT toute lecture — même protocole que la modification
+  // des lignes (UPDATE conditionnel) et que l'émission Lot C (lockInvoiceRow). Une modification concurrente du brouillon attend ou a
+  // déjà commité : les lignes et l'en-tête lus ici sont la version finale, le recalcul écrit à l'émission ne peut plus être périmé.
+  await (input.lockInvoice ?? lockInvoiceForUpdate)(tx, input.invoiceId, input.companyId)
   const invoice = await tx.invoice.findFirst({
     where: { id: input.invoiceId, companyId: input.companyId },
     select: { id: true, status: true, kind: true, number: true, worksiteId: true, globalDiscountBp: true, vatReverseCharge: true, lines: { select: { quantity: true, unitPrice: true, vatRate: true, discountBp: true, deductsDepositId: true } } },
@@ -199,6 +211,8 @@ export interface CreditNoteInput {
   nextNumber: (tx: Prisma.TransactionClient) => Promise<string>
   /** Correctif P2-03 : figement documentaire de l'avoir émis (injectable pour les tests sans base ; défaut = snapshot réel). */
   captureSnapshot?: SnapshotCapture
+  /** Correctif R2 (même famille) : verrou de l'origine avant la lecture copiée dans l'avoir (défaut = FOR UPDATE réel). */
+  lockInvoice?: InvoiceLock
 }
 
 /**
@@ -210,6 +224,9 @@ export async function createCreditNoteCore(
   tx: Prisma.TransactionClient,
   input: CreditNoteInput
 ): Promise<LifecycleResult<{ id: string; number: string }>> {
+  // R2 (même famille) : l'origine est verrouillée avant la lecture dont l'avoir est la copie exacte (sérialisation avec paiements,
+  // avoirs partiels et émission concurrents ; le contenu d'une pièce émise est figé en base, le statut est relu sous verrou).
+  await (input.lockInvoice ?? lockInvoiceForUpdate)(tx, input.invoiceId, input.companyId)
   const original = await tx.invoice.findFirst({
     where: { id: input.invoiceId, companyId: input.companyId },
     select: {

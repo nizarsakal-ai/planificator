@@ -11,7 +11,7 @@ import { MoneyError, parseEuroInputToCents, parseVatRateToBp } from "@/lib/billi
 import { PostingError, postMissingDocuments } from "@/lib/accounting/c5/postings"
 import { DocumentIntegrityError } from "@/lib/billing/document-integrity"
 import { declareVat } from "@/lib/accounting/c5/vat-declaration"
-import { autoReconcile, importBankStatement, matchTransaction } from "@/lib/accounting/c5/bank.service"
+import { autoReconcile, importBankStatement, matchTransaction, resolveBankCollision, resolveImportCollisions } from "@/lib/accounting/c5/bank.service"
 import { guessBankMapping, previewCsv } from "@/lib/accounting/c5/bank-import"
 import { createSupplierInvoice, extractSupplierInvoice, rejectSupplierInvoice, storeSupplierFile, updateSupplierInvoice, validateSupplierInvoice, SUPPLIER_CATEGORIES } from "@/lib/accounting/c5/supplier-invoice.service"
 
@@ -61,12 +61,27 @@ export async function previewBankCsvAction(text: unknown): Promise<Result<{ head
 
 const mappingSchema = z.object({ date: z.number().int().min(0).max(100), label: z.number().int().min(0).max(100), amount: z.number().int().min(0).max(100).optional(), debit: z.number().int().min(0).max(100).optional(), credit: z.number().int().min(0).max(100).optional(), reference: z.number().int().min(0).max(100).optional(), bankId: z.number().int().min(0).max(100).optional(), headerRows: z.number().int().min(0).max(10) }).strict()
 
-export async function importBankStatementAction(raw: unknown): Promise<Result<{ imported: number; duplicates: number; ambiguous: number; invalid: { row: number; error: string }[] }>> {
+export async function importBankStatementAction(raw: unknown): Promise<Result<{ importId: string; imported: number; duplicates: number; ambiguous: number; collisions: number; invalid: { row: number; error: string }[] }>> {
   const p = z.object({ text: z.string().max(2_100_000), fileName: z.string().max(200), mapping: mappingSchema }).strict().safeParse(raw)
   if (!p.success) return { ok: false, error: "Import invalide (mapping ou fichier)." }
   if (p.data.mapping.amount === undefined && (p.data.mapping.debit === undefined || p.data.mapping.credit === undefined)) return { ok: false, error: "Indiquez la colonne montant, ou les colonnes débit et crédit." }
   const r = await run((ctx) => importBankStatement(prisma, ctx, p.data.text, p.data.fileName, p.data.mapping))
-  return r.ok ? { ok: true, imported: r.value.imported, duplicates: r.value.duplicates, ambiguous: r.value.ambiguous, invalid: r.value.invalid } : r
+  return r.ok ? { ok: true, importId: r.value.importId, imported: r.value.imported, duplicates: r.value.duplicates, ambiguous: r.value.ambiguous, collisions: r.value.collisions, invalid: r.value.invalid } : r
+}
+
+// R4 : résolution explicite d'une collision d'identité inter-fichiers (par opération, ou en bloc pour un relevé).
+const resolutionSchema = z.enum(["DUPLICATE", "DISTINCT"])
+export async function resolveBankCollisionAction(raw: unknown): Promise<Result<{ status: string }>> {
+  const p = z.object({ transactionId: idSchema, resolution: resolutionSchema, notes: z.string().trim().max(300).optional() }).strict().safeParse(raw)
+  if (!p.success) return { ok: false, error: "Demande invalide." }
+  const r = await run((ctx) => resolveBankCollision(prisma, ctx, p.data.transactionId, p.data.resolution, p.data.notes ?? null))
+  return r.ok ? { ok: true, status: r.value.status } : r
+}
+export async function resolveImportCollisionsAction(raw: unknown): Promise<Result<{ resolved: number }>> {
+  const p = z.object({ importId: idSchema, resolution: resolutionSchema }).strict().safeParse(raw)
+  if (!p.success) return { ok: false, error: "Demande invalide." }
+  const r = await run((ctx) => resolveImportCollisions(prisma, ctx, p.data.importId, p.data.resolution))
+  return r.ok ? { ok: true, resolved: r.value.resolved } : r
 }
 
 export async function autoReconcileAction(): Promise<Result<{ matched: number; unmatched: number; ambiguous: number; errors: { transactionId: string; error: string }[] }>> {

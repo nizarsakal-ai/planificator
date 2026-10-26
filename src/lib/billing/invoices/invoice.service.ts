@@ -56,10 +56,25 @@ async function checkReferences(db: Db, ctx: InvoiceContext, parsed: ParsedInvoic
 }
 
 /** Brouillon de facture : numéro PROVISOIRE ; le numéro légal est attribué à l'émission. */
+const QUOTE_ALREADY_LINKED = "Ce devis est déjà lié à une facture."
+/** Audit A2 (même famille que R2) : l'unicité « une facture de solde non annulée par devis » est garantie en base (index partiel) ; la violation est traduite. */
+function isOneFinalPerQuoteViolation(e: unknown): boolean {
+  const err = e as { code?: string; meta?: { target?: unknown }; message?: string }
+  const target = Array.isArray(err.meta?.target) ? (err.meta?.target as unknown[]).map(String) : [String(err.meta?.target ?? "")]
+  return err.code === "P2002" && (target.includes("quoteId") || (err.message ?? "").includes("invoices_one_final_per_quote_key"))
+}
+
 export async function createDraftInvoice(db: Db, ctx: InvoiceContext, parsed: ParsedInvoice, now: Date): Promise<LifecycleResult<{ id: string; number: string }>> {
   const refs = await checkReferences(db, ctx, parsed)
   if (!refs.ok) return refs
   const created = await db.$transaction(async (tx) => {
+    // Le devis lié est verrouillé (aucune facture existante à verrouiller avant : ordre facture → devis respecté) : sérialise avec
+    // convertQuote/createDraftInvoice concurrents ; contrôle « déjà lié » relu sous verrou, l'index unique partiel reste le filet.
+    if (parsed.quoteId) {
+      await tx.$queryRaw`SELECT 1 FROM "quotes" WHERE "id" = ${parsed.quoteId} AND "companyId" = ${ctx.companyId} FOR UPDATE`
+      const linked = await tx.invoice.findFirst({ where: { companyId: ctx.companyId, quoteId: parsed.quoteId, kind: "INVOICE", status: { not: "CANCELLED" } }, select: { id: true } })
+      if (linked) return null
+    }
     const number = await nextDocumentNumber(tx, ctx.companyId, "INVOICE_DRAFT", now.getUTCFullYear())
     const inv = await tx.invoice.create({
       data: {
@@ -71,7 +86,8 @@ export async function createDraftInvoice(db: Db, ctx: InvoiceContext, parsed: Pa
     await tx.historyLog.create({ data: { companyId: ctx.companyId, worksiteId: parsed.worksiteId, actorId: ctx.userId, action: "CREATED", entityType: "Invoice", entityId: inv.id, detail: `Facture ${inv.number} créée (brouillon)` } })
     await flushDeferredConstraints(tx)
     return inv
-  })
+  }).catch((e) => { if (isOneFinalPerQuoteViolation(e)) return null; throw e })
+  if (!created) return { ok: false, error: QUOTE_ALREADY_LINKED }
   return { ok: true, value: created }
 }
 
@@ -85,6 +101,15 @@ export async function updateDraftInvoice(db: Db, ctx: InvoiceContext, invoiceId:
   const refs = await checkReferences(db, ctx, { ...parsed, currentInvoiceId: invoiceId } as ParsedInvoice)
   if (!refs.ok) return refs
   return withLifecycleAbort(() => db.$transaction(async (tx) => {
+    // Ordre global des verrous (voir deposit.service.ts) : FACTURE → DEVIS → ACOMPTES. La facture d'abord (comme issueInvoiceCore), puis le
+    // devis lié ; une émission concurrente tenant la facture est attendue, puis la modification est refusée (plus un brouillon) — jamais d'interblocage.
+    await lockInvoiceRow(tx, invoiceId, ctx.companyId)
+    if (parsed.quoteId) {
+      await tx.$queryRaw`SELECT 1 FROM "quotes" WHERE "id" = ${parsed.quoteId} AND "companyId" = ${ctx.companyId} FOR UPDATE`
+      // Audit A2 : contrôle « devis déjà lié » SOUS verrou du devis (l'index unique partiel reste le filet).
+      const linked = await tx.invoice.findFirst({ where: { companyId: ctx.companyId, quoteId: parsed.quoteId, kind: "INVOICE", status: { not: "CANCELLED" }, id: { not: invoiceId } }, select: { id: true } })
+      if (linked) throw new LifecycleAbort(QUOTE_ALREADY_LINKED)
+    }
     const r = await replaceInvoiceDraftCore(tx, { companyId: ctx.companyId, invoiceId, actorId: ctx.userId, header: { ...toHeader(parsed), worksiteId: parsed.worksiteId, clientId: refs.value.clientId, quoteId: parsed.quoteId }, lines: toLines(parsed) })
     if (!r.ok) return r
     // Facture de solde : les déductions d'acomptes (lignes retirées par le remplacement) sont régénérées.
@@ -95,7 +120,7 @@ export async function updateDraftInvoice(db: Db, ctx: InvoiceContext, invoiceId:
     }
     await flushDeferredConstraints(tx)
     return r
-  }))
+  }).catch((e) => { if (isOneFinalPerQuoteViolation(e)) throw new LifecycleAbort(QUOTE_ALREADY_LINKED); throw e }))
 }
 
 export async function issueInvoice(db: Db, ctx: InvoiceContext, invoiceId: string, now: Date): Promise<LifecycleResult<{ number: string }>> {

@@ -726,6 +726,12 @@ enum InvoiceCreditScope {
   PARTIAL
 }
 
+/// Correctif R4 : résolution explicite d'une collision d'identité bancaire inter-fichiers.
+enum BankCollisionResolution {
+  DUPLICATE
+  DISTINCT
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // FACTURATION COMPLÈTE — Lot C1 (SPEC-BILLING-C1) : paramètres de facturation et journal des courriers.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3084,6 +3090,12 @@ model BankTransaction {
   externalId               String?
   occurrence               Int                   @default(1)
   identityAmbiguous        Boolean               @default(false)
+  // Correctif R4 : collision inter-fichiers (tuple déjà connu d'un relevé antérieur, sans identifiant bancaire) — conservée en
+  // attente d'une résolution explicite (doublon ⇒ ignorée ; opération distincte ⇒ rapprochable) ; provenance = opération connue.
+  tupleKey                 String?
+  collisionOfId            String?
+  collisionResolution      BankCollisionResolution?
+  collisionResolvedAt      DateTime?
 
   company                Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
   import                 BankStatementImport @relation(fields: [companyId, importId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
@@ -3091,6 +3103,8 @@ model BankTransaction {
   matchedPayment         InvoicePayment?     @relation("BankMatchedPayment", fields: [companyId, matchedPaymentId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
   matchedSupplierInvoice SupplierInvoice?    @relation(fields: [companyId, matchedSupplierInvoiceId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
   payments               InvoicePayment[]    @relation("PaymentBankTransaction") // Correctif P1-03 : paiement créé par le rapprochement (au plus un : bankTransactionId UNIQUE)
+  collisionOf            BankTransaction?    @relation("BankCollision", fields: [companyId, collisionOfId], references: [companyId, id], onDelete: Restrict) // Correctif R4
+  collisions             BankTransaction[]   @relation("BankCollision")
 
   @@unique([companyId, id])
   @@unique([companyId, fingerprint])
@@ -3098,6 +3112,7 @@ model BankTransaction {
   @@unique([matchedPaymentId])
   @@index([companyId, status])
   @@index([companyId, date])
+  @@index([companyId, tupleKey])
   @@map("bank_transactions")
 }
 

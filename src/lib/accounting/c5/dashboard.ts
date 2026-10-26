@@ -52,7 +52,7 @@ export async function accountingDashboard(db: Db, ctx: { companyId: string }, no
     // P1-01 : une pièce incohérente rend la TVA du mois NON calculable ; le tableau de bord le dit au lieu d'afficher un autre montant.
     if (!(e instanceof DocumentIntegrityError)) throw e
     if (!inconsistentDocuments.includes(e.documentNumber)) inconsistentDocuments.push(e.documentNumber)
-    vat = { basis: vatRegime, periodStart: monthStart, periodEnd: vatPeriodEnd, collected: [], collectedCents: BigInt(0), deductibleCents: BigInt(0), dueCents: BigInt(0), documents: 0, payments: 0, supplierInvoices: 0, warnings: [`TVA du mois non calculable : pièce ${e.documentNumber} incohérente (totaux enregistrés ≠ recalcul).`] }
+    vat = { basis: vatRegime, periodStart: monthStart, periodEnd: vatPeriodEnd, collected: [], collectedCents: BigInt(0), deductibleCents: BigInt(0), dueCents: BigInt(0), documents: 0, payments: 0, adjustments: 0, supplierInvoices: 0, warnings: [`TVA du mois non calculable : pièce ${e.documentNumber} incohérente (totaux enregistrés ≠ recalcul).`] }
   }
   const sup = await db.supplierInvoice.groupBy({ by: ["category"], where: { companyId, status: "VALIDATED", date: { gte: yearStart } }, _sum: { totalHTCents: true }, _count: { _all: true } })
   return {

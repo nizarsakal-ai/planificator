@@ -9,12 +9,13 @@
 //   des relevés qui se chevauchent conservent le maximum d'occurrences observé ; l'empreinte de l'occurrence 1 garde le format
 //   antérieur (lignes déjà importées valides sans recalcul) ;
 // - une ligne dont le tuple est répété dans le fichier (sans identifiant bancaire) est marquée « identité ambiguë » : conservée,
-//   jamais rapprochée automatiquement, résolution explicite par rapprochement manuel.
+//   jamais rapprochée automatiquement, résolution explicite par rapprochement manuel ;
+// - correctif R4 : `tupleKey` = empreinte du tuple sans rang (clé de recherche des collisions ENTRE fichiers, résolues dans le service).
 import { createHash } from "node:crypto"
 import { parseCsv, detectDelimiter } from "@/lib/billing/quotes/quote-import"
 
 export interface BankColumnMapping { date: number; label: number; amount?: number; debit?: number; credit?: number; reference?: number; bankId?: number; headerRows: number }
-export interface ParsedBankLine { date: Date; label: string; amountCents: bigint; reference: string | null; externalId: string | null; occurrence: number; identityAmbiguous: boolean; fingerprint: string; row: number }
+export interface ParsedBankLine { date: Date; label: string; amountCents: bigint; reference: string | null; externalId: string | null; occurrence: number; identityAmbiguous: boolean; fingerprint: string; /** R4 : empreinte du tuple sans rang d'occurrence (null avec identifiant bancaire) */ tupleKey: string | null; row: number }
 export interface BankParseResult { lines: ParsedBankLine[]; invalid: { row: number; error: string }[] }
 
 export const MAX_BANK_ROWS = 5000
@@ -92,13 +93,13 @@ export function parseBankCsv(companyId: string, text: string, mapping: BankColum
     if (externalId) {
       if (seenExternal.has(externalId)) { out.invalid.push({ row, error: `identifiant bancaire en double dans le fichier (${externalId})` }); return }
       seenExternal.add(externalId)
-      out.lines.push({ date, label, amountCents: amount, reference, externalId, occurrence: 1, identityAmbiguous: false, fingerprint: bankExternalFingerprint(companyId, externalId), row })
+      out.lines.push({ date, label, amountCents: amount, reference, externalId, occurrence: 1, identityAmbiguous: false, fingerprint: bankExternalFingerprint(companyId, externalId), tupleKey: null, row })
       return
     }
     const key = bankFingerprint(companyId, date, amount, label, reference)
     const occurrence = (tupleCount.get(key) ?? 0) + 1
     tupleCount.set(key, occurrence)
-    out.lines.push({ date, label, amountCents: amount, reference, externalId: null, occurrence, identityAmbiguous: false, fingerprint: bankFingerprint(companyId, date, amount, label, reference, occurrence), row })
+    out.lines.push({ date, label, amountCents: amount, reference, externalId: null, occurrence, identityAmbiguous: false, fingerprint: bankFingerprint(companyId, date, amount, label, reference, occurrence), tupleKey: key, row })
   })
   // Tuple répété dans le fichier sans identifiant bancaire ⇒ identité ambiguë pour TOUTES ses occurrences (y compris la première).
   for (const l of out.lines) {

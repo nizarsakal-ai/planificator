@@ -144,7 +144,10 @@ export async function validateSupplierInvoice(db: Db, ctx: AccountingContext, id
       if (!acc) throw new LifecycleAbort(`Compte de charge ${number} absent ou inactif : choisissez un compte.`)
       expenseAccountId = acc.id
     }
+    // Audit A4 (même famille que R2) : l'unicité « une facture validée par (fournisseur, numéro) » est garantie en base (index partiel) ;
+    // deux validations concurrentes du même document ⇒ la seconde est refusée (ROLLBACK), jamais deux charges/TVA déductibles.
     const u = await tx.supplierInvoice.updateMany({ where: { id: s.id, companyId: ctx.companyId, status: "PENDING" }, data: { status: "VALIDATED", supplierId: supplier.id, expenseAccountId, validatedAt: new Date(), validatedById: ctx.userId } })
+      .catch((e: { code?: string }) => { if (e.code === "P2002") throw new LifecycleAbort(SUPPLIER_ERRORS.duplicateNumber); throw e })
     if (u.count !== 1) throw new Error("SUPPLIER_INVOICE_CONFLICT")
     const e = await postSupplierInvoiceEntry(tx, ctx, s.id)
     await tx.historyLog.create({ data: { companyId: ctx.companyId, actorId: ctx.userId, action: "STATUS_CHANGED", entityType: "SupplierInvoice", entityId: s.id, detail: `Facture fournisseur ${s.number} validée (${supplier.name}) — écriture ${e.entryId}`, oldValue: { status: "PENDING" }, newValue: { status: "VALIDATED", supplierId: supplier.id, entryId: e.entryId } } })
@@ -167,6 +170,9 @@ export async function findOrCreateSupplier(tx: Tx, ctx: AccountingContext, input
     const bySiret = await tx.supplier.findFirst({ where: { companyId: ctx.companyId, siret: input.siret }, select: { id: true, name: true, defaultExpenseAccountId: true } })
     if (bySiret) return bySiret
   }
+  // Audit A4 : sans SIRET, la recherche par nom puis la création sont sérialisées par nom (sinon deux fournisseurs homonymes
+  // créés simultanément, et le contrôle de doublon par fournisseur ne se rencontre jamais).
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('supplier-name'), hashtext(${`${ctx.companyId}|${name.toLowerCase()}`}))`
   const byName = await tx.supplier.findFirst({ where: { companyId: ctx.companyId, name: { equals: name, mode: "insensitive" } }, select: { id: true, name: true, siret: true, defaultExpenseAccountId: true } })
   if (byName) {
     if (input.siret && !byName.siret) await tx.supplier.updateMany({ where: { id: byName.id, companyId: ctx.companyId, siret: null }, data: { siret: input.siret } })

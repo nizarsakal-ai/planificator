@@ -146,6 +146,12 @@ export async function applyDepositDeductions(db: Db, ctx: DepositContext, finalI
 export async function depositIssueChecks(tx: Tx, companyId: string, invoice: { id: string; kind: string; quoteId: string | null; totalTTCCents: bigint; vatReverseCharge: boolean }): Promise<string | null> {
   if (!invoice.quoteId) return null
   if (invoice.kind === "INVOICE") {
+    // ORDRE GLOBAL DES VERROUS (facturation) : FACTURE (lockInvoiceRow, premier) → DEVIS (lockQuoteRow) → ACOMPTES (FOR UPDATE).
+    // issueInvoiceCore tient la facture avant d'appeler ces contrôles ; updateDraftInvoice verrouille la facture puis le devis ;
+    // createDepositInvoice/convertQuote/createDraftInvoice ne tiennent aucune facture existante avant le devis. Aucun chemin ne prend devis → facture existante.
+    // Même famille que R2 (audit A1) : verrou du devis AVANT les contrôles — la création d'un acompte (createDepositInvoice, qui
+    // verrouille le devis puis vérifie « solde émis ») est sérialisée avec l'émission du solde : plus d'acompte créé pendant l'émission.
+    await lockQuoteRow(tx, invoice.quoteId, companyId)
     // Verrou des acomptes du devis : sérialise avec un avoir total concurrent sur l'un d'eux (createCreditNoteCore).
     await tx.$queryRaw`SELECT 1 FROM "invoices" WHERE "companyId" = ${companyId} AND "quoteId" = ${invoice.quoteId} AND "kind"::text = 'DEPOSIT' ORDER BY "id" FOR UPDATE`
     const draft = await tx.invoice.count({ where: { companyId, quoteId: invoice.quoteId, kind: "DEPOSIT", status: "DRAFT" } })
@@ -170,6 +176,9 @@ export async function depositIssueChecks(tx: Tx, companyId: string, invoice: { i
     await lockQuoteRow(tx, invoice.quoteId, companyId)
     const q = await tx.quote.findFirst({ where: { id: invoice.quoteId, companyId }, select: { totalTTC: true } })
     if (!q) return DEPOSIT_ERRORS.quoteNotFound
+    // Audit A1 : un acompte ne s'émet jamais après l'émission de la facture de solde (il ne serait jamais déduit : double facturation).
+    const finalIssued = await tx.invoice.findFirst({ where: { companyId, quoteId: invoice.quoteId, kind: "INVOICE", status: { in: ["SENT", "PARTIAL", "PAID"] } }, select: { id: true } })
+    if (finalIssued) return DEPOSIT_ERRORS.finalIssued
     const others = await depositsTotalCents(tx, companyId, invoice.quoteId, invoice.id)
     if (others + invoice.totalTTCCents > decimalToCents(q.totalTTC)) return DEPOSIT_ERRORS.ceiling
   }

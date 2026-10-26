@@ -42,7 +42,7 @@ export function BankImportDialog() {
       const m: Mapping = mode === "amount" ? { ...mapping, debit: undefined, credit: undefined } : { ...mapping, amount: undefined }
       const r = await importBankStatementAction({ text, fileName, mapping: m })
       if (!r.ok) { toast.error(r.error); return }
-      toast.success(`${r.imported} opération(s) importée(s), ${r.duplicates} doublon(s) ignoré(s)${r.invalid.length ? `, ${r.invalid.length} ligne(s) invalide(s)` : ""}.`)
+      toast.success(`${r.imported} opération(s) importée(s), ${r.duplicates} doublon(s) certain(s) ignoré(s)${r.collisions ? `, ${r.collisions} collision(s) à résoudre (tuple déjà connu d'un relevé antérieur)` : ""}${r.invalid.length ? `, ${r.invalid.length} ligne(s) invalide(s)` : ""}.`)
       setOpen(false); setMapping(null); router.refresh()
     } catch { toast.error("Erreur serveur : import non effectué.") } finally { setLoading(false) }
   }

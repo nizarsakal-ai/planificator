@@ -8,7 +8,7 @@ import { formatEuro } from "@/lib/billing/money"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { BankImportDialog } from "@/components/comptabilite/BankImportDialog"
-import { AutoReconcileButton, MatchButtons } from "@/components/comptabilite/C5Actions"
+import { AutoReconcileButton, CollisionButtons, MatchButtons } from "@/components/comptabilite/C5Actions"
 
 export const metadata: Metadata = { title: "Comptabilité — Banque et rapprochement" }
 const STATUS: Record<string, string> = { PENDING: "À rapprocher", MATCHED: "Rapprochée", IGNORED: "Ignorée" }
@@ -33,12 +33,13 @@ export default async function BanquePage({ searchParams }: { searchParams: Promi
             {list.rows.map((r, i) => { const c = candidates[i]; return (
               <tr key={r.id} className="border-t align-top">
                 <td className="px-3 py-2">{dateFr.format(r.date)}</td>
-                <td className="px-3 py-2">{r.label}{r.reference && <div className="text-xs text-slate-400">réf. {r.reference}</div>}{r.externalId && <div className="text-xs text-slate-400">id banque {r.externalId}</div>}{r.identityAmbiguous && <div className="text-xs text-amber-700">Identité ambiguë (opération n° {r.occurrence} d’un même tuple dans le relevé) : rapprochement manuel uniquement.</div>}</td>
+                <td className="px-3 py-2">{r.label}{r.reference && <div className="text-xs text-slate-400">réf. {r.reference}</div>}{r.externalId && <div className="text-xs text-slate-400">id banque {r.externalId}</div>}{r.collisionOfId && !r.collisionResolution && <div className="text-xs text-amber-700">Collision d’identité : tuple identique à une opération déjà importée{r.collisionOf ? ` (relevé ${r.collisionOf.import.fileName}, occurrence ${r.collisionOf.occurrence})` : ""} — relevés qui se chevauchent ou second mouvement réel ? Décision explicite requise avant tout rapprochement.</div>}{r.collisionResolution && <div className="text-xs text-slate-500">Collision résolue : {r.collisionResolution === "DUPLICATE" ? "doublon" : "opération distincte"}.</div>}{r.identityAmbiguous && !(r.collisionOfId && !r.collisionResolution) && <div className="text-xs text-amber-700">Identité ambiguë (opération n° {r.occurrence} d’un même tuple dans le relevé) : rapprochement manuel uniquement.</div>}</td>
                 <td className={`px-3 py-2 text-right tabular-nums ${r.amountCents < BigInt(0) ? "text-red-700" : "text-green-700"}`}>{formatEuro(r.amountCents)}</td>
                 <td className="px-3 py-2">
                   {r.status === "MATCHED" && (r.matchedInvoice ? <Link className="underline" href={`/factures/${r.matchedInvoice.id}`}>Facture {r.matchedInvoice.number}</Link> : r.matchedSupplierInvoice ? <span>Fournisseur {r.matchedSupplierInvoice.supplierName} — {r.matchedSupplierInvoice.number}</span> : "Rapprochée")}
                   {r.status === "IGNORED" && <span className="text-slate-500">Ignorée{r.notes ? ` — ${r.notes}` : ""}</span>}
-                  {r.status === "PENDING" && c && <MatchButtons transactionId={r.id} invoices={c.invoices.slice(0, 20).map((x) => ({ id: x.id, number: x.number, label: `${x.clientName} · reste ${formatEuro(x.remainingCents)}${x.exact ? " ✓" : ""}` }))} supplierInvoices={c.supplierInvoices.slice(0, 20).map((x) => ({ id: x.id, number: x.number, label: `${x.supplierName} · ${formatEuro(x.totalTTCCents)}${x.exact ? " ✓" : ""}` }))} />}
+                  {r.status === "PENDING" && r.collisionOfId && !r.collisionResolution && <CollisionButtons transactionId={r.id} importId={r.importId} />}
+                  {r.status === "PENDING" && !(r.collisionOfId && !r.collisionResolution) && c && <MatchButtons transactionId={r.id} invoices={c.invoices.slice(0, 20).map((x) => ({ id: x.id, number: x.number, label: `${x.clientName} · reste ${formatEuro(x.remainingCents)}${x.exact ? " ✓" : ""}` }))} supplierInvoices={c.supplierInvoices.slice(0, 20).map((x) => ({ id: x.id, number: x.number, label: `${x.supplierName} · ${formatEuro(x.totalTTCCents)}${x.exact ? " ✓" : ""}` }))} />}
                 </td>
               </tr>) })}
           </tbody></table>

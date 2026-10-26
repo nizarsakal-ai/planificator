@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { autoReconcileAction, declareVatAction, matchTransactionAction, postMissingDocumentsAction, rejectSupplierInvoiceAction, validateSupplierInvoiceAction } from "@/lib/actions/accounting-c5.actions"
+import { autoReconcileAction, declareVatAction, matchTransactionAction, postMissingDocumentsAction, rejectSupplierInvoiceAction, resolveBankCollisionAction, resolveImportCollisionsAction, validateSupplierInvoiceAction } from "@/lib/actions/accounting-c5.actions"
 
 function useAct() {
   const router = useRouter()
@@ -22,9 +22,10 @@ export function PostMissingButton() {
   return <Button disabled={busy} onClick={() => void act(() => postMissingDocumentsAction(), (r) => (r.ok ? `${r.posted} écriture(s) générée(s), ${r.existing} déjà présente(s)${r.errors.length ? `, ${r.errors.length} erreur(s) : ${r.errors.slice(0, 3).map((e) => `${e.ref} (${e.error})`).join(" ; ")}` : ""}` : ""))}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Générer les écritures manquantes</Button>
 }
 
-export function DeclareVatButton({ periodStart, periodEnd, basis }: { periodStart: string; periodEnd: string; basis: string }) {
+export function DeclareVatButton({ periodStart, periodEnd, basis, blocked = false }: { periodStart: string; periodEnd: string; basis: string; blocked?: boolean }) {
   const { busy, act } = useAct()
-  return <Button variant="outline" disabled={busy} onClick={() => { if (window.confirm(`Enregistrer la déclaration de TVA du ${periodStart} au ${periodEnd} (${basis}) ? Les montants seront figés.`)) void act(() => declareVatAction({ periodStart, periodEnd, basis }), () => "Déclaration enregistrée.") }}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Enregistrer la déclaration</Button>
+  // R5 : la règle est appliquée côté serveur (declareVat refuse) ; le bouton l'annonce seulement.
+  return <Button variant="outline" disabled={busy || blocked} title={blocked ? "Enregistrement refusé : situation hors contrat fiscal sur la période." : undefined} onClick={() => { if (window.confirm(`Enregistrer la déclaration de TVA du ${periodStart} au ${periodEnd} (${basis}) ? Les montants seront figés.`)) void act(() => declareVatAction({ periodStart, periodEnd, basis }), () => "Déclaration enregistrée.") }}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Enregistrer la déclaration</Button>
 }
 
 export function AutoReconcileButton() {
@@ -54,6 +55,18 @@ export function SupplierValidateButtons({ id }: { id: string }) {
     <div className="flex gap-2">
       <Button size="sm" disabled={busy} onClick={() => { if (window.confirm("Valider cette facture fournisseur ? Elle sera figée et comptabilisée (journal HA).")) void act(() => validateSupplierInvoiceAction(id), () => "Facture validée et comptabilisée.") }}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Valider et comptabiliser</Button>
       <Button size="sm" variant="destructive" disabled={busy} onClick={() => { const r = window.prompt("Motif du rejet :", ""); if (r !== null) void act(() => rejectSupplierInvoiceAction(id, r), () => "Facture rejetée.") }}>Rejeter</Button>
+    </div>
+  )
+}
+
+/** R4 : collision d'identité inter-fichiers — décision explicite doublon / opération distincte (la règle est appliquée côté serveur). */
+export function CollisionButtons({ transactionId, importId }: { transactionId: string; importId: string }) {
+  const { busy, act } = useAct()
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <Button size="sm" variant="outline" disabled={busy} onClick={() => { if (window.confirm("Marquer cette opération comme DOUBLON de l'opération déjà importée ? Elle sera ignorée (aucun paiement).")) void act(() => resolveBankCollisionAction({ transactionId, resolution: "DUPLICATE" }), () => "Collision résolue : doublon ignoré.") }}>Doublon</Button>
+      <Button size="sm" variant="outline" disabled={busy} onClick={() => { if (window.confirm("Confirmer qu'il s'agit d'une opération DISTINCTE (second mouvement réel) ? Elle deviendra rapprochable.")) void act(() => resolveBankCollisionAction({ transactionId, resolution: "DISTINCT" }), () => "Collision résolue : opération distincte.") }}>Opération distincte</Button>
+      <Button size="sm" variant="ghost" disabled={busy} onClick={() => { if (window.confirm("Marquer comme DOUBLONS toutes les collisions non résolues de ce relevé ? (relevés qui se chevauchent)")) void act(() => resolveImportCollisionsAction({ importId, resolution: "DUPLICATE" }), (r) => (r.ok ? `${r.resolved} collision(s) du relevé résolue(s) en doublon.` : "")) }}>Tout le relevé : doublons</Button>
     </div>
   )
 }
