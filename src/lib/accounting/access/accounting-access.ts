@@ -19,6 +19,8 @@ const defaultDeps: AccountingAccessDeps = {
   // Lecture seule : aucune écriture en base dans le Lot 0.
   findCompany: (companyId) =>
     prisma.company.findUnique({ where: { id: companyId }, select: { id: true, active: true } }),
+  findUserHomeCompanyId: async (userId) =>
+    (await prisma.user.findUnique({ where: { id: userId }, select: { companyId: true } }))?.companyId ?? null,
 }
 
 /**

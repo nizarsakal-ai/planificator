@@ -55,9 +55,11 @@ export function authorizedCallback({
     pathname.startsWith("/inscription") ||
     pathname.startsWith("/invitation") ||
     pathname.startsWith("/reinitialiser") ||
-    pathname.startsWith("/mot-de-passe-oublie")
+    pathname.startsWith("/mot-de-passe-oublie") ||
+    // Lot C1 : page publique de signature de devis (jeton = seule autorité ; 404 si BILLING_COMPLETE_ENABLED est absent).
+    pathname.startsWith("/devis-signature/")
   ) {
-    if (isLoggedIn) {
+    if (isLoggedIn && !pathname.startsWith("/devis-signature/")) {
       const destination =
         role === "SUPER_ADMIN"
           ? "/super-admin/entreprises"

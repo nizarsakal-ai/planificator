@@ -7,7 +7,8 @@ export const BASE_ACCOUNTS: readonly [string, string][] = [
   ["445660", "TVA déductible sur autres biens et services"], ["445710", "TVA collectée"],
   ["512000", "Banque"], ["530000", "Caisse"], ["601000", "Achats de matières premières"],
   ["604000", "Achats d'études et prestations de services"], ["606000", "Achats non stockés de matières et fournitures"],
-  ["613000", "Locations"], ["616000", "Primes d'assurances"], ["625000", "Déplacements, missions et réceptions"],
+  ["607000", "Achats de marchandises"], ["613000", "Locations"], ["615000", "Entretien et réparations"], ["616000", "Primes d'assurances"],
+  ["622000", "Rémunérations d'intermédiaires et honoraires"], ["625000", "Déplacements, missions et réceptions"],
   ["641000", "Rémunérations du personnel"], ["645000", "Charges de sécurité sociale"], ["706000", "Prestations de services"],
   ["707000", "Ventes de marchandises"], ["758000", "Produits divers de gestion courante"],
 ]

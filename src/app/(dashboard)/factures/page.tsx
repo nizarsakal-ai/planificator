@@ -10,6 +10,9 @@ import {
   type ArticleOption,
 } from "@/components/factures/NouvelleFactureDialog"
 import { InvoiceStatusButtons } from "@/components/factures/InvoiceStatusButtons"
+import { isBillingCompleteEnabled } from "@/lib/billing/billing-feature-flag"
+import { resolveBillingAccess } from "@/lib/billing/access"
+import { InvoicesPageC2 } from "@/components/factures/InvoicesPageC2"
 
 export const metadata: Metadata = { title: "Factures" }
 
@@ -21,15 +24,22 @@ const STATUS_META: Record<string, { label: string; className: string }> = {
   SENT:      { label: "Envoyée",   className: "bg-blue-50 text-blue-600" },
   PAID:      { label: "Payée",     className: "bg-green-50 text-green-600" },
   CANCELLED: { label: "Annulée",   className: "bg-red-50 text-red-500" },
+  PARTIAL:   { label: "Part. payée", className: "bg-amber-50 text-amber-700" }, // Lot C2 (visible seulement après usage du module complet)
 }
 const CREDIT_NOTE_META = { label: "Avoir émis", className: "bg-amber-50 text-amber-700" }
 
-export default async function FacturesPage() {
+export default async function FacturesPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const session = await auth()
   if (!session?.user) redirect("/login")
   if (!["ADMIN", "SUPER_ADMIN"].includes(session.user.role)) redirect("/dashboard")
 
   const companyId = session.user.companyId!
+
+  // Lot C2 : facturation complète (drapeau serveur BILLING_COMPLETE_ENABLED). Drapeau OFF ⇒ page Lot B ci-dessous, inchangée.
+  if (isBillingCompleteEnabled()) {
+    const access = await resolveBillingAccess()
+    if (access.ok) return <InvoicesPageC2 ctx={access.context} searchParams={await searchParams} />
+  }
 
   const [invoicesRaw, worksitesRaw, articlesRaw] = await Promise.all([
     prisma.invoice.findMany({

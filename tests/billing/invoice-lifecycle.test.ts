@@ -4,6 +4,7 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import { readFileSync } from "node:fs"
 import type { Prisma } from "@prisma/client"
+import { setBillingClockForTests } from "@/lib/billing/clock"
 import {
   INVOICE_TRANSITIONS,
   LIFECYCLE_ERRORS,
@@ -13,6 +14,9 @@ import {
   replaceDraftLinesCore,
   transitionInvoiceCore,
 } from "@/lib/billing/invoice-lifecycle.core"
+
+// Correctif P2-03 : le figement documentaire réel exige une base ; ces tests de cœur injectent un no-op.
+const noSnapshot = async () => {}
 
 type Row = Record<string, unknown> & { id: string }
 const A = "company-a"
@@ -29,7 +33,11 @@ function makeTx(seed: Row[], lines: Row[] = []) {
   let seq = 0
   const hooks: { beforeUpdate?: () => void } = {}
   const tx = {
+    // Correctif R2 : le cœur verrouille le parent (SELECT … FOR UPDATE) avant la lecture ; sans base, le verrou est un no-op.
+    $queryRaw: async () => [],
+    invoiceDepositDeduction: { count: async () => 0, updateMany: async () => ({ count: 0 }) }, // S1/T1 : aucune déduction dans ces scénarios Lot B (libération = no-op)
     invoice: {
+      count: async () => 0,
       findFirst: async ({ where, select }: { where: Record<string, unknown>; select?: Record<string, unknown> }) => {
         const row = invoices.find((r) => matches(r, where))
         if (!row) return null
@@ -75,6 +83,7 @@ const inv = (id: string, status: string, companyId = A, extra: Record<string, un
   periodStart: null, periodEnd: null, totalHT: 100, totalVAT: 20, totalTTC: 120, paymentTerms: null, creditedInvoiceId: null, ...extra,
 })
 const now = new Date("2026-10-25T12:00:00Z")
+setBillingClockForTests(() => now) // R3/S3 : horloge de décision déterministe (= now) pour les horodatages et dates d'émission
 const line = (invoiceId: string, position: number): Row => ({
   id: `x-${invoiceId}-${position}`, invoiceId, articleId: null, designation: `L${position}`, unit: "u", quantity: 1, unitPrice: 50, vatRate: 20, lineHT: 50, position,
 })
@@ -100,10 +109,10 @@ describe("Automate de statuts", () => {
 
   it("émission DRAFT → SENT : sentAt posé, trace d'audit", async () => {
     const s = makeTx([inv("1", "DRAFT")])
-    const r = await transitionInvoiceCore(s.tx, { companyId: A, invoiceId: "1", to: "SENT", actorId: "u", now })
+    const r = await transitionInvoiceCore(s.tx, { companyId: A, invoiceId: "1", to: "SENT", actorId: "u", now, captureSnapshot: noSnapshot })
     assert.deepEqual(r, { ok: true, value: undefined })
     assert.equal(s.invoices[0].status, "SENT")
-    assert.equal(s.invoices[0].sentAt, now)
+    assert.equal((s.invoices[0].sentAt as Date).toISOString(), now.toISOString()) // S3 : instant de décision (nouvel objet Date, même valeur)
     assert.equal(s.history.length, 1)
     assert.equal(s.history[0].action, "STATUS_CHANGED")
   })
@@ -120,14 +129,14 @@ describe("Automate de statuts", () => {
 
   it("PAID → SENT refusé ; sentAt jamais réécrit", async () => {
     const s = makeTx([inv("1", "PAID", A, { sentAt: "orig" })])
-    const r = await transitionInvoiceCore(s.tx, { companyId: A, invoiceId: "1", to: "SENT", actorId: "u", now })
+    const r = await transitionInvoiceCore(s.tx, { companyId: A, invoiceId: "1", to: "SENT", actorId: "u", now, captureSnapshot: noSnapshot })
     assert.equal(r.ok, false)
     assert.equal(s.invoices[0].sentAt, "orig")
   })
 
   it("isolation : facture d'une autre société introuvable", async () => {
     const s = makeTx([inv("1", "DRAFT", B)])
-    const r = await transitionInvoiceCore(s.tx, { companyId: A, invoiceId: "1", to: "SENT", actorId: "u", now })
+    const r = await transitionInvoiceCore(s.tx, { companyId: A, invoiceId: "1", to: "SENT", actorId: "u", now, captureSnapshot: noSnapshot })
     assert.deepEqual(r, { ok: false, error: LIFECYCLE_ERRORS.notFound })
     assert.equal(s.invoices[0].status, "DRAFT")
   })
@@ -191,11 +200,11 @@ describe("Avoirs", () => {
 
   it("avoir total : copie exacte, émis, facture d'origine annulée, deux traces", async () => {
     const s = makeTx([inv("1", "SENT")], [line("1", 0), line("1", 1)])
-    const r = await createCreditNoteCore(s.tx, { companyId: A, invoiceId: "1", actorId: "u", reason: "erreur", now, nextNumber })
+    const r = await createCreditNoteCore(s.tx, { companyId: A, invoiceId: "1", actorId: "u", reason: "erreur", now, nextNumber, captureSnapshot: noSnapshot })
     assert.equal(r.ok, true)
     const note = s.invoices.find((x) => x.kind === "CREDIT_NOTE")!
     assert.equal(note.status, "SENT")
-    assert.equal(note.sentAt, now)
+    assert.equal((note.sentAt as Date).toISOString(), now.toISOString())
     assert.equal(note.creditedInvoiceId, "1")
     assert.equal(note.number, "AV-2026-0001")
     assert.equal(note.totalTTC, 120)
@@ -206,14 +215,14 @@ describe("Avoirs", () => {
 
   it("avoir sur facture payée accepté", async () => {
     const s = makeTx([inv("1", "PAID")], [line("1", 0)])
-    const r = await createCreditNoteCore(s.tx, { companyId: A, invoiceId: "1", actorId: "u", reason: null, now, nextNumber })
+    const r = await createCreditNoteCore(s.tx, { companyId: A, invoiceId: "1", actorId: "u", reason: null, now, nextNumber, captureSnapshot: noSnapshot })
     assert.equal(r.ok, true)
   })
 
   it("refusé sur brouillon, facture annulée, avoir, autre société", async () => {
     for (const row of [inv("1", "DRAFT"), inv("1", "CANCELLED"), inv("1", "SENT", A, { kind: "CREDIT_NOTE" }), inv("1", "SENT", B)]) {
       const s = makeTx([row])
-      const r = await createCreditNoteCore(s.tx, { companyId: A, invoiceId: "1", actorId: "u", reason: null, now, nextNumber })
+      const r = await createCreditNoteCore(s.tx, { companyId: A, invoiceId: "1", actorId: "u", reason: null, now, nextNumber, captureSnapshot: noSnapshot })
       assert.equal(r.ok, false)
       assert.equal(s.invoices.length, 1)
     }
@@ -221,14 +230,14 @@ describe("Avoirs", () => {
 
   it("un seul avoir par facture", async () => {
     const s = makeTx([inv("1", "SENT"), inv("2", "SENT", A, { kind: "CREDIT_NOTE", creditedInvoiceId: "1" })])
-    const r = await createCreditNoteCore(s.tx, { companyId: A, invoiceId: "1", actorId: "u", reason: null, now, nextNumber })
+    const r = await createCreditNoteCore(s.tx, { companyId: A, invoiceId: "1", actorId: "u", reason: null, now, nextNumber, captureSnapshot: noSnapshot })
     assert.deepEqual(r, { ok: false, error: LIFECYCLE_ERRORS.alreadyCredited })
   })
 
   it("concurrence : facture changée avant l'annulation → conflit, aucun avoir créé", async () => {
     const s = makeTx([inv("1", "SENT")], [line("1", 0)])
     s.hooks.beforeUpdate = () => { s.invoices[0].status = "PAID"; s.hooks.beforeUpdate = undefined }
-    const r = await createCreditNoteCore(s.tx, { companyId: A, invoiceId: "1", actorId: "u", reason: null, now, nextNumber })
+    const r = await createCreditNoteCore(s.tx, { companyId: A, invoiceId: "1", actorId: "u", reason: null, now, nextNumber, captureSnapshot: noSnapshot })
     assert.deepEqual(r, { ok: false, error: LIFECYCLE_ERRORS.conflict })
     assert.equal(s.invoices.length, 1)
   })

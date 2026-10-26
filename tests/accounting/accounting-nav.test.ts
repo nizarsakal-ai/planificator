@@ -50,11 +50,13 @@ describe("navigation comptabilité", () => {
     }
   })
 
-  it("la visibilité calculée côté serveur exclut SUPER_ADMIN : jamais de lien Comptabilité pour lui dans le Lot 0", () => {
-    assert.equal(isAccountingNavVisible({ enabled: true, role: "SUPER_ADMIN", companyId: "c1" }), false)
+  it("SUPER_ADMIN avec société : lien visible (affichage seulement ; la garde serveur le borne à sa société de rattachement)", () => {
+    assert.equal(isAccountingNavVisible({ enabled: true, role: "SUPER_ADMIN", companyId: "c1" }), true)
+    assert.equal(isAccountingNavVisible({ enabled: true, role: "SUPER_ADMIN", companyId: null }), false)
     assert.equal(isAccountingNavVisible({ enabled: true, role: "ADMIN", companyId: "c1" }), true)
-    const items = withAccountingNavItem(getNavItems("SUPER_ADMIN"), isAccountingNavVisible({ enabled: true, role: "SUPER_ADMIN", companyId: "c1" }))
-    assert.ok(!items.some((i) => i.href === "/comptabilite"))
+    const hasFactures = getNavItems("SUPER_ADMIN").some((i) => i.href === "/factures")
+    const items = withAccountingNavItem(getNavItems("SUPER_ADMIN"), true)
+    assert.equal(items.some((i) => i.href === "/comptabilite"), hasFactures)
   })
 
   it("TEAM_LEADER, EMPLOYEE, CLIENT : jamais d'entrée, même si visible=true (pas de « Factures » à côté duquel l'insérer)", () => {

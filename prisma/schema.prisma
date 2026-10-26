@@ -142,6 +142,7 @@ enum QuoteStatus {
   ACCEPTED  // Accepté par le client
   REFUSED   // Refusé
   EXPIRED   // Expiré (au-delà de validUntil)
+  CONVERTED // Converti en facture (Lot C1)
 }
 
 enum InvoiceStatus {
@@ -149,12 +150,24 @@ enum InvoiceStatus {
   SENT       // Émise / envoyée au client (immuable)
   PAID       // Payée (immuable)
   CANCELLED  // Brouillon abandonné, ou facture émise annulée PAR AVOIR (jamais de retour arrière)
+  PARTIAL    // Lot C2 : partiellement payée (Σ paiements entre 0 et TTC, exclus)
+}
+
+/// Lot C2 — mode de règlement d'un paiement.
+enum PaymentMethod {
+  TRANSFER
+  CHECK
+  CASH
+  CARD
+  DIRECT_DEBIT
+  OTHER
 }
 
 /// Lot B minimal (ADR-PLAN-003) : une facture émise ne s'annule que par un avoir référencé.
 enum InvoiceKind {
   INVOICE      // Facture
   CREDIT_NOTE  // Avoir total émis sur une facture SENT/PAID
+  DEPOSIT      // Lot C3 : facture d'acompte (vraie facture, déduite sur la facture de solde)
 }
 
 enum ExpenseStatus {
@@ -364,6 +377,18 @@ model Company {
   accountingSequences     AccountingSequence[]
   accountingChainHeads    AccountingChainHead[]
   documentCounters        DocumentCounter[]
+  billingSettings         BillingSettings?
+  billingMailLogs         BillingMailLog[]
+  invoicePayments         InvoicePayment[]
+  invoiceDepositDeductions InvoiceDepositDeduction[]
+  invoiceDocumentSnapshots InvoiceDocumentSnapshot[] // Correctif P2-03
+  accountingDocumentPostings AccountingDocumentPosting[]
+  suppliers               Supplier[]
+  supplierInvoices        SupplierInvoice[]
+  supplierInvoiceFiles    SupplierInvoiceFile[]
+  bankStatementImports    BankStatementImport[]
+  bankTransactions        BankTransaction[]
+  vatDeclarations         VatDeclaration[]
   acquisitionMessages     AcquisitionMessage[]
   worksiteImportDrafts    WorksiteImportDraft[]
   acquisitionAttachments  AcquisitionAttachment[]
@@ -473,6 +498,25 @@ model Quote {
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
+  // Lot C1 (SPEC-BILLING-C1) — colonnes additives, calculs en centimes (BigInt) côté service.
+  subject                 String?
+  globalDiscountBp        Int       @default(0)     // remise globale en points de base (250 = 2,50 %)
+  vatReverseCharge        Boolean   @default(false) // autoliquidation (art. 283-2 nonies CGI)
+  acceptedAt              DateTime?
+  refusedAt               DateTime?
+  refusalReason           String?
+  expiredAt               DateTime?
+  convertedAt             DateTime?
+  signerName              String?
+  signedAt                DateTime?
+  signatureIpHash         String?   // sha256 de l'adresse IP du signataire (jamais en clair)
+  signatureTokenHash      String?   @unique // sha256 du jeton de signature (jeton jamais stocké)
+  signatureTokenExpiresAt DateTime?
+  reminderJ3SentAt        DateTime?
+  reminderJ7SentAt        DateTime?
+  reminderJ15SentAt       DateTime?
+  importRef               String?   // référence externe d'import (unique par société)
+
   // Relations
   company  Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   worksite Worksite    @relation(fields: [worksiteId], references: [id], onDelete: Cascade)
@@ -481,7 +525,11 @@ model Quote {
   invoices Invoice[]   // factures issues de ce devis
 
   @@unique([companyId, number])
+  @@unique([id, companyId])
+  @@unique([companyId, importRef])
   @@index([companyId])
+  @@index([companyId, status])
+  @@index([companyId, issueDate])
   @@index([worksiteId])
   @@index([clientId])
   @@index([status])
@@ -497,8 +545,10 @@ model QuoteLine {
   quantity    Decimal @db.Decimal(10, 2)
   unitPrice   Decimal @db.Decimal(10, 2)  // prix HT figé
   vatRate     Decimal @db.Decimal(5, 2)   // TVA figée
-  lineHT      Decimal @db.Decimal(10, 2)  // quantity * unitPrice
+  lineHT      Decimal @db.Decimal(10, 2)  // quantity * unitPrice (après remise de ligne, Lot C1)
   position    Int     @default(0)         // ordre d'affichage
+  description String?                     // Lot C1 : détail facultatif
+  discountBp  Int     @default(0)         // Lot C1 : remise de ligne en points de base
 
   // Relations
   quote   Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
@@ -517,7 +567,7 @@ model Invoice {
   number      String        // "FAC-2026-0001" (séquentiel, unique par entreprise)
   status      InvoiceStatus @default(DRAFT)
   kind        InvoiceKind   @default(INVOICE)
-  creditedInvoiceId String? @unique // avoir : facture d'origine (un seul avoir total par facture)
+  creditedInvoiceId String?       // avoir : facture d'origine (Lot C4 : index unique partiel « un seul avoir TOTAL », plusieurs PARTIAL)
   issueDate   DateTime      @default(now())
   dueDate     DateTime?     // échéance de paiement
   periodStart DateTime?     // début de la période facturée (= dates du chantier)
@@ -532,24 +582,81 @@ model Invoice {
   paidAt      DateTime?     // date de règlement
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
+  // Lot C1 : remise globale et autoliquidation (copiées du devis ; utilisées par C2–C4).
+  globalDiscountBp Int     @default(0)
+  vatReverseCharge Boolean @default(false)
+  // Lot C2 : objet, relances après échéance (J+30/45/60), paiements.
+  subject             String?
+  reminderDue30SentAt DateTime?
+  reminderDue45SentAt DateTime?
+  reminderDue60SentAt DateTime?
+  payments            InvoicePayment[]
+  // Lot C3 : acomptes (pourcentage demandé ; déductions sur la facture de solde).
+  depositBp           Int?
+  depositDeductions   InvoiceDepositDeduction[] @relation("FinalInvoiceDeductions")
+  deductedBy          InvoiceDepositDeduction[] @relation("DepositInvoiceDeductions")
+  deductionLines      InvoiceLine[]             @relation("LineDeductsDeposit")
+  // Lot C4 : avoirs partiels (TOTAL = Lot B, PARTIAL = plafonné au restant créditable).
+  creditScope         InvoiceCreditScope?
+  creditReason        String?
+  // Lot C5 : rapprochement bancaire.
+  bankTransactions    BankTransaction[] @relation("BankMatchedInvoice")
 
   // Relations
   // Lot B : pièces conservées — aucune suppression en cascade depuis la société ou le chantier.
   company  Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
   worksite Worksite      @relation(fields: [worksiteId], references: [id], onDelete: Restrict)
   client   Client        @relation(fields: [clientId], references: [id])
-  quote    Quote?        @relation(fields: [quoteId], references: [id], onDelete: Restrict)
+  quote    Quote?        @relation(fields: [companyId, quoteId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02 : FK composite société
   lines    InvoiceLine[]
-  creditedInvoice Invoice? @relation("InvoiceCreditNote", fields: [creditedInvoiceId], references: [id], onDelete: Restrict)
-  creditNote      Invoice? @relation("InvoiceCreditNote")
+  documentSnapshots InvoiceDocumentSnapshot[] // Correctif P2-03 : données documentaires figées à l'émission (au plus une : invoiceId UNIQUE en base)
+  creditedInvoice Invoice?  @relation("InvoiceCreditNote", fields: [creditedInvoiceId], references: [id], onDelete: Restrict)
+  creditNotes     Invoice[] @relation("InvoiceCreditNote") // Lot C4 : plusieurs avoirs partiels ; un seul TOTAL (index partiel SQL)
 
   @@unique([companyId, number])
+  @@unique([id, companyId])
+  @@index([creditedInvoiceId])
   @@index([companyId])
+  @@index([companyId, status])
+  @@index([companyId, issueDate])
+  @@index([companyId, dueDate])
   @@index([worksiteId])
   @@index([clientId])
   @@index([status])
   @@index([kind])
   @@map("invoices")
+}
+
+/// Lot C2 (SPEC-BILLING-C2) — paiement d'une facture émise : append-only (contre-passation par ligne opposée),
+/// montant en centimes, FK composite (companyId, invoiceId) → même société garantie en base.
+model InvoicePayment {
+  id                String        @id @default(cuid())
+  companyId         String
+  invoiceId         String
+  amountCents       BigInt        // négatif uniquement pour une contre-passation
+  method            PaymentMethod
+  paidAt            DateTime      @db.Date
+  reference         String?
+  notes             String?
+  recordedById      String
+  reversesPaymentId String?       @unique
+  reversedAt        DateTime?
+  bankTransactionId String?       @unique // Correctif P1-03 : opération bancaire à l'origine du paiement (un seul paiement par opération)
+  createdAt         DateTime      @default(now())
+
+  company  Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  invoice  Invoice        @relation(fields: [companyId, invoiceId], references: [companyId, id], onDelete: Restrict)
+  reverses InvoicePayment? @relation("PaymentReversal", fields: [reversesPaymentId], references: [id], onDelete: Restrict)
+  reversedBy InvoicePayment? @relation("PaymentReversal")
+  // Relations déclarées en liste côté Prisma (FK composites société) ; l'unicité réelle est garantie en base
+  // (bank_transactions.matchedPaymentId UNIQUE, invoice_payments.bankTransactionId UNIQUE).
+  bankTransactions BankTransaction[] @relation("BankMatchedPayment") // Lot C5 : opération qui référence ce paiement
+  reconciles       BankTransaction?  @relation("PaymentBankTransaction", fields: [companyId, bankTransactionId], references: [companyId, id], onDelete: Restrict)
+
+  @@unique([companyId, id])
+  @@index([invoiceId])
+  @@index([companyId, paidAt])
+  @@map("invoice_payments")
 }
 
 model InvoiceLine {
@@ -563,13 +670,129 @@ model InvoiceLine {
   vatRate     Decimal @db.Decimal(5, 2)
   lineHT      Decimal @db.Decimal(10, 2)
   position    Int     @default(0)
+  description String?                 // Lot C1
+  discountBp  Int     @default(0)     // Lot C1 : remise de ligne en points de base
+  deductsDepositId String?            // Lot C3 : ligne de déduction d'un acompte (facture de solde)
 
   // Relations
   invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   article Article? @relation(fields: [articleId], references: [id], onDelete: Restrict)
+  deductsDeposit Invoice? @relation("LineDeductsDeposit", fields: [deductsDepositId], references: [id], onDelete: Restrict)
 
   @@index([invoiceId])
+  @@index([deductsDepositId])
   @@map("invoice_lines")
+}
+
+/// Lot C3 (SPEC-BILLING-C3) — un acompte émis n'est déduit qu'une fois, sur une facture de solde du même devis.
+model InvoiceDepositDeduction {
+  id               String   @id @default(cuid())
+  companyId        String
+  finalInvoiceId   String
+  depositInvoiceId String
+  amountTTCCents   BigInt
+  createdAt        DateTime @default(now())
+  // Cycle R4 (T1) : affectation ACTIVE (releasedAt NULL) vs trace HISTORIQUE libérée (releasedAt posé quand le solde émis est annulé par
+  // avoir total). Une seule affectation active par acompte (index unique partiel SQL) ; la trace n'est jamais supprimée ni réécrite.
+  releasedAt       DateTime?
+
+  company      Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  finalInvoice Invoice @relation("FinalInvoiceDeductions", fields: [companyId, finalInvoiceId], references: [companyId, id], onDelete: Restrict)
+  deposit      Invoice @relation("DepositInvoiceDeductions", fields: [companyId, depositInvoiceId], references: [companyId, id], onDelete: Restrict)
+
+  @@index([finalInvoiceId])
+  @@index([depositInvoiceId])
+  @@map("invoice_deposit_deductions")
+}
+
+/// Correctif P2-03 — snapshot documentaire d'une pièce émise (vendeur, acheteur, mentions, conditions, pied de page, références),
+/// figé à l'émission, immuable en base (déclencheur) ; les montants/lignes restent protégés par les déclencheurs Lot B/C.
+model InvoiceDocumentSnapshot {
+  id            String   @id @default(cuid())
+  companyId     String
+  invoiceId     String   @unique
+  schemaVersion Int      @default(1)
+  seller        Json
+  buyer         Json
+  document      Json
+  createdAt     DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  invoice Invoice @relation(fields: [companyId, invoiceId], references: [companyId, id], onDelete: Restrict)
+
+  @@index([companyId])
+  @@map("invoice_document_snapshots")
+}
+
+/// Lot C4 — portée d'un avoir.
+enum InvoiceCreditScope {
+  TOTAL
+  PARTIAL
+}
+
+/// Correctif R4 : résolution explicite d'une collision d'identité bancaire inter-fichiers.
+enum BankCollisionResolution {
+  DUPLICATE
+  DISTINCT
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FACTURATION COMPLÈTE — Lot C1 (SPEC-BILLING-C1) : paramètres de facturation et journal des courriers.
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum VatRegime {
+  DEBITS        // TVA sur les débits (facturation)
+  ENCAISSEMENTS // TVA sur les encaissements (prestations de services)
+}
+
+model BillingSettings {
+  id                String    @id @default(cuid())
+  companyId         String    @unique
+  vatNumber         String?   // TVA intracommunautaire du vendeur
+  legalForm         String?   // SARL, SAS, EI…
+  shareCapital      String?   // "10 000 €"
+  rcs               String?   // "RCS Paris 123 456 789"
+  iban              String?
+  bic               String?
+  quoteValidityDays Int       @default(30)
+  paymentTermsDays  Int       @default(30)
+  latePenaltyText   String?   // remplace la mention par défaut (pénalités, indemnité forfaitaire 40 €)
+  quoteFooter       String?
+  invoiceFooter     String?
+  vatRegime         VatRegime @default(DEBITS)
+  defaultDepositBp  Int       @default(3000) // 30 %
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("billing_settings")
+}
+
+enum BillingMailStatus {
+  SIMULATED // courrier journalisé, non envoyé (drapeau BILLING_MAIL_ENABLED absent)
+  SENT
+  FAILED
+}
+
+model BillingMailLog {
+  id           String            @id @default(cuid())
+  companyId    String
+  kind         String            // QUOTE_SENT | QUOTE_REMINDER_J3 | … | INVOICE_SENT | INVOICE_REMINDER_30 | …
+  to           String
+  subject      String
+  documentType String            // "Quote" | "Invoice"
+  documentId   String
+  status       BillingMailStatus
+  providerId   String?
+  error        String?
+  createdAt    DateTime          @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, documentType, documentId])
+  @@index([companyId, createdAt])
+  @@map("billing_mail_logs")
 }
 
 // Compteur pour la numérotation séquentielle légale (sans trou), par entreprise/type/an.
@@ -739,6 +962,8 @@ model Client {
   notes     String?
   companyId String
   active    Boolean  @default(true)
+  siret     String?  // Lot C1 : mentions de facturation (SIRET/SIREN du client)
+  vatNumber String?  // Lot C1 : TVA intracommunautaire du client
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2236,6 +2461,8 @@ model AccountingAccount {
 
   company Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
   lines   JournalEntryLine[]
+  supplierDefaults Supplier[]        // Lot C5
+  supplierInvoices SupplierInvoice[] // Lot C5
 
   @@unique([companyId, number])
   @@unique([companyId, id])
@@ -2336,6 +2563,7 @@ model JournalEntry {
   reversalOf JournalEntry?      @relation("EntryReversal", fields: [companyId, reversalOfId], references: [companyId, id], onDelete: Restrict)
   reversedBy JournalEntry[]     @relation("EntryReversal")
   lines      JournalEntryLine[]
+  documentPostings AccountingDocumentPosting[] // Lot C5
 
   @@unique([companyId, id])
   @@unique([companyId, journalId, fiscalYearId, number])
@@ -2710,4 +2938,210 @@ model VehicleCartographyCache {
  company Company @relation(fields:[companyId],references:[id],onDelete:Cascade)
  @@index([expiresAt],map:"vehicle_cartography_cache_expiresAt_idx")
  @@map("vehicle_cartography_cache")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPTABILITÉ — Lot C5 (SPEC-BILLING-C5) : lien pièce ↔ écriture, fournisseurs, factures fournisseurs (OCR), banque,
+// déclarations de TVA. Tout porte companyId ; FK Restrict ; FK composites vers les tables comptables A1.
+// ═══════════════════════════════════════════════════════════════════════════
+
+model AccountingDocumentPosting {
+  id            String   @id @default(cuid())
+  companyId     String
+  sourceType    String   // INVOICE | CREDIT_NOTE | DEPOSIT | PAYMENT | SUPPLIER_INVOICE
+  sourceId      String
+  sourceVersion Int      @default(1)
+  entryId       String
+  createdAt     DateTime @default(now())
+
+  company Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  entry   JournalEntry @relation(fields: [companyId, entryId], references: [companyId, id], onDelete: Restrict)
+
+  @@unique([companyId, sourceType, sourceId, sourceVersion])
+  @@index([companyId, entryId])
+  @@map("accounting_document_postings")
+}
+
+model Supplier {
+  id                      String   @id @default(cuid())
+  companyId               String
+  name                    String
+  siret                   String?
+  vatNumber               String?
+  email                   String?
+  address                 String?
+  defaultExpenseAccountId String?
+  active                  Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  company               Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  defaultExpenseAccount AccountingAccount? @relation(fields: [companyId, defaultExpenseAccountId], references: [companyId, id], onDelete: Restrict)
+  invoices              SupplierInvoice[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, siret])
+  @@index([companyId, name])
+  @@map("suppliers")
+}
+
+enum SupplierInvoiceStatus {
+  PENDING
+  VALIDATED
+  REJECTED
+}
+
+model SupplierInvoiceFile {
+  id           String   @id @default(cuid())
+  companyId    String
+  sha256       String
+  mime         String
+  size         Int
+  data         Bytes
+  originalName String
+  createdAt    DateTime @default(now())
+
+  company  Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  invoices SupplierInvoice[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, sha256])
+  @@map("supplier_invoice_files")
+}
+
+model SupplierInvoice {
+  id               String                @id @default(cuid())
+  companyId        String
+  supplierId       String?
+  supplierName     String
+  siret            String?
+  number           String
+  date             DateTime              @db.Date
+  dueDate          DateTime?             @db.Date
+  totalHTCents     BigInt
+  vatCents         BigInt
+  totalTTCCents    BigInt
+  vatRateBp        Int?
+  category         String?
+  expenseAccountId String?
+  status           SupplierInvoiceStatus @default(PENDING)
+  fileId           String?
+  ocrProvider      String?
+  ocrRaw           Json?
+  ocrConfidence    Json?
+  validatedAt      DateTime?
+  validatedById    String?
+  paidAt           DateTime?             @db.Date
+  notes            String?
+  createdById      String
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  company        Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  supplier       Supplier?            @relation(fields: [companyId, supplierId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
+  expenseAccount AccountingAccount?   @relation(fields: [companyId, expenseAccountId], references: [companyId, id], onDelete: Restrict)
+  file           SupplierInvoiceFile? @relation(fields: [companyId, fileId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
+  bankTransactions BankTransaction[]
+
+  @@unique([companyId, id])
+  @@index([companyId, status])
+  @@index([companyId, date])
+  @@index([companyId, supplierId])
+  @@map("supplier_invoices")
+}
+
+model BankStatementImport {
+  id           String   @id @default(cuid())
+  companyId    String
+  fileName     String
+  sha256       String
+  rowCount     Int
+  mapping      Json
+  importedById String
+  createdAt    DateTime @default(now())
+
+  company      Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  transactions BankTransaction[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, sha256])
+  @@map("bank_statement_imports")
+}
+
+enum BankTransactionStatus {
+  PENDING
+  MATCHED
+  IGNORED
+}
+
+model BankTransaction {
+  id                       String                @id @default(cuid())
+  companyId                String
+  importId                 String
+  date                     DateTime              @db.Date
+  label                    String
+  amountCents              BigInt
+  reference                String?
+  fingerprint              String
+  status                   BankTransactionStatus @default(PENDING)
+  matchedInvoiceId         String?
+  matchedPaymentId         String?
+  matchedSupplierInvoiceId String?
+  matchedAt                DateTime?
+  notes                    String?
+  createdAt                DateTime              @default(now())
+  // Correctif P2-01 : identité d'une opération (identifiant bancaire stable, rang d'occurrence du même tuple, ambiguïté).
+  externalId               String?
+  occurrence               Int                   @default(1)
+  identityAmbiguous        Boolean               @default(false)
+  // Correctif R4 : collision inter-fichiers (tuple déjà connu d'un relevé antérieur, sans identifiant bancaire) — conservée en
+  // attente d'une résolution explicite (doublon ⇒ ignorée ; opération distincte ⇒ rapprochable) ; provenance = opération connue.
+  tupleKey                 String?
+  collisionOfId            String?
+  collisionResolution      BankCollisionResolution?
+  collisionResolvedAt      DateTime?
+
+  company                Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  import                 BankStatementImport @relation(fields: [companyId, importId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
+  matchedInvoice         Invoice?            @relation("BankMatchedInvoice", fields: [companyId, matchedInvoiceId], references: [companyId, id], onDelete: Restrict)
+  matchedPayment         InvoicePayment?     @relation("BankMatchedPayment", fields: [companyId, matchedPaymentId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
+  matchedSupplierInvoice SupplierInvoice?    @relation(fields: [companyId, matchedSupplierInvoiceId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
+  payments               InvoicePayment[]    @relation("PaymentBankTransaction") // Correctif P1-03 : paiement créé par le rapprochement (au plus un : bankTransactionId UNIQUE)
+  collisionOf            BankTransaction?    @relation("BankCollision", fields: [companyId, collisionOfId], references: [companyId, id], onDelete: Restrict) // Correctif R4
+  collisions             BankTransaction[]   @relation("BankCollision")
+
+  @@unique([companyId, id])
+  @@unique([companyId, fingerprint])
+  @@unique([companyId, externalId])
+  @@unique([matchedPaymentId])
+  @@index([companyId, status])
+  @@index([companyId, date])
+  @@index([companyId, tupleKey])
+  @@map("bank_transactions")
+}
+
+enum VatDeclarationStatus {
+  DRAFT
+  DECLARED
+}
+
+model VatDeclaration {
+  id              String               @id @default(cuid())
+  companyId       String
+  periodStart     DateTime             @db.Date
+  periodEnd       DateTime             @db.Date
+  basis           VatRegime
+  collectedCents  BigInt
+  deductibleCents BigInt
+  dueCents        BigInt
+  details         Json
+  status          VatDeclarationStatus @default(DECLARED)
+  declaredAt      DateTime?
+  createdById     String
+  createdAt       DateTime             @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, periodStart, periodEnd])
+  @@map("vat_declarations")
 }
