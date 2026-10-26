@@ -24,6 +24,7 @@ export const VAT_DECLARATION_ERRORS = {
   overlaps: "La période chevauche une déclaration déjà enregistrée.",
   notEnded: "La période n'est pas terminée : une déclaration ne se fige qu'après son dernier jour.",
   outOfContract: "Déclaration refusée : la période comporte une situation hors contrat fiscal à traiter avant tout enregistrement.",
+  basisMismatch: "Régime de TVA unique par société : la base demandée diffère de celle des déclarations déjà enregistrées.",
 } as const
 
 export async function declareVat(db: Db, ctx: AccountingContext, periodStart: Date, periodEnd: Date, basis: "DEBITS" | "ENCAISSEMENTS"): Promise<LifecycleResult<{ id: string; dueCents: bigint }>> {
@@ -37,6 +38,10 @@ export async function declareVat(db: Db, ctx: AccountingContext, periodStart: Da
     return await db.$transaction(async (tx): Promise<LifecycleResult<{ id: string; dueCents: bigint }>> => {
       const existing = await tx.vatDeclaration.findFirst({ where: { companyId: ctx.companyId, periodStart, periodEnd }, select: { id: true } })
       if (existing) return { ok: false, error: VAT_DECLARATION_ERRORS.alreadyDeclared }
+      // Même famille U1 (cycle R5) : le régime (débits / encaissements) est une option de la société, pas de la période — mélanger les bases
+      // d'une déclaration à l'autre déclarerait deux fois (ou jamais) la même TVA ; la base des déclarations existantes fait foi.
+      const otherBasis = await tx.vatDeclaration.findFirst({ where: { companyId: ctx.companyId, basis: { not: basis } }, select: { basis: true, periodStart: true, periodEnd: true } })
+      if (otherBasis) return { ok: false, error: `${VAT_DECLARATION_ERRORS.basisMismatch} (${otherBasis.basis === "DEBITS" ? "débits" : "encaissements"}, ex. ${otherBasis.periodStart.toISOString().slice(0, 10)} → ${otherBasis.periodEnd.toISOString().slice(0, 10)})` }
       // Chevauchement : [start, end] ∩ [s', e'] ≠ ∅ — la même pièce/le même mouvement ne peut pas être déclaré deux fois.
       const overlap = await tx.vatDeclaration.findFirst({ where: { companyId: ctx.companyId, periodStart: { lte: periodEnd }, periodEnd: { gte: periodStart } }, select: { periodStart: true, periodEnd: true } })
       if (overlap) return { ok: false, error: `${VAT_DECLARATION_ERRORS.overlaps} (${overlap.periodStart.toISOString().slice(0, 10)} → ${overlap.periodEnd.toISOString().slice(0, 10)})` }

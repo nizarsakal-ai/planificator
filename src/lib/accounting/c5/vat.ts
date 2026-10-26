@@ -21,7 +21,8 @@
 //   ou données héritées) ⇒ remboursement non modélisé ⇒ `warnings` ; aucune régularisation inventée ; la déclaration (R5) est REFUSÉE
 //   tant qu'un tel cas existe dans la période. Cycle R4 (T2) : la réaffectation après encaissement antérieur et le cas « paiement et avoir
 //   ciblé le même jour » (chronologie au jour non prouvée) sont détectés structurellement et refusés conservatoirement ; un écart avec une
-//   période déjà déclarée est signalé.
+//   période déjà déclarée est signalé. Cycle R5 (U1) : le caractère hors contrat porte sur l'HISTORIQUE de la facture — tout mouvement
+//   postérieur à un avoir hors contrat (réaffectation / même jour) est lui-même hors contrat, quelle que soit sa période.
 import type { Prisma, PrismaClient } from "@prisma/client"
 import { assertStoredTotalsMatch, recomputeDocumentTotals } from "@/lib/billing/document-integrity"
 import { centsToDecimalString, roundHalfUp, type DocumentTotals } from "@/lib/billing/money"
@@ -119,6 +120,11 @@ export async function computeVat(db: Db, ctx: { companyId: string }, periodStart
     const inPeriod = await db.invoicePayment.findMany({ where: { companyId, paidAt: { gte: periodStart, lte: end } }, select: { invoiceId: true }, distinct: ["invoiceId"] })
     const creditedInPeriod = await db.invoice.findMany({ where: { companyId, kind: "CREDIT_NOTE", status: { in: ["SENT", "PAID"] }, issueDate: { gte: periodStart, lte: end }, creditedInvoiceId: { not: null } }, select: { creditedInvoiceId: true }, distinct: ["creditedInvoiceId"] })
     const ids = [...new Set([...inPeriod.map((p) => p.invoiceId), ...creditedInPeriod.map((c) => c.creditedInvoiceId as string)])]
+    // Même famille U1 (cycle R5) : un mouvement saisi APRÈS la déclaration de la période qui le contient (paiement antidaté, import bancaire
+    // tardif) n'a jamais été déclaré et ne le sera pas (déclaration figée) ; l'allocation cumulative des mouvements ULTÉRIEURS de la même
+    // facture en dépend ⇒ ces mouvements sont hors contrat et leur période est refusée tant que la régularisation n'est pas traitée.
+    const declaredEnc = await db.vatDeclaration.findMany({ where: { companyId, basis: "ENCAISSEMENTS", declaredAt: { not: null } }, select: { periodStart: true, periodEnd: true, declaredAt: true } })
+    const declaredEndOf = (d: { periodEnd: Date }) => new Date(Date.UTC(d.periodEnd.getUTCFullYear(), d.periodEnd.getUTCMonth(), d.periodEnd.getUTCDate(), 23, 59, 59, 999))
     const invoices = ids.length === 0 ? [] : await db.invoice.findMany({
       where: { companyId, id: { in: ids }, kind: { not: "CREDIT_NOTE" } },
       select: {
@@ -144,16 +150,41 @@ export async function computeVat(db: Db, ctx: { companyId: string }, periodStart
       // - paiement et avoir le MÊME jour ⇒ chronologie non prouvée (les dates de paiement sont au jour) ⇒ ambigu ⇒ refus conservatoire ;
       //   l'ordre de tri (avoir avant paiement) reste une convention de calcul, jamais une preuve, et n'est pas inversé silencieusement.
       const multiRate = totals.vatSummary.filter((v) => v.baseCents !== BigInt(0)).length > 1
-      let inPeriodEvents = 0, excessWarned = false
+      // U1 (cycle R5, revue Codex R4) : le caractère hors contrat est établi sur TOUT l'historique de la facture, pas seulement sur les
+      // avoirs datés dans la période. Un avoir partiel ciblé sur une facture multi-taux est hors contrat si un encaissement NET
+      // (paiements − contre-passations, dates strictement antérieures) existe avant lui (réaffectation non validée) ou si un mouvement
+      // de trésorerie est daté du même jour (chronologie non prouvée). À partir de la date du premier avoir hors contrat, la ventilation
+      // par taux de TOUT mouvement ultérieur de la facture dépend de cette réaffectation : ces mouvements sont eux-mêmes hors contrat et
+      // la période qui les contient est refusée, quelle que soit la période de l'avoir (mars refusé ⇒ avril, mai… refusés aussi).
+      // Contrat explicite (DECISIONS R5) : un encaissement antérieur intégralement contre-passé AVANT l'avoir (net = 0) n'est pas un
+      // encaissement conservé ⇒ l'avoir est traité comme « avant tout encaissement » (oracle 10 €) ; une contre-passation datée APRÈS
+      // l'avoir est un mouvement dépendant (période refusée). Les mouvements strictement antérieurs à l'avoir ne sont pas concernés
+      // (leur ventilation n'en dépend pas). Aucune résolution automatique : la levée relève d'une règle validée par l'expert-comptable.
+      const credits = evs.filter((e) => e.event.kind === "CREDIT" && e.event.totals.totalTTCCents < totals.totalTTCCents)
+      const netPriorOf = (c: Ev) => evs.filter((p) => p.event.kind === "PAYMENT" && p.at < c.at).reduce((s2, p) => s2 + (p.event.kind === "PAYMENT" ? p.event.amountCents : BigInt(0)), BigInt(0))
+      const sameDayOf = (c: Ev) => evs.filter((p) => p.event.kind === "PAYMENT" && p.at === c.at && p.event.amountCents !== BigInt(0)).length
+      let taint: { credit: Ev; kind: "prior" | "sameDay" } | null = null
+      if (multiRate) for (const c of credits) { const k = netPriorOf(c) !== BigInt(0) ? "prior" : sameDayOf(c) > 0 ? "sameDay" : null; if (k && (!taint || c.at < taint.credit.at)) taint = { credit: c, kind: k } }
+      const taintInPeriod = !!taint && taint.credit.date >= periodStart && taint.credit.date <= end
+      let late: { at: number; date: Date; period: string } | null = null
+      for (const p of inv.payments) {
+        const d = declaredEnc.find((x) => x.declaredAt && p.paidAt >= x.periodStart && p.paidAt <= declaredEndOf(x) && p.createdAt > x.declaredAt)
+        if (d && p.paidAt < periodStart && (!late || day(p.paidAt) < late.at)) late = { at: day(p.paidAt), date: p.paidAt, period: `${d.periodStart.toISOString().slice(0, 10)} → ${d.periodEnd.toISOString().slice(0, 10)}` }
+      }
+      let inPeriodEvents = 0, excessWarned = false, dependent = 0, dependentLate = 0
       evs.forEach((e, i) => {
         if (e.date < periodStart || e.date > end) return
         inPeriodEvents++
-        if (e.event.kind === "PAYMENT") payments++
-        else {
+        // Un avoir réalloue lui aussi le cumul : une dépendance à un encaissement non déclaré
+        // ne disparaît pas lorsque la période suivante contient seulement un avoir.
+        if (late && e.at >= late.at) dependentLate++
+        if (e.event.kind === "PAYMENT") {
+          payments++
+          if (taint && e.at >= taint.credit.at) dependent++
+        } else {
           if (allocated[i].parts.length > 0) adjustments++
           if (multiRate && e.event.totals.totalTTCCents < totals.totalTTCCents) {
-            const priorPaid = evs.filter((p) => p.event.kind === "PAYMENT" && p.at < e.at).reduce((s2, p) => s2 + (p.event.kind === "PAYMENT" ? p.event.amountCents : BigInt(0)), BigInt(0))
-            const sameDay = evs.filter((p) => p.event.kind === "PAYMENT" && p.at === e.at).length
+            const priorPaid = netPriorOf(e), sameDay = sameDayOf(e)
             if (priorPaid !== BigInt(0)) warnings.push(`Avoir ${e.number} sur la facture ${inv.number} après encaissement antérieur (facture multi-taux) : réaffectation de la TVA encaissée par taux à la date de l'avoir — règle en attente de validation par l'expert-comptable ; la déclaration de cette période est refusée jusqu'à validation.`)
             if (sameDay > 0) warnings.push(`Avoir ${e.number} et ${sameDay} paiement(s) de la facture ${inv.number} le même jour (${e.date.toISOString().slice(0, 10)}) : chronologie encaissement/avoir non prouvée (dates au jour) — catégorie fiscale ambiguë, déclaration de cette période refusée conservatoirement jusqu'à décision de l'expert-comptable.`)
           }
@@ -165,6 +196,13 @@ export async function computeVat(db: Db, ctx: { companyId: string }, periodStart
           warnings.push(`${origin} : ${centsToDecimalString(allocated[i].excessCents)} € encaissés au-delà de la facture nette de ses avoirs — la régularisation de la TVA encaissée n'intervient qu'au remboursement effectif (mouvement de trésorerie non pris en charge par le module) — à traiter avec l'expert-comptable.`)
         }
       })
+      // U1 : mouvements de la période dont la ventilation dépend d'un avoir hors contrat daté d'une période ANTÉRIEURE (si l'avoir est dans
+      // la période, son propre avertissement refuse déjà la période et l'explique).
+      if (taint && dependent > 0 && !taintInPeriod) {
+        const why = taint.kind === "prior" ? "après encaissement antérieur" : "le même jour qu'un encaissement (chronologie non prouvée)"
+        warnings.push(`${dependent} mouvement(s) de trésorerie de la facture ${inv.number} dans la période : ventilation de la TVA par taux dépendante de la réaffectation non validée (avoir ${taint.credit.number} du ${taint.credit.date.toISOString().slice(0, 10)}, ${why}) — déclaration de cette période refusée tant que ce cas n'est pas résolu avec l'expert-comptable ; les mouvements antérieurs à l'avoir et les autres factures ne sont pas concernés.`)
+      }
+      if (late && dependentLate > 0) warnings.push(`${dependentLate} événement(s) de la facture ${inv.number} dans la période : allocation cumulative dépendante d'un encaissement du ${late.date.toISOString().slice(0, 10)} saisi après la déclaration de la période ${late.period} (jamais déclaré, déclaration figée non réécrite) — déclaration de cette période refusée tant que la régularisation n'est pas traitée avec l'expert-comptable.`)
       if (inPeriodEvents > 0) documents++
     }
   }

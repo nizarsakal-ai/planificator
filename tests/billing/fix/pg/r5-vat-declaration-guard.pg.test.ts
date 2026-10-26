@@ -51,23 +51,27 @@ describe("R5 — refus explicite d'une déclaration comportant un cas hors contr
     const b = await withClock(AFTER_PERIODS, () => declareVat(db, B, MAR[0], MAR[1], "ENCAISSEMENTS")); assert.ok(b.ok && b.value.dueCents === BigInt(2000), js(b))
   })
   it("même famille : instantané cohérent (SERIALIZABLE) — un paiement committé APRÈS la première lecture de la déclaration n'entre pas dans la déclaration figée ; rejeu de la période refusé", async () => {
-    const inv = await inv120(A, "wA", "2026-04-02"); await pay(A, inv, 6000, "2026-04-05")
-    const inv2 = await inv120(A, "wA", "2026-04-02")
+    // Société B (régime encaissements déjà déclaré en mars) : depuis le cycle R5, une société ne mélange pas les bases d'une déclaration à l'autre.
+    const inv = await inv120(B, "wB", "2026-04-02"); await pay(B, inv, 6000, "2026-04-05")
+    const inv2 = await inv120(B, "wB", "2026-04-02")
     // Barrière déterministe : le client utilisé par la déclaration est étendu pour SUSPENDRE après sa première lecture (l'instantané
     // SERIALIZABLE est alors pris) ; la session 2 committe un paiement de 120 € sur inv2 pendant cette suspension ; la déclaration reprend.
     let release!: () => void; const gate = new Promise<void>((r) => { release = r }); let paused = false
     const hooked = db.$extends({ query: { vatDeclaration: { async findFirst({ args, query }) { const r = await query(args); paused = true; await gate; return r } } } }) as unknown as PrismaClient
     useTestClock(AFTER_PERIODS) // déclaration d'avril : « aujourd'hui » postérieur à la période
-    const declaring = declareVat(hooked, A, APR[0], APR[1], "ENCAISSEMENTS")
+    const declaring = declareVat(hooked, B, APR[0], APR[1], "ENCAISSEMENTS")
     assert.ok(await waitFor(async () => paused), "la déclaration a pris son instantané et attend")
-    const p2 = await pay(A, inv2, 12000, "2026-04-06"); assert.equal(p2.status, "PAID") // committé pendant la suspension
+    const p2 = await pay(B, inv2, 12000, "2026-04-06"); assert.equal(p2.status, "PAID") // committé pendant la suspension
     release()
     const r = await declaring; assert.ok(r.ok, js(r)); if (!r.ok) return
     const stored = await db.vatDeclaration.findUniqueOrThrow({ where: { id: r.value.id } })
     assert.equal(stored.collectedCents, BigInt(1000), "déclaration = instantané antérieur au paiement concurrent (60 € encaissés ⇒ 10 €)")
     assert.equal((stored.details as { payments: number }).payments, 1)
-    const after = await computeVat(db, A, APR[0], APR[1], "ENCAISSEMENTS"); assert.equal(after.collectedCents, BigInt(3000), "le recalcul courant voit les deux paiements")
-    assert.deepEqual(await declareVat(db, A, APR[0], APR[1], "ENCAISSEMENTS"), { ok: false, error: VAT_DECLARATION_ERRORS.alreadyDeclared })
+    const after = await computeVat(db, B, APR[0], APR[1], "ENCAISSEMENTS"); assert.equal(after.collectedCents, BigInt(3000), "le recalcul courant voit les deux paiements")
+    assert.deepEqual(await declareVat(db, B, APR[0], APR[1], "ENCAISSEMENTS"), { ok: false, error: VAT_DECLARATION_ERRORS.alreadyDeclared })
+    // Société A : mars déclaré en DÉBITS ⇒ une déclaration d'avril en ENCAISSEMENTS est refusée (régime unique par société), rien de persisté.
+    const mixed = await declareVat(db, A, APR[0], APR[1], "ENCAISSEMENTS"); assert.equal(mixed.ok, false); assert.match((mixed as { error: string }).error, /Régime de TVA unique par société .*débits/)
+    assert.equal(await db.vatDeclaration.count({ where: { companyId: "coA" } }), 1)
     useTestClock()
     void waitingSessions; void holdTransaction; void db2; void NOW
   })
