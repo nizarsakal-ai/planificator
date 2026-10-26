@@ -15,6 +15,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { Prisma } from "@prisma/client"
+import { captureDocumentSnapshot, type SnapshotCapture } from "@/lib/billing/pdf/document-snapshot"
+import { centsToDecimalString, computeDocumentTotals, decimalToCents, storedVatRateToBp } from "@/lib/billing/money"
 
 // Lot C2 : PARTIAL (partiellement payée) — aucune transition manuelle depuis ce statut ; l'avoir total reste possible.
 export type InvoiceStatusValue = "DRAFT" | "SENT" | "PAID" | "CANCELLED" | "PARTIAL"
@@ -66,6 +68,8 @@ export interface TransitionInput {
   to: RequestedInvoiceStatus
   actorId: string
   now: Date
+  /** Correctif P2-03 : figement documentaire à l'émission (injectable pour les tests sans base ; défaut = snapshot réel). */
+  captureSnapshot?: SnapshotCapture
 }
 
 export async function transitionInvoiceCore(
@@ -74,29 +78,44 @@ export async function transitionInvoiceCore(
 ): Promise<LifecycleResult> {
   const invoice = await tx.invoice.findFirst({
     where: { id: input.invoiceId, companyId: input.companyId },
-    select: { id: true, status: true, kind: true, number: true, worksiteId: true },
+    select: { id: true, status: true, kind: true, number: true, worksiteId: true, globalDiscountBp: true, vatReverseCharge: true, lines: { select: { quantity: true, unitPrice: true, vatRate: true, discountBp: true, deductsDepositId: true } } },
   })
   if (!invoice || !isStatus(invoice.status)) return { ok: false, error: LIFECYCLE_ERRORS.notFound }
+  // Correctif P1-01 (chemin Lot B) : à l'émission, les totaux sont RECALCULÉS depuis les lignes avec le moteur centimes et écrits
+  // dans la même instruction que la transition — les totaux persistés d'une pièce émise sont toujours égaux au recalcul.
+  let issuedTotals: { totalHT: string; totalVAT: string; totalTTC: string } | null = null
+  if (input.to === "SENT") {
+    const lines = (invoice as { lines?: { quantity: unknown; unitPrice: unknown; vatRate: unknown; discountBp?: number | null; deductsDepositId?: string | null }[] }).lines ?? []
+    const t = computeDocumentTotals(
+      lines.map((l) => ({ quantityHundredths: decimalToCents(l.quantity as never), unitPriceCents: decimalToCents(l.unitPrice as never), discountBp: l.discountBp ?? 0, vatRateBp: storedVatRateToBp(l.vatRate as never), excludeGlobalDiscount: !!l.deductsDepositId })),
+      { globalDiscountBp: (invoice as { globalDiscountBp?: number }).globalDiscountBp ?? 0, vatReverseCharge: (invoice as { vatReverseCharge?: boolean }).vatReverseCharge ?? false },
+    )
+    issuedTotals = { totalHT: centsToDecimalString(t.totalHTCents), totalVAT: centsToDecimalString(t.totalVATCents), totalTTC: centsToDecimalString(t.totalTTCCents) }
+  }
   // Lot C3 : un acompte (DEPOSIT) suit le même automate ; un avoir reste immuable.
   if (invoice.kind === "CREDIT_NOTE") return { ok: false, error: LIFECYCLE_ERRORS.creditNoteImmutable }
   const from = invoice.status
   if (input.to === "CANCELLED" && from !== "DRAFT") return { ok: false, error: LIFECYCLE_ERRORS.cancelIssued }
   if (!canTransition(from, input.to)) return { ok: false, error: LIFECYCLE_ERRORS.forbidden }
   if (input.to === "SENT" && invoice.number.startsWith(PROVISIONAL_NUMBER_PREFIX)) return { ok: false, error: LIFECYCLE_ERRORS.provisionalNumber }
-  // Lot C3 : l'abandon d'un brouillon de facture de solde libère ses déductions d'acomptes (les acomptes redeviennent déductibles).
-  if (input.to === "CANCELLED" && invoice.kind === "INVOICE") {
-    await tx.invoiceDepositDeduction.deleteMany({ where: { companyId: input.companyId, finalInvoiceId: invoice.id } })
-  }
 
+  // La transition conditionnelle est la PREMIÈRE écriture : un conflit ici n'a rien modifié (correctif P1-06, même règle partout :
+  // aucune réponse d'échec après une mutation).
   const updated = await tx.invoice.updateMany({
     where: { id: invoice.id, companyId: input.companyId, status: from, kind: invoice.kind },
     data: {
       status: input.to,
-      ...(input.to === "SENT" ? { sentAt: input.now } : {}),
+      ...(input.to === "SENT" ? { sentAt: input.now, ...issuedTotals } : {}),
       ...(input.to === "PAID" ? { paidAt: input.now } : {}),
     },
   })
   if (updated.count !== 1) return { ok: false, error: LIFECYCLE_ERRORS.conflict }
+  // Lot C3 : l'abandon d'un brouillon de facture de solde libère ses déductions d'acomptes (les acomptes redeviennent déductibles).
+  if (input.to === "CANCELLED" && invoice.kind === "INVOICE") {
+    await tx.invoiceDepositDeduction.deleteMany({ where: { companyId: input.companyId, finalInvoiceId: invoice.id } })
+  }
+  // Correctif P2-03 : les données documentaires de la pièce émise sont figées dans la même transaction.
+  if (input.to === "SENT") await (input.captureSnapshot ?? captureDocumentSnapshot)(tx, input.companyId, invoice.id)
 
   await tx.historyLog.create({
     data: {
@@ -178,6 +197,8 @@ export interface CreditNoteInput {
   reason: string | null
   now: Date
   nextNumber: (tx: Prisma.TransactionClient) => Promise<string>
+  /** Correctif P2-03 : figement documentaire de l'avoir émis (injectable pour les tests sans base ; défaut = snapshot réel). */
+  captureSnapshot?: SnapshotCapture
 }
 
 /**
@@ -198,7 +219,9 @@ export async function createCreditNoteCore(
       lines: {
         orderBy: { position: "asc" },
         // Lot C1 : description et remise de ligne font partie de la copie exacte.
-        select: { articleId: true, designation: true, description: true, unit: true, quantity: true, unitPrice: true, vatRate: true, lineHT: true, position: true, discountBp: true },
+        // Correctif P1-01 : le marqueur de déduction d'acompte (deductsDepositId) aussi — il détermine le calcul (ligne hors
+        // remise globale) ; sans lui, l'avoir total d'un solde remisé recalculerait un autre montant que la pièce annulée.
+        select: { articleId: true, designation: true, description: true, unit: true, quantity: true, unitPrice: true, vatRate: true, lineHT: true, position: true, discountBp: true, deductsDepositId: true },
       },
     },
   })
@@ -237,6 +260,7 @@ export async function createCreditNoteCore(
       creditScope: "TOTAL",
       creditedInvoiceId: original.id,
       status: "DRAFT",
+      issueDate: input.now, // date d'émission de l'avoir = instant de la décision (déterministe, comme l'avoir partiel C4)
       periodStart: original.periodStart,
       periodEnd: original.periodEnd,
       totalHT: original.totalHT,
@@ -256,6 +280,8 @@ export async function createCreditNoteCore(
     data: { status: "SENT", sentAt: input.now },
   })
   if (issued.count !== 1) throw new Error("CREDIT_NOTE_ISSUE_FAILED")
+  // Correctif P2-03 : l'avoir est une nouvelle pièce avec sa propre identité d'émission figée.
+  await (input.captureSnapshot ?? captureDocumentSnapshot)(tx, input.companyId, note.id)
 
   await tx.historyLog.create({
     data: {

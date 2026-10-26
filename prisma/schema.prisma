@@ -381,6 +381,7 @@ model Company {
   billingMailLogs         BillingMailLog[]
   invoicePayments         InvoicePayment[]
   invoiceDepositDeductions InvoiceDepositDeduction[]
+  invoiceDocumentSnapshots InvoiceDocumentSnapshot[] // Correctif P2-03
   accountingDocumentPostings AccountingDocumentPosting[]
   suppliers               Supplier[]
   supplierInvoices        SupplierInvoice[]
@@ -606,8 +607,9 @@ model Invoice {
   company  Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
   worksite Worksite      @relation(fields: [worksiteId], references: [id], onDelete: Restrict)
   client   Client        @relation(fields: [clientId], references: [id])
-  quote    Quote?        @relation(fields: [quoteId], references: [id], onDelete: Restrict)
+  quote    Quote?        @relation(fields: [companyId, quoteId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02 : FK composite société
   lines    InvoiceLine[]
+  documentSnapshots InvoiceDocumentSnapshot[] // Correctif P2-03 : données documentaires figées à l'émission (au plus une : invoiceId UNIQUE en base)
   creditedInvoice Invoice?  @relation("InvoiceCreditNote", fields: [creditedInvoiceId], references: [id], onDelete: Restrict)
   creditNotes     Invoice[] @relation("InvoiceCreditNote") // Lot C4 : plusieurs avoirs partiels ; un seul TOTAL (index partiel SQL)
 
@@ -639,14 +641,19 @@ model InvoicePayment {
   recordedById      String
   reversesPaymentId String?       @unique
   reversedAt        DateTime?
+  bankTransactionId String?       @unique // Correctif P1-03 : opération bancaire à l'origine du paiement (un seul paiement par opération)
   createdAt         DateTime      @default(now())
 
   company  Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
   invoice  Invoice        @relation(fields: [companyId, invoiceId], references: [companyId, id], onDelete: Restrict)
   reverses InvoicePayment? @relation("PaymentReversal", fields: [reversesPaymentId], references: [id], onDelete: Restrict)
   reversedBy InvoicePayment? @relation("PaymentReversal")
-  bankTransaction BankTransaction? // Lot C5
+  // Relations déclarées en liste côté Prisma (FK composites société) ; l'unicité réelle est garantie en base
+  // (bank_transactions.matchedPaymentId UNIQUE, invoice_payments.bankTransactionId UNIQUE).
+  bankTransactions BankTransaction[] @relation("BankMatchedPayment") // Lot C5 : opération qui référence ce paiement
+  reconciles       BankTransaction?  @relation("PaymentBankTransaction", fields: [companyId, bankTransactionId], references: [companyId, id], onDelete: Restrict)
 
+  @@unique([companyId, id])
   @@index([invoiceId])
   @@index([companyId, paidAt])
   @@map("invoice_payments")
@@ -692,6 +699,25 @@ model InvoiceDepositDeduction {
 
   @@index([finalInvoiceId])
   @@map("invoice_deposit_deductions")
+}
+
+/// Correctif P2-03 — snapshot documentaire d'une pièce émise (vendeur, acheteur, mentions, conditions, pied de page, références),
+/// figé à l'émission, immuable en base (déclencheur) ; les montants/lignes restent protégés par les déclencheurs Lot B/C.
+model InvoiceDocumentSnapshot {
+  id            String   @id @default(cuid())
+  companyId     String
+  invoiceId     String   @unique
+  schemaVersion Int      @default(1)
+  seller        Json
+  buyer         Json
+  document      Json
+  createdAt     DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  invoice Invoice @relation(fields: [companyId, invoiceId], references: [companyId, id], onDelete: Restrict)
+
+  @@index([companyId])
+  @@map("invoice_document_snapshots")
 }
 
 /// Lot C4 — portée d'un avoir.
@@ -2943,6 +2969,7 @@ model Supplier {
   defaultExpenseAccount AccountingAccount? @relation(fields: [companyId, defaultExpenseAccountId], references: [companyId, id], onDelete: Restrict)
   invoices              SupplierInvoice[]
 
+  @@unique([companyId, id])
   @@unique([companyId, siret])
   @@index([companyId, name])
   @@map("suppliers")
@@ -2967,6 +2994,7 @@ model SupplierInvoiceFile {
   company  Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
   invoices SupplierInvoice[]
 
+  @@unique([companyId, id])
   @@unique([companyId, sha256])
   @@map("supplier_invoice_files")
 }
@@ -3000,11 +3028,12 @@ model SupplierInvoice {
   updatedAt        DateTime              @updatedAt
 
   company        Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  supplier       Supplier?            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  supplier       Supplier?            @relation(fields: [companyId, supplierId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
   expenseAccount AccountingAccount?   @relation(fields: [companyId, expenseAccountId], references: [companyId, id], onDelete: Restrict)
-  file           SupplierInvoiceFile? @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  file           SupplierInvoiceFile? @relation(fields: [companyId, fileId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
   bankTransactions BankTransaction[]
 
+  @@unique([companyId, id])
   @@index([companyId, status])
   @@index([companyId, date])
   @@index([companyId, supplierId])
@@ -3024,6 +3053,7 @@ model BankStatementImport {
   company      Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
   transactions BankTransaction[]
 
+  @@unique([companyId, id])
   @@unique([companyId, sha256])
   @@map("bank_statement_imports")
 }
@@ -3050,14 +3080,21 @@ model BankTransaction {
   matchedAt                DateTime?
   notes                    String?
   createdAt                DateTime              @default(now())
+  // Correctif P2-01 : identité d'une opération (identifiant bancaire stable, rang d'occurrence du même tuple, ambiguïté).
+  externalId               String?
+  occurrence               Int                   @default(1)
+  identityAmbiguous        Boolean               @default(false)
 
   company                Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  import                 BankStatementImport @relation(fields: [importId], references: [id], onDelete: Restrict)
+  import                 BankStatementImport @relation(fields: [companyId, importId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
   matchedInvoice         Invoice?            @relation("BankMatchedInvoice", fields: [companyId, matchedInvoiceId], references: [companyId, id], onDelete: Restrict)
-  matchedPayment         InvoicePayment?     @relation(fields: [matchedPaymentId], references: [id], onDelete: Restrict)
-  matchedSupplierInvoice SupplierInvoice?    @relation(fields: [matchedSupplierInvoiceId], references: [id], onDelete: Restrict)
+  matchedPayment         InvoicePayment?     @relation("BankMatchedPayment", fields: [companyId, matchedPaymentId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
+  matchedSupplierInvoice SupplierInvoice?    @relation(fields: [companyId, matchedSupplierInvoiceId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
+  payments               InvoicePayment[]    @relation("PaymentBankTransaction") // Correctif P1-03 : paiement créé par le rapprochement (au plus un : bankTransactionId UNIQUE)
 
+  @@unique([companyId, id])
   @@unique([companyId, fingerprint])
+  @@unique([companyId, externalId])
   @@unique([matchedPaymentId])
   @@index([companyId, status])
   @@index([companyId, date])

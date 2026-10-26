@@ -16,6 +16,7 @@ import {
   type LifecycleResult, type QuoteDraftHeader, type QuoteDraftLine,
 } from "./quote-lifecycle.core"
 import { generateSignatureToken, hashSignatureToken, isValidSignatureToken, signatureExpiry } from "./quote-signature"
+import { calendarDayIn, isQuoteValidAt } from "./quote-validity"
 import { candidateToParsedQuote, parseQuoteImport } from "./quote-import"
 import { listQuotes, type QuoteListFilters } from "./quote-queries"
 import type { ParsedQuote } from "./quote-schemas"
@@ -137,7 +138,12 @@ export async function duplicateQuote(db: Db, ctx: QuoteContext, quoteId: string,
 
 export interface SendQuoteResult { status: string; signatureUrl: string }
 
-/** Envoi (DRAFT → SENT) ou renvoi (SENT) : nouveau jeton de signature à chaque envoi, courrier journalisé après COMMIT. */
+/**
+ * Envoi (DRAFT → SENT) ou renvoi (SENT) : nouveau jeton de signature à chaque envoi, courrier journalisé après COMMIT.
+ * Correctif P2-04 : validité métier dépassée (validUntil, jour civil Europe/Paris inclus) ⇒ REFUS, aucun jeton, aucun courrier,
+ * même simulé ; l'offre se renouvelle explicitement par duplication. Correctif P1-05 : le renouvellement du jeton est une
+ * écriture conditionnelle sur la ligne (verrou de ligne), partageant le protocole de la signature/du refus par jeton.
+ */
 export async function sendQuote(db: Db, ctx: QuoteContext, quoteId: string, now: Date): Promise<LifecycleResult<SendQuoteResult>> {
   const q = await db.quote.findFirst({
     where: { id: quoteId, companyId: ctx.companyId },
@@ -145,12 +151,17 @@ export async function sendQuote(db: Db, ctx: QuoteContext, quoteId: string, now:
   })
   if (!q) return { ok: false, error: QUOTE_ERRORS.notFound }
   if (q.status !== "DRAFT" && q.status !== "SENT") return { ok: false, error: "Seul un devis brouillon ou envoyé peut être envoyé." }
+  if (!isQuoteValidAt(q.validUntil, now)) return { ok: false, error: QUOTE_ERRORS.expired }
   const to = q.client.email?.trim()
   if (!to) return { ok: false, error: QUOTE_ERRORS.noEmail }
   const { token, hash } = generateSignatureToken()
-  const expires = signatureExpiry(q.validUntil, now)
-  const data = { signatureTokenHash: hash, signatureTokenExpiresAt: expires }
   const r = await db.$transaction(async (tx) => {
+    // Relecture sous verrou de la validité et du statut : la décision ET l'expiration du jeton dérivent de la validité relue sous verrou.
+    await lockQuoteRow(tx, quoteId, ctx.companyId)
+    const cur = await tx.quote.findFirst({ where: { id: quoteId, companyId: ctx.companyId }, select: { status: true, validUntil: true } })
+    if (!cur || cur.status !== q.status) return { ok: false as const, error: QUOTE_ERRORS.conflict }
+    if (!isQuoteValidAt(cur.validUntil, now)) return { ok: false as const, error: QUOTE_ERRORS.expired }
+    const data = { signatureTokenHash: hash, signatureTokenExpiresAt: signatureExpiry(cur.validUntil, now) }
     if (q.status === "DRAFT") return transitionQuoteCore(tx, { companyId: ctx.companyId, quoteId, to: "SENT", actorId: ctx.userId, now, data, detail: `Devis ${q.number} envoyé à ${to}` })
     const u = await tx.quote.updateMany({ where: { id: quoteId, companyId: ctx.companyId, status: "SENT" }, data })
     if (u.count !== 1) return { ok: false as const, error: QUOTE_ERRORS.conflict }
@@ -219,7 +230,8 @@ export async function getQuoteForSignature(db: Db, token: unknown, now: Date) {
     },
   })
   if (!q) return null
-  const expired = !q.signatureTokenExpiresAt || q.signatureTokenExpiresAt < now
+  // P2-04 : la validité métier (validUntil) prime sur l'expiration technique du jeton.
+  const expired = !q.signatureTokenExpiresAt || q.signatureTokenExpiresAt < now || !isQuoteValidAt(q.validUntil, now)
   const signable = q.status === "SENT" && !expired
   if (signable) return { ...q, tokenExpired: expired, signable: true as const }
   return {
@@ -228,33 +240,58 @@ export async function getQuoteForSignature(db: Db, token: unknown, now: Date) {
   }
 }
 
+/**
+ * Correctif P1-05 — autorité du jeton vérifiée AU MOMENT DE LA DÉCISION :
+ * 1. verrou de la ligne portant le hachage (SELECT … FOR UPDATE) : renvoi, relance, signature, refus et expiration partagent ce
+ *    protocole (leurs UPDATE attendent le verrou) ; 2. relecture sous verrou du hachage, de l'expiration, de la validité métier
+ *    (P2-04) et du statut SENT ; 3. transition par UPDATE conditionnel incluant le hachage et l'expiration (guard) : un
+ *    renouvellement committé avant la décision ⇒ l'ancien lien échoue sans rien modifier, le nouveau lien reste utilisable.
+ */
+async function lockQuoteByTokenHash(tx: Prisma.TransactionClient, hash: string): Promise<string | null> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "quotes" WHERE "signatureTokenHash" = ${hash} FOR UPDATE`
+  return rows.length === 1 ? rows[0].id : null
+}
+const decisionSelect = { id: true, companyId: true, createdById: true, number: true, status: true, validUntil: true, signatureTokenExpiresAt: true } as const
+
+async function readQuoteForDecision(tx: Prisma.TransactionClient, hash: string, now: Date): Promise<LifecycleResult<{ id: string; companyId: string; createdById: string; number: string }>> {
+  const id = await lockQuoteByTokenHash(tx, hash)
+  if (!id) return { ok: false, error: QUOTE_ERRORS.tokenInvalid }
+  const q = await tx.quote.findFirst({ where: { id, signatureTokenHash: hash }, select: decisionSelect })
+  if (!q || !q.signatureTokenExpiresAt || q.signatureTokenExpiresAt < now) return { ok: false, error: QUOTE_ERRORS.tokenInvalid }
+  if (!isQuoteValidAt(q.validUntil, now)) return { ok: false, error: QUOTE_ERRORS.expired }
+  if (q.status !== "SENT") return { ok: false, error: QUOTE_ERRORS.notSent }
+  return { ok: true, value: { id: q.id, companyId: q.companyId, createdById: q.createdById, number: q.number } }
+}
+
 export async function signQuoteByToken(db: Db, token: unknown, input: { signerName: string; ipHash: string | null; now: Date }): Promise<LifecycleResult> {
   if (!isValidSignatureToken(token)) return { ok: false, error: QUOTE_ERRORS.tokenInvalid }
   const name = input.signerName.trim().slice(0, 120)
   if (name.length < 2) return { ok: false, error: "Indiquez votre nom pour signer." }
+  const hash = hashSignatureToken(token)
   return db.$transaction(async (tx) => {
-    const q = await tx.quote.findFirst({ where: { signatureTokenHash: hashSignatureToken(token) }, select: { id: true, companyId: true, createdById: true, number: true, status: true, signatureTokenExpiresAt: true } })
-    if (!q || !q.signatureTokenExpiresAt || q.signatureTokenExpiresAt < input.now) return { ok: false, error: QUOTE_ERRORS.tokenInvalid }
-    if (q.status !== "SENT") return { ok: false, error: QUOTE_ERRORS.notSent }
+    const q = await readQuoteForDecision(tx, hash, input.now)
+    if (!q.ok) return q
     const r = await transitionQuoteCore(tx, {
-      companyId: q.companyId, quoteId: q.id, to: "ACCEPTED", actorId: q.createdById, now: input.now,
-      data: { signerName: name, signedAt: input.now, signatureIpHash: input.ipHash }, detail: `Devis ${q.number} signé en ligne par ${name} (action du client via le lien public ; acteur technique = créateur du devis)`,
+      companyId: q.value.companyId, quoteId: q.value.id, to: "ACCEPTED", actorId: q.value.createdById, now: input.now,
+      guard: { signatureTokenHash: hash, signatureTokenExpiresAt: { gte: input.now } },
+      data: { signerName: name, signedAt: input.now, signatureIpHash: input.ipHash }, detail: `Devis ${q.value.number} signé en ligne par ${name} (action du client via le lien public ; acteur technique = créateur du devis)`,
     })
-    return r.ok ? { ok: true, value: undefined } : r
+    return r.ok ? { ok: true, value: undefined } : { ok: false, error: r.error === QUOTE_ERRORS.conflict ? QUOTE_ERRORS.tokenInvalid : r.error }
   })
 }
 
 export async function refuseQuoteByToken(db: Db, token: unknown, input: { reason: string | null; now: Date }): Promise<LifecycleResult> {
   if (!isValidSignatureToken(token)) return { ok: false, error: QUOTE_ERRORS.tokenInvalid }
+  const hash = hashSignatureToken(token)
   return db.$transaction(async (tx) => {
-    const q = await tx.quote.findFirst({ where: { signatureTokenHash: hashSignatureToken(token) }, select: { id: true, companyId: true, createdById: true, number: true, status: true, signatureTokenExpiresAt: true } })
-    if (!q || !q.signatureTokenExpiresAt || q.signatureTokenExpiresAt < input.now) return { ok: false, error: QUOTE_ERRORS.tokenInvalid }
-    if (q.status !== "SENT") return { ok: false, error: QUOTE_ERRORS.notSent }
+    const q = await readQuoteForDecision(tx, hash, input.now)
+    if (!q.ok) return q
     const r = await transitionQuoteCore(tx, {
-      companyId: q.companyId, quoteId: q.id, to: "REFUSED", actorId: q.createdById, now: input.now,
-      data: { refusalReason: input.reason?.trim().slice(0, 500) || null }, detail: `Devis ${q.number} refusé en ligne par le client (action via le lien public ; acteur technique = créateur du devis)`,
+      companyId: q.value.companyId, quoteId: q.value.id, to: "REFUSED", actorId: q.value.createdById, now: input.now,
+      guard: { signatureTokenHash: hash, signatureTokenExpiresAt: { gte: input.now } },
+      data: { refusalReason: input.reason?.trim().slice(0, 500) || null }, detail: `Devis ${q.value.number} refusé en ligne par le client (action via le lien public ; acteur technique = créateur du devis)`,
     })
-    return r.ok ? { ok: true, value: undefined } : r
+    return r.ok ? { ok: true, value: undefined } : { ok: false, error: r.error === QUOTE_ERRORS.conflict ? QUOTE_ERRORS.tokenInvalid : r.error }
   })
 }
 
@@ -323,7 +360,8 @@ const STEPS: readonly { step: 3 | 7 | 15; column: "reminderJ3SentAt" | "reminder
  *    et le courrier de relance le rappelle sans nouveau lien).
  */
 export async function runQuoteReminders(db: Db, now: Date, limit = 200): Promise<ReminderRunReport> {
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  // P2-04 : « aujourd'hui » = jour civil en Europe/Paris ; un devis est périmé dès que validUntil < ce jour (fin de validité révolue).
+  const today = calendarDayIn(now)
   const toExpire = await db.quote.findMany({ where: { status: "SENT", validUntil: { lt: today } }, select: { id: true, companyId: true, createdById: true }, take: limit })
   let expired = 0
   for (const q of toExpire) {

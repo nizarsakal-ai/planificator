@@ -11,6 +11,13 @@ ADD COLUMN     "creditScope" "InvoiceCreditScope";
 
 -- Rétro-remplissage : tous les avoirs existants (Lot B) sont des avoirs totaux.
 UPDATE "invoices" SET "creditScope" = 'TOTAL' WHERE "kind"::text = 'CREDIT_NOTE' AND "creditScope" IS NULL;
+-- Correctif du 26/10/2026 (campagne de migration héritée, mandat Codex §4.C.2) : sur une base contenant des avoirs Lot B, cet UPDATE
+-- laisse des événements de déclencheurs DIFFÉRÉS (invariants Lot B) en attente, et le ALTER TABLE ci-dessous échoue alors avec
+-- « cannot ALTER TABLE "invoices" because it has pending trigger events » (SQLSTATE 55006) : la chaîne livrée à 68b2504 ne pouvait
+-- pas s'appliquer à des données réelles comportant un avoir. Les invariants sont donc évalués immédiatement ici (un avoir hérité
+-- non conforme arrête la migration avec un diagnostic CREDIT_NOTE_INVALID explicite — aucune réparation automatique).
+-- Modification délibérée d'une migration livrée mais jamais déployée hors bases jetables ; signalée dans RAPPORT-CORRECTIONS et MIGRATION-READINESS.
+SET CONSTRAINTS ALL IMMEDIATE;
 
 -- Compatibilité Lot B : un avoir créé sans portée (chemin Lot B, SQL direct) est un avoir TOTAL.
 CREATE OR REPLACE FUNCTION invoices_credit_scope_default() RETURNS trigger AS $$

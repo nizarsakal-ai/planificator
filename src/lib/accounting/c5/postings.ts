@@ -9,6 +9,7 @@ import { ensureBaseReferential } from "@/lib/accounting/engine/setup"
 import type { LineInput } from "@/lib/accounting/engine/validate"
 import { runAccountingTransaction } from "@/lib/accounting/engine/transaction"
 import { computeDocumentTotals, decimalToCents, storedVatRateToBp } from "@/lib/billing/money"
+import { DocumentIntegrityError, assertStoredTotalsMatch } from "@/lib/billing/document-integrity"
 
 type Tx = Prisma.TransactionClient
 export type PostingSourceType = "INVOICE" | "CREDIT_NOTE" | "DEPOSIT" | "PAYMENT" | "SUPPLIER_INVOICE"
@@ -52,7 +53,7 @@ function side(accountId: string, debit: bigint, credit: bigint, label: string | 
 export async function postInvoiceEntry(tx: Tx, ctx: AccountingContext, invoiceId: string): Promise<{ entryId: string; existing: boolean }> {
   const inv = await tx.invoice.findFirst({
     where: { id: invoiceId, companyId: ctx.companyId },
-    select: { id: true, number: true, kind: true, status: true, sentAt: true, issueDate: true, totalTTC: true, globalDiscountBp: true, vatReverseCharge: true, client: { select: { name: true } }, lines: { select: { quantity: true, unitPrice: true, vatRate: true, discountBp: true, deductsDepositId: true } } },
+    select: { id: true, number: true, kind: true, status: true, sentAt: true, issueDate: true, totalHT: true, totalVAT: true, totalTTC: true, globalDiscountBp: true, vatReverseCharge: true, client: { select: { name: true } }, lines: { select: { quantity: true, unitPrice: true, vatRate: true, discountBp: true, deductsDepositId: true } } },
   })
   if (!inv) throw new PostingError("DOCUMENT_NOT_FOUND")
   if (inv.status === "DRAFT" || !inv.sentAt) throw new PostingError("DOCUMENT_NOT_ISSUED", "Pièce non émise.")
@@ -60,6 +61,11 @@ export async function postInvoiceEntry(tx: Tx, ctx: AccountingContext, invoiceId
   const existing = await tx.accountingDocumentPosting.findFirst({ where: { companyId: ctx.companyId, sourceType, sourceId: inv.id, sourceVersion: 1 }, select: { entryId: true } })
   if (existing) return { entryId: existing.entryId, existing: true }
   const totals = computeDocumentTotals(inv.lines.map((l) => ({ quantityHundredths: decimalToCents(l.quantity), unitPriceCents: decimalToCents(l.unitPrice), discountBp: l.discountBp, vatRateBp: storedVatRateToBp(l.vatRate), excludeGlobalDiscount: !!l.deductsDepositId })), { globalDiscountBp: inv.globalDiscountBp, vatReverseCharge: inv.vatReverseCharge })
+  // Correctif P1-01 : totaux persistés = recalcul, sinon refus explicite AVANT toute écriture (jamais d'écriture d'un autre montant).
+  try { assertStoredTotalsMatch(inv, totals) } catch (e) {
+    if (e instanceof DocumentIntegrityError) throw new PostingError("TOTALS_MISMATCH", `Pièce ${inv.number} refusée : totaux enregistrés (${decimalToCents(inv.totalTTC)} c TTC) différents du recalcul des lignes (${totals.totalTTCCents} c TTC). Aucune écriture générée.`)
+    throw e
+  }
   const sign = inv.kind === "CREDIT_NOTE" ? BigInt(-1) : BigInt(1)
   const [a411, a706, a44571] = await Promise.all([accountId(tx, ctx, ACCOUNTS.clients), accountId(tx, ctx, ACCOUNTS.sales), accountId(tx, ctx, ACCOUNTS.vatCollected)])
   const label = `${inv.kind === "CREDIT_NOTE" ? "Avoir" : inv.kind === "DEPOSIT" ? "Acompte" : "Facture"} ${inv.number} — ${inv.client.name}`

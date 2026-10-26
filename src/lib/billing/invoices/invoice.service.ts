@@ -10,6 +10,7 @@ import { sendBillingMail } from "@/lib/billing/mail/send"
 import { invoiceReminderMail, invoiceSentMail } from "@/lib/billing/mail/templates"
 import { getBillingSettings } from "@/lib/billing/settings"
 import type { LifecycleResult } from "@/lib/billing/quotes/quote-lifecycle.core"
+import { LifecycleAbort, withLifecycleAbort } from "@/lib/billing/lifecycle-abort"
 import { INVOICE_C2_ERRORS, issueInvoiceCore, recordPaymentCore, replaceInvoiceDraftCore, reversePaymentCore, type InvoiceDraftLine, type PaymentStatus } from "./invoice-c2.core"
 import { depositIssueChecks } from "./deposit.service"
 import type { ParsedInvoice } from "./invoice-schemas"
@@ -74,21 +75,27 @@ export async function createDraftInvoice(db: Db, ctx: InvoiceContext, parsed: Pa
   return { ok: true, value: created }
 }
 
+/**
+ * Modification d'un brouillon. Correctif P1-06 : le remplacement de l'en-tête et des lignes est la première écriture ; si le
+ * recalcul des déductions d'acomptes refuse ensuite (prestations ramenées sous les acomptes émis, facture non brouillon…),
+ * l'échec est levé DANS la transaction (LifecycleAbort) ⇒ ROLLBACK complet (en-tête, lignes, liaisons, journal), puis
+ * traduit en { ok: false } hors transaction. Un refus avant toute écriture (brouillon introuvable/non brouillon) est renvoyé tel quel.
+ */
 export async function updateDraftInvoice(db: Db, ctx: InvoiceContext, invoiceId: string, parsed: ParsedInvoice): Promise<LifecycleResult> {
   const refs = await checkReferences(db, ctx, { ...parsed, currentInvoiceId: invoiceId } as ParsedInvoice)
   if (!refs.ok) return refs
-  return db.$transaction(async (tx) => {
+  return withLifecycleAbort(() => db.$transaction(async (tx) => {
     const r = await replaceInvoiceDraftCore(tx, { companyId: ctx.companyId, invoiceId, actorId: ctx.userId, header: { ...toHeader(parsed), worksiteId: parsed.worksiteId, clientId: refs.value.clientId, quoteId: parsed.quoteId }, lines: toLines(parsed) })
     if (!r.ok) return r
     // Facture de solde : les déductions d'acomptes (lignes retirées par le remplacement) sont régénérées.
     if (parsed.quoteId) {
       const { applyDepositDeductionsCore } = await import("./deposit.service")
       const d = await applyDepositDeductionsCore(tx, ctx, invoiceId)
-      if (!d.ok) return d
+      if (!d.ok) throw new LifecycleAbort(d.error)
     }
     await flushDeferredConstraints(tx)
     return r
-  })
+  }))
 }
 
 export async function issueInvoice(db: Db, ctx: InvoiceContext, invoiceId: string, now: Date): Promise<LifecycleResult<{ number: string }>> {
@@ -124,11 +131,20 @@ export async function sendInvoiceMail(db: Db, ctx: InvoiceContext, invoiceId: st
   return { ok: true, value: { status: sent.status } }
 }
 
-export interface PaymentInput { amountCents: bigint; method: "TRANSFER" | "CHECK" | "CASH" | "CARD" | "DIRECT_DEBIT" | "OTHER"; paidAt: Date; reference: string | null; notes: string | null }
+export interface PaymentInput { amountCents: bigint; method: "TRANSFER" | "CHECK" | "CASH" | "CARD" | "DIRECT_DEBIT" | "OTHER"; paidAt: Date; reference: string | null; notes: string | null; bankTransactionId?: string | null }
+
+/**
+ * Enregistrement d'un paiement DANS une transaction fournie par l'appelant (correctif P1-03 : rapprochement bancaire en une
+ * seule transaction) : verrou de la facture, plafond du reste à payer, statut recalculé. L'appelant reste responsable du
+ * `flushDeferredConstraints` final. Un refus renvoyé ici n'a rien écrit.
+ */
+export async function recordPaymentTx(tx: Prisma.TransactionClient, ctx: InvoiceContext, invoiceId: string, input: PaymentInput, now: Date): Promise<LifecycleResult<{ paymentId: string; status: PaymentStatus; remainingCents: bigint }>> {
+  return recordPaymentCore(tx, { companyId: ctx.companyId, invoiceId, actorId: ctx.userId, now, ...input, lockInvoice: lockInvoiceRow, enablePaymentsContext })
+}
 
 export async function recordPayment(db: Db, ctx: InvoiceContext, invoiceId: string, input: PaymentInput, now: Date): Promise<LifecycleResult<{ paymentId: string; status: PaymentStatus; remainingCents: bigint }>> {
   return db.$transaction(async (tx) => {
-    const r = await recordPaymentCore(tx, { companyId: ctx.companyId, invoiceId, actorId: ctx.userId, now, ...input, lockInvoice: lockInvoiceRow, enablePaymentsContext })
+    const r = await recordPaymentTx(tx, ctx, invoiceId, input, now)
     if (r.ok) await flushDeferredConstraints(tx)
     return r
   })

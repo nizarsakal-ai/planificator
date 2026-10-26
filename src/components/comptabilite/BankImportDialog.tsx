@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { importBankStatementAction, previewBankCsvAction } from "@/lib/actions/accounting-c5.actions"
 
-type Mapping = { date: number; label: number; amount?: number; debit?: number; credit?: number; reference?: number; headerRows: number }
+type Mapping = { date: number; label: number; amount?: number; debit?: number; credit?: number; reference?: number; bankId?: number; headerRows: number }
 
 function Sel({ k, label, optional, header, mapping, onChange }: { k: keyof Mapping; label: string; optional?: boolean; header: string[]; mapping: Mapping; onChange: (m: Mapping) => void }) {
   return (
@@ -60,7 +60,7 @@ export function BankImportDialog() {
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Sel k="date" label="Date" header={header} mapping={mapping} onChange={setMapping} /><Sel k="label" label="Libellé" header={header} mapping={mapping} onChange={setMapping} />
               {mode === "amount" ? <Sel k="amount" label="Montant" header={header} mapping={mapping} onChange={setMapping} /> : <><Sel k="debit" label="Débit" header={header} mapping={mapping} onChange={setMapping} /><Sel k="credit" label="Crédit" header={header} mapping={mapping} onChange={setMapping} /></>}
-              <Sel k="reference" label="Référence" optional header={header} mapping={mapping} onChange={setMapping} />
+              <Sel k="reference" label="Référence" optional header={header} mapping={mapping} onChange={setMapping} /><Sel k="bankId" label="Identifiant bancaire (unique, recommandé)" optional header={header} mapping={mapping} onChange={setMapping} />
             </div>
             <div className="max-h-40 overflow-auto rounded border"><table className="w-full text-xs"><thead className="bg-slate-50"><tr>{header.map((h, i) => <th key={i} className="px-2 py-1 text-left">{h}</th>)}</tr></thead><tbody>{sample.map((r, i) => <tr key={i} className="border-t">{r.map((c, j) => <td key={j} className="px-2 py-1">{c}</td>)}</tr>)}</tbody></table></div>
             <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setOpen(false)}>Annuler</Button><Button disabled={loading} onClick={() => void submit()}>Importer</Button></div>

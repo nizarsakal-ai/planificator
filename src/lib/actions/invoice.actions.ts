@@ -22,7 +22,7 @@ import {
  */
 function billingIntegrityError(error: unknown): string | null {
   const message = error instanceof Error ? error.message : ""
-  const code = /\b(INVOICE_[A-Z_]+|CREDIT_NOTE_INVALID|PAYMENT_[A-Z_]+)\b/.exec(message)?.[1]
+  const code = /\b(INVOICE_[A-Z_]+|CREDIT_NOTE_INVALID|PAYMENT_[A-Z_]+|DOCUMENT_SNAPSHOT_[A-Z_]+|DEPOSIT_DEDUCTION_[A-Z_]+)\b/.exec(message)?.[1]
   if (!code) return null
   // Lot C2 : une facture avec paiements enregistrés ne se solde plus manuellement (enregistrez le paiement restant).
   if (code.startsWith("PAYMENT_")) return "Opération refusée : des paiements sont enregistrés sur cette facture (utilisez la fiche facture)."

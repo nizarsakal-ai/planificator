@@ -24,6 +24,11 @@ export interface DocumentPdfData {
   footer: string | null
   signature?: { name: string; date: string } | null
   extraBlocks?: { title: string; rows: string[] }[]
+  /** Correctif P2-03 : origine du contenu documentaire d'une pièce émise. SNAPSHOT = figé à l'émission ; CURRENT_NO_SNAPSHOT =
+   *  pièce émise avant la mise en place du snapshot, rééditée depuis les fiches actuelles (signalé sur le document) ; DRAFT = brouillon. */
+  reissue?: { source: "SNAPSHOT" | "CURRENT_NO_SNAPSHOT" | "DRAFT"; capturedAt: string | null }
+  /** Annexe de suivi des règlements (évolue après l'émission) : distincte de la pièce émise, jamais figée. */
+  settlement?: { title: string; rows: string[] } | null
 }
 
 export function sellerParty(company: { name: string; address: string | null; siret: string | null; email: string | null; phone: string | null }, s: BillingSettingsView): PdfParty {

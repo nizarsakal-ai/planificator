@@ -7,7 +7,7 @@ import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { convertQuoteAction, deleteDraftQuoteAction, duplicateQuoteAction, quoteStatusAction, sendQuoteAction } from "@/lib/actions/quote.actions"
 
-export function QuoteActions({ id, status, hasEmail, invoiceId }: { id: string; status: string; hasEmail: boolean; invoiceId: string | null }) {
+export function QuoteActions({ id, status, hasEmail, invoiceId, validityExpired = false }: { id: string; status: string; hasEmail: boolean; invoiceId: string | null; validityExpired?: boolean }) {
   const router = useRouter()
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -27,7 +27,7 @@ export function QuoteActions({ id, status, hasEmail, invoiceId }: { id: string; 
 
   const buttons: React.ReactNode[] = []
   if (status === "DRAFT") buttons.push(<Button key="edit" size="sm" variant="outline" asChild><Link href={`/devis/${id}/modifier`}>Modifier</Link></Button>)
-  if (status === "DRAFT" || status === "SENT") {
+  if ((status === "DRAFT" || status === "SENT") && !validityExpired) {
     buttons.push(B("send", status === "DRAFT" ? "Envoyer au client" : "Renvoyer (nouveau lien)", () => {
       if (!hasEmail) { toast.error("Le client n'a pas d'adresse e-mail."); return }
       if (!window.confirm(status === "DRAFT" ? "Envoyer ce devis ? Il ne sera plus modifiable." : "Renvoyer le devis ? L'ancien lien de signature sera invalidé.")) return
@@ -45,5 +45,10 @@ export function QuoteActions({ id, status, hasEmail, invoiceId }: { id: string; 
   buttons.push(B("dup", "Dupliquer", () => void act("dup", () => duplicateQuoteAction(id), (r) => `Devis ${r.number} créé.`, (r) => `/devis/${r.id}`)))
   buttons.push(<Button key="pdf" size="sm" variant="outline" asChild><a href={`/api/pdf/devis/${id}`} target="_blank" rel="noopener">PDF</a></Button>)
   if (status === "DRAFT") buttons.push(B("del", "Supprimer le brouillon", () => { if (window.confirm("Supprimer définitivement ce brouillon ?")) void act("del", () => deleteDraftQuoteAction(id), () => "Brouillon supprimé.", () => "/devis") }, "destructive"))
-  return <div className="flex flex-wrap gap-2">{buttons}</div>
+  return (
+    <div className="space-y-2">
+      {validityExpired && (status === "DRAFT" || status === "SENT") && <p className="text-sm text-amber-700">Validité dépassée : ce devis ne peut plus être envoyé ni signé (règle P2-04). Dupliquez-le pour renouveler l&apos;offre avec une nouvelle date de validité.</p>}
+      <div className="flex flex-wrap gap-2">{buttons}</div>
+    </div>
+  )
 }

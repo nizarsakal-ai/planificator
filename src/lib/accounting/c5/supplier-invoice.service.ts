@@ -9,6 +9,7 @@ import type { AccountingContext } from "@/lib/accounting/engine/posting"
 import { runAccountingTransaction } from "@/lib/accounting/engine/transaction"
 import { ensureBaseReferential } from "@/lib/accounting/engine/setup"
 import type { LifecycleResult } from "@/lib/billing/quotes/quote-lifecycle.core"
+import { LifecycleAbort, withLifecycleAbort } from "@/lib/billing/lifecycle-abort"
 import { MAX_OCR_FILE_BYTES, OcrError, getOcrProvider, sniffMime, type OcrExtraction } from "./ocr-provider"
 import { postSupplierInvoiceEntry } from "./postings"
 
@@ -121,7 +122,9 @@ export async function extractSupplierInvoice(db: Db, ctx: AccountingContext, fil
  * Idempotent : une facture déjà validée renvoie son écriture.
  */
 export async function validateSupplierInvoice(db: Db, ctx: AccountingContext, id: string): Promise<LifecycleResult<{ entryId: string; supplierId: string }>> {
-  return runAccountingTransaction(db, async (tx) => {
+  // Mandat §2.6 (même classe que P1-06) : un refus survenant APRÈS la première écriture (fournisseur créé/associé) lève
+  // LifecycleAbort ⇒ ROLLBACK complet, au lieu d'un résultat d'échec qui laisserait committer le fournisseur.
+  return withLifecycleAbort(() => runAccountingTransaction(db, async (tx) => {
     await tx.$queryRaw`SELECT 1 FROM "supplier_invoices" WHERE "id" = ${id} AND "companyId" = ${ctx.companyId} FOR UPDATE`
     const s = await tx.supplierInvoice.findFirst({ where: { id, companyId: ctx.companyId } })
     if (!s) return { ok: false as const, error: SUPPLIER_ERRORS.notFound }
@@ -132,13 +135,13 @@ export async function validateSupplierInvoice(db: Db, ctx: AccountingContext, id
     if (s.status !== "PENDING") return { ok: false as const, error: SUPPLIER_ERRORS.notPending }
     const supplier = await findOrCreateSupplier(tx, ctx, { name: s.supplierName, siret: s.siret })
     const dup = await tx.supplierInvoice.findFirst({ where: { companyId: ctx.companyId, supplierId: supplier.id, number: s.number, status: "VALIDATED", id: { not: s.id } }, select: { id: true } })
-    if (dup) return { ok: false as const, error: SUPPLIER_ERRORS.duplicateNumber }
+    if (dup) throw new LifecycleAbort(SUPPLIER_ERRORS.duplicateNumber)
     let expenseAccountId = s.expenseAccountId ?? supplier.defaultExpenseAccountId
     if (!expenseAccountId) {
       const number = CATEGORY_ACCOUNT[s.category ?? "autre"] ?? "606000"
       await ensureBaseReferential(tx, ctx)
       const acc = await tx.accountingAccount.findFirst({ where: { companyId: ctx.companyId, number, active: true }, select: { id: true } })
-      if (!acc) return { ok: false as const, error: `Compte de charge ${number} absent ou inactif : choisissez un compte.` }
+      if (!acc) throw new LifecycleAbort(`Compte de charge ${number} absent ou inactif : choisissez un compte.`)
       expenseAccountId = acc.id
     }
     const u = await tx.supplierInvoice.updateMany({ where: { id: s.id, companyId: ctx.companyId, status: "PENDING" }, data: { status: "VALIDATED", supplierId: supplier.id, expenseAccountId, validatedAt: new Date(), validatedById: ctx.userId } })
@@ -146,7 +149,7 @@ export async function validateSupplierInvoice(db: Db, ctx: AccountingContext, id
     const e = await postSupplierInvoiceEntry(tx, ctx, s.id)
     await tx.historyLog.create({ data: { companyId: ctx.companyId, actorId: ctx.userId, action: "STATUS_CHANGED", entityType: "SupplierInvoice", entityId: s.id, detail: `Facture fournisseur ${s.number} validée (${supplier.name}) — écriture ${e.entryId}`, oldValue: { status: "PENDING" }, newValue: { status: "VALIDATED", supplierId: supplier.id, entryId: e.entryId } } })
     return { ok: true as const, value: { entryId: e.entryId, supplierId: supplier.id } }
-  })
+  }))
 }
 
 export async function rejectSupplierInvoice(db: Db, ctx: AccountingContext, id: string, reason: string | null): Promise<LifecycleResult> {
@@ -202,8 +205,12 @@ export async function getSupplierInvoiceFile(db: Db, ctx: { companyId: string },
   return s?.file ?? null
 }
 
-/** Marque payée (rapprochement bancaire ou manuel) — conditionnel, idempotent. */
-export async function markSupplierInvoicePaid(tx: Tx | Db, companyId: string, id: string, paidAt: Date): Promise<boolean> {
+/**
+ * Correctif P1-04 — règlement INTÉGRAL d'une facture fournisseur par rapprochement bancaire (appelé sous verrou FOR UPDATE de
+ * la facture, dans la transaction du rapprochement, après contrôle du montant exact par l'appelant). Un échec (facture non
+ * validée, déjà réglée, modifiée entre-temps) LÈVE : la transaction appelante est annulée — jamais un booléen ignoré.
+ */
+export async function settleSupplierInvoiceExact(tx: Tx, companyId: string, id: string, paidAt: Date): Promise<void> {
   const u = await tx.supplierInvoice.updateMany({ where: { id, companyId, status: "VALIDATED", paidAt: null }, data: { paidAt } })
-  return u.count === 1
+  if (u.count !== 1) throw new LifecycleAbort("Facture fournisseur modifiée entre-temps : règlement annulé.")
 }

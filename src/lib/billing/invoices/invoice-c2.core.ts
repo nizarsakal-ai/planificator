@@ -6,6 +6,7 @@
 import type { Prisma } from "@prisma/client"
 import { MoneyError, centsToDecimalString, computeDocumentTotals, decimalToCents, storedVatRateToBp } from "@/lib/billing/money"
 import type { LifecycleResult } from "@/lib/billing/quotes/quote-lifecycle.core"
+import { captureDocumentSnapshot, type SnapshotCapture } from "@/lib/billing/pdf/document-snapshot"
 
 export const INVOICE_C2_ERRORS = {
   notFound: "Facture introuvable.",
@@ -47,6 +48,8 @@ export interface IssueInvoiceInput {
   lockInvoice: (tx: Prisma.TransactionClient, invoiceId: string, companyId: string) => Promise<void>
   /** Contrôles supplémentaires sous verrou (C3 : acomptes) ; message d'erreur ou null. */
   extraChecks?: (tx: Prisma.TransactionClient, invoice: { id: string; kind: string; quoteId: string | null; totalTTCCents: bigint; vatReverseCharge: boolean }) => Promise<string | null>
+  /** Correctif P2-03 : figement documentaire à l'émission (injectable pour les tests sans base ; défaut = snapshot réel). */
+  captureSnapshot?: SnapshotCapture
 }
 
 /**
@@ -105,6 +108,8 @@ export async function issueInvoiceCore(tx: Prisma.TransactionClient, input: Issu
     const paid = await tx.invoice.updateMany({ where: { id: inv.id, companyId: input.companyId, status: "SENT" }, data: { status: "PAID", paidAt: input.now } })
     if (paid.count !== 1) throw new Error(`INVOICE_CONFLICT: ${INVOICE_C2_ERRORS.conflict}`)
   }
+  // Correctif P2-03 : identités vendeur/acheteur, mentions, conditions, pied de page et références figés avec la pièce émise.
+  await (input.captureSnapshot ?? captureDocumentSnapshot)(tx, input.companyId, inv.id)
   await tx.historyLog.create({
     data: {
       companyId: input.companyId, worksiteId: inv.worksiteId, actorId: input.actorId, action: "STATUS_CHANGED", entityType: "Invoice", entityId: inv.id,
@@ -143,6 +148,8 @@ export interface RecordPaymentInput {
   paidAt: Date
   reference: string | null
   notes: string | null
+  /** Correctif P1-03 : opération bancaire à l'origine du paiement (clé UNIQUE en base ⇒ un seul paiement par opération). */
+  bankTransactionId?: string | null
   lockInvoice: (tx: Prisma.TransactionClient, invoiceId: string, companyId: string) => Promise<void>
   /** Pose l'indicateur transactionnel autorisant les changements de statut liés aux paiements. */
   enablePaymentsContext: (tx: Prisma.TransactionClient) => Promise<void>
@@ -163,7 +170,7 @@ export async function recordPaymentCore(tx: Prisma.TransactionClient, input: Rec
   const remaining = total - paid - credited
   if (input.amountCents > remaining) return { ok: false, error: `${INVOICE_C2_ERRORS.exceeds} (reste : ${centsToDecimalString(remaining)} €)` }
   const payment = await tx.invoicePayment.create({
-    data: { companyId: input.companyId, invoiceId: inv.id, amountCents: input.amountCents, method: input.method, paidAt: input.paidAt, reference: input.reference, notes: input.notes, recordedById: input.actorId },
+    data: { companyId: input.companyId, invoiceId: inv.id, amountCents: input.amountCents, method: input.method, paidAt: input.paidAt, reference: input.reference, notes: input.notes, recordedById: input.actorId, bankTransactionId: input.bankTransactionId ?? null },
     select: { id: true },
   })
   const newPaid = paid + input.amountCents

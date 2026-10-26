@@ -10,6 +10,7 @@ import type { LifecycleResult } from "@/lib/billing/quotes/quote-lifecycle.core"
 import { enablePaymentsContext, lockInvoiceRow } from "./invoice.service"
 import { statusForPaid, sumPayments } from "./invoice-c2.core"
 import { computeCreditLines, type CreditRequest } from "./credit-note.core"
+import { captureDocumentSnapshot } from "@/lib/billing/pdf/document-snapshot"
 
 type Db = PrismaClient
 export interface CreditContext { companyId: string; userId: string }
@@ -23,6 +24,7 @@ export const CREDIT_ERRORS = {
   depositPartial: "Un acompte ne reçoit pas d'avoir partiel (il est déduit en totalité sur la facture de solde) : utilisez l'avoir total.",
   exceeds: "L'avoir dépasse le montant restant créditable.",
   exceedsPaid: "L'avoir dépasse le reste à payer : contre-passez d'abord le paiement correspondant (aucun trop-perçu n'est créé par avoir).",
+  settledOutside: "Facture réglée hors module (payée sans ligne de paiement enregistrée) : aucun avoir partiel possible, utilisez l'avoir total.",
   reason: "Indiquez le motif de l'avoir (3 caractères minimum).",
   invalid: "Lignes ou montant de l'avoir invalides.",
 } as const
@@ -63,6 +65,9 @@ export async function createPartialCreditNote(db: Db, ctx: CreditContext, invoic
     if (already + computed.totals.totalTTCCents > ttc) return { ok: false, error: CREDIT_ERRORS.exceeds }
     // Règle unique (pas de trop-perçu par avoir) : avoir ≤ reste à payer = TTC − paiements − avoirs partiels.
     const paidBefore = await sumPayments(tx, ctx.companyId, o.id)
+    // Correctif P1-07 : une facture PAID héritée (réglée hors module, sans ligne de paiement) est intégralement encaissée :
+    // la tolérance « PAID sans paiement » n'est jamais un contournement du plafond (la base le refuse aussi).
+    if (o.status === "PAID" && paidBefore === BigInt(0) && already === BigInt(0) && ttc > BigInt(0)) return { ok: false, error: CREDIT_ERRORS.settledOutside }
     if (paidBefore + already + computed.totals.totalTTCCents > ttc) return { ok: false, error: CREDIT_ERRORS.exceedsPaid }
 
     const number = await nextDocumentNumber(tx, ctx.companyId, "CREDIT_NOTE", now.getUTCFullYear())
@@ -79,6 +84,8 @@ export async function createPartialCreditNote(db: Db, ctx: CreditContext, invoic
     })
     const issued = await tx.invoice.updateMany({ where: { id: note.id, companyId: ctx.companyId, status: "DRAFT", kind: "CREDIT_NOTE" }, data: { status: "SENT", sentAt: now } })
     if (issued.count !== 1) throw new Error("CREDIT_NOTE_ISSUE_FAILED")
+    // Correctif P2-03 : l'avoir est une nouvelle pièce émise, à l'identité documentaire figée.
+    await captureDocumentSnapshot(tx, ctx.companyId, note.id)
 
     // Reste à payer de l'origine = TTC − paiements − avoirs partiels ; soldée par avoir si reste = 0.
     const paid = paidBefore

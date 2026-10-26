@@ -14,9 +14,11 @@ export default async function TableauDeBordPage() {
   const ctx = await requireAccountingPage()
   const settings = await getBillingSettingsFor(prisma, ctx)
   const d = await accountingDashboard(prisma, ctx, new Date(), settings.vatRegime)
+  const integrityNotices = [...d.inconsistentDocuments.map((n) => `Pièce ${n} : totaux enregistrés différents du recalcul des lignes — exclue des indicateurs, PDF/TVA/écritures refusés jusqu'à correction.`), ...d.vatWarnings]
   const maxCat = d.supplierByCategory.reduce((m, c) => (c.htCents > m ? c.htCents : m), BigInt(0))
   return (
     <div className="space-y-4">
+      {integrityNotices.length > 0 && <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{integrityNotices.map((n) => <p key={n}>{n}</p>)}</div>}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card><CardContent className="p-4"><p className="text-xs uppercase text-slate-500">CA HT du mois</p><p className="mt-1 text-2xl font-semibold tabular-nums">{formatEuro(d.revenueMonthHTCents)}</p></CardContent></Card>
         <Card><CardContent className="p-4"><p className="text-xs uppercase text-slate-500">CA HT de l&apos;année</p><p className="mt-1 text-2xl font-semibold tabular-nums">{formatEuro(d.revenueYearHTCents)}</p></CardContent></Card>

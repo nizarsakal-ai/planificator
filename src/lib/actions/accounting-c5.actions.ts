@@ -9,6 +9,7 @@ import { AccountingError, type AccountingContext } from "@/lib/accounting/engine
 import { accountingErrorMessage, isoDateSchema } from "@/lib/accounting/ui/forms"
 import { MoneyError, parseEuroInputToCents, parseVatRateToBp } from "@/lib/billing/money"
 import { PostingError, postMissingDocuments } from "@/lib/accounting/c5/postings"
+import { DocumentIntegrityError } from "@/lib/billing/document-integrity"
 import { declareVat } from "@/lib/accounting/c5/vat-declaration"
 import { autoReconcile, importBankStatement, matchTransaction } from "@/lib/accounting/c5/bank.service"
 import { guessBankMapping, previewCsv } from "@/lib/accounting/c5/bank-import"
@@ -29,8 +30,9 @@ async function run<T>(fn: (ctx: AccountingContext) => Promise<{ ok: true; value:
     if (error instanceof AccountingAccessError) return { ok: false, error: "Accès refusé." }
     if (error instanceof AccountingError) return { ok: false, error: accountingErrorMessage(error.code, error.details) }
     if (error instanceof PostingError) return { ok: false, error: error.message }
+    if (error instanceof DocumentIntegrityError) return { ok: false, error: `Pièce ${error.documentNumber} refusée : totaux enregistrés différents du recalcul des lignes.` }
     const message = error instanceof Error ? error.message : ""
-    if (/\b(ENTRY_[A-Z_]+|PAYMENT_[A-Z_]+|INVOICE_[A-Z_]+|SUPPLIER_INVOICE_CONFLICT)\b/.test(message)) return { ok: false, error: "Opération refusée par les contrôles d'intégrité." }
+    if (/\b(ENTRY_[A-Z_]+|PAYMENT_[A-Z_]+|INVOICE_[A-Z_]+|SUPPLIER_INVOICE_CONFLICT|BANK_MATCH_INVALID|SUPPLIER_PAYMENT_INVALID|DEPOSIT_DEDUCTION_[A-Z_]+|DOCUMENT_SNAPSHOT_[A-Z_]+|PARTIAL_CREDIT_[A-Z_]+|CREDIT_NOTE_INVALID)\b/.test(message)) return { ok: false, error: "Opération refusée par les contrôles d'intégrité." }
     console.error("[comptabilite] action C5 en échec", error instanceof Error ? error.name : "erreur")
     return { ok: false, error: "Erreur serveur, réessayez." }
   }
@@ -57,17 +59,17 @@ export async function previewBankCsvAction(text: unknown): Promise<Result<{ head
   return { ok: true, header: p.header, sample: p.sample, mapping: guessBankMapping(p.header) }
 }
 
-const mappingSchema = z.object({ date: z.number().int().min(0).max(100), label: z.number().int().min(0).max(100), amount: z.number().int().min(0).max(100).optional(), debit: z.number().int().min(0).max(100).optional(), credit: z.number().int().min(0).max(100).optional(), reference: z.number().int().min(0).max(100).optional(), headerRows: z.number().int().min(0).max(10) }).strict()
+const mappingSchema = z.object({ date: z.number().int().min(0).max(100), label: z.number().int().min(0).max(100), amount: z.number().int().min(0).max(100).optional(), debit: z.number().int().min(0).max(100).optional(), credit: z.number().int().min(0).max(100).optional(), reference: z.number().int().min(0).max(100).optional(), bankId: z.number().int().min(0).max(100).optional(), headerRows: z.number().int().min(0).max(10) }).strict()
 
-export async function importBankStatementAction(raw: unknown): Promise<Result<{ imported: number; duplicates: number; invalid: { row: number; error: string }[] }>> {
+export async function importBankStatementAction(raw: unknown): Promise<Result<{ imported: number; duplicates: number; ambiguous: number; invalid: { row: number; error: string }[] }>> {
   const p = z.object({ text: z.string().max(2_100_000), fileName: z.string().max(200), mapping: mappingSchema }).strict().safeParse(raw)
   if (!p.success) return { ok: false, error: "Import invalide (mapping ou fichier)." }
   if (p.data.mapping.amount === undefined && (p.data.mapping.debit === undefined || p.data.mapping.credit === undefined)) return { ok: false, error: "Indiquez la colonne montant, ou les colonnes débit et crédit." }
   const r = await run((ctx) => importBankStatement(prisma, ctx, p.data.text, p.data.fileName, p.data.mapping))
-  return r.ok ? { ok: true, imported: r.value.imported, duplicates: r.value.duplicates, invalid: r.value.invalid } : r
+  return r.ok ? { ok: true, imported: r.value.imported, duplicates: r.value.duplicates, ambiguous: r.value.ambiguous, invalid: r.value.invalid } : r
 }
 
-export async function autoReconcileAction(): Promise<Result<{ matched: number; unmatched: number; errors: { transactionId: string; error: string }[] }>> {
+export async function autoReconcileAction(): Promise<Result<{ matched: number; unmatched: number; ambiguous: number; errors: { transactionId: string; error: string }[] }>> {
   const r = await run(async (ctx) => ({ ok: true as const, value: await autoReconcile(prisma, ctx) }))
   return r.ok ? { ok: true, ...r.value } : r
 }

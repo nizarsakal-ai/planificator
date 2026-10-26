@@ -4,6 +4,7 @@ import { requireAccountingPage, dateFr } from "@/lib/accounting/ui/page-context"
 import { searchParam } from "@/lib/accounting/ui/labels"
 import { isCalendarDay } from "@/lib/accounting/ui/forms"
 import { computeVat } from "@/lib/accounting/c5/vat"
+import { DocumentIntegrityError } from "@/lib/billing/document-integrity"
 import { listVatDeclarations } from "@/lib/accounting/c5/vat-declaration"
 import { getBillingSettingsFor } from "@/lib/billing/settings"
 import { bpToPercentString, formatEuro } from "@/lib/billing/money"
@@ -24,9 +25,16 @@ export default async function TvaPage({ searchParams }: { searchParams: Promise<
   const periodStart = du && isCalendarDay(du) ? new Date(`${du}T00:00:00.000Z`) : defStart
   const periodEnd = au && isCalendarDay(au) ? new Date(`${au}T00:00:00.000Z`) : defEnd
   const basis = base === "ENCAISSEMENTS" || base === "DEBITS" ? base : settings.vatRegime
-  const [v, declarations] = await Promise.all([computeVat(prisma, ctx, periodStart, periodEnd, basis), listVatDeclarations(prisma, ctx)])
+  const declarations = await listVatDeclarations(prisma, ctx)
+  let v: Awaited<ReturnType<typeof computeVat>>
+  try { v = await computeVat(prisma, ctx, periodStart, periodEnd, basis) } catch (e) {
+    if (!(e instanceof DocumentIntegrityError)) throw e
+    // P1-01 : refus explicite — aucun montant de TVA n'est affiché à partir d'une pièce incohérente.
+    return <div className="rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-900">Calcul de TVA refusé : la pièce {e.documentNumber} a des totaux enregistrés différents du recalcul de ses lignes. Corrigez la pièce (ou contactez l&apos;administrateur) avant toute déclaration.</div>
+  }
   return (
     <div className="space-y-4">
+      {v.warnings.length > 0 && <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{v.warnings.map((w) => <p key={w}>{w}</p>)}</div>}
       <Card><CardContent className="p-4">
         <form method="get" className="grid gap-2 sm:grid-cols-4">
           <Input name="du" type="date" defaultValue={periodStart.toISOString().slice(0, 10)} aria-label="Début" /><Input name="au" type="date" defaultValue={periodEnd.toISOString().slice(0, 10)} aria-label="Fin" />

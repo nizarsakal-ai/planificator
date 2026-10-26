@@ -54,6 +54,9 @@ export function DocumentPdf({ data }: { data: DocumentPdfData }) {
         {data.extraBlocks?.map((b) => (
           <View key={b.title} style={[s.box, { marginTop: 10 }]}><Text style={s.bold}>{b.title}</Text>{b.rows.map((r, i) => <Text key={i} style={s.small}>{r}</Text>)}</View>
         ))}
+        {data.settlement && (
+          <View style={[s.box, { marginTop: 10, borderStyle: "dashed" }]}><Text style={s.bold}>{data.settlement.title}</Text>{data.settlement.rows.map((r, i) => <Text key={i} style={s.small}>{r}</Text>)}</View>
+        )}
         {data.notes && <View style={{ marginTop: 10 }}><Text style={s.bold}>Notes</Text><Text style={s.small}>{data.notes}</Text></View>}
         <View style={{ marginTop: 12 }}>{data.mentions.map((m, i) => <Text key={i} style={s.mention}>{m}</Text>)}</View>
         {data.signature !== undefined && (

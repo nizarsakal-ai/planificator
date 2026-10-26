@@ -8,6 +8,7 @@ import { linesAndTotals, fmtDate } from "@/lib/billing/pdf/document-data"
 import { Card, CardContent } from "@/components/ui/card"
 import { QuoteStatusBadge } from "@/components/devis/QuoteStatusBadge"
 import { QuoteActions } from "@/components/devis/QuoteActions"
+import { isQuoteValidAt } from "@/lib/billing/quotes/quote-validity"
 import { ClientBillingIdsForm } from "@/components/devis/ClientBillingIdsForm"
 import { DepositDialog } from "@/components/factures/DepositDialog"
 import { InvoiceStatusBadge } from "@/components/factures/InvoiceStatusBadge"
@@ -41,7 +42,7 @@ export default async function DevisDetailPage({ params }: { params: Promise<{ id
           <h1 className="flex items-center gap-3 text-2xl font-bold text-slate-900">{q.number} <QuoteStatusBadge status={q.status} /></h1>
           {q.subject && <p className="text-slate-600">{q.subject}</p>}
         </div>
-        <QuoteActions id={q.id} status={q.status} hasEmail={!!q.client.email} invoiceId={invoice?.id ?? null} />
+        <QuoteActions id={q.id} status={q.status} hasEmail={!!q.client.email} invoiceId={invoice?.id ?? null} validityExpired={!isQuoteValidAt(q.validUntil, new Date())} />
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">

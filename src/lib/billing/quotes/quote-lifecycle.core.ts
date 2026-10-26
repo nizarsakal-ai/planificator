@@ -29,6 +29,7 @@ export const QUOTE_ERRORS = {
   noEmail: "Le client n'a pas d'adresse e-mail : renseignez-la avant l'envoi.",
   notSent: "Ce devis n'est pas en attente de signature.",
   tokenInvalid: "Lien de signature invalide ou expiré.",
+  expired: "La validité de ce devis est dépassée : il ne peut plus être envoyé ni signé. Dupliquez-le pour renouveler explicitement l'offre.",
 } as const
 
 export type LifecycleResult<T = undefined> = { ok: true; value: T } | { ok: false; error: string }
@@ -42,6 +43,11 @@ export interface QuoteTransitionInput {
   /** Champs supplémentaires posés avec la transition (sentAt, signerName…), déjà validés par l'appelant. */
   data?: Prisma.QuoteUpdateManyMutationInput
   detail?: string
+  /**
+   * Correctif P1-05 : conditions supplémentaires de l'UPDATE conditionnel (ex. hachage et expiration du jeton encore valides).
+   * La décision n'est prise que si la ligne satisfait ENCORE ces conditions au moment de l'écriture ; sinon conflit, rien n'est modifié.
+   */
+  guard?: Prisma.QuoteWhereInput
 }
 
 export async function transitionQuoteCore(tx: Prisma.TransactionClient, input: QuoteTransitionInput): Promise<LifecycleResult<{ from: QuoteStatusValue }>> {
@@ -60,7 +66,7 @@ export async function transitionQuoteCore(tx: Prisma.TransactionClient, input: Q
     : input.to === "EXPIRED" ? { expiredAt: input.now }
     : { convertedAt: input.now }
   const updated = await tx.quote.updateMany({
-    where: { id: quote.id, companyId: input.companyId, status: from },
+    where: { ...(input.guard ?? {}), id: quote.id, companyId: input.companyId, status: from },
     data: { status: input.to, ...stamps, ...(input.data ?? {}) },
   })
   if (updated.count !== 1) return { ok: false, error: QUOTE_ERRORS.conflict }
