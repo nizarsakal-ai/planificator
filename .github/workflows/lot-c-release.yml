@@ -27,7 +27,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
@@ -35,7 +35,6 @@ jobs:
       NEXT_TELEMETRY_DISABLED: '1'
       DATABASE_URL: postgresql://postgres@127.0.0.1:5432/postgres
       TEST_PG_ADMIN_URL: postgresql://postgres@127.0.0.1:5432/postgres
-      AUTH_SECRET: synthetic-ci-not-a-production-secret
       BILLING_COMPLETE_ENABLED: 'false'
       BILLING_MAIL_ENABLED: 'false'
       BILLING_REMINDERS_ENABLED: 'false'
@@ -105,6 +104,8 @@ jobs:
               raise SystemExit(1)
           PY
       - name: Production build with synthetic configuration
+        env:
+          AUTH_SECRET: synthetic-ci-not-a-production-secret
         run: |
           set -o pipefail
           npm run build | tee ci-evidence/build.log
