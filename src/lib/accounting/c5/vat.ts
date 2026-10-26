@@ -23,6 +23,7 @@
 //   ciblé le même jour » (chronologie au jour non prouvée) sont détectés structurellement et refusés conservatoirement ; un écart avec une
 //   période déjà déclarée est signalé. Cycle R5 (U1) : le caractère hors contrat porte sur l'HISTORIQUE de la facture — tout mouvement
 //   postérieur à un avoir hors contrat (réaffectation / même jour) est lui-même hors contrat, quelle que soit sa période.
+import { allocationDigest, readAllocationHistory, type VatAllocationHistory } from "./vat-history"
 import type { Prisma, PrismaClient } from "@prisma/client"
 import { assertStoredTotalsMatch, recomputeDocumentTotals } from "@/lib/billing/document-integrity"
 import { centsToDecimalString, roundHalfUp, type DocumentTotals } from "@/lib/billing/money"
@@ -30,6 +31,7 @@ import { centsToDecimalString, roundHalfUp, type DocumentTotals } from "@/lib/bi
 type Db = PrismaClient | Prisma.TransactionClient
 export interface VatRateRow { vatRateBp: number; baseCents: bigint; vatCents: bigint }
 export interface VatComputation {
+  allocationHistory?: VatAllocationHistory
   basis: "DEBITS" | "ENCAISSEMENTS"; periodStart: Date; periodEnd: Date
   collected: VatRateRow[]; collectedCents: bigint; deductibleCents: bigint; dueCents: bigint
   documents: number; payments: number; supplierInvoices: number
@@ -106,6 +108,7 @@ export async function computeVat(db: Db, ctx: { companyId: string }, periodStart
   const end = new Date(Date.UTC(periodEnd.getUTCFullYear(), periodEnd.getUTCMonth(), periodEnd.getUTCDate(), 23, 59, 59, 999))
   const map = new Map<number, VatRateRow>()
   const warnings: string[] = []
+  const allocationHistory: VatAllocationHistory = { version: 1, invoiceDigests: Object.create(null) }
   let documents = 0, payments = 0, adjustments = 0
   if (basis === "DEBITS") {
     const docs = await db.invoice.findMany({ where: { companyId, status: { in: ["SENT", "PARTIAL", "PAID", "CANCELLED"] }, sentAt: { not: null }, issueDate: { gte: periodStart, lte: end } }, select: docSelect })
@@ -123,7 +126,7 @@ export async function computeVat(db: Db, ctx: { companyId: string }, periodStart
     // Même famille U1 (cycle R5) : un mouvement saisi APRÈS la déclaration de la période qui le contient (paiement antidaté, import bancaire
     // tardif) n'a jamais été déclaré et ne le sera pas (déclaration figée) ; l'allocation cumulative des mouvements ULTÉRIEURS de la même
     // facture en dépend ⇒ ces mouvements sont hors contrat et leur période est refusée tant que la régularisation n'est pas traitée.
-    const declaredEnc = await db.vatDeclaration.findMany({ where: { companyId, basis: "ENCAISSEMENTS", declaredAt: { not: null } }, select: { periodStart: true, periodEnd: true, declaredAt: true } })
+    const declaredEnc = await db.vatDeclaration.findMany({ where: { companyId, basis: "ENCAISSEMENTS", declaredAt: { not: null } }, select: { periodStart: true, periodEnd: true, declaredAt: true, details: true } })
     const declaredEndOf = (d: { periodEnd: Date }) => new Date(Date.UTC(d.periodEnd.getUTCFullYear(), d.periodEnd.getUTCMonth(), d.periodEnd.getUTCDate(), 23, 59, 59, 999))
     const invoices = ids.length === 0 ? [] : await db.invoice.findMany({
       where: { companyId, id: { in: ids }, kind: { not: "CREDIT_NOTE" } },
@@ -143,6 +146,29 @@ export async function computeVat(db: Db, ctx: { companyId: string }, periodStart
         ...inv.payments.map((p): Ev => ({ at: day(p.paidAt), rank: 1, createdAt: p.createdAt, id: p.id, date: p.paidAt, number: "", event: { kind: "PAYMENT", amountCents: p.amountCents } })),
         ...inv.creditNotes.map((c): Ev => ({ at: day(c.issueDate), rank: 0, createdAt: c.createdAt, id: c.id, date: c.issueDate, number: c.number, event: { kind: "CREDIT", totals: checkedTotals(c) } })),
       ].sort((a, b) => a.at - b.at || a.rank - b.rank || a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      const digestAt = (until: Date) => allocationDigest({
+        total: totals.totalTTCCents.toString(),
+        vat: totals.vatSummary.map(v => [v.vatRateBp, v.baseCents.toString(), v.vatCents.toString()]),
+        events: evs.filter(e => e.date <= until).map(e => ({
+          id: e.id, date: e.date.toISOString(), kind: e.event.kind,
+          value: e.event.kind === "PAYMENT" ? e.event.amountCents.toString() : {
+            total: e.event.totals.totalTTCCents.toString(),
+            vat: e.event.totals.vatSummary.map(v => [v.vatRateBp, v.baseCents.toString(), v.vatCents.toString()]),
+          },
+        })),
+      })
+      // Même requête/snapshot que les montants calculés : persister cette preuve dans details,
+      // dans la transaction SERIALIZABLE de declareVat, sans nouvelle table/migration.
+      allocationHistory.invoiceDigests[inv.id] = digestAt(end)
+      const changedHistory = declaredEnc.find(d => {
+        const dEnd = declaredEndOf(d)
+        if (dEnd >= periodStart) return false // seules les périodes antérieures sont des dépendances
+        const h = readAllocationHistory(d.details)
+        const activeInDeclared = evs.some(e => e.date >= d.periodStart && e.date <= dEnd)
+        if (!h) return activeInDeclared // ancien format : ne pas inventer une preuve rétroactive
+        const hadInvoice = Object.prototype.hasOwnProperty.call(h.invoiceDigests, inv.id)
+        return hadInvoice ? h.invoiceDigests[inv.id] !== digestAt(dEnd) : activeInDeclared
+      })
       const allocated = allocateReceiptsVatEvents(totals, evs.map((e) => e.event))
       // T2 (cycle R4) : la catégorie « avoir ciblé après encaissement antérieur, facture multi-taux » est détectée STRUCTURELLEMENT
       // (chronologie des dates métier), indépendamment du résultat de l'allocation et de l'ordre de tri des événements d'un même jour :
@@ -176,7 +202,9 @@ export async function computeVat(db: Db, ctx: { companyId: string }, periodStart
         ...inv.creditNotes.map(c => ({ date: c.issueDate, recordedAt: new Date(Math.max(c.createdAt.getTime(), c.sentAt?.getTime() ?? 0)), source: `avoir ${c.number}` })),
       ]
       for (const e of recordedEvents) {
-        const d = declaredEnc.find(x => x.declaredAt && e.date >= x.periodStart && e.date <= declaredEndOf(x) && e.recordedAt > x.declaredAt)
+        // Les dates ne servent qu'à expliquer une divergence DÉJÀ prouvée par l'empreinte
+        // (ou l'absence de preuve héritée), jamais à contredire un historique inclus identique.
+        const d = changedHistory && changedHistory.declaredAt && e.date >= changedHistory.periodStart && e.date <= declaredEndOf(changedHistory) && e.recordedAt > changedHistory.declaredAt ? changedHistory : undefined
         if (d && e.date < periodStart && (!late || day(e.date) < late.at)) late = { at: day(e.date), date: e.date, source: e.source, period: `${d.periodStart.toISOString().slice(0, 10)} → ${d.periodEnd.toISOString().slice(0, 10)}` }
       }
       let inPeriodEvents = 0, excessWarned = false, dependent = 0, dependentLate = 0
@@ -211,6 +239,10 @@ export async function computeVat(db: Db, ctx: { companyId: string }, periodStart
         warnings.push(`${dependent} mouvement(s) de trésorerie de la facture ${inv.number} dans la période : ventilation de la TVA par taux dépendante de la réaffectation non validée (avoir ${taint.credit.number} du ${taint.credit.date.toISOString().slice(0, 10)}, ${why}) — déclaration de cette période refusée tant que ce cas n'est pas résolu avec l'expert-comptable ; les mouvements antérieurs à l'avoir et les autres factures ne sont pas concernés.`)
       }
       if (late && dependentLate > 0) warnings.push(`${dependentLate} événement(s) de la facture ${inv.number} dans la période : allocation cumulative dépendante d'un ${late.source} du ${late.date.toISOString().slice(0, 10)} saisi après la déclaration de la période ${late.period} (événement absent de la déclaration figée, jamais réécrite) — déclaration de cette période refusée tant que la régularisation n'est pas traitée avec l'expert-comptable.`)
+      if (changedHistory && !late && inPeriodEvents > 0) {
+        const hasProof = readAllocationHistory(changedHistory.details) !== null
+        warnings.push(`Facture ${inv.number} : historique d'allocation ${hasProof ? "différent des événements effectivement inclus" : "non vérifiable (déclaration historique sans empreinte)"} dans la déclaration figée du ${changedHistory.periodStart.toISOString().slice(0, 10)} au ${changedHistory.periodEnd.toISOString().slice(0, 10)} — déclaration de cette période refusée ; régularisation à traiter avec l'expert-comptable, sans réécriture de la déclaration antérieure.`)
+      }
       if (inPeriodEvents > 0) documents++
     }
   }
@@ -239,6 +271,6 @@ export async function computeVat(db: Db, ctx: { companyId: string }, periodStart
       warnings.push(`Période déjà déclarée (${label}) : le recalcul (${centsToDecimalString(collectedCents)} € collectés, ${centsToDecimalString(deductible)} € déductibles) diffère de la déclaration figée (${centsToDecimalString(d.collectedCents)} € / ${centsToDecimalString(d.deductibleCents)} €) — la déclaration n'est pas réécrite.`)
     }
   }
-  return { basis, periodStart, periodEnd, collected, collectedCents, deductibleCents: deductible, dueCents: collectedCents - deductible, documents, payments, adjustments, supplierInvoices: supplier.length, warnings }
+  return { ...(basis === "ENCAISSEMENTS" ? { allocationHistory } : {}), basis, periodStart, periodEnd, collected, collectedCents, deductibleCents: deductible, dueCents: collectedCents - deductible, documents, payments, adjustments, supplierInvoices: supplier.length, warnings }
 }
 

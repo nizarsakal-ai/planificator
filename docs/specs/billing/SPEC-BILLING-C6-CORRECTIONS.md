@@ -191,3 +191,15 @@ Suites `test:billing:fix` (unitaires), `test:billing:fix:pg` (P1-01 … P2-03, c
 ## Cycle R6 Codex — V1, avoir saisi après déclaration
 
 La revue indépendante de 41ff27f démontre un avoir antidaté avant les encaissements mais saisi après déclaration : février figé 652 c, recalculé 455 c, mars accepté 545 c (1 197 c cumulés au lieu de 1 000 c). La garde des encaissements tardifs couvrait seulement les paiements. Elle prend désormais aussi les avoirs émis (date de saisie ou d'émission la plus tardive) ; les événements dépendants des périodes suivantes sont refusés, sans réécrire la déclaration figée ni produire de régularisation fiscale automatique. Régression r16, deux exercices ; reproduction indépendante originale rejouée avec assertions de refus. Aucun changement de migration.
+
+## Cycle R7 Codex — W1, inclusion dans l'instantané déclaré
+
+Une date de création/émission ne prouve pas la visibilité transactionnelle. La revue indépendante de32d8c81 a démontré qu'un avoir peut être écrit avant une déclaration et commité après : février652c figé, mars545c accepté, total1197c contre1000c recalculés.
+
+Pour chaque facture ayant un événement dans la période, computeVat calcule une empreinte SHA256 canonique de l'assiette initiale et de tous les paiements/contre-passations/avoirs effectivement visibles jusqu'à la fin de période (identifiants, dates métier, montants et ventilation par taux). declareVat archive ce manifeste version1 dans son JSON details existant, dans le même snapshot SERIALIZABLE que ses montants. Aucun champ de schéma ni migration ajoutés.
+
+Une période ultérieure compare l'historique de ses factures dépendantes à celui effectivement figé dans chaque déclaration antérieure. Toute divergence refuse la déclaration ; les dates ne servent plus que d'explication. Les compensations de montants ne masquent pas les différences d'événements. Une transaction rollbackée ne change pas l'empreinte. Un événement commité avant l'instantané fait partie du manifeste et n'entraîne aucun refus par cette garde.
+
+Déclarations d'une ancienne version sans manifeste, version inconnue ou manifeste malformé : refus conservatoire uniquement pour les factures présentant un événement dans cette période déclarée et un événement dépendant dans la période courante. Aucun manifeste n'est reconstruit rétroactivement ; régularisation hors module avec l'expert-comptable. Les autres factures/sociétés et le régime débits ne sont pas modifiés par cette garde. L'activation doit présenter explicitement cette limite de compatibilité.
+
+Régression r17 : deux connexions indépendantes avec barrière après les écritures métier mais avant commit ; avoir, paiement, contre-passation, compensation, rollback, commit avant déclaration ; absence d'écriture lors du refus et conservation des montants figés. La garde protège les déclarations futures, elle ne réécrit pas une déclaration déjà figée et ne produit aucune régularisation fiscale automatique.

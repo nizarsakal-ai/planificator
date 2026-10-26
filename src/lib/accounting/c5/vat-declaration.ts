@@ -54,6 +54,7 @@ export async function declareVat(db: Db, ctx: AccountingContext, periodStart: Da
             collected: v.collected.map((r) => ({ vatRateBp: r.vatRateBp, baseCents: r.baseCents.toString(), vatCents: r.vatCents.toString() })),
             documents: v.documents, payments: v.payments, adjustments: v.adjustments, supplierInvoices: v.supplierInvoices,
             warnings: v.warnings, outOfContractChecked: true,
+            ...(v.allocationHistory ? { allocationHistory: v.allocationHistory } : {}),
           } as Prisma.InputJsonValue,
           status: "DECLARED", declaredAt: new Date(), createdById: ctx.userId,
         },
