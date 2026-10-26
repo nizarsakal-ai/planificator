@@ -35,7 +35,7 @@ function makeTx(seed: Row[], lines: Row[] = []) {
   const tx = {
     // Correctif R2 : le cœur verrouille le parent (SELECT … FOR UPDATE) avant la lecture ; sans base, le verrou est un no-op.
     $queryRaw: async () => [],
-    invoiceDepositDeduction: { count: async () => 0 }, // S1 (même famille) : aucune déduction dans ces scénarios Lot B
+    invoiceDepositDeduction: { count: async () => 0, updateMany: async () => ({ count: 0 }) }, // S1/T1 : aucune déduction dans ces scénarios Lot B (libération = no-op)
     invoice: {
       count: async () => 0,
       findFirst: async ({ where, select }: { where: Record<string, unknown>; select?: Record<string, unknown> }) => {

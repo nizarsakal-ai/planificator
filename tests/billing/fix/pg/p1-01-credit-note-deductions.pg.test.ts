@@ -115,6 +115,7 @@ describe("P1-01 — cas de référence : prestation 100 € HT, remise globale 1
     const copyLines = (noteId: string, keepMarker: boolean) => fin.lines.map((l, i) => `('${noteId}-l${i}','${noteId}',${l.articleId ? `'${l.articleId}'` : "NULL"},'${l.designation.replace(/'/g, "''")}',${l.description ? `'${l.description.replace(/'/g, "''")}'` : "NULL"},'${l.unit}',${l.quantity},${l.unitPrice},${l.vatRate},${l.lineHT},${l.position},${l.discountBp},${keepMarker && l.deductsDepositId ? `'${l.deductsDepositId}'` : "NULL"})`).join(",")
     const attempt = (noteId: string, keepMarker: boolean) => db.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(`UPDATE invoices SET status='CANCELLED' WHERE id='${f}' AND status='SENT'`)
+      await tx.$executeRawUnsafe(`UPDATE invoice_deposit_deductions SET "releasedAt"=now() WHERE "finalInvoiceId"='${f}' AND "releasedAt" IS NULL`) // T1 : l'annulation d'un solde émis libère ses affectations (trace conservée)
       await tx.$executeRawUnsafe(`INSERT INTO invoices(id,"companyId","worksiteId","clientId","quoteId",number,"createdById","updatedAt",status,kind,"creditScope","creditedInvoiceId","totalHT","totalVAT","totalTTC","globalDiscountBp","vatReverseCharge") VALUES ('${noteId}','coA','wA','clA','${q}','AV-SQL-${noteId}','admA',now(),'DRAFT','CREDIT_NOTE','TOTAL','${f}',${fin.totalHT},${fin.totalVAT},${fin.totalTTC},${fin.globalDiscountBp},${fin.vatReverseCharge})`)
       await tx.$executeRawUnsafe(`INSERT INTO invoice_lines(id,"invoiceId","articleId",designation,description,unit,quantity,"unitPrice","vatRate","lineHT",position,"discountBp","deductsDepositId") VALUES ${copyLines(noteId, keepMarker)}`)
       await tx.$executeRawUnsafe(`UPDATE invoices SET status='SENT', "sentAt"=now() WHERE id='${noteId}'`)
@@ -126,6 +127,7 @@ describe("P1-01 — cas de référence : prestation 100 € HT, remise globale 1
     assert.equal((await db.invoice.findUniqueOrThrow({ where: { id: f } })).status, "SENT", "rollback complet : la facture n'est pas annulée")
     await attempt("cn-kept", true)
     assert.equal((await db.invoice.findUniqueOrThrow({ where: { id: f } })).status, "CANCELLED")
+    assert.ok((await db.invoiceDepositDeduction.findFirstOrThrow({ where: { finalInvoiceId: f } })).releasedAt, "T1 : trace libérée, conservée")
     assert.match(await sqlError(db, `UPDATE invoice_lines SET "deductsDepositId"=NULL WHERE "invoiceId"='cn-kept'`), /INVOICE_IMMUTABLE/)
     assert.match(await sqlError(db, `UPDATE invoices SET "totalTTC"=59.40 WHERE id='cn-kept'`), /INVOICE_IMMUTABLE/)
     assert.equal((await db.invoice.findUniqueOrThrow({ where: { id: dep } })).status, "SENT")

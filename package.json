@@ -41,7 +41,7 @@
     "test:billing:fix:autopost:pg": "node --import tsx --experimental-test-module-mocks --test --test-concurrency=1 tests/billing/fix/pg/flags-autopost.pg.test.ts",
     "test:billing:fix:cross:pg": "node --import tsx --test --test-concurrency=1 tests/billing/fix/pg/campaign-cross-fec.pg.test.ts",
     "test:billing:fix:flags:pg": "node --import tsx --test --test-concurrency=1 tests/billing/fix/pg/flags-matrix.pg.test.ts",
-    "test:billing:fix:legacy:pg": "sh tests/billing/pg/legacy/run-legacy-campaign.sh coherent && sh tests/billing/pg/legacy/run-legacy-campaign.sh cross-company && sh tests/billing/pg/legacy/run-legacy-campaign.sh stale-match",
+    "test:billing:fix:legacy:pg": "sh tests/billing/pg/legacy/run-legacy-campaign.sh coherent && sh tests/billing/pg/legacy/run-legacy-campaign.sh cross-company && sh tests/billing/pg/legacy/run-legacy-campaign.sh stale-match && sh tests/billing/pg/legacy/run-legacy-campaign.sh deduction-orphan && sh tests/billing/pg/legacy/run-legacy-campaign.sh cancelled-final",
     "test:invitations": "node --import tsx --experimental-test-module-mocks --test tests/employes/invitation-superadmin.action.test.ts",
     "test:invitations:pg": "node --import tsx tests/employes/pg/invitation-superadmin-run.ts test",
     "test:navigation": "node --import tsx --test tests/navigation/nav-config.test.ts",

@@ -71,14 +71,17 @@ describe("#10 — withLockRetry sur un vrai interblocage PostgreSQL (P2010 / 40P
 })
 
 describe("#3 / #2 / #5 / #14 — déductions et chemin Lot B", () => {
-  it("#3 : acompte annulé par avoir alors qu'il est déduit sur un brouillon ⇒ l'émission du solde (Lot C : mismatch ; SQL direct : contrainte différée) est refusée", async () => {
+  it("#3 : acompte affecté à un brouillon de solde ⇒ avoir refusé (T1 : une affectation active) ; après abandon du brouillon ⇒ avoir OK ; une liaison vers un acompte annulé est refusée dès l'INSERT (SQL direct) et à l'émission (contrainte différée)", async () => {
     const q = await acceptedQuote(db, A, "wA", L)
     const dep = await issuedDeposit(db, A, q, { kind: "PERCENT", bp: 3000 })
     const fin = await finalDraft(db, A, q)
-    const cn = await totalNote(dep); assert.ok(cn.ok, js(cn)) // permis : le solde est encore brouillon
-    assert.equal((await issueInvoice(db, A, fin, NOW)).ok, false)
-    await db.$executeRawUnsafe(`UPDATE invoices SET number = 'FAC-2026-7790' WHERE id = '${fin}'`)
-    await assert.rejects(db.$transaction(async (tx) => { await tx.$executeRawUnsafe(`UPDATE invoices SET status = 'SENT', "sentAt" = now() WHERE id = '${fin}'`); await flushDeferredConstraints(tx) }), /DEPOSIT_DEDUCTION_INVALID: 1 liaison/)
+    const cn = await totalNote(dep); assert.equal(cn.ok, false); assert.match((cn as { error: string }).error, /brouillon de facture de solde/)
+    const abandon = await db.$transaction(async (tx) => { const r = await transitionInvoiceCore(tx, { companyId: "coA", invoiceId: fin, actorId: "admA", to: "CANCELLED", now: NOW }); if (r.ok) await flushDeferredConstraints(tx); return r }); assert.ok(abandon.ok, js(abandon))
+    const cn2 = await totalNote(dep); assert.ok(cn2.ok, js(cn2))
+    // Nouveau solde : l'acompte annulé n'est plus déduit (1 200 €) ; une liaison SQL vers cet acompte annulé est refusée à l'insertion.
+    const fin2 = await finalDraft(db, A, q)
+    assert.equal((await db.invoice.findUniqueOrThrow({ where: { id: fin2 } })).totalTTC.toString(), "1200")
+    await assert.rejects(db.$executeRawUnsafe(`INSERT INTO invoice_deposit_deductions(id,"companyId","finalInvoiceId","depositInvoiceId","amountTTCCents") VALUES ('bad-${dep}','coA','${fin2}','${dep}',36000)`), /DEPOSIT_DEDUCTION_INVALID: seul un acompte émis/)
   })
   it("#2 : chemin Lot B — une facture FAC liée à un devis porteur d'acomptes ne s'émet pas par transitionInvoiceCore ; sans acompte, elle s'émet avec la date d'émission du jour Paris de la décision (#14)", async () => {
     const q = await acceptedQuote(db, A, "wA", L)
