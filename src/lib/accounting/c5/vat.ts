@@ -130,7 +130,7 @@ export async function computeVat(db: Db, ctx: { companyId: string }, periodStart
       select: {
         ...docSelect,
         payments: { select: { id: true, amountCents: true, paidAt: true, createdAt: true } },
-        creditNotes: { where: { kind: "CREDIT_NOTE", status: { in: ["SENT", "PAID"] } }, select: { ...docSelect, issueDate: true, createdAt: true } },
+        creditNotes: { where: { kind: "CREDIT_NOTE", status: { in: ["SENT", "PAID"] } }, select: { ...docSelect, issueDate: true, createdAt: true, sentAt: true } },
       },
       orderBy: { number: "asc" },
     })
@@ -166,10 +166,18 @@ export async function computeVat(db: Db, ctx: { companyId: string }, periodStart
       let taint: { credit: Ev; kind: "prior" | "sameDay" } | null = null
       if (multiRate) for (const c of credits) { const k = netPriorOf(c) !== BigInt(0) ? "prior" : sameDayOf(c) > 0 ? "sameDay" : null; if (k && (!taint || c.at < taint.credit.at)) taint = { credit: c, kind: k } }
       const taintInPeriod = !!taint && taint.credit.date >= periodStart && taint.credit.date <= end
-      let late: { at: number; date: Date; period: string } | null = null
-      for (const p of inv.payments) {
-        const d = declaredEnc.find((x) => x.declaredAt && p.paidAt >= x.periodStart && p.paidAt <= declaredEndOf(x) && p.createdAt > x.declaredAt)
-        if (d && p.paidAt < periodStart && (!late || day(p.paidAt) < late.at)) late = { at: day(p.paidAt), date: p.paidAt, period: `${d.periodStart.toISOString().slice(0, 10)} → ${d.periodEnd.toISOString().slice(0, 10)}` }
+      let late: { at: number; date: Date; source: string; period: string } | null = null
+      // Les avoirs font partie du même historique cumulatif que les paiements. Leur date métier
+      // peut précéder un paiement déjà déclaré alors que leur saisie/émission est postérieure.
+      // Dans ce cas le test « avoir après encaissement » ne suffit pas : la période figée manque
+      // l'avoir, et la ventilation des événements suivants doit rester bloquée.
+      const recordedEvents = [
+        ...inv.payments.map(p => ({ date: p.paidAt, recordedAt: p.createdAt, source: "encaissement" })),
+        ...inv.creditNotes.map(c => ({ date: c.issueDate, recordedAt: new Date(Math.max(c.createdAt.getTime(), c.sentAt?.getTime() ?? 0)), source: `avoir ${c.number}` })),
+      ]
+      for (const e of recordedEvents) {
+        const d = declaredEnc.find(x => x.declaredAt && e.date >= x.periodStart && e.date <= declaredEndOf(x) && e.recordedAt > x.declaredAt)
+        if (d && e.date < periodStart && (!late || day(e.date) < late.at)) late = { at: day(e.date), date: e.date, source: e.source, period: `${d.periodStart.toISOString().slice(0, 10)} → ${d.periodEnd.toISOString().slice(0, 10)}` }
       }
       let inPeriodEvents = 0, excessWarned = false, dependent = 0, dependentLate = 0
       evs.forEach((e, i) => {
@@ -202,7 +210,7 @@ export async function computeVat(db: Db, ctx: { companyId: string }, periodStart
         const why = taint.kind === "prior" ? "après encaissement antérieur" : "le même jour qu'un encaissement (chronologie non prouvée)"
         warnings.push(`${dependent} mouvement(s) de trésorerie de la facture ${inv.number} dans la période : ventilation de la TVA par taux dépendante de la réaffectation non validée (avoir ${taint.credit.number} du ${taint.credit.date.toISOString().slice(0, 10)}, ${why}) — déclaration de cette période refusée tant que ce cas n'est pas résolu avec l'expert-comptable ; les mouvements antérieurs à l'avoir et les autres factures ne sont pas concernés.`)
       }
-      if (late && dependentLate > 0) warnings.push(`${dependentLate} événement(s) de la facture ${inv.number} dans la période : allocation cumulative dépendante d'un encaissement du ${late.date.toISOString().slice(0, 10)} saisi après la déclaration de la période ${late.period} (jamais déclaré, déclaration figée non réécrite) — déclaration de cette période refusée tant que la régularisation n'est pas traitée avec l'expert-comptable.`)
+      if (late && dependentLate > 0) warnings.push(`${dependentLate} événement(s) de la facture ${inv.number} dans la période : allocation cumulative dépendante d'un ${late.source} du ${late.date.toISOString().slice(0, 10)} saisi après la déclaration de la période ${late.period} (événement absent de la déclaration figée, jamais réécrite) — déclaration de cette période refusée tant que la régularisation n'est pas traitée avec l'expert-comptable.`)
       if (inPeriodEvents > 0) documents++
     }
   }
