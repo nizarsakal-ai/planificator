@@ -2,8 +2,8 @@
 
 | Champ | Valeur |
 |-------|--------|
-| **Statut** | Implémenté localement (branche `fix/billing-c-codex-corrections`, base `68b2504`) — cycle R2 (revue Codex NO-GO sur `27808b8`, constats R1–R5) intégré ; en attente de nouvelle revue Codex ; verdict de référence NO-GO non levé par ce document |
-| **Source** | `CODEX_REVIEW_LOT_C.md`, `MANDAT_CLAUDE_CORRECTIONS_LOT_C.md` et `CODEX_REVIEW_CORRECTIONS_LOT_C.md` (NO-GO R1–R5) du 26/10/2026 |
+| **Statut** | Implémenté localement (branche `fix/billing-c-codex-corrections`, base `68b2504`) — cycles R2 (R1–R5) et R3 (revue Codex NO-GO sur `1ae6096` : S1, S2, S3, réserve fiscale R1) intégrés ; en attente de nouvelle revue Codex ; verdict de référence NO-GO non levé par ce document |
+| **Source** | `CODEX_REVIEW_LOT_C.md`, `MANDAT_CLAUDE_CORRECTIONS_LOT_C.md`, `CODEX_REVIEW_CORRECTIONS_LOT_C.md` (NO-GO R1–R5) et `CODEX_REVIEW_CORRECTIONS_LOT_C_R2.md` (NO-GO S1–S3) du 26/10/2026 |
 | **Drapeaux** | inchangés (`BILLING_COMPLETE_ENABLED`, `ACCOUNTING_MODULE_ENABLED`, `ACCOUNTING_AUTO_POSTING_ENABLED`, `BILLING_MAIL_ENABLED`, `BILLING_OCR_ENABLED`), tous OFF par défaut dans le code |
 
 Cette spécification complète C1–C5 sans réécrire leur histoire : lorsqu'une règle ci-dessous contredit une formulation antérieure, la règle ci-dessous prime.
@@ -18,6 +18,8 @@ Cette spécification complète C1–C5 sans réécrire leur histoire : lorsqu'un
 | `20261026053000_billing_fix_p2_03_document_snapshot` | Table `invoice_document_snapshots` (vendeur, acheteur, document : mentions, conditions, pied de page, chantier, références ; `schemaVersion`), immuable (déclencheur), insérable uniquement pour une pièce émise de la même société. |
 | `20261026054000_billing_fix_p2_01_bank_import_identity` | `bank_transactions.externalId` (unique par société), `occurrence` (≥ 1), `identityAmbiguous`. |
 | `20261026060000_billing_fix_r4_bank_collisions` (cycle R2) | `bank_transactions.tupleKey` (empreinte du tuple sans rang, indexée), `collisionOfId` (FK composite société → opération de provenance), `collisionResolution` (`DUPLICATE` / `DISTINCT`), `collisionResolvedAt`, CHECK de cohérence ; reprise : `tupleKey` = empreinte pour l'occurrence 1 ; occurrences > 1 (jamais déployées hors bases jetables) ⇒ précontrôle explicite, aucun recalcul SQL. |
+| `20261026062000_billing_fix_s1_deduction_consistency` (cycle R3) | Contrainte différée `invoice_deductions_consistency_check` : à l'émission d'une facture de solde, chaque liaison `invoice_deposit_deductions` doit avoir sa ligne `deductsDepositId`, le devis lié doit être renseigné et égal à celui de l'acompte, et chaque ligne de déduction doit avoir sa liaison. **Précontrôle** : factures de solde émises déjà incohérentes ⇒ arrêt explicite. |
+| `20261026063000_billing_fix_s2_deposit_ceiling_trigger` (cycle R3) | Contrôle différé du plafond des acomptes (C3) restreint à `INSERT OR UPDATE OF totalTTC, quoteId, kind, companyId` : plus de verrou du devis sur un simple changement de statut d'un acompte (paiement, avoir, abandon) — suppression de l'arête acompte → devis au COMMIT. Fonction inchangée. |
 | `20261026061000_billing_fix_r2_same_family_uniques` (cycle R2) | Index uniques partiels : une facture de solde (`kind INVOICE`) non annulée par devis et société ; une facture fournisseur `VALIDATED` par (société, fournisseur, numéro). **Précontrôle** : des doublons existants arrêtent la migration (`BILLING_FIX_PRECHECK`), aucune réparation automatique. |
 
 ## 2. Règles par constat
@@ -84,10 +86,37 @@ Snapshot structuré versionné à l'émission (facture, acompte, avoir — y com
 
 ### Même famille (audit interne du cycle R2, corrigés)
 - Acompte et émission du solde sérialisés par le verrou du devis ; un acompte ne s'émet jamais après l'émission du solde (`deposit.service.ts`).
-- Une seule facture de solde non annulée par devis (contrôle sous verrou du devis + index unique partiel ; violation traduite « Ce devis est déjà lié à une facture. »). **Ordre global des verrous** : facture → devis → acomptes (documenté dans `deposit.service.ts`).
+- Une seule facture de solde non annulée par devis (contrôle sous verrou du devis + index unique partiel ; violation traduite « Ce devis est déjà lié à une facture. »). **Ordre global des verrous** (révisé au cycle R3, S2) : devis → facture → acomptes (documenté dans `deposit.service.ts`).
 - Une seule facture fournisseur validée par (fournisseur, numéro) (index unique partiel + verrou consultatif par nom de fournisseur sans SIRET).
 - Courrier de renvoi bâti sur les données relues sous verrou ; relance conditionnée au hachage lu (un renvoi concurrent n'est jamais écrasé) et à l'instant courant.
-- Non corrigés, documentés (DECISIONS du cycle R2) : date d'émission/série annuelle calculées en UTC avant verrou (B1/B2), déductions d'acompte orphelines après retrait du devis d'un brouillon (A3), contrôles d'émission et snapshot lus dans des instructions distinctes (A7), relances de factures sur reste dû lu avant réclamation (A8), fusion des lignes d'import de devis par référence (D1), fichier fournisseur déjà présent non bloquant (D2/E1), export FEC servi malgré SIREN manquant (E2), rapprochement automatique sur « montant exact » lu hors verrou (E3), acceptation manuelle d'un devis périmé (B5).
+- Non corrigés au cycle R2, documentés (DECISIONS R2) ; **B1/B2 et A3 corrigés au cycle R3 (S3, S1)** : contrôles d'émission et snapshot lus dans des instructions distinctes (A7), relances de factures sur reste dû lu avant réclamation (A8), fusion des lignes d'import de devis par référence (D1), fichier fournisseur déjà présent non bloquant (D2/E1), export FEC servi malgré SIREN manquant (E2), rapprochement automatique sur « montant exact » lu hors verrou (E3), acceptation manuelle d'un devis périmé (B5).
+
+## 2 ter. Cycle R3 — constats S1 à S3 de la revue Codex R2 (NO-GO sur `1ae6096`) et réserve fiscale R1
+
+### S1 — Devis lié d'une facture de solde avec acomptes déduits
+- `updateDraftInvoice` **refuse** le retrait ou le changement du devis lié dès qu'une liaison d'acompte ou une ligne de déduction existe (`INVOICE_C2_ERRORS.quoteLocked`), avant toute écriture ; la sémantique d'un « détachement » n'étant pas définie, aucune reconstruction n'est tentée. Le retrait/changement reste possible sans acompte déduit (les déductions suivent alors le nouveau devis). L'abandon du brouillon (Lot B `CANCELLED`) supprime les liaisons : l'acompte redevient déductible sur une nouvelle facture de solde.
+- `depositIssueChecks` contrôle aussi **sans devis** : une liaison ou une ligne de déduction orpheline refuse l'émission (`orphanDeductions`). La base impose l'invariant à l'émission quel que soit le chemin (Lot B inclus) : migration `20261026062000`.
+- Tests : `tests/billing/fix/pg/r7-s1-deductions-quote.pg.test.ts` (reproduction Codex, changement de devis, rollback total, état corrompu par SQL refusé par le service et la base, chemin Lot B `setInvoiceLines`, PDF/snapshot, réutilisation de l'acompte).
+
+### S2 — Ordre global des verrous
+- **DEVIS → FACTURE → ACOMPTES** pour tous les chemins de facturation : `issueInvoiceCore` verrouille le devis lié (lu avant tout verrou) puis la facture, relit le lien et refuse en cas de changement (conflit) ; `updateDraftInvoice` verrouille les devis concernés (ancien et nouveau, par identifiant croissant) puis la facture ; `depositIssueChecks` reprend le verrou du devis (ré-entrant) puis les acomptes ; création d'acompte, conversion et création de brouillon ne tiennent aucune facture avant le devis ; avoirs, paiements et chemin Lot B ne verrouillent que la facture. Défense en profondeur : `withLockRetry` rejoue (3 essais) une transaction victime d'interblocage (P2034) pour `issueInvoice`/`updateDraftInvoice`.
+- Tests : `r8-s2-lock-order.pg.test.ts` (deux connexions, barrières : acompte DRAFT vs solde dans les deux ordres ⇒ sérialisation et refus explicites, jamais 40P01 ; rejeu borné). Le harnais de Codex (parents verrouillés avant le devis) reproduit un protocole que l'application n'emploie plus.
+
+### S3 — Jour métier Europe/Paris et horloge de décision
+- `src/lib/billing/business-day.ts` : date d'émission = jour civil Europe/Paris de l'instant de décision ; série annuelle (FAC, AV, PROV, DEV dupliqué) = son année ; échéance = émission + délai en jours civils. Appliqué aux factures/acomptes (`issueInvoiceCore`), avoirs partiels (`createPartialCreditNote`), avoirs totaux Lot B (`createCreditNoteCore`, numéro via `nextNumber(tx, at)`), brouillons PROV, devis dupliqués ; `nextDocumentNumber` par défaut = année Paris de l'horloge serveur.
+- `decisionClock(start, clock)` (remplace `decisionInstant`) : créée **avant** les verrous, elle renvoie le début de requête **avancé du temps réellement écoulé** (attente du verrou incluse). Un `now` simulé (tests, rejeux) conserve sa chronologie ; en production début de requête ≈ heure réelle. Exemple : 2026-12-31T23:30:00Z ⇒ FAC-2027-0001, issueDate 2027-01-01.
+- Tests : `r9-s3-paris-day.pg.test.ts` (reproduction Codex, hiver/été, avoirs partiel et total, attente de verrou franchissant minuit) ; `fix-unit.test.ts` (R3).
+
+### Même famille (audit interne du cycle R3, corrigés)
+- `lockQuoteRow` = `FOR NO KEY UPDATE` : exclusif entre décisions métier, compatible avec les KEY SHARE des clés étrangères des pièces insérées (avoir sur un acompte, lignes de déduction) ; `withLockRetry` rejoue les interblocages réels (P2010/40P01) comme les P2034.
+- Chemin Lot B : `transitionInvoiceCore` verrouille le devis lié avant la facture et **refuse** d'émettre une facture liée à un devis porteur d'acomptes (`quoteHasDeposits`) ; `replaceDraftLinesCore` refuse un brouillon de solde avec déductions (`hasDeductions`) ; la date d'émission Lot B devient le jour civil Paris de la décision ; `createInvoice` verrouille le devis avant le compteur.
+- Contrainte S1 : une liaison vers un acompte non émis (brouillon, annulé par avoir) est refusée à l'émission.
+- Contre-passation datée du jour civil Paris de la décision ; « aujourd'hui », mois/année du tableau de bord, échéances (`todayUtc`), période non terminée (déclaration), défaut d'import de devis, date de saisie d'écriture et `ValidDate` du FEC dérivent du jour civil Paris.
+- Émission : fiches client et société lues sous `FOR SHARE` avant les contrôles (même version figée dans le snapshot). Fichier fournisseur d'une facture rejetée réutilisable.
+- Décisions produit documentées, non corrigées (DECISIONS R3-D05) : acompte lié à un solde annulé par avoir total ; contre-passation d'un paiement rapproché ; échéance figée à la conversion ; avoir par montant sur solde avec déductions ; cadence des relances.
+
+### Réserve fiscale R1 (cycle R3)
+Tant que la réaffectation par taux d'un encaissement antérieur à un avoir ciblé (facture multi-taux) n'est pas validée par l'expert-comptable, le calcul la **signale hors contrat** (`warnings`) ⇒ la déclaration de la période est **refusée** (R5). L'aperçu reste calculé ; aucune extension du périmètre fiscal. Un avoir ciblé sans encaissement antérieur (oracle Codex 230 − 120 = 110 €) n'est pas concerné.
 
 ## 3. TVA sur les encaissements — table des règles
 
@@ -97,7 +126,7 @@ Snapshot structuré versionné à l'émission (facture, acompte, avoir — y com
 | Paiements fractionnés, centimes, taux multiples | Σ parts = TVA de la facture par taux au terme du règlement ; aucune dérive | Choix d'implémentation (testé) |
 | Contre-passation d'un paiement | Mouvement négatif ⇒ part négative exacte du paiement annulé, dans la période de la contre-passation | Régularisation reliée à un événement et à une base antérieure |
 | Avoir (partiel/total) sans mouvement de trésorerie | Aucune TVA « négative » sur les encaissements ; l'avoir réduit le reste dû | CGI art. 272-1 : imputation/restitution conditionnée à la rectification de la facture ET à l'absence d'encaissement conservé ; BOI-TVA-DED-40-10-20 |
-| Avoir après paiement partiel (partie non encaissée) | TVA déjà collectée conservée en montant total pour un taux unique ; facture multi-taux : réaffectation par taux datée de l'avoir (l'encaissement conservé couvre la facture nette) — R1 | Même fondement ; ventilation = choix d'implémentation (testé), à confirmer par l'expert-comptable |
+| Avoir après paiement partiel (partie non encaissée) | TVA déjà collectée conservée en montant total pour un taux unique ; facture multi-taux : réaffectation par taux datée de l'avoir, **signalée hors contrat ⇒ déclaration refusée** tant que l'expert-comptable ne l'a pas validée (cycle R3) | Même fondement ; ventilation = hypothèse non validée |
 | Avoir ciblé puis encaissement du reste (multi-taux) | Assiette nette de l'avoir : la TVA encaissée est celle des postes restants (ex. 230 − 120 = 110 € ⇒ 10 € @10 %) — R1 | BOI-TVA-BASE-20-20 (exigibilité à l'encaissement) ; oracle déduit des pièces |
 | Avoir total sur facture encaissée | Non régularisé automatiquement ; avertissement ; remboursement non pris en charge | **Cas non couvert** — décision expert-comptable requise (restitution art. 272-1 après remboursement effectif) |
 | Débits (option) | TVA des pièces émises par date d'émission, avoirs en négatif | CGI art. 269-2-c (option pour les débits) ; inchangé |
@@ -109,4 +138,4 @@ Sources officielles : [CGI art. 269](https://www.legifrance.gouv.fr/codes/articl
 
 ## 4. Critères d'acceptation (tests livrés)
 
-Suites `test:billing:fix` (unitaires), `test:billing:fix:pg` (P1-01 … P2-03, puis cycle R2 : `r1-vat-credit-allocation`, `r2-legacy-issue-race`, `r3-decision-clock`, `r4-bank-collisions`, `r5-vat-declaration-guard`, `r6-same-family`), `test:billing:fix:actions:pg` (actions HTTP, session simulée), `test:billing:fix:campaign:pg` (parcours croisé + FEC, matrice des drapeaux), `tests/billing/pg/legacy/run-legacy-campaign.sh` (migration héritée synthétique, précontrôles). Index constat → test → invariant : `MATRICE-11-CONSTATS.md` (cycle 1) et `MATRICE-R1-R5.md` (cycle R2) des dossiers de restitution.
+Suites `test:billing:fix` (unitaires), `test:billing:fix:pg` (P1-01 … P2-03, cycle R2 : `r1`…`r6`, cycle R3 : `r7-s1-deductions-quote`, `r8-s2-lock-order`, `r9-s3-paris-day`, `r10-same-family-r3`), `test:billing:fix:actions:pg` (actions HTTP, session simulée), `test:billing:fix:campaign:pg` (parcours croisé + FEC, matrice des drapeaux), `tests/billing/pg/legacy/run-legacy-campaign.sh` (migration héritée synthétique, précontrôles). Index constat → test → invariant : `MATRICE-11-CONSTATS.md` (cycle 1), `MATRICE-R1-R5.md` (cycle R2) et `MATRICE-S1-S3.md` (cycle R3) des dossiers de restitution.
