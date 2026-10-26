@@ -34,12 +34,16 @@ Exclus : multi-devise, Factur-X, télédéclaration, lettrage avancé, OFX (CSV 
 CA HT du mois et de l'année (factures et acomptes émis non annulés, avoirs déduits, par `issueDate`), factures impayées (nombre, reste dû), TVA à déclarer (collectée − déductible sur la période courante selon le régime), CA HT des 12 derniers mois (graphique), répartition des charges fournisseurs validées par catégorie (année).
 
 ### 3.3 TVA
+> Base « encaissements » **redéfinie** par le correctif P1-02 (SPEC-BILLING-C6 §2–3) : mouvements de trésorerie seulement, allocation cumulative par taux, avoirs non déduits sans remboursement.
+
 Période [début, fin] ; base **débits** : TVA des factures/acomptes émis − avoirs par `issueDate` ; base **encaissements** : TVA incluse dans les paiements de la période, au prorata des bases par taux de la facture (TVA = paiement × TVA_taux / TTC) ; déductible : TVA des factures fournisseurs validées par date. Détail par taux. « Enregistrer la déclaration » fige les montants (DECLARED) ; une déclaration existante pour la même période est refusée.
 
 ### 3.4 Export FEC (art. A47 A-1 LPF)
 Écritures **validées** de l'exercice choisi, 18 colonnes séparées par `|` : JournalCode, JournalLib, EcritureNum (numéro par journal), EcritureDate (AAAAMMJJ), CompteNum, CompteLib, CompAuxNum, CompAuxLib (vides), PieceRef (documentRef), PieceDate, EcritureLib, Debit, Credit (virgule décimale), EcritureLet, DateLet (vides), ValidDate, Montantdevise, Idevise (vides) ; ordre chronologique (date, journal, numéro, position) ; nom `SIRENFECAAAAMMJJ.txt` (SIREN dérivé du SIRET de la société ; `000000000` + avertissement si absent) ; encodage UTF-8, fin de ligne CRLF.
 
 ### 3.5 Banque et rapprochement
+> **Remplacé** par les correctifs P1-03, P1-04 et P2-01 (SPEC-BILLING-C6 §2) : rapprochement en une transaction, règlement fournisseur de montant exact, identité des opérations (identifiant bancaire / occurrences / ambiguïté). Le paragraphe ci-dessous décrit l'état initial du Lot C5.
+
 Import CSV générique : détection du séparateur, aperçu des 5 premières lignes, **mapping des colonnes** (date, libellé, montant OU débit/crédit, référence) choisi par l'utilisateur, formats de date JJ/MM/AAAA ou AAAA-MM-JJ, montants « 1 234,56 » ; relevé déjà importé (sha256) ⇒ refus ; ligne déjà présente (empreinte) ⇒ ignorée. Rapprochement automatique : pour chaque ligne PENDING créditrice, facture émise de la société dont le reste à payer = montant et (référence contient le numéro OU date à ± 10 jours de l'échéance/émission) ⇒ **enregistrement du paiement** (virement, date de l'opération) et MATCHED ; débit = facture fournisseur validée impayée de même TTC ⇒ marquée payée et MATCHED. Rapprochement manuel : choix d'une facture (paiement créé, plafond C2) ou d'une facture fournisseur, ou « ignorer ». Jamais deux paiements pour une même ligne (statut conditionnel).
 
 ### 3.6 Factures fournisseurs (OCR)
