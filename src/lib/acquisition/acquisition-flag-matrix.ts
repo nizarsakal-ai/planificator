@@ -14,6 +14,7 @@ import { isAcquisitionContentFetchEnabled } from "@/lib/acquisition/content/cont
 import { isAcquisitionContentCronEnabled } from "@/lib/acquisition/content/content-cron-feature-flag"
 import {
   getExtractionProviderId,
+  isAcquisitionExtractionAttachmentsEnabled,
   isAcquisitionExtractionEnabled,
   isAcquisitionExtractionMultimodalEnabled,
   type ExtractionProviderId,
@@ -42,6 +43,7 @@ export {
   isAcquisitionExtractionEnabled,
   isAcquisitionExtractionCronEnabled,
   isAcquisitionExtractionMultimodalEnabled,
+  isAcquisitionExtractionAttachmentsEnabled,
   isAcquisitionConversionFullyEnabled,
   getExtractionProviderId,
   isAcquisitionOrchestratorCronEnabled,
@@ -82,6 +84,8 @@ export type AcquisitionFlagIssueCode =
   | "INV_MULTIMODAL_WITHOUT_MASTER"
   | "INV_MULTIMODAL_WITHOUT_EXTRACTION"
   | "INV_MULTIMODAL_PROVIDER_WITHOUT_VISION"
+  | "INV_ATTACHMENTS_WITHOUT_MASTER"
+  | "INV_ATTACHMENTS_WITHOUT_EXTRACTION"
 
 export interface AcquisitionFlagMatrix {
   master: boolean
@@ -97,6 +101,8 @@ export interface AcquisitionFlagMatrix {
   extractionProvider: ExtractionProviderId
   /** PLAN-ACQ-MULTIMODAL — vision photos / PDF scannés (Anthropic uniquement). */
   extractionMultimodal: boolean
+  /** PLAN-ACQ-MULTIMODAL — .xlsx + extraction PJ seules (relance manuelle). */
+  extractionAttachments: boolean
   conversion: boolean
   conversionFully: boolean
   orchestratorCron: boolean
@@ -125,6 +131,7 @@ export function getAcquisitionFlagMatrix(): AcquisitionFlagMatrix {
     extractionCron: isAcquisitionExtractionCronEnabled(),
     extractionProvider: getExtractionProviderId(),
     extractionMultimodal: isAcquisitionExtractionMultimodalEnabled(),
+    extractionAttachments: isAcquisitionExtractionAttachmentsEnabled(),
     conversion,
     conversionFully: isAcquisitionConversionFullyEnabled(),
     orchestratorCron: isAcquisitionOrchestratorCronEnabled(),
@@ -245,6 +252,18 @@ export function validateAcquisitionFlagMatrix(
     issues.push({
       code: "INV_MULTIMODAL_PROVIDER_WITHOUT_VISION",
       message: "Extraction multimodal ON has no effect unless ACQUISITION_EXTRACTION_PROVIDER=anthropic",
+    })
+  }
+  if (matrix.extractionAttachments && !matrix.master) {
+    issues.push({
+      code: "INV_ATTACHMENTS_WITHOUT_MASTER",
+      message: "Extraction attachments ON requires PLANIFICATOR_ACQUISITION_ENABLED",
+    })
+  }
+  if (matrix.extractionAttachments && !matrix.extraction) {
+    issues.push({
+      code: "INV_ATTACHMENTS_WITHOUT_EXTRACTION",
+      message: "Extraction attachments ON requires ACQUISITION_EXTRACTION_ENABLED",
     })
   }
   if (matrix.conversion && !matrix.master) {

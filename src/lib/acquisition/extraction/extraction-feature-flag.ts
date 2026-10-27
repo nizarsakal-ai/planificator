@@ -19,6 +19,15 @@ export function isAcquisitionExtractionMultimodalEnabled(): boolean {
   return process.env.ACQUISITION_EXTRACTION_MULTIMODAL_ENABLED === "true"
 }
 
+/**
+ * PLAN-ACQ-MULTIMODAL (correctif revue) — Lecture PJ étendue : .xlsx et extraction
+ * « pièces jointes seules » (mail sans texte, relance manuelle). OFF par défaut :
+ * flag OFF ⇒ comportement historique strict (PDF texte seul, barrière 005A d'origine).
+ */
+export function isAcquisitionExtractionAttachmentsEnabled(): boolean {
+  return process.env.ACQUISITION_EXTRACTION_ATTACHMENTS_ENABLED === "true"
+}
+
 export function getExtractionProviderId(): ExtractionProviderId {
   const raw = (process.env.ACQUISITION_EXTRACTION_PROVIDER ?? "deterministic").trim().toLowerCase()
   if (raw === "anthropic") return "anthropic"
