@@ -62,6 +62,8 @@ export type ImportDraftReviewBundle = {
     rejectionReason: string | null
     createdWorksiteId: string | null
     updatedAt: Date
+    /** PLAN-ACQ-MULTIMODAL — reprise d'un EXTRACTING interrompu. */
+    extractionStartedAt?: Date | null
   }
   message: {
     id: string
@@ -107,12 +109,16 @@ export type ConsultationProposedFormDto = {
   proposedContactEmail: string | null
   proposedContactPhone: string | null
   extractionEnabled: boolean
+  /** PLAN-ACQ-MULTIMODAL — EXTRACTING orphelin (> TTL reclaim) : relance manuelle permise. */
+  extractionReclaimable?: boolean
 }
 
 export type ImportDraftStatusSnapshot = {
   id: string
   status: WorksiteImportDraftStatus
   version: number
+  /** PLAN-ACQ-MULTIMODAL — pour la reprise d'un EXTRACTING interrompu. */
+  extractionStartedAt?: Date | null
 }
 
 export type SaveCorrectionsOutcome =

@@ -3,6 +3,7 @@
  */
 
 import type { WorksiteImportDraftStatus } from "@prisma/client"
+import { getExtractionReclaimTtlMs } from "@/lib/acquisition/extraction/extraction-feature-flag"
 import {
   EXTRACTION_WARNING_CATALOG,
   EXTRACTION_WARNING_CODES,
@@ -43,13 +44,35 @@ export type ReExtractPolicy =
   | { allowed: true; force: boolean }
   | { allowed: false }
 
-export function getReExtractPolicy(status: WorksiteImportDraftStatus): ReExtractPolicy {
+/**
+ * PLAN-ACQ-MULTIMODAL — un EXTRACTING plus vieux que le TTL de reclaim est un
+ * orphelin (process interrompu) : la relance manuelle est permise, le claim
+ * atomique du service gère déjà la reprise (prédicat extractionStartedAt < TTL).
+ * Calcul côté serveur uniquement (env).
+ */
+export function isExtractingReclaimable(
+  status: WorksiteImportDraftStatus,
+  extractionStartedAt: Date | string | null | undefined,
+  now: Date = new Date()
+): boolean {
+  if (status !== "EXTRACTING" || !extractionStartedAt) return false
+  const started = new Date(extractionStartedAt).getTime()
+  if (!Number.isFinite(started)) return false
+  return started < now.getTime() - getExtractionReclaimTtlMs()
+}
+
+export function getReExtractPolicy(
+  status: WorksiteImportDraftStatus,
+  opts?: { extractingReclaimable?: boolean }
+): ReExtractPolicy {
   switch (status) {
     case "PENDING_EXTRACTION":
     case "FAILED":
       return { allowed: true, force: false }
     case "PENDING_REVIEW":
       return { allowed: true, force: true }
+    case "EXTRACTING":
+      return opts?.extractingReclaimable === true ? { allowed: true, force: false } : { allowed: false }
     default:
       return { allowed: false }
   }
@@ -57,10 +80,12 @@ export function getReExtractPolicy(status: WorksiteImportDraftStatus): ReExtract
 
 export function getConsultationUiActions(
   status: WorksiteImportDraftStatus,
-  opts?: { extractionEnabled?: boolean }
+  opts?: { extractionEnabled?: boolean; extractingReclaimable?: boolean }
 ): ConsultationUiActions {
   const extractionEnabled = opts?.extractionEnabled !== false
-  const reExtract = getReExtractPolicy(status)
+  const reExtract = getReExtractPolicy(status, {
+    extractingReclaimable: opts?.extractingReclaimable,
+  })
   switch (status) {
     case "PENDING_EXTRACTION":
       return {
@@ -76,7 +101,7 @@ export function getConsultationUiActions(
         canSave: false,
         canApprove: false,
         canReject: false,
-        canReExtract: false,
+        canReExtract: extractionEnabled && reExtract.allowed,
       }
     case "PENDING_REVIEW":
       return {
@@ -193,6 +218,8 @@ export function dateToInputValue(d: Date | null | undefined): string {
 export type AttachmentReadingTone = "ok" | "muted" | "warn" | "error"
 
 export type AttachmentReadingView = {
+  /** Id de pièce (association fiable ; noms homonymes possibles). */
+  attachmentId?: string
   filename: string
   outcome: string
   label: string
@@ -222,6 +249,9 @@ const READING_REASON_SUFFIX: Record<string, string> = {
   IMAGE_DIMENSIONS: "> 8000 px",
   FILE_BYTES: "> 10 Mo",
   TEXT_BUDGET: "budget texte atteint",
+  XLSX_FLAG_OFF: "lecture .xlsx désactivée (flag)",
+  DEADLINE: "délai dépassé",
+  PROVIDER_REJECTED: "refusée par le fournisseur",
   XLSX_LIMITS: "classeur trop volumineux",
   LOAD_BUDGET: "trop de pièces volumineuses",
 }
@@ -247,7 +277,9 @@ export function mapAttachmentReadOutcomes(extractedData: unknown): AttachmentRea
     if (!cat) continue
     const reasonRaw = (item as { reason?: unknown }).reason
     const suffix = typeof reasonRaw === "string" ? READING_REASON_SUFFIX[reasonRaw] : undefined
+    const idRaw = (item as { attachmentId?: unknown }).attachmentId
     out.push({
+      ...(typeof idRaw === "string" && idRaw ? { attachmentId: idRaw.slice(0, 64) } : {}),
       filename: filename.slice(0, 255),
       outcome,
       label: suffix ? `${cat.label} (${suffix})` : cat.label,

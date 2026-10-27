@@ -56,9 +56,20 @@ export function ConsultationDetail({
   const warnings = mapWarningDataToPublicView(draft.warningData)
   // PLAN-ACQ-MULTIMODAL — issue de lecture par fichier (dernière extraction).
   const readings = bundle.attachmentReadings ?? []
-  const readingByFilename = new Map(readings.map((r) => [r.filename, r]))
-  const unmatchedReadings = readings.filter(
-    (r) => !attachments.some((a) => a.filename.slice(0, 255) === r.filename)
+  // Association par id de pièce ; repli nom de fichier pour les extractions
+  // antérieures sans id (les homonymes ne sont alors pas distinguables).
+  const readingById = new Map(
+    readings.filter((r) => r.attachmentId).map((r) => [r.attachmentId as string, r])
+  )
+  const legacyByFilename = new Map(
+    readings.filter((r) => !r.attachmentId).map((r) => [r.filename, r])
+  )
+  const readingFor = (a: { id: string; filename: string }) =>
+    readingById.get(a.id) ?? legacyByFilename.get(a.filename.slice(0, 255))
+  const unmatchedReadings = readings.filter((r) =>
+    r.attachmentId
+      ? !attachments.some((a) => a.id === r.attachmentId)
+      : !attachments.some((a) => a.filename.slice(0, 255) === r.filename)
   )
   const confidence =
     draft.confidenceData && typeof draft.confidenceData === "object"
@@ -131,7 +142,7 @@ export function ConsultationDetail({
             <ul className="space-y-2">
               {attachments.map((a) => {
                 const stored = a.status === "STORED"
-                const reading = readingByFilename.get(a.filename.slice(0, 255))
+                const reading = readingFor(a)
                 return (
                   <li
                     key={a.id}

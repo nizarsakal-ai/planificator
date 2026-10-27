@@ -16,7 +16,10 @@ import {
 import type { ExtractDraftResult, ExtractionActor } from "@/lib/acquisition/extraction/extraction.types"
 import { importDraftReadRepository } from "@/lib/acquisition/review/import-draft-read.repository"
 import { importDraftReviewService } from "@/lib/acquisition/review/import-draft-review.service"
-import { getReExtractPolicy } from "@/lib/acquisition/review/consultation-ui"
+import {
+  getReExtractPolicy,
+  isExtractingReclaimable,
+} from "@/lib/acquisition/review/consultation-ui"
 import { reExtractImportDraftSchema } from "@/lib/acquisition/review/import-draft-review.schema"
 import type {
   ApproveOutcome,
@@ -48,6 +51,7 @@ export type AcquisitionReviewActionDeps = {
     actor: ExtractionActor
     draftId: string
     force?: boolean
+    deadlineAt?: number
   }) => Promise<ExtractDraftResult>
   /**
    * PLAN-ACQ-MULTIMODAL — récupération du contenu / des pièces manquants
@@ -57,9 +61,18 @@ export type AcquisitionReviewActionDeps = {
     companyId: string
     draftId: string
     actorUserId?: string
+    deadlineAt?: number
   }) => Promise<ManualReExtractPreparation>
+  clock?: () => number
   revalidatePath?: (path: string) => void
 }
+
+/**
+ * PLAN-ACQ-MULTIMODAL — échéance interne de la relance (sous maxDuration = 300 s
+ * de la page) : préparation + lecture PJ + provider. Au-delà, le brouillon est
+ * libéré en FAILED retryable par le service (jamais EXTRACTING orphelin).
+ */
+export const RELAUNCH_DEADLINE_MS = 240_000
 
 async function requireReviewContext(
   deps: AcquisitionReviewActionDeps
@@ -215,7 +228,9 @@ export async function reExtractImportDraftActionImpl(
   }
 
   const status = snapshot.status as WorksiteImportDraftStatus
-  const policy = getReExtractPolicy(status)
+  const policy = getReExtractPolicy(status, {
+    extractingReclaimable: isExtractingReclaimable(status, snapshot.extractionStartedAt),
+  })
   if (!policy.allowed) {
     return {
       ok: false as const,
@@ -226,6 +241,7 @@ export async function reExtractImportDraftActionImpl(
   }
 
   // PLAN-ACQ-MULTIMODAL — relance autonome : contenu + pièces manquants (non bloquant).
+  const deadlineAt = (deps.clock ?? Date.now)() + RELAUNCH_DEADLINE_MS
   const prepare = deps.prepareManualReExtraction ?? defaultPrepareManualReExtraction
   let warnings: string[] = []
   try {
@@ -233,6 +249,7 @@ export async function reExtractImportDraftActionImpl(
       companyId: authz.ctx.companyId,
       draftId: parsed.data.draftId,
       actorUserId: authz.ctx.actorUserId,
+      deadlineAt,
     })
     warnings = prepared.warnings.slice(0, 10)
   } catch {
@@ -248,6 +265,7 @@ export async function reExtractImportDraftActionImpl(
     },
     draftId: parsed.data.draftId,
     force: policy.force,
+    deadlineAt,
   })
 
   if (result.ok) {

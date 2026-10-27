@@ -35,6 +35,8 @@ import { hasExploitableMessageText } from "@/lib/acquisition/extraction/extracti
 export const MANUAL_REEXTRACT_MAX_DOWNLOADS = 10
 /** Au-delà, plus de nouveau téléchargement (le cron prendra le relais). */
 export const MANUAL_REEXTRACT_DOWNLOAD_BUDGET_MS = 20_000
+/** Temps réservé à l'extraction après la préparation (lecture PJ + provider). */
+export const MANUAL_REEXTRACT_EXTRACTION_RESERVE_MS = 90_000
 
 export const CONTENT_FETCH_DISABLED_WARNING = "Récupération du contenu désactivée (flag)"
 export const ATTACHMENT_DOWNLOAD_DISABLED_WARNING = "Téléchargement des pièces jointes désactivé (flag)"
@@ -133,7 +135,7 @@ function contentFailureWarning(result: Extract<FetchMessageContentResult, { ok: 
 }
 
 export async function prepareManualReExtraction(
-  input: { companyId: string; draftId: string; actorUserId?: string },
+  input: { companyId: string; draftId: string; actorUserId?: string; deadlineAt?: number },
   deps: ManualReExtractPreparationDeps = {}
 ): Promise<ManualReExtractPreparation> {
   const out: ManualReExtractPreparation = { warnings: [], contentFetched: false, attachmentsStored: 0 }
@@ -155,6 +157,13 @@ export async function prepareManualReExtraction(
   const findContent = deps.findContent ?? defaultDeps.findContent
   const content = await findContent(input.companyId, messageId)
   if (!hasExploitableMessageText(content)) {
+    if (
+      input.deadlineAt != null &&
+      (deps.clock ?? Date.now)() >= input.deadlineAt - MANUAL_REEXTRACT_EXTRACTION_RESERVE_MS
+    ) {
+      out.warnings.push("Délai de relance atteint : contenu du mail non récupéré")
+      return out
+    }
     const fetchContent = deps.fetchContent ?? fetchAndStoreMessageContentCore
     try {
       const r = await fetchContent({
@@ -192,6 +201,11 @@ export async function prepareManualReExtraction(
   const now = (deps.now ?? (() => new Date()))()
   const clock = deps.clock ?? Date.now
   const started = clock()
+  // Échéance de téléchargement : 20 s ET réserve pour l'extraction avant l'échéance globale.
+  const downloadUntil = Math.min(
+    started + MANUAL_REEXTRACT_DOWNLOAD_BUDGET_MS,
+    (input.deadlineAt ?? Number.POSITIVE_INFINITY) - MANUAL_REEXTRACT_EXTRACTION_RESERVE_MS
+  )
   const schedule =
     deps.scheduleRetryToDiscovered ??
     ((i) => acquisitionAttachmentRepository.scheduleRetryToDiscovered(i))
@@ -201,7 +215,7 @@ export async function prepareManualReExtraction(
   let attempted = 0
   for (let i = 0; i < pending.length; i++) {
     const att = pending[i]
-    if (attempted >= MANUAL_REEXTRACT_MAX_DOWNLOADS || clock() - started >= MANUAL_REEXTRACT_DOWNLOAD_BUDGET_MS) {
+    if (attempted >= MANUAL_REEXTRACT_MAX_DOWNLOADS || clock() >= downloadUntil) {
       const left = pending.length - i
       out.warnings.push(`${left} pièce(s) restante(s) seront récupérées par la tâche planifiée`)
       break

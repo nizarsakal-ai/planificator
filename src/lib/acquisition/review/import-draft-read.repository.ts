@@ -78,9 +78,13 @@ export class ImportDraftReadRepository {
     if (!input.companyId || !input.draftId) return null
     const row = await this.db.worksiteImportDraft.findFirst({
       where: { id: input.draftId, companyId: input.companyId },
-      select: { id: true, status: true, version: true },
+      select: { id: true, status: true, version: true, extractionStartedAt: true },
     })
-    return row
+    if (!row) return null
+    // Snapshot minimal inchangé ; extractionStartedAt seulement pour un EXTRACTING
+    // (reprise d'un orphelin, PLAN-ACQ-MULTIMODAL).
+    const { extractionStartedAt, ...minimal } = row
+    return row.status === "EXTRACTING" ? { ...minimal, extractionStartedAt } : minimal
   }
 
   /**
@@ -117,6 +121,7 @@ export class ImportDraftReadRepository {
         extractionProvider: true,
         extractionModel: true,
         lastExtractionErrorCode: true,
+        extractionStartedAt: true,
         reviewedByUserId: true,
         reviewedAt: true,
         rejectionReason: true,
@@ -188,6 +193,7 @@ export class ImportDraftReadRepository {
         rejectionReason: draft.rejectionReason,
         createdWorksiteId: draft.createdWorksiteId,
         updatedAt: draft.updatedAt,
+        extractionStartedAt: draft.extractionStartedAt,
       },
       message: {
         id: draft.acquisitionMessage.id,

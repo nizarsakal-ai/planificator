@@ -268,12 +268,13 @@ describe("reExtractImportDraftActionImpl — relance autonome", () => {
 
 describe("bout en bout (mocks) : relance → pièce téléchargée → extraction PJ seules", () => {
   it("flags ON : le bon de commande DISCOVERED est récupéré puis lu, la consultation passe en revue", async () => {
-    const keys = ["PLANIFICATOR_ACQUISITION_ENABLED", "ACQUISITION_CONTENT_FETCH_ENABLED", "ACQUISITION_EXTRACTION_ENABLED", "ACQUISITION_EXTRACTION_PROVIDER"] as const
+    const keys = ["PLANIFICATOR_ACQUISITION_ENABLED", "ACQUISITION_CONTENT_FETCH_ENABLED", "ACQUISITION_EXTRACTION_ENABLED", "ACQUISITION_EXTRACTION_PROVIDER", "ACQUISITION_EXTRACTION_ATTACHMENTS_ENABLED"] as const
     const backup = Object.fromEntries(keys.map((k) => [k, process.env[k]]))
     process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
     process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
     process.env.ACQUISITION_EXTRACTION_ENABLED = "true"
     process.env.ACQUISITION_EXTRACTION_PROVIDER = "deterministic"
+    process.env.ACQUISITION_EXTRACTION_ATTACHMENTS_ENABLED = "true"
     try {
       const att = {
         id: "a1",
