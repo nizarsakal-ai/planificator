@@ -26,7 +26,7 @@ export default async function FournisseurDetailPage({ params }: { params: Promis
       <p className="text-sm text-slate-500"><Link href="/comptabilite/fournisseurs" className="hover:underline">Factures fournisseurs</Link> / {s.number}</p>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <h2 className="text-xl font-semibold">{s.supplierName} — {s.number} <span className="text-sm font-normal text-slate-500">({s.status === "PENDING" ? "à valider" : s.status === "VALIDATED" ? "validée" : "rejetée"})</span></h2>
-        {s.status === "PENDING" && <SupplierValidateButtons id={s.id} />}
+        {s.status === "PENDING" && <SupplierValidateButtons id={s.id} expenseAccountId={s.expenseAccountId ?? undefined} expenseAccountLabel={s.expenseAccount ? `${s.expenseAccount.number} ${s.expenseAccount.label}` : undefined} />}
       </div>
       {s.status !== "PENDING" ? (
         <Card><CardContent className="grid gap-2 p-4 text-sm sm:grid-cols-2">

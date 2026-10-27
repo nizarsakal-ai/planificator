@@ -49,11 +49,11 @@ export function MatchButtons({ transactionId, invoices, supplierInvoices }: { tr
   )
 }
 
-export function SupplierValidateButtons({ id }: { id: string }) {
+export function SupplierValidateButtons({ id, expenseAccountId, expenseAccountLabel }: { id: string; expenseAccountId?: string; expenseAccountLabel?: string }) {
   const { busy, act } = useAct()
   return (
     <div className="flex gap-2">
-      <Button size="sm" disabled={busy} onClick={() => { if (window.confirm("Confirmez-vous avoir vérifié les montants, la catégorie et le compte de charge, y compris toute proposition OCR provisoire ? Cette facture sera figée et comptabilisée (journal HA).")) void act(() => validateSupplierInvoiceAction(id), () => "Facture validée et comptabilisée.") }}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Valider et comptabiliser</Button>
+      <Button size="sm" disabled={busy} onClick={() => { if (window.confirm(`Confirmez-vous avoir vérifié les montants, la catégorie et le compte de charge${expenseAccountLabel ? ` ${expenseAccountLabel}` : ""}, y compris toute proposition OCR provisoire ? Cette facture sera figée et comptabilisée (journal HA).`)) void act(() => validateSupplierInvoiceAction(id, expenseAccountId), () => "Facture validée et comptabilisée.") }}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Valider et comptabiliser</Button>
       <Button size="sm" variant="destructive" disabled={busy} onClick={() => { const r = window.prompt("Motif du rejet :", ""); if (r !== null) void act(() => rejectSupplierInvoiceAction(id, r), () => "Facture rejetée.") }}>Rejeter</Button>
     </div>
   )

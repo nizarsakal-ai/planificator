@@ -122,12 +122,12 @@ export async function extractSupplierInvoice(db: Db, ctx: AccountingContext, fil
  * SIRET (sinon nom exact), compte de charge choisi/déduit de la catégorie, statut VALIDATED, écriture d'achat (idempotente).
  * Validation humaine explicite : l'OCR et ses suggestions ne valent pas approbation.
  * L'action authentifiée « Valider et comptabiliser » confirme la revue des montants,
- * de la catégorie et du compte (C5Actions). Pas de statut serveur « classification confirmée » :
- * un appel direct autorisé n'est pas bloqué par une confirmation distincte. La revue humaine
- * reste de la responsabilité de l'appelant ; le dialogue client n'est pas un verrou serveur.
+ * de la catégorie et du compte (C5Actions). Pour la restauration, le compte confirmé
+ * doit correspondre au compte courant sous verrou ; une confirmation périmée est refusée.
+ * L'appelant autorisé reste responsable de la sincérité de sa confirmation.
  * Idempotent : une facture déjà validée renvoie son écriture.
  */
-export async function validateSupplierInvoice(db: Db, ctx: AccountingContext, id: string): Promise<LifecycleResult<{ entryId: string; supplierId: string }>> {
+export async function validateSupplierInvoice(db: Db, ctx: AccountingContext, id: string, confirmedExpenseAccountId?: string): Promise<LifecycleResult<{ entryId: string; supplierId: string }>> {
   // Mandat §2.6 (même classe que P1-06) : un refus survenant APRÈS la première écriture (fournisseur créé/associé) lève
   // LifecycleAbort ⇒ ROLLBACK complet, au lieu d'un résultat d'échec qui laisserait committer le fournisseur.
   return withLifecycleAbort(() => runAccountingTransaction(db, async (tx) => {
@@ -140,7 +140,7 @@ export async function validateSupplierInvoice(db: Db, ctx: AccountingContext, id
     }
     if (s.status !== "PENDING") return { ok: false as const, error: SUPPLIER_ERRORS.notPending }
     // La nature du repas ne détermine pas son imputation : choix humain obligatoire.
-    if (s.category === "restauration" && !s.expenseAccountId) return { ok: false as const, error: "Restauration : choisissez et confirmez un compte de charge avant de comptabiliser." }
+    if (s.category === "restauration" && (!s.expenseAccountId || confirmedExpenseAccountId !== s.expenseAccountId)) return { ok: false as const, error: "Restauration : choisissez et confirmez un compte de charge avant de comptabiliser." }
     const supplier = await findOrCreateSupplier(tx, ctx, { name: s.supplierName, siret: s.siret })
     const dup = await tx.supplierInvoice.findFirst({ where: { companyId: ctx.companyId, supplierId: supplier.id, number: s.number, status: "VALIDATED", id: { not: s.id } }, select: { id: true } })
     if (dup) throw new LifecycleAbort(SUPPLIER_ERRORS.duplicateNumber)

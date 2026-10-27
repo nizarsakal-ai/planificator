@@ -156,10 +156,10 @@ export async function updateSupplierInvoiceAction(id: unknown, raw: unknown): Pr
   return r.ok ? { ok: true } : r
 }
 
-export async function validateSupplierInvoiceAction(id: unknown): Promise<Result<{ entryId: string }>> {
+export async function validateSupplierInvoiceAction(id: unknown, confirmedExpenseAccountId?: string): Promise<Result<{ entryId: string }>> {
   const i = idSchema.safeParse(id)
   if (!i.success) return { ok: false, error: "Facture introuvable." }
-  const r = await run((ctx) => validateSupplierInvoice(prisma, ctx, i.data))
+  const r = await run((ctx) => validateSupplierInvoice(prisma, ctx, i.data, typeof confirmedExpenseAccountId === "string" && confirmedExpenseAccountId.length <= 64 ? confirmedExpenseAccountId : undefined))
   return r.ok ? { ok: true, entryId: r.value.entryId } : r
 }
 

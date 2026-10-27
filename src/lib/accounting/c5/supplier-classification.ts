@@ -1,7 +1,7 @@
 // Référentiel partagé navigateur/serveur : suggestions modifiables, jamais une validation comptable.
 export const SUPPLIER_CATEGORIES = ["marchandises", "services", "location", "deplacement", "honoraires", "entretien", "restauration", "autre"] as const
 export type SupplierCategory = typeof SUPPLIER_CATEGORIES[number]
-export const CATEGORY_ACCOUNT: Record<string, string> = { marchandises: "607000", services: "604000", location: "613000", deplacement: "625000", honoraires: "622000", entretien: "615000", autre: "606000" }
+export const CATEGORY_ACCOUNT: Record<string, string> = { marchandises: "607000", services: "604000", location: "613000", deplacement: "625000", honoraires: "622000", entretien: "615000", restauration: "625000", autre: "606000" }
 
 /** Tolère les libellés français usuels ; aucune catégorie devinée à partir d'un texte inconnu. */
 export function normalizeSupplierCategory(value: unknown): SupplierCategory | null {
