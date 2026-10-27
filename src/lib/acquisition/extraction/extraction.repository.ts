@@ -11,6 +11,11 @@ import type {
   ExtractionCanonicalFields,
   ExtractionWarning,
 } from "@/lib/acquisition/extraction/extraction.types"
+import {
+  computeAttachmentsOnlyFingerprint,
+  hasExploitableMessageText,
+  type ExtractionSourceKind,
+} from "@/lib/acquisition/extraction/extraction-source-fingerprint"
 
 export type DraftExtractionRow = {
   id: string
@@ -39,6 +44,9 @@ export type MessageLite = {
 }
 
 export type AttachmentMetaRow = {
+  /** PLAN-ACQ-MULTIMODAL — optionnels (fakes historiques) ; utilisés pour l'empreinte. */
+  id?: string
+  sha256?: string | null
   filename: string
   mimeType: string
   category: string
@@ -62,6 +70,13 @@ export type PersistExtractionInput = {
   expectedVersion: number
   /** Hash figé au claim — vérifié atomiquement dans la TX. */
   expectedContentHash: string
+  /**
+   * PLAN-ACQ-MULTIMODAL — nature de l'empreinte. Défaut MESSAGE_CONTENT
+   * (comportement historique strict). ATTACHMENTS_ONLY : l'empreinte est
+   * recalculée dans la TX depuis les pièces STORED, et le contenu ne doit
+   * toujours pas avoir de texte exploitable.
+   */
+  sourceKind?: ExtractionSourceKind
   status: "PENDING_REVIEW" | "FAILED" | "OBSOLETE"
   fields: ExtractionCanonicalFields
   confidenceData: Record<string, number>
@@ -130,6 +145,8 @@ export class DraftExtractionRepository {
     const rows = await this.db.acquisitionAttachment.findMany({
       where: { companyId, acquisitionMessageId },
       select: {
+        id: true,
+        sha256: true,
         filename: true,
         mimeType: true,
         category: true,
@@ -141,6 +158,8 @@ export class DraftExtractionRepository {
       orderBy: { createdAt: "asc" },
     })
     return rows.map((r) => ({
+      id: r.id,
+      sha256: r.sha256,
       filename: r.filename,
       mimeType: r.mimeType,
       category: r.category,
@@ -216,15 +235,50 @@ export class DraftExtractionRepository {
       })
       if (!draftLite) return "STATE_CHANGED" as const
 
-      const contentFresh = await tx.acquisitionMessageContent.findFirst({
-        where: {
-          companyId: input.companyId,
-          acquisitionMessageId: draftLite.acquisitionMessageId,
-        },
-        select: { contentHash: true },
-      })
+      let sourceFresh: boolean
+      if (input.sourceKind === "ATTACHMENTS_ONLY") {
+        const contentNow = await tx.acquisitionMessageContent.findFirst({
+          where: {
+            companyId: input.companyId,
+            acquisitionMessageId: draftLite.acquisitionMessageId,
+          },
+          select: { contentHash: true, normalizedText: true },
+        })
+        const attachmentsNow = await tx.acquisitionAttachment.findMany({
+          where: {
+            companyId: input.companyId,
+            acquisitionMessageId: draftLite.acquisitionMessageId,
+          },
+          select: {
+            id: true,
+            filename: true,
+            sha256: true,
+            storagePublicId: true,
+            sizeBytes: true,
+            status: true,
+          },
+          take: 50,
+          orderBy: { createdAt: "asc" },
+        })
+        // Un texte de mail apparu entre-temps rend l'extraction PJ-seules périmée.
+        sourceFresh =
+          !hasExploitableMessageText(contentNow) &&
+          computeAttachmentsOnlyFingerprint({
+            contentHash: contentNow?.contentHash ?? null,
+            attachments: attachmentsNow,
+          }) === input.expectedContentHash
+      } else {
+        const contentFresh = await tx.acquisitionMessageContent.findFirst({
+          where: {
+            companyId: input.companyId,
+            acquisitionMessageId: draftLite.acquisitionMessageId,
+          },
+          select: { contentHash: true },
+        })
+        sourceFresh = Boolean(contentFresh && contentFresh.contentHash === input.expectedContentHash)
+      }
 
-      if (!contentFresh || contentFresh.contentHash !== input.expectedContentHash) {
+      if (!sourceFresh) {
         const staleMark = await tx.worksiteImportDraft.updateMany({
           where: {
             id: input.draftId,

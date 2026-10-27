@@ -15,6 +15,7 @@ import {
   getExtractionReclaimTtlMs,
   getExtractionTimeoutMs,
   isAcquisitionExtractionEnabled,
+  isAcquisitionExtractionMultimodalEnabled,
 } from "@/lib/acquisition/extraction/extraction-feature-flag"
 import { isExtractionProviderError } from "@/lib/acquisition/extraction/extraction-provider.errors"
 import type { ExtractionProviderPort } from "@/lib/acquisition/extraction/extraction-provider.port"
@@ -30,15 +31,27 @@ import {
   normalizeProviderResult,
   applyDeterministicPostEnrichment,
 } from "@/lib/acquisition/extraction/extraction-normalize"
+import { appendAttachmentTextToBody } from "@/lib/acquisition/extraction/attachment-text-excerpts"
 import {
-  appendAttachmentTextToBody,
-  buildAttachmentTextExcerpts,
-} from "@/lib/acquisition/extraction/attachment-text-excerpts"
+  isPotentiallyReadableAttachment,
+  readAttachmentsForExtraction,
+  shouldLoadAttachmentBytes,
+  type AttachmentReadOutcome,
+  type AttachmentReadingOptions,
+} from "@/lib/acquisition/extraction/attachment-reading"
+import {
+  computeAttachmentsOnlyFingerprint,
+  hasExploitableMessageText,
+  type ExtractionSourceKind,
+} from "@/lib/acquisition/extraction/extraction-source-fingerprint"
 import {
   defaultAttachmentBytesLoader,
   type AttachmentBytesLoader,
 } from "@/lib/acquisition/extraction/attachment-bytes-loader"
-import { catalogWarning } from "@/lib/acquisition/extraction/extraction.schema"
+import {
+  catalogWarning,
+  extractionCanonicalFieldsSchema,
+} from "@/lib/acquisition/extraction/extraction.schema"
 import type {
   ExtractDraftResult,
   ExtractionErrorCode,
@@ -99,6 +112,41 @@ function fail(
   extra?: Partial<Extract<ExtractDraftResult, { ok: false }>>
 ): ExtractDraftResult {
   return { ok: false, outcome, code, message, ...extra }
+}
+
+/**
+ * PLAN-ACQ-MULTIMODAL — Vision active seulement si flag ON ET provider capable
+ * (Anthropic). Le provider déterministe ignore proprement les visuels.
+ */
+function resolveVisionOptions(provider: ExtractionProviderPort): AttachmentReadingOptions {
+  if (!isAcquisitionExtractionMultimodalEnabled()) {
+    return { vision: { enabled: false, reason: "FLAG_OFF" } }
+  }
+  if (provider.supportsVisualInputs !== true) {
+    return { vision: { enabled: false, reason: "PROVIDER_NOT_VISION" } }
+  }
+  return { vision: { enabled: true } }
+}
+
+/** Avertissements catalogue dérivés des issues de lecture (sans texte de fichier). */
+function readOutcomeWarnings(outcomes: AttachmentReadOutcome[]) {
+  const warnings = []
+  for (const o of outcomes) {
+    if (o.outcome === "IGNORED_HEIC") {
+      warnings.push(
+        catalogWarning("ATTACHMENT_HEIC_UNSUPPORTED", { field: o.filename.slice(0, 64), source: "SERVICE" })
+      )
+    } else if (
+      o.outcome === "IGNORED_TOO_LARGE" ||
+      o.outcome === "IGNORED_VISION_DISABLED" ||
+      o.outcome === "FAILED"
+    ) {
+      warnings.push(
+        catalogWarning("ATTACHMENT_NOT_READ", { field: o.filename.slice(0, 64), source: "SERVICE" })
+      )
+    }
+  }
+  return warnings
 }
 
 function resolveProvider(override?: ExtractionProviderPort): ExtractionProviderPort | null {
@@ -391,24 +439,63 @@ async function runDraftExtractionCore(
   }
 
   const content = await repository.findContent(companyId, draft.acquisitionMessageId)
-  if (!content || !content.normalizedText.trim()) {
-    return fail("CONTENT_MISSING", "CONTENT_MISSING", "Contenu message absent (005A)", {
+  const visionOptions = resolveVisionOptions(provider)
+  const visionEnabled = visionOptions.vision.enabled
+
+  // PLAN-ACQ-MULTIMODAL — barrière 005A.
+  // AUTO (UNIT_CRON / ORCHESTRATOR_AUTO) : inchangé, texte de mail obligatoire
+  // (la preuve Detection porte sur le contentHash du texte).
+  // MANUEL (relance humaine) : texte absent toléré si au moins une PJ lisible ;
+  // l'empreinte source devient alors celle des pièces (préfixe att1:, jamais
+  // égale à un contentHash ⇒ aucune décision AUTO possible en aval).
+  let sourceKind: ExtractionSourceKind = "MESSAGE_CONTENT"
+  let sourceHash: string
+  let attachments: Awaited<ReturnType<typeof repository.listAttachmentMetadata>> | null = null
+  if (hasExploitableMessageText(content)) {
+    sourceHash = content!.contentHash
+  } else {
+    if (isAutoExtractionContext(executionContext)) {
+      return fail("CONTENT_MISSING", "CONTENT_MISSING", "Contenu message absent (005A)", {
+        draftId: draft.id,
+      })
+    }
+    attachments = await repository.listAttachmentMetadata(companyId, draft.acquisitionMessageId)
+    const readable = attachments.filter((a) =>
+      isPotentiallyReadableAttachment(a, { visionEnabled })
+    )
+    if (readable.length === 0) {
+      return fail(
+        "CONTENT_MISSING",
+        "CONTENT_MISSING",
+        "Contenu message absent et aucune pièce jointe lisible (005A)",
+        { draftId: draft.id }
+      )
+    }
+    sourceKind = "ATTACHMENTS_ONLY"
+    sourceHash = computeAttachmentsOnlyFingerprint({
+      contentHash: content?.contentHash ?? null,
+      attachments,
+    })
+    log("EXTRACTION_ATTACHMENTS_ONLY", {
       draftId: draft.id,
+      readableCount: readable.length,
+      hashPrefix: contentHashPrefix(sourceHash),
     })
   }
 
   // PLAN-ACQ-DETECTION-001 — défense en profondeur AUTO (avant claim).
+  // (AUTO n'atteint ce point qu'avec sourceKind MESSAGE_CONTENT.)
   if (isAutoExtractionContext(executionContext)) {
     if (
       !hasValidDetectionProofForAutoExtraction({
         detectionClassification: draft.detectionClassification,
         detectionContentHash: draft.detectionContentHash,
-        currentContentHash: content.contentHash,
+        currentContentHash: sourceHash,
       })
     ) {
       log("EXTRACTION_BLOCKED_DETECTION", {
         draftId: draft.id,
-        hashPrefix: contentHashPrefix(content.contentHash),
+        hashPrefix: contentHashPrefix(sourceHash),
         detectionClassification: draft.detectionClassification,
       })
       return fail(
@@ -423,10 +510,9 @@ async function runDraftExtractionCore(
   }
 
   const message = await repository.findMessage(companyId, draft.acquisitionMessageId)
-  const attachments = await repository.listAttachmentMetadata(
-    companyId,
-    draft.acquisitionMessageId
-  )
+  if (!attachments) {
+    attachments = await repository.listAttachmentMetadata(companyId, draft.acquisitionMessageId)
+  }
 
   if (isAutoExtractionContext(executionContext)) {
     const pendingRequiredPlan = attachments.find((att) => {
@@ -479,23 +565,23 @@ async function runDraftExtractionCore(
   }
 
   const claimVersion = claimed.version
-  const contentHashAtClaim = content.contentHash
+  const contentHashAtClaim = sourceHash
+  const messageText = content?.normalizedText ?? ""
 
   log("EXTRACTION_STARTED", {
     draftId: draft.id,
     hashPrefix: contentHashPrefix(contentHashAtClaim),
     attemptCount: claimed.extractionAttemptCount,
+    sourceKind,
   })
 
   try {
     const loadBytes = deps.loadAttachmentBytes ?? defaultAttachmentBytesLoader
+    const attachmentList = attachments
     const withBytes = await Promise.all(
-      attachments.map(async (a) => {
-        const isPdf =
-          (a.mimeType || "").toLowerCase() === "application/pdf" ||
-          a.filename.toLowerCase().endsWith(".pdf")
+      attachmentList.map(async (a) => {
         let bytes: Buffer | null = null
-        if (isPdf) {
+        if (shouldLoadAttachmentBytes(a, { visionEnabled })) {
           try {
             bytes = await loadBytes({
               filename: a.filename,
@@ -511,25 +597,23 @@ async function runDraftExtractionCore(
           filename: a.filename,
           mimeType: a.mimeType,
           category: a.category,
+          sizeBytes: a.sizeBytes,
+          status: a.status,
           bytes,
         }
       })
     )
 
-    const { excerpts, outcomes } = await buildAttachmentTextExcerpts(withBytes)
-    const enrichedText = appendAttachmentTextToBody(content.normalizedText, excerpts)
+    const reading = await readAttachmentsForExtraction(withBytes, visionOptions)
+    const excerpts = reading.excerpts
+    const visualFilenames = new Set(
+      reading.outcomes.filter((o) => o.outcome === "READ_VISION").map((o) => o.filename)
+    )
+    const enrichedText = appendAttachmentTextToBody(messageText, excerpts)
 
-    const pdfWarnings = outcomes.flatMap((o) => {
+    const pdfWarnings = reading.pdfOutcomes.flatMap((o) => {
       const code = o.status
-      if (
-        code !== "PDF_TEXT_EXTRACTED" &&
-        code !== "PDF_NO_TEXT_LAYER" &&
-        code !== "PDF_PARSE_FAILED" &&
-        code !== "PDF_TEXT_TRUNCATED"
-      ) {
-        return []
-      }
-      const att = attachments.find((a) => a.filename === o.filename)
+      const att = attachmentList.find((a) => a.filename.slice(0, 255) === o.filename)
       const isPlan = att?.category === "PLAN"
       const warnings = [
         catalogWarning(code, {
@@ -539,7 +623,9 @@ async function runDraftExtractionCore(
       ]
       if (
         isPlan &&
-        (code === "PDF_NO_TEXT_LAYER" || code === "PDF_PARSE_FAILED")
+        (code === "PDF_NO_TEXT_LAYER" || code === "PDF_PARSE_FAILED") &&
+        // Lu en vision : la pièce n'est plus « illisible ».
+        !visualFilenames.has(o.filename)
       ) {
         warnings.push(
           catalogWarning("REQUIRED_DOCUMENT_UNREADABLE", {
@@ -550,6 +636,65 @@ async function runDraftExtractionCore(
       }
       return warnings
     })
+    const attachmentWarnings = [...pdfWarnings, ...readOutcomeWarnings(reading.outcomes)]
+    const attachmentReadOutcomes = reading.outcomes
+
+    log("EXTRACTION_ATTACHMENTS_READ", {
+      draftId: draft.id,
+      textCount: excerpts.length,
+      visualCount: reading.visuals.length,
+      outcomeCount: attachmentReadOutcomes.length,
+    })
+
+    // PJ seules mais rien de lisible au final (ex. PDF scanné, vision OFF) :
+    // échec terminal explicite, issues de lecture persistées pour l'UI.
+    if (
+      sourceKind === "ATTACHMENTS_ONLY" &&
+      excerpts.length === 0 &&
+      reading.visuals.length === 0
+    ) {
+      const completedAt = nowFn()
+      const emptyFields = extractionCanonicalFieldsSchema.parse({})
+      const persistOutcome = await repository.persistExtraction({
+        companyId,
+        draftId: draft.id,
+        expectedVersion: claimVersion,
+        expectedContentHash: contentHashAtClaim,
+        sourceKind,
+        status: "FAILED",
+        fields: emptyFields,
+        confidenceData: {},
+        warningData: attachmentWarnings.slice(0, 50),
+        extractedData: {
+          ...buildExtractedDataPayload(emptyFields, {}, contentHashAtClaim),
+          sourceKind,
+          attachmentReadOutcomes,
+        },
+        providerId: "none",
+        model: null,
+        errorCode: "CONTENT_MISSING",
+        now: completedAt,
+        extractionRetryable: resolveExtractionRetryableForError("CONTENT_MISSING"),
+      })
+      const mapped = mapPersistOutcome(persistOutcome, draft.id)
+      if (mapped) return mapped
+      log("EXTRACTION_FAILED", {
+        draftId: draft.id,
+        code: "CONTENT_MISSING",
+        hashPrefix: contentHashPrefix(contentHashAtClaim),
+      })
+      return fail(
+        "FAILED",
+        "CONTENT_MISSING",
+        "Contenu message absent et aucune pièce jointe exploitable",
+        {
+          draftId: draft.id,
+          status: "FAILED",
+          attemptCount: claimed.extractionAttemptCount,
+          maxAttempts,
+        }
+      )
+    }
 
     const raw = await withTimeout(
       provider.extract({
@@ -563,6 +708,7 @@ async function runDraftExtractionCore(
           sizeBytes: a.sizeBytes,
         })),
         attachmentTextExcerpts: excerpts,
+        ...(reading.visuals.length > 0 ? { attachmentVisuals: reading.visuals } : {}),
         extractionSchemaVersion: EXTRACTION_SCHEMA_VERSION,
       }),
       deps.timeoutMs ?? getExtractionTimeoutMs()
@@ -602,14 +748,14 @@ async function runDraftExtractionCore(
 
     const gate = evaluateExtractionGate(normalized.fields, [
       ...normalized.warnings,
-      ...pdfWarnings,
+      ...attachmentWarnings,
     ])
     const completedAt = nowFn()
-    const extractedData = buildExtractedDataPayload(
-      normalized.fields,
-      normalized.evidenceData,
-      contentHashAtClaim
-    )
+    const extractedData = {
+      ...buildExtractedDataPayload(normalized.fields, normalized.evidenceData, contentHashAtClaim),
+      sourceKind,
+      attachmentReadOutcomes,
+    }
 
     if (!gate.pass) {
       const errorCode = gate.failureCode ?? "CONTENT_INSUFFICIENT"
@@ -619,6 +765,7 @@ async function runDraftExtractionCore(
         draftId: draft.id,
         expectedVersion: claimVersion,
         expectedContentHash: contentHashAtClaim,
+        sourceKind,
         status: "FAILED",
         fields: normalized.fields,
         confidenceData: normalized.confidenceData,
@@ -674,6 +821,7 @@ async function runDraftExtractionCore(
       draftId: draft.id,
       expectedVersion: claimVersion,
       expectedContentHash: contentHashAtClaim,
+      sourceKind,
       status: successStatus,
       fields: normalized.fields,
       confidenceData: normalized.confidenceData,
