@@ -26,7 +26,7 @@ export function guardClientRoles(result: NormalizedExtraction, body: string): vo
   delete evidenceData.clientName
   warnings.unshift(catalogWarning("CLIENT_IDENTITY_AMBIGUOUS", { field: "clientName", source: "SERVICE" }))
 
-  const donors = [...body.matchAll(/donneur\s+d['’]ordre\s*:\s*([^\r\n]+)/gi)]
+  const donors = [...body.matchAll(/donneur[ \t]+d['’]ordre[ \t]*:[ \t]*([^\r\n]+)/gi)]
     .filter(m => m[1].trim().length >= 2 && m[1].trim().length <= 100 && identity(m[1]) !== identity(client))
   if (new Set(donors.map(m => identity(m[1]))).size === 1) {
     fields.clientName = donors[0][1].trim()

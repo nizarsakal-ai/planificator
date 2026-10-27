@@ -35,6 +35,7 @@ it("recovers only an explicitly labelled unique donor, never a company inferred 
   assert.equal(extract(fields, "Donneur d’ordre : LOUEUR EXEMPLE\nClient final : MAIRIE TEST").fields.clientName, "LOUEUR EXEMPLE")
   assert.equal(extract(fields, "Donneur d'ordre : AAAAA\nDonneur d'ordre : BBBBB\nClient final : MAIRIE TEST").fields.clientName, null)
   assert.equal(extract(fields, "Pour notre client : MAIRIE TEST\ncontact@exemple.fr").fields.clientName, null)
+  assert.equal(extract(fields, "Donneur d’ordre :\nContact : Personne Test\nClient final : MAIRIE TEST").fields.clientName, null)
 })
 
 it("preserves a correct donor and existing end-client distinction", () => {
