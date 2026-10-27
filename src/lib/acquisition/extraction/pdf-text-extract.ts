@@ -35,33 +35,83 @@ function normalizeExtractedText(raw: string): string {
     .trim()
 }
 
-async function parseWithUnpdf(
+type PdfDocument = Awaited<ReturnType<typeof getDocumentProxy>>
+
+/**
+ * Ouvre le document, exécute `fn`, et DÉTRUIT toujours le proxy pdf.js (libère
+ * worker / mémoire). Sur échéance : le proxy est détruit immédiatement (les
+ * opérations pdf.js en cours sont annulées) et `onTimeout` est renvoyé.
+ */
+export async function withPdfDocument<T>(
   buf: Buffer,
+  timeoutMs: number,
+  fn: (pdf: PdfDocument) => Promise<T>,
+  onTimeout: T
+): Promise<T> {
+  let doc: PdfDocument | null = null
+  let abandoned = false
+  const destroy = (d: PdfDocument | null) => {
+    if (!d) return
+    try {
+      void Promise.resolve(d.loadingTask.destroy()).catch(() => undefined)
+    } catch {
+      // ignoré
+    }
+  }
+  const work = (async () => {
+    const pdf = await getDocumentProxy(new Uint8Array(buf))
+    doc = pdf
+    if (abandoned) {
+      destroy(pdf)
+      return onTimeout
+    }
+    try {
+      return await fn(pdf)
+    } finally {
+      destroy(pdf)
+    }
+  })()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => {
+          abandoned = true
+          destroy(doc)
+          resolve(onTimeout)
+        }, Math.max(0, timeoutMs))
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+    // Une rejection tardive du travail abandonné ne doit jamais remonter.
+    work.catch(() => undefined)
+  }
+}
+
+async function parseWithUnpdf(
+  pdf: PdfDocument,
   maxChars: number
 ): Promise<PdfTextExtractResult> {
-  const pdf = await getDocumentProxy(new Uint8Array(buf))
-  try {
-    const result = await extractText(pdf, { mergePages: true })
-    const joined = normalizeExtractedText(
-      typeof result.text === "string" ? result.text : ""
-    )
+  const result = await extractText(pdf, { mergePages: true })
+  const joined = normalizeExtractedText(
+    typeof result.text === "string" ? result.text : ""
+  )
 
-    if (!joined) {
-      return { status: "PDF_NO_TEXT_LAYER", text: "", truncated: false }
-    }
-
-    if (joined.length > maxChars) {
-      return {
-        status: "PDF_TEXT_TRUNCATED",
-        text: joined.slice(0, maxChars),
-        truncated: true,
-      }
-    }
-
-    return { status: "PDF_TEXT_EXTRACTED", text: joined, truncated: false }
-  } finally {
-    // getDocumentProxy / PDF.js : pas d’API destroy stable exposée par unpdf 1.x
+  if (!joined) {
+    return { status: "PDF_NO_TEXT_LAYER", text: "", truncated: false }
   }
+
+  if (joined.length > maxChars) {
+    return {
+      status: "PDF_TEXT_TRUNCATED",
+      text: joined.slice(0, maxChars),
+      truncated: true,
+    }
+  }
+
+  return { status: "PDF_TEXT_EXTRACTED", text: joined, truncated: false }
 }
 
 function failed(): PdfTextExtractResult {
@@ -89,15 +139,9 @@ export async function extractPdfTextLayer(
       return failed()
     }
 
-    let timer: ReturnType<typeof setTimeout> | undefined
-    try {
-      const timed = new Promise<PdfTextExtractResult>((resolve) => {
-        timer = setTimeout(() => resolve(failed()), timeoutMs)
-      })
-      return await Promise.race([parseWithUnpdf(buf, maxChars), timed])
-    } finally {
-      if (timer) clearTimeout(timer)
-    }
+    return await withPdfDocument(buf, timeoutMs, (pdf) => parseWithUnpdf(pdf, maxChars), failed()).catch(
+      () => failed()
+    )
   } catch {
     return failed()
   }
@@ -117,18 +161,12 @@ export async function countPdfPages(
     const buf = Buffer.isBuffer(input) ? input : Buffer.from(input)
     if (buf.length < 5 || buf.subarray(0, 5).toString("latin1") !== "%PDF-") return null
     if (buf.byteLength > maxBytes) return null
-    let timer: ReturnType<typeof setTimeout> | undefined
-    try {
-      const timed = new Promise<null>((resolve) => {
-        timer = setTimeout(() => resolve(null), timeoutMs)
-      })
-      const counted = getDocumentProxy(new Uint8Array(buf))
-        .then((pdf) => (Number.isInteger(pdf.numPages) && pdf.numPages >= 0 ? pdf.numPages : null))
-        .catch(() => null)
-      return await Promise.race([counted, timed])
-    } finally {
-      if (timer) clearTimeout(timer)
-    }
+    return await withPdfDocument<number | null>(
+      buf,
+      timeoutMs,
+      async (pdf) => (Number.isInteger(pdf.numPages) && pdf.numPages >= 0 ? pdf.numPages : null),
+      null
+    ).catch(() => null)
   } catch {
     return null
   }

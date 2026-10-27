@@ -34,7 +34,7 @@ export type AttachmentVisualInput =
   | {
       filename: string
       kind: "image"
-      mediaType: "image/jpeg" | "image/png" | "image/webp" | "image/gif"
+      mediaType: "image/jpeg" | "image/png"
       base64: string
       byteLength: number
     }

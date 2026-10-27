@@ -7,12 +7,14 @@
  *   exceljs n'exécute rien.
  * - Rendu feuille par feuille, une ligne par rangée, cellules séparées par " | ".
  * - Plafonds : taille fichier, taille décompressée déclarée (anti zip-bomb),
- *   nb feuilles, nb lignes, nb caractères ; timeout.
+ *   nb feuilles, nb lignes, nb caractères ; timeout / échéance appliqués
+ *   rangée par rangée (lecture en flux, abandon réel).
  * - Jamais d'exception : statut par fichier.
  *
  * Choix : `exceljs` et non `xlsx` 0.18.5 (vulnérable, prototype pollution / ReDoS).
  */
 
+import { Readable } from "node:stream"
 import ExcelJS from "exceljs"
 
 export type XlsxTextExtractStatus =
@@ -45,6 +47,8 @@ export type XlsxExtractOptions = {
   maxUncompressedBytes?: number
   maxSheets?: number
   maxRowsPerSheet?: number
+  /** Échéance absolue (ms epoch) — la lecture s'arrête réellement au-delà. */
+  deadlineAt?: number
 }
 
 function result(status: XlsxTextExtractStatus, text = "", truncated = false): XlsxTextExtractResult {
@@ -136,18 +140,32 @@ function cleanCell(raw: string): string {
     .slice(0, XLSX_DEFAULT_MAX_CELL_CHARS)
 }
 
+/**
+ * Lecture en flux (WorkbookReader) : chaque rangée est lue à la demande, ce qui
+ * permet d'ABANDONNER réellement le parsing (sortie de l'itérateur + destruction
+ * du flux source) à l'échéance, et d'éviter de charger tout le classeur.
+ */
 async function parseWorkbook(
   buf: Buffer,
-  opts: Required<Pick<XlsxExtractOptions, "maxChars" | "maxSheets" | "maxRowsPerSheet">>
+  opts: Required<Pick<XlsxExtractOptions, "maxChars" | "maxSheets" | "maxRowsPerSheet">> & {
+    deadlineAt: number
+  }
 ): Promise<XlsxTextExtractResult> {
-  const workbook = new ExcelJS.Workbook()
-  // Le type exceljs attend un Buffer « legacy » ; l'instance est bien un Buffer Node.
-  await workbook.xlsx.load(buf as unknown as Parameters<typeof workbook.xlsx.load>[0])
+  const source = Readable.from(buf)
+  const reader = new ExcelJS.stream.xlsx.WorkbookReader(source, {
+    sharedStrings: "cache",
+    styles: "cache",
+    hyperlinks: "ignore",
+    worksheets: "emit",
+    entries: "ignore",
+  })
 
   const lines: string[] = []
   let chars = 0
   let truncated = false
   let anyValue = false
+  let sheetIndex = 0
+  let timedOut = false
 
   const push = (line: string): boolean => {
     const cost = line.length + 1
@@ -162,39 +180,52 @@ async function parseWorkbook(
     return true
   }
 
-  const sheets = workbook.worksheets
-  if (sheets.length > opts.maxSheets) truncated = true
-
-  outer: for (const sheet of sheets.slice(0, opts.maxSheets)) {
-    const sheetLines: string[] = []
-    let rowCount = 0
-    let sheetTruncated = false
-    sheet.eachRow({ includeEmpty: false }, (row) => {
-      if (sheetTruncated) return
-      if (rowCount >= opts.maxRowsPerSheet) {
-        sheetTruncated = true
-        return
+  try {
+    outer: for await (const sheet of reader) {
+      if (Date.now() > opts.deadlineAt) {
+        timedOut = true
+        break
       }
-      const cells: string[] = []
-      const values = Array.isArray(row.values) ? row.values : []
-      for (let i = 1; i < values.length && cells.length < XLSX_DEFAULT_MAX_CELLS_PER_ROW; i++) {
-        const text = cleanCell(cellValueToText(values[i]))
-        if (text) cells.push(text)
+      sheetIndex++
+      if (sheetIndex > opts.maxSheets) {
+        truncated = true
+        break
       }
-      if (cells.length === 0) return
-      rowCount++
-      sheetLines.push(cells.join(" | "))
-    })
-    if (sheetTruncated) truncated = true
-    if (sheetLines.length === 0) continue
-    anyValue = true
-    const name = cleanCell(sheet.name || "Feuille").slice(0, 64)
-    if (!push(`--- Feuille: ${name} ---`)) break
-    for (const line of sheetLines) {
-      if (!push(line)) break outer
+      const sheetLines: string[] = []
+      let rowCount = 0
+      for await (const row of sheet) {
+        if (Date.now() > opts.deadlineAt) {
+          timedOut = true
+          break outer
+        }
+        if (rowCount >= opts.maxRowsPerSheet) {
+          truncated = true
+          break
+        }
+        const cells: string[] = []
+        const values = Array.isArray(row.values) ? row.values : []
+        for (let i = 1; i < values.length && cells.length < XLSX_DEFAULT_MAX_CELLS_PER_ROW; i++) {
+          const text = cleanCell(cellValueToText(values[i]))
+          if (text) cells.push(text)
+        }
+        if (cells.length === 0) continue
+        rowCount++
+        sheetLines.push(cells.join(" | "))
+      }
+      if (sheetLines.length === 0) continue
+      anyValue = true
+      const rawName = (sheet as unknown as { name?: unknown }).name
+      const name = cleanCell(typeof rawName === "string" && rawName ? rawName : `Feuille ${sheetIndex}`).slice(0, 64)
+      if (!push(`--- Feuille: ${name} ---`)) break
+      for (const line of sheetLines) {
+        if (!push(line)) break outer
+      }
     }
+  } finally {
+    source.destroy()
   }
 
+  if (timedOut) return result("XLSX_PARSE_FAILED")
   if (!anyValue) return result("XLSX_EMPTY")
   const text = lines.join("\n").trim()
   return result(truncated ? "XLSX_TEXT_TRUNCATED" : "XLSX_TEXT_EXTRACTED", text, truncated)
@@ -218,20 +249,13 @@ export async function extractXlsxText(
     if (declared == null) return result("XLSX_PARSE_FAILED")
     if (declared > maxUncompressed) return result("XLSX_TOO_LARGE")
 
-    let timer: ReturnType<typeof setTimeout> | undefined
-    try {
-      const timed = new Promise<XlsxTextExtractResult>((resolve) => {
-        timer = setTimeout(() => resolve(result("XLSX_PARSE_FAILED")), timeoutMs)
-      })
-      const parsed = parseWorkbook(buf, {
-        maxChars: opts?.maxChars ?? DEFAULT_MAX_CHARS,
-        maxSheets: opts?.maxSheets ?? XLSX_DEFAULT_MAX_SHEETS,
-        maxRowsPerSheet: opts?.maxRowsPerSheet ?? XLSX_DEFAULT_MAX_ROWS_PER_SHEET,
-      }).catch(() => result("XLSX_PARSE_FAILED"))
-      return await Promise.race([parsed, timed])
-    } finally {
-      if (timer) clearTimeout(timer)
-    }
+    const deadlineAt = Math.min(Date.now() + timeoutMs, opts?.deadlineAt ?? Number.POSITIVE_INFINITY)
+    return await parseWorkbook(buf, {
+      maxChars: opts?.maxChars ?? DEFAULT_MAX_CHARS,
+      maxSheets: opts?.maxSheets ?? XLSX_DEFAULT_MAX_SHEETS,
+      maxRowsPerSheet: opts?.maxRowsPerSheet ?? XLSX_DEFAULT_MAX_ROWS_PER_SHEET,
+      deadlineAt,
+    }).catch(() => result("XLSX_PARSE_FAILED"))
   } catch {
     return result("XLSX_PARSE_FAILED")
   }

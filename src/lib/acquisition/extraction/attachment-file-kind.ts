@@ -5,12 +5,17 @@
  * - `guessAttachmentKindFromMeta` : métadonnées seules (MIME déclaré + extension),
  *   utilisé AVANT claim pour décider si une pièce est potentiellement lisible.
  * - `sniffAttachmentKind` : signature magique sur les octets (autorité finale).
+ *   PDF, JPEG, PNG, HEIC/HEIF, ZIP .xlsx ; tout le reste = non pris en charge.
  *   Un JPEG déclaré `application/octet-stream` est reconnu ici.
  *
  * Aucune dépendance Prisma / provider. Pure.
  */
 
-export type AttachmentImageMediaType = "image/jpeg" | "image/png" | "image/webp" | "image/gif"
+/**
+ * Seuls JPEG et PNG : ce sont les seules images que la politique de téléchargement
+ * (attachment-policy) laisse stocker. WebP / GIF ne sont jamais STORED → non gérés.
+ */
+export type AttachmentImageMediaType = "image/jpeg" | "image/png"
 
 export type AttachmentFileKind =
   | { kind: "pdf" }
@@ -36,11 +41,9 @@ const IMAGE_EXT_TO_MEDIA: Record<string, AttachmentImageMediaType> = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".png": "image/png",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
 }
 
-const IMAGE_MIMES = new Set<string>(["image/jpeg", "image/png", "image/webp", "image/gif"])
+const IMAGE_MIMES = new Set<string>(["image/jpeg", "image/png"])
 
 /**
  * Estimation par métadonnées (MIME déclaré + extension). Jamais suffisante seule
@@ -97,12 +100,6 @@ export function sniffAttachmentKind(
   ) {
     return { kind: "image", mediaType: "image/png" }
   }
-  if (startsWithAscii(bytes, 0, "GIF87a") || startsWithAscii(bytes, 0, "GIF89a")) {
-    return { kind: "image", mediaType: "image/gif" }
-  }
-  if (startsWithAscii(bytes, 0, "RIFF") && startsWithAscii(bytes, 8, "WEBP")) {
-    return { kind: "image", mediaType: "image/webp" }
-  }
   if (bytes.length >= 12 && startsWithAscii(bytes, 4, "ftyp")) {
     const brand = String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]).toLowerCase()
     if (["heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1"].includes(brand)) {
@@ -120,7 +117,7 @@ export function sniffAttachmentKind(
 }
 
 /**
- * Dimensions d'image lues dans l'en-tête (PNG, GIF, JPEG, WebP VP8/VP8L/VP8X).
+ * Dimensions d'image lues dans l'en-tête (PNG, JPEG).
  * null si non mesurable — l'appelant décide (pas de décodage complet).
  */
 export function readImageDimensions(
@@ -132,24 +129,6 @@ export function readImageDimensions(
     if (mediaType === "image/png") {
       if (buf.length < 24 || !startsWithAscii(buf, 12, "IHDR")) return null
       return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) }
-    }
-    if (mediaType === "image/gif") {
-      if (buf.length < 10) return null
-      return { width: buf.readUInt16LE(6), height: buf.readUInt16LE(8) }
-    }
-    if (mediaType === "image/webp") {
-      if (buf.length < 30) return null
-      if (startsWithAscii(buf, 12, "VP8X")) {
-        return { width: 1 + buf.readUIntLE(24, 3), height: 1 + buf.readUIntLE(27, 3) }
-      }
-      if (startsWithAscii(buf, 12, "VP8L")) {
-        const b = buf.readUInt32LE(21)
-        return { width: 1 + (b & 0x3fff), height: 1 + ((b >> 14) & 0x3fff) }
-      }
-      if (startsWithAscii(buf, 12, "VP8 ")) {
-        return { width: buf.readUInt16LE(26) & 0x3fff, height: buf.readUInt16LE(28) & 0x3fff }
-      }
-      return null
     }
     // JPEG : parcours des segments jusqu'au SOFn.
     let p = 2

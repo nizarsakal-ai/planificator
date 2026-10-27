@@ -1,15 +1,16 @@
 /**
  * PLAN-ACQ-MULTIMODAL — Lecture des pièces jointes pour l'extraction.
  *
- * Par fichier (ordre du message conservé), une issue explicite :
+ * Par fichier (ordre du message conservé, identifié par l'id de pièce), une issue :
  * - PDF à couche texte → extrait texte (unpdf)
  * - PDF sans couche texte → bloc `document` vision (si vision active) sinon ignoré
- * - .xlsx → extrait texte (exceljs, valeurs uniquement)
- * - JPEG/PNG/WebP/GIF (signature magique) → bloc `image` vision (si active) sinon ignoré
- * - HEIC/HEIF → ignoré avec avertissement explicite (aucune conversion)
+ * - .xlsx → extrait texte (exceljs, valeurs uniquement) si lecture PJ étendue active
+ * - JPEG/PNG (signature magique, même déclarés octet-stream) → bloc `image` si vision active
+ * - HEIC/HEIF → ignoré explicitement (aucune conversion)
  * - autre → ignoré (format)
  *
  * Jamais d'exception. Toutes les entrées sont des données non fiables.
+ * Échéance globale respectée : au-delà, les pièces restantes sont « FAILED (DEADLINE) ».
  */
 
 import type {
@@ -34,10 +35,14 @@ import {
 } from "@/lib/acquisition/extraction/attachment-text-excerpts"
 import { extractXlsxText } from "@/lib/acquisition/extraction/xlsx-text-extract"
 
-/** Plafonds vision (Anthropic : 5 Mo/image ; requête ≤ 32 Mo, base64 +33 %). */
+/**
+ * Plafonds vision. Anthropic limite chaque image à 5 Mo — limite appliquée ici
+ * sur la taille ENCODÉE base64 (ceil(n/3)*4), et par prudence aussi aux documents
+ * PDF. Budget total encodé 20 Mo (requête API ≤ 32 Mo).
+ */
 export const MAX_VISUAL_FILES = 5
-export const MAX_VISUAL_FILE_BYTES = 5 * 1024 * 1024
-export const MAX_VISUAL_TOTAL_BYTES = 15 * 1024 * 1024
+export const MAX_VISUAL_BASE64_BYTES = 5 * 1024 * 1024
+export const MAX_VISUAL_TOTAL_BASE64_BYTES = 20 * 1024 * 1024
 export const MAX_VISUAL_PDF_PAGES = 10
 export const MAX_VISUAL_IMAGE_DIMENSION = 8_000
 /** Au-delà, les octets ne sont pas lus (plafond lecture texte PDF/xlsx inclus). */
@@ -46,6 +51,10 @@ const MAX_OUTCOMES = 50
 /** Bornes mémoire du chargement des octets (avant lecture). */
 export const MAX_LOADED_VISUAL_CANDIDATES = 2 * MAX_VISUAL_FILES
 export const MAX_TOTAL_LOADED_BYTES = 60 * 1024 * 1024
+
+export function base64EncodedLength(byteLength: number): number {
+  return Math.ceil(byteLength / 3) * 4
+}
 
 export const ATTACHMENT_READ_OUTCOME_CODES = [
   "READ_TEXT",
@@ -65,6 +74,8 @@ export type AttachmentReadOutcomeCode = (typeof ATTACHMENT_READ_OUTCOME_CODES)[n
 export type AttachmentReadKind = "pdf" | "xlsx" | "image" | "heic" | "other"
 
 export type AttachmentReadOutcome = {
+  /** Id de la pièce (clé d'association ; les noms de fichier peuvent être homonymes). */
+  attachmentId?: string
   filename: string
   kind: AttachmentReadKind
   outcome: AttachmentReadOutcomeCode
@@ -72,9 +83,11 @@ export type AttachmentReadOutcome = {
   reason?: string
 }
 
-export type VisionDisabledReason = "FLAG_OFF" | "PROVIDER_NOT_VISION"
+/** FLAG_OFF / AUTO_CONTEXT : désactivation attendue, aucun avertissement bruyant. */
+export type VisionDisabledReason = "FLAG_OFF" | "PROVIDER_NOT_VISION" | "AUTO_CONTEXT"
 
 export type AttachmentForReading = {
+  id?: string
   filename: string
   mimeType: string
   category: string
@@ -87,6 +100,7 @@ export type AttachmentForReading = {
 }
 
 export type AttachmentLegacyPdfOutcome = {
+  attachmentId?: string
   filename: string
   status: PdfTextExtractStatus
 }
@@ -101,45 +115,56 @@ export type AttachmentReadingResult = {
 
 export type AttachmentReadingOptions = {
   vision: { enabled: true } | { enabled: false; reason: VisionDisabledReason }
+  /**
+   * Lecture PJ étendue (.xlsx). false = comportement historique (PDF texte seul).
+   * Défaut : true (tests unitaires) ; le service passe le flag explicitement.
+   */
+  xlsxEnabled?: boolean
+  /** Échéance absolue (ms epoch). */
+  deadlineAt?: number
+  now?: () => number
 }
 
 function kindLabel(k: AttachmentFileKind): AttachmentReadKind {
   return k.kind === "unsupported" ? "other" : k.kind
 }
 
+function isOctetStream(mimeType: string): boolean {
+  return (mimeType || "").toLowerCase().startsWith("application/octet-stream")
+}
+
 /**
  * Lisibilité potentielle d'après les métadonnées seules (avant claim).
- * Une pièce STORED d'un format supporté ; images seulement si vision active.
+ * Une pièce STORED d'un format supporté ; xlsx si lecture étendue ; images
+ * (et octet-stream) seulement si vision active.
  */
 export function isPotentiallyReadableAttachment(
   meta: { filename: string; mimeType: string; status: string; storagePublicId?: string | null },
-  opts: { visionEnabled: boolean }
+  opts: { visionEnabled: boolean; xlsxEnabled?: boolean }
 ): boolean {
   if (meta.status !== "STORED") return false
   if (meta.storagePublicId !== undefined && !meta.storagePublicId?.trim()) return false
   const kind = guessAttachmentKindFromMeta(meta)
-  if (kind.kind === "pdf" || kind.kind === "xlsx") return true
+  if (kind.kind === "pdf") return true
+  if (kind.kind === "xlsx") return opts.xlsxEnabled !== false
   if (kind.kind === "image") return opts.visionEnabled
-  // MIME générique (octet-stream) : seule la signature tranchera, si vision active.
-  const mime = (meta.mimeType || "").toLowerCase()
-  if (kind.kind === "unsupported" && mime.startsWith("application/octet-stream")) {
-    return opts.visionEnabled
-  }
+  if (kind.kind === "unsupported" && isOctetStream(meta.mimeType)) return opts.visionEnabled
   return false
 }
 
 /** Faut-il charger les octets de cette pièce ? (évite les téléchargements inutiles). */
 export function shouldLoadAttachmentBytes(
   meta: { filename: string; mimeType: string; status: string; sizeBytes: number },
-  opts: { visionEnabled: boolean }
+  opts: { visionEnabled: boolean; xlsxEnabled?: boolean }
 ): boolean {
   if (meta.status !== "STORED") return false
   if (Number.isFinite(meta.sizeBytes) && meta.sizeBytes > MAX_READ_FILE_BYTES) return false
   const kind = guessAttachmentKindFromMeta(meta)
-  if (kind.kind === "pdf" || kind.kind === "xlsx") return true
+  if (kind.kind === "pdf") return true
+  if (kind.kind === "xlsx") return opts.xlsxEnabled !== false
   if (kind.kind === "heic") return false
   if (kind.kind === "image") return opts.visionEnabled
-  return opts.visionEnabled && (meta.mimeType || "").toLowerCase().startsWith("application/octet-stream")
+  return opts.visionEnabled && isOctetStream(meta.mimeType)
 }
 
 /**
@@ -149,7 +174,7 @@ export function shouldLoadAttachmentBytes(
  */
 export function planAttachmentLoads(
   metas: Array<{ filename: string; mimeType: string; status: string; sizeBytes: number }>,
-  opts: { visionEnabled: boolean }
+  opts: { visionEnabled: boolean; xlsxEnabled?: boolean }
 ): Array<"LOAD" | "SKIP" | "BUDGET"> {
   let visualCandidates = 0
   let totalBytes = 0
@@ -185,6 +210,9 @@ export async function readAttachmentsForExtraction(
   let totalChars = 0
   const visionEnabled = options.vision.enabled
   const visionOffReason = options.vision.enabled ? undefined : options.vision.reason
+  const xlsxEnabled = options.xlsxEnabled !== false
+  const now = options.now ?? Date.now
+  const deadlineAt = options.deadlineAt ?? Number.POSITIVE_INFINITY
 
   const pushExcerpt = (
     filename: string,
@@ -207,14 +235,23 @@ export async function readAttachmentsForExtraction(
 
   for (const att of attachments.slice(0, MAX_OUTCOMES)) {
     const filename = (att.filename || "piece-jointe").slice(0, 255)
+    const attachmentId = att.id
     const metaKind = guessAttachmentKindFromMeta(att)
-    const record = (o: Omit<AttachmentReadOutcome, "filename">) => {
-      outcomes.push({ filename, ...o })
+    const record = (o: Omit<AttachmentReadOutcome, "filename" | "attachmentId">) => {
+      outcomes.push({ ...(attachmentId ? { attachmentId } : {}), filename, ...o })
       return outcomes.length - 1
+    }
+    const pdfOutcome = (status: PdfTextExtractStatus) =>
+      pdfOutcomes.push({ ...(attachmentId ? { attachmentId } : {}), filename, status })
+
+    if (now() >= deadlineAt) {
+      if (metaKind.kind === "pdf") pdfOutcome("PDF_PARSE_FAILED")
+      record({ kind: kindLabel(metaKind), outcome: "FAILED", reason: "DEADLINE" })
+      continue
     }
 
     if (att.status !== "STORED") {
-      if (metaKind.kind === "pdf") pdfOutcomes.push({ filename, status: "PDF_PARSE_FAILED" })
+      if (metaKind.kind === "pdf") pdfOutcome("PDF_PARSE_FAILED")
       record({ kind: kindLabel(metaKind), outcome: "UNAVAILABLE", reason: `NOT_STORED_${att.status}`.slice(0, 40) })
       continue
     }
@@ -224,14 +261,19 @@ export async function readAttachmentsForExtraction(
       continue
     }
 
+    if (metaKind.kind === "xlsx" && !xlsxEnabled) {
+      record({ kind: "xlsx", outcome: "IGNORED_FORMAT", reason: "XLSX_FLAG_OFF" })
+      continue
+    }
+
     if (att.loadSkippedForBudget && !att.bytes) {
-      if (metaKind.kind === "pdf") pdfOutcomes.push({ filename, status: "PDF_PARSE_FAILED" })
+      if (metaKind.kind === "pdf") pdfOutcome("PDF_PARSE_FAILED")
       record({ kind: kindLabel(metaKind), outcome: "IGNORED_TOO_LARGE", reason: "LOAD_BUDGET" })
       continue
     }
 
     if (Number.isFinite(att.sizeBytes) && att.sizeBytes > MAX_READ_FILE_BYTES && !att.bytes) {
-      if (metaKind.kind === "pdf") pdfOutcomes.push({ filename, status: "PDF_PARSE_FAILED" })
+      if (metaKind.kind === "pdf") pdfOutcome("PDF_PARSE_FAILED")
       record({ kind: kindLabel(metaKind), outcome: "IGNORED_TOO_LARGE", reason: "FILE_BYTES" })
       continue
     }
@@ -239,11 +281,11 @@ export async function readAttachmentsForExtraction(
     const bytes = att.bytes && att.bytes.byteLength > 0 ? att.bytes : null
     if (!bytes) {
       if (metaKind.kind === "pdf") {
-        pdfOutcomes.push({ filename, status: "PDF_PARSE_FAILED" })
+        pdfOutcome("PDF_PARSE_FAILED")
         record({ kind: "pdf", outcome: "UNAVAILABLE", reason: "BYTES_UNAVAILABLE" })
       } else if (metaKind.kind === "xlsx") {
         record({ kind: "xlsx", outcome: "UNAVAILABLE", reason: "BYTES_UNAVAILABLE" })
-      } else if (metaKind.kind === "image" || (att.mimeType || "").toLowerCase().startsWith("application/octet-stream")) {
+      } else if (metaKind.kind === "image" || isOctetStream(att.mimeType)) {
         if (!visionEnabled) {
           record({ kind: kindLabel(metaKind), outcome: "IGNORED_VISION_DISABLED", reason: visionOffReason })
         } else {
@@ -263,13 +305,17 @@ export async function readAttachmentsForExtraction(
     }
 
     if (kind.kind === "unsupported") {
-      if (metaKind.kind === "pdf") pdfOutcomes.push({ filename, status: "PDF_PARSE_FAILED" })
+      if (metaKind.kind === "pdf") pdfOutcome("PDF_PARSE_FAILED")
       record({ kind: "other", outcome: "IGNORED_FORMAT", reason: "SIGNATURE_UNSUPPORTED" })
       continue
     }
 
     if (kind.kind === "xlsx") {
-      const r = await extractXlsxText(bytes, { maxChars: MAX_EXCERPT_CHARS })
+      if (!xlsxEnabled) {
+        record({ kind: "xlsx", outcome: "IGNORED_FORMAT", reason: "XLSX_FLAG_OFF" })
+        continue
+      }
+      const r = await extractXlsxText(bytes, { maxChars: MAX_EXCERPT_CHARS, deadlineAt })
       if (r.status === "XLSX_TEXT_EXTRACTED" || r.status === "XLSX_TEXT_TRUNCATED") {
         const pushed = pushExcerpt(filename, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", r.text, r.truncated)
         if (!pushed.pushed) {
@@ -288,15 +334,14 @@ export async function readAttachmentsForExtraction(
     }
 
     if (kind.kind === "pdf") {
+      const remaining = Math.max(1, deadlineAt - now())
       const r = await extractPdfTextLayer(bytes, {
         maxChars: MAX_EXCERPT_CHARS,
-        timeoutMs: PDF_PARSE_TIMEOUT_MS,
+        timeoutMs: Math.min(PDF_PARSE_TIMEOUT_MS, remaining),
       })
       if ((r.status === "PDF_TEXT_EXTRACTED" || r.status === "PDF_TEXT_TRUNCATED") && r.text) {
         const pushed = pushExcerpt(filename, "application/pdf", r.text, r.truncated)
-        const status: PdfTextExtractStatus =
-          pushed.pushed && !pushed.truncated ? "PDF_TEXT_EXTRACTED" : "PDF_TEXT_TRUNCATED"
-        pdfOutcomes.push({ filename, status })
+        pdfOutcome(pushed.pushed && !pushed.truncated ? "PDF_TEXT_EXTRACTED" : "PDF_TEXT_TRUNCATED")
         if (!pushed.pushed) {
           record({ kind: "pdf", outcome: "IGNORED_TOO_LARGE", reason: "TEXT_BUDGET" })
         } else {
@@ -305,7 +350,7 @@ export async function readAttachmentsForExtraction(
         continue
       }
       if (r.status === "PDF_NO_TEXT_LAYER") {
-        pdfOutcomes.push({ filename, status: "PDF_NO_TEXT_LAYER" })
+        pdfOutcome("PDF_NO_TEXT_LAYER")
         const idx = record({
           kind: "pdf",
           outcome: "IGNORED_VISION_DISABLED",
@@ -316,12 +361,12 @@ export async function readAttachmentsForExtraction(
         }
         continue
       }
-      pdfOutcomes.push({ filename, status: "PDF_PARSE_FAILED" })
+      pdfOutcome("PDF_PARSE_FAILED")
       record({ kind: "pdf", outcome: "FAILED", reason: "PDF_PARSE_FAILED" })
       continue
     }
 
-    // Image (jpeg/png/webp/gif) — y compris déclarée application/octet-stream.
+    // Image JPEG / PNG — y compris déclarée application/octet-stream.
     const idx = record({
       kind: "image",
       outcome: "IGNORED_VISION_DISABLED",
@@ -332,46 +377,54 @@ export async function readAttachmentsForExtraction(
     }
   }
 
-  const visuals = await allocateVisualBudget(candidates, outcomes)
+  const visuals = await allocateVisualBudget(candidates, outcomes, { now, deadlineAt })
   return { excerpts, visuals, outcomes, pdfOutcomes }
 }
 
 /**
  * Attribue le budget vision : PDF scannés d'abord (bons de commande), puis photos,
- * dans l'ordre du message. Dépassement → « ignoré (trop gros) ».
+ * dans l'ordre du message. Tout dépassement → « ignoré (trop gros) », jamais
+ * d'échec global de l'extraction.
  */
 async function allocateVisualBudget(
   candidates: VisualCandidate[],
-  outcomes: AttachmentReadOutcome[]
+  outcomes: AttachmentReadOutcome[],
+  clock: { now: () => number; deadlineAt: number }
 ): Promise<AttachmentVisualInput[]> {
   const ordered = [
     ...candidates.filter((c) => c.kind === "pdf"),
     ...candidates.filter((c) => c.kind === "image"),
   ]
   const visuals: Array<{ index: number; visual: AttachmentVisualInput }> = []
-  let totalBytes = 0
+  let totalEncoded = 0
 
-  const ignore = (c: VisualCandidate, reason: string) => {
-    outcomes[c.index] = { ...outcomes[c.index], outcome: "IGNORED_TOO_LARGE", reason }
+  const ignore = (c: VisualCandidate, outcome: "IGNORED_TOO_LARGE" | "FAILED", reason: string) => {
+    outcomes[c.index] = { ...outcomes[c.index], outcome, reason }
   }
 
   for (const c of ordered) {
-    if (c.bytes.byteLength > MAX_VISUAL_FILE_BYTES) {
-      ignore(c, "VISUAL_FILE_BYTES")
+    const encoded = base64EncodedLength(c.bytes.byteLength)
+    if (encoded > MAX_VISUAL_BASE64_BYTES) {
+      ignore(c, "IGNORED_TOO_LARGE", "VISUAL_FILE_BYTES")
       continue
     }
     if (visuals.length >= MAX_VISUAL_FILES) {
-      ignore(c, "MAX_VISUAL_FILES")
+      ignore(c, "IGNORED_TOO_LARGE", "MAX_VISUAL_FILES")
       continue
     }
-    if (totalBytes + c.bytes.byteLength > MAX_VISUAL_TOTAL_BYTES) {
-      ignore(c, "VISUAL_TOTAL_BUDGET")
+    if (totalEncoded + encoded > MAX_VISUAL_TOTAL_BASE64_BYTES) {
+      ignore(c, "IGNORED_TOO_LARGE", "VISUAL_TOTAL_BUDGET")
       continue
     }
     if (c.kind === "pdf") {
-      const pages = await countPdfPages(c.bytes)
+      const remaining = clock.deadlineAt - clock.now()
+      if (remaining <= 0) {
+        ignore(c, "FAILED", "DEADLINE")
+        continue
+      }
+      const pages = await countPdfPages(c.bytes, { timeoutMs: Math.min(PDF_PARSE_TIMEOUT_MS, remaining) })
       if (pages != null && pages > MAX_VISUAL_PDF_PAGES) {
-        ignore(c, "PDF_PAGES")
+        ignore(c, "IGNORED_TOO_LARGE", "PDF_PAGES")
         continue
       }
       visuals.push({
@@ -388,7 +441,7 @@ async function allocateVisualBudget(
       const mediaType = c.mediaType as Exclude<AttachmentVisualInput["mediaType"], "application/pdf">
       const dims = readImageDimensions(c.bytes, mediaType)
       if (dims && (dims.width > MAX_VISUAL_IMAGE_DIMENSION || dims.height > MAX_VISUAL_IMAGE_DIMENSION)) {
-        ignore(c, "IMAGE_DIMENSIONS")
+        ignore(c, "IGNORED_TOO_LARGE", "IMAGE_DIMENSIONS")
         continue
       }
       visuals.push({
@@ -402,10 +455,12 @@ async function allocateVisualBudget(
         },
       })
     }
-    totalBytes += c.bytes.byteLength
+    totalEncoded += encoded
+    const prev = outcomes[c.index]
     outcomes[c.index] = {
-      filename: outcomes[c.index].filename,
-      kind: outcomes[c.index].kind,
+      ...(prev.attachmentId ? { attachmentId: prev.attachmentId } : {}),
+      filename: prev.filename,
+      kind: prev.kind,
       outcome: "READ_VISION",
     }
   }

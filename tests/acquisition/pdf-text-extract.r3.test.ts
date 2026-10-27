@@ -5,10 +5,19 @@ process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import {
-  appendAttachmentTextToBody,
-  buildAttachmentTextExcerpts,
-} from "@/lib/acquisition/extraction/attachment-text-excerpts"
+import { appendAttachmentTextToBody } from "@/lib/acquisition/extraction/attachment-text-excerpts"
+import { readAttachmentsForExtraction } from "@/lib/acquisition/extraction/attachment-reading"
+
+/** Ex-API buildAttachmentTextExcerpts (supprimée) : lecture via readAttachmentsForExtraction. */
+async function buildAttachmentTextExcerpts(
+  atts: Array<{ filename: string; mimeType: string; category: string; bytes?: Buffer | null }>
+) {
+  const r = await readAttachmentsForExtraction(
+    atts.map((a) => ({ ...a, sizeBytes: a.bytes?.byteLength ?? 0, status: "STORED", bytes: a.bytes ?? null })),
+    { vision: { enabled: false, reason: "FLAG_OFF" } }
+  )
+  return { excerpts: r.excerpts, outcomes: r.pdfOutcomes }
+}
 import {
   buildFlateCompressedMultiBlockPdf,
   buildMinimalEmptyPdf,
