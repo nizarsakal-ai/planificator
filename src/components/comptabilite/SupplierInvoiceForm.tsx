@@ -1,5 +1,6 @@
 "use client"
 // Saisie / vérification d'une facture fournisseur : import ou capture (caméra) du fichier, extraction OCR (si activée), champs avec confiance.
+import { normalizeSupplierCategory, suggestedExpenseAccountId } from "@/lib/accounting/c5/supplier-classification"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
@@ -37,7 +38,8 @@ export function SupplierInvoiceForm({ mode, invoiceId, initial, accounts, confid
       if (r.extraction) {
         const e = r.extraction as Record<string, unknown>
         const cents = (x: unknown) => (typeof x === "string" ? (Number(x) / 100).toFixed(2) : "")
-        setV({ ...v, supplierName: (e.supplier as string) ?? v.supplierName, siret: (e.siret as string) ?? "", number: (e.invoiceNumber as string) ?? v.number, date: (e.date as string) ?? v.date, totalHT: cents(e.totalHTCents) || v.totalHT, vat: cents(e.vatCents) || v.vat, totalTTC: cents(e.totalTTCCents) || v.totalTTC, vatRate: typeof e.vatRateBp === "number" ? String(e.vatRateBp / 100) : v.vatRate, category: (e.category as string) ?? v.category })
+        const category = normalizeSupplierCategory(e.category)
+        setV((current) => ({ ...current, supplierName: (e.supplier as string) ?? current.supplierName, siret: (e.siret as string) ?? "", number: (e.invoiceNumber as string) ?? current.number, date: (e.date as string) ?? current.date, totalHT: cents(e.totalHTCents) || current.totalHT, vat: cents(e.vatCents) || current.vat, totalTTC: cents(e.totalTTCCents) || current.totalTTC, vatRate: typeof e.vatRateBp === "number" ? String(e.vatRateBp / 100) : current.vatRate, category: category ?? "", expenseAccountId: suggestedExpenseAccountId(category, accounts) }))
         setConf((e.confidence as Record<string, number>) ?? {}); setOcr(e)
         toast.success("Champs extraits : vérifiez chaque valeur avant validation.")
       } else toast.info(r.extractionError ?? "Fichier enregistré : saisissez les champs manuellement.")
@@ -76,8 +78,9 @@ export function SupplierInvoiceForm({ mode, invoiceId, initial, accounts, confid
         <div><Label htmlFor="ht">Montant HT *<Conf c={conf.amountHT} /></Label><Input id="ht" inputMode="decimal" required value={v.totalHT} onChange={set("totalHT")} /></div>
         <div><Label htmlFor="tv">TVA *<Conf c={conf.vatAmount} /></Label><Input id="tv" inputMode="decimal" required value={v.vat} onChange={set("vat")} /></div>
         <div><Label htmlFor="tt">TTC *<Conf c={conf.amountTTC} /></Label><Input id="tt" inputMode="decimal" required value={v.totalTTC} onChange={set("totalTTC")} /></div>
-        <div><Label htmlFor="ca">Catégorie</Label><select id="ca" value={v.category} onChange={set("category")} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm">{CATS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
+        <div><Label htmlFor="ca">Catégorie<Conf c={conf.category} /></Label><select id="ca" value={v.category} onChange={(e) => { const category = e.target.value; setConf((current) => { const { category: _category, ...rest } = current; return rest }); setV((current) => ({ ...current, category, expenseAccountId: !current.expenseAccountId || current.expenseAccountId === suggestedExpenseAccountId(current.category, accounts) ? suggestedExpenseAccountId(category, accounts) : current.expenseAccountId })) }} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm">{CATS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
         <div className="sm:col-span-2"><Label htmlFor="ac">Compte de charge (défaut selon la catégorie)</Label><select id="ac" value={v.expenseAccountId} onChange={set("expenseAccountId")} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="">— Selon la catégorie —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.number} {a.label}</option>)}</select></div>
+        <p className="sm:col-span-2 text-xs text-slate-500">La catégorie et le compte suggérés sont à vérifier et restent modifiables. Si aucun compte correspondant n’est disponible, sélectionnez un compte de charge.</p>
         <div className="sm:col-span-2"><Label htmlFor="no">Notes</Label><Input id="no" maxLength={1000} value={v.notes} onChange={set("notes")} /></div>
       </CardContent></Card>
       <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => router.back()}>Annuler</Button><Button type="submit" disabled={loading}>{loading && <Loader2 className="h-4 w-4 animate-spin" />} {mode === "create" ? "Enregistrer (à valider)" : "Enregistrer les corrections"}</Button></div>

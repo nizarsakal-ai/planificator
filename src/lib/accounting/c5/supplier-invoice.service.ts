@@ -15,8 +15,8 @@ import { postSupplierInvoiceEntry } from "./postings"
 
 type Db = PrismaClient
 type Tx = Prisma.TransactionClient
-export const SUPPLIER_CATEGORIES = ["marchandises", "services", "location", "deplacement", "honoraires", "entretien", "autre"] as const
-export const CATEGORY_ACCOUNT: Record<string, string> = { marchandises: "607000", services: "604000", location: "613000", deplacement: "625000", honoraires: "622000", entretien: "615000", autre: "606000" }
+import { SUPPLIER_CATEGORIES, CATEGORY_ACCOUNT } from "./supplier-classification"
+export { SUPPLIER_CATEGORIES, CATEGORY_ACCOUNT } from "./supplier-classification"
 export const CATEGORY_LABEL: Record<string, string> = { marchandises: "Marchandises", services: "Prestations", location: "Locations", deplacement: "Déplacements", honoraires: "Honoraires", entretien: "Entretien", autre: "Autre" }
 
 export const SUPPLIER_ERRORS = {

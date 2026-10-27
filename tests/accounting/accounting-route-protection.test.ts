@@ -220,6 +220,7 @@ describe("A1 — périmètre du moteur comptable (aucun branchement facture, auc
       "src/lib/accounting/c5/fec.ts",
       "src/lib/accounting/c5/ocr-provider.ts",
       "src/lib/accounting/c5/postings.ts",
+      "src/lib/accounting/c5/supplier-classification.ts",
       "src/lib/accounting/c5/supplier-invoice.service.ts",
       "src/lib/accounting/c5/vat-declaration.ts",
       "src/lib/accounting/c5/vat-history.ts",
