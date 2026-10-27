@@ -21,6 +21,7 @@ import {
 import { isExtractionProviderError } from "@/lib/acquisition/extraction/extraction-provider.errors"
 import type { ExtractionProviderPort } from "@/lib/acquisition/extraction/extraction-provider.port"
 import { resolveExtractionProvider } from "@/lib/acquisition/extraction/extraction-provider.factory"
+import { preExtractionWorkPeriod } from "@/lib/acquisition/policy/pre-extraction-work-period"
 import { classifyWorkPeriod } from "@/lib/acquisition/policy/work-period-classification"
 import { evidenceQuoteInHaystack } from "@/lib/acquisition/extraction/anthropic-extraction.prompt"
 import {
@@ -427,16 +428,6 @@ async function runDraftExtractionCore(
     return fail("DISABLED", "EXTRACTION_DISABLED", "Extraction désactivée")
   }
 
-  // Provider résolu AVANT claim (I2) — anthropic absent n'incrémente pas attemptCount.
-  const provider = resolveProvider(deps.provider)
-  if (!provider) {
-    return fail(
-      "FAILED",
-      "PROVIDER_NOT_CONFIGURED",
-      "Provider extraction non configuré (005B-3)",
-    )
-  }
-
   const companyId = input.companyId
   const draft = await repository.findDraft(companyId, input.draftId)
   if (!draft) {
@@ -501,6 +492,24 @@ async function runDraftExtractionCore(
     )
   }
 
+  const content = await repository.findContent(companyId, draft.acquisitionMessageId)
+  const message = await repository.findMessage(companyId, draft.acquisitionMessageId)
+  const period = preExtractionWorkPeriod(message?.subject ?? null, content?.normalizedText ?? "", now)
+  if (period.kind === "OBSOLETE" && content) {
+    if (!(await ensureOrchestratorOwned(executionContext))) return failLeaseStolen(draft.id)
+    const marked = await repository.markObsoleteBeforeExtraction({
+      companyId, draftId: draft.id, expectedVersion: draft.version,
+      expectedStatus: draft.status, expectedContentHash: content.contentHash,
+      ownershipFence: isOrchestratorAutoContext(executionContext) ? resolveOrchestratorAutoTransactionalFence(executionContext.capability) : undefined,
+    })
+    if (!marked) {
+      if (!(await ensureOrchestratorOwned(executionContext))) return failLeaseStolen(draft.id)
+      return fail("STATE_CHANGED", "EXTRACTION_STATE_CHANGED", "Consultation modifiée pendant le contrôle des dates", { draftId: draft.id })
+    }
+    log("EXTRACTION_SKIPPED_OBSOLETE", { draftId: draft.id })
+    return { ok: true, outcome: "SKIPPED_OBSOLETE", draftId: draft.id, status: "OBSOLETE", warningCount: 0 }
+  }
+
   if (draft.extractionAttemptCount >= maxAttempts && !force) {
     return fail("MAX_ATTEMPTS_REACHED", "EXTRACTION_MAX_ATTEMPTS", "Nombre max de tentatives atteint", {
       draftId: draft.id,
@@ -509,7 +518,16 @@ async function runDraftExtractionCore(
     })
   }
 
-  const content = await repository.findContent(companyId, draft.acquisitionMessageId)
+  // Provider résolu AVANT claim (I2) — anthropic absent n'incrémente pas attemptCount.
+  const provider = resolveProvider(deps.provider)
+  if (!provider) {
+    return fail(
+      "FAILED",
+      "PROVIDER_NOT_CONFIGURED",
+      "Provider extraction non configuré (005B-3)",
+    )
+  }
+
   const visionOptions = resolveVisionOptions(provider, executionContext)
   const visionEnabled = visionOptions.vision.enabled
   const xlsxEnabled = visionOptions.xlsxEnabled === true
@@ -582,7 +600,6 @@ async function runDraftExtractionCore(
     }
   }
 
-  const message = await repository.findMessage(companyId, draft.acquisitionMessageId)
   if (!attachments) {
     attachments = await repository.listAttachmentMetadata(companyId, draft.acquisitionMessageId)
   }

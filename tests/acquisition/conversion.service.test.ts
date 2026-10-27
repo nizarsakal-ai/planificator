@@ -645,60 +645,17 @@ describe("ImportDraftConversionService", () => {
     assert.equal(db.worksites.length, 0)
   })
 
-  it("PROVIDENCE-DATES — NULL/NULL → Worksite PLANNED sans dates ni Assignment", async () => {
-    const before = Date.now()
-    const db = createFakeDb({
-      draft: baseDraft({
-        proposedStartDate: null,
-        proposedEndDate: null,
-      }),
-      clients: [{ id: "c1", companyId: "co1" }],
+  for (const start of [null, new Date("2026-11-02T00:00:00Z")]) {
+    it(`unconfirmed period (${start ? "start only" : "no dates"}) blocks human conversion without writes`, async () => {
+      const db = createFakeDb({ draft: baseDraft({ proposedStartDate: start, proposedEndDate: null }), clients: [{ id: "c1", companyId: "co1" }] })
+      const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-27T12:00:00Z") })
+      const result = await svc.convertImportDraft(admin, { draftId: "d1", expectedVersion: 2, clientMode: "EXISTING", existingClientId: "c1" })
+      assert.ok(!result.ok && result.code === "WORK_PERIOD_UNCONFIRMED")
+      assert.equal(db.worksites.length, 0)
+      assert.equal(db.documents.length, 0)
+      assert.equal(db.draft.status, "APPROVED")
     })
-    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
-    const r = await svc.convertImportDraft(admin, {
-      draftId: "d1",
-      expectedVersion: 2,
-      clientMode: "EXISTING",
-      existingClientId: "c1",
-    })
-    assert.equal(r.ok, true)
-    assert.equal(db.worksites.length, 1)
-    assert.equal(db.worksites[0]!.startDate, null)
-    assert.equal(db.worksites[0]!.endDate, null)
-    assert.equal(db.worksites[0]!.status, "PLANNED")
-    assert.equal(db.assignments, 0)
-    assert.equal(db.lastWorksiteCreateData?.startDate, null)
-    assert.equal(db.lastWorksiteCreateData?.endDate, null)
-    // aucune date « maintenant » / receivedAt injectée dans le payload create
-    const payload = db.lastWorksiteCreateData ?? {}
-    assert.equal("receivedAt" in payload && payload.receivedAt != null, false)
-    assert.equal(payload.startDate === null && payload.endDate === null, true)
-    assert.ok(Date.now() - before < 60_000)
-  })
-
-  it("START-ONLY — START/NULL → Worksite avec endDate null", async () => {
-    const db = createFakeDb({
-      draft: baseDraft({
-        proposedStartDate: new Date("2026-10-01T00:00:00.000Z"),
-        proposedEndDate: null,
-      }),
-      clients: [{ id: "c1", companyId: "co1" }],
-    })
-    const svc = new ImportDraftConversionService({
-      db: db as never,
-      now: () => new Date("2026-09-06T12:00:00.000Z"),
-    })
-    const r = await svc.convertImportDraft(admin, {
-      draftId: "d1",
-      expectedVersion: 2,
-      clientMode: "EXISTING",
-      existingClientId: "c1",
-    })
-    assert.equal(r.ok, true)
-    assert.equal(db.worksites.length, 1)
-    assert.equal(db.worksites[0]!.startDate?.toISOString(), "2026-10-01T00:00:00.000Z")
-    assert.equal(db.worksites[0]!.endDate, null)
-  })
+  }
 
   it("START-ONLY — NULL/END reste refusé", async () => {
     const db = createFakeDb({

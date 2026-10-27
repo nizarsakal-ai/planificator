@@ -216,6 +216,19 @@ describe("acquisition conversion — intégration PostgreSQL 005D", RUN, () => {
     assert.ok(repeated.ok && repeated.outcome === "ALREADY_CONVERTED")
   })
 
+  it("uncertain dates block conversion in the transaction without creating any worksite", async () => {
+    const draftId = await seedApproved(companyA)
+    const { ctx } = await admin(companyA)
+    await db.worksiteImportDraft.update({ where: { id: draftId }, data: { proposedStartDate: null, proposedEndDate: null } })
+    const before = await db.worksite.count({ where: { companyId: companyA } })
+    const svc = new ImportDraftConversionService({ db, now: () => new Date("2026-10-27T12:00:00Z") })
+    const result = await svc.convertImportDraft(ctx, { draftId, expectedVersion: 3, clientMode: "NEW", newClient: { name: "Must not create" } })
+    assert.ok(!result.ok && result.code === "WORK_PERIOD_UNCONFIRMED", JSON.stringify(result))
+    assert.equal(await db.worksite.count({ where: { companyId: companyA } }), before)
+    assert.equal(await db.client.count({ where: { companyId: companyA, name: "Must not create" } }), 0)
+    assert.equal((await db.worksiteImportDraft.findUniqueOrThrow({ where: { id: draftId } })).status, "APPROVED")
+  })
+
   it("EXISTING cross-tenant CLIENT_NOT_FOUND", async () => {
     const draftId = await seedApproved(companyA)
     const draftBefore = await db.worksiteImportDraft.findUniqueOrThrow({

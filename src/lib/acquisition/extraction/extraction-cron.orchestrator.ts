@@ -71,6 +71,11 @@ export function mapExtractionOutcomeToStats(
   ctx: { companyId: string; draftId: string; acquisitionMessageId?: string }
 ): void {
   if (result.ok) {
+    if (result.outcome === "SKIPPED_OBSOLETE") {
+      stats.skipped++
+      log("EXTRACTION_DRAFT_SKIPPED_OBSOLETE", { ...ctx, outcome: result.outcome })
+      return
+    }
     if (result.outcome === "EXTRACTED") {
       stats.extracted++
       log("EXTRACTION_DRAFT_EXTRACTED", { ...ctx, outcome: result.outcome })

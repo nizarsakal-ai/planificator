@@ -5,6 +5,7 @@
 
 import type { PrismaClient, WorksiteImportDraftStatus } from "@prisma/client"
 import { Prisma } from "@prisma/client"
+import type { TransactionalOwnershipFence } from "@/lib/acquisition/conversion/conversion-ownership-fence.port"
 import { prisma } from "@/lib/prisma"
 import { EXTRACTION_SCHEMA_VERSION } from "@/lib/acquisition/extraction/extraction-feature-flag"
 import type {
@@ -167,6 +168,31 @@ export class DraftExtractionRepository {
       status: r.status,
       storagePublicId: r.storagePublicId,
     }))
+  }
+
+  /** No provider/attachment read and no extraction attempt for a proven finished job. */
+  async markObsoleteBeforeExtraction(input: {
+    companyId: string; draftId: string; expectedVersion: number;
+    expectedStatus: WorksiteImportDraftStatus; expectedContentHash: string;
+    ownershipFence?: TransactionalOwnershipFence;
+  }): Promise<boolean> {
+    if (!["PENDING_EXTRACTION", "FAILED", "PENDING_REVIEW", "EXTRACTING"].includes(input.expectedStatus)) return false
+    return this.db.$transaction(async tx => {
+      if (input.ownershipFence && await input.ownershipFence.assertOwnedAndLock(tx) !== "OWNED") return false
+      const updated = await tx.worksiteImportDraft.updateMany({
+        where: {
+          id: input.draftId, companyId: input.companyId,
+          version: input.expectedVersion, status: input.expectedStatus,
+          acquisitionMessage: { content: { is: { companyId: input.companyId, contentHash: input.expectedContentHash } } },
+        },
+        data: {
+          status: "OBSOLETE", version: { increment: 1 },
+          extractionStartedAt: null, extractionRetryable: false,
+          lastExtractionErrorCode: null, lastExtractionErrorAt: null,
+        },
+      })
+      return updated.count === 1
+    })
   }
 
   /**

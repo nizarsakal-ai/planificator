@@ -516,3 +516,12 @@ describe("runAcquisitionExtractionCronOrchestrator", () => {
     }
   })
 })
+
+it("obsolete preflight is counted as skipped, never extracted or failed", () => {
+  const stats = emptyExtractionCronRunStats()
+  mapExtractionOutcomeToStats(stats, { ok: true, outcome: "SKIPPED_OBSOLETE", status: "OBSOLETE", draftId: "past", warningCount: 0 }, () => {}, { companyId: "co1", draftId: "past" })
+  assert.equal(stats.skipped, 1)
+  assert.equal(stats.extracted, 0)
+  assert.equal(stats.alreadyExtracted, 0)
+  assert.equal(stats.failed, 0)
+})
