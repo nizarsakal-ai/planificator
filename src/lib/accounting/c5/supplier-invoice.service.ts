@@ -17,7 +17,7 @@ type Db = PrismaClient
 type Tx = Prisma.TransactionClient
 import { SUPPLIER_CATEGORIES, CATEGORY_ACCOUNT } from "./supplier-classification"
 export { SUPPLIER_CATEGORIES, CATEGORY_ACCOUNT } from "./supplier-classification"
-export const CATEGORY_LABEL: Record<string, string> = { marchandises: "Marchandises", services: "Prestations", location: "Locations", deplacement: "Déplacements", honoraires: "Honoraires", entretien: "Entretien", autre: "Autre" }
+export const CATEGORY_LABEL: Record<string, string> = { marchandises: "Marchandises", services: "Prestations", location: "Locations", deplacement: "Déplacements", honoraires: "Honoraires", entretien: "Entretien", restauration: "Restauration", autre: "Autre" }
 
 export const SUPPLIER_ERRORS = {
   fileType: "Fichier refusé : seuls JPEG, PNG, WebP et PDF sont acceptés (type vérifié par signature).",
@@ -139,6 +139,8 @@ export async function validateSupplierInvoice(db: Db, ctx: AccountingContext, id
       return { ok: true as const, value: { entryId: e.entryId, supplierId: s.supplierId } }
     }
     if (s.status !== "PENDING") return { ok: false as const, error: SUPPLIER_ERRORS.notPending }
+    // La nature du repas ne détermine pas son imputation : choix humain obligatoire.
+    if (s.category === "restauration" && !s.expenseAccountId) return { ok: false as const, error: "Restauration : choisissez et confirmez un compte de charge avant de comptabiliser." }
     const supplier = await findOrCreateSupplier(tx, ctx, { name: s.supplierName, siret: s.siret })
     const dup = await tx.supplierInvoice.findFirst({ where: { companyId: ctx.companyId, supplierId: supplier.id, number: s.number, status: "VALIDATED", id: { not: s.id } }, select: { id: true } })
     if (dup) throw new LifecycleAbort(SUPPLIER_ERRORS.duplicateNumber)

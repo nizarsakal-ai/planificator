@@ -12,7 +12,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { createSupplierInvoiceAction, updateSupplierInvoiceAction, uploadSupplierFileAction } from "@/lib/actions/accounting-c5.actions"
 
 export interface SupplierFormValues { supplierName: string; siret: string; number: string; date: string; dueDate: string; totalHT: string; vat: string; totalTTC: string; vatRate: string; category: string; expenseAccountId: string; notes: string }
-const CATS = [["", "—"], ["marchandises", "Marchandises"], ["services", "Prestations"], ["location", "Locations"], ["deplacement", "Déplacements"], ["honoraires", "Honoraires"], ["entretien", "Entretien"], ["autre", "Autre"]]
+const CATS = [["", "—"], ["marchandises", "Marchandises"], ["services", "Prestations"], ["location", "Locations"], ["deplacement", "Déplacements"], ["honoraires", "Honoraires"], ["entretien", "Entretien"], ["restauration", "Restauration"], ["autre", "Autre"]]
 const empty: SupplierFormValues = { supplierName: "", siret: "", number: "", date: new Date().toISOString().slice(0, 10), dueDate: "", totalHT: "", vat: "", totalTTC: "", vatRate: "20", category: "", expenseAccountId: "", notes: "" }
 
 function Conf({ c }: { c?: number }) { if (c === undefined) return null; const pct = Math.round(c * 100); return <span className={`ml-1 text-[10px] ${pct >= 80 ? "text-green-700" : pct >= 50 ? "text-amber-700" : "text-red-700"}`} title="Confiance de l'extraction">{pct} %</span> }
@@ -86,7 +86,7 @@ export function SupplierInvoiceForm({ mode, invoiceId, initial, accounts, confid
         <div className="sm:col-span-2"><Label htmlFor="ac">Compte de charge (défaut selon la catégorie)</Label><select id="ac" value={v.expenseAccountId} onChange={set("expenseAccountId")} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="">— Selon la catégorie —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.number} {a.label}</option>)}</select></div>
         {classificationEmpty && <p role="status" className="sm:col-span-2 text-sm text-amber-800">Aucune classification extraite : renseignez la catégorie et le compte de charge manuellement.</p>}
         <p role="status" className="sm:col-span-2 text-sm text-amber-800">{classificationNeedsReview ? "Nature de l’achat incertaine : Autre / achats non stockés est une proposition provisoire. Corrigez la catégorie et le compte avant toute validation." : ""}</p>
-        {v.category && !v.expenseAccountId && <p role="status" className="sm:col-span-2 text-sm text-amber-800">Le compte suggéré est absent du plan actif de cette société. Sélectionnez un compte disponible.</p>}
+        {v.category && !v.expenseAccountId && <p role="status" className="sm:col-span-2 text-sm text-amber-800">{v.category === "restauration" ? "Restauration reconnue : choisissez le compte adapté au contexte du repas. Aucun compte n’est imposé ; votre choix devra être confirmé avant comptabilisation." : "Le compte suggéré est absent du plan actif de cette société. Sélectionnez un compte disponible."}</p>}
         <p className="sm:col-span-2 text-xs text-slate-500">La catégorie et le compte suggérés sont à vérifier et restent modifiables. Si aucun compte correspondant n’est disponible, sélectionnez un compte de charge.</p>
         <div className="sm:col-span-2"><Label htmlFor="no">Notes</Label><Input id="no" maxLength={1000} value={v.notes} onChange={set("notes")} /></div>
       </CardContent></Card>
