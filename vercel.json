@@ -15,6 +15,14 @@
     {
       "path": "/api/cron/vehicle-document-reminders",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/billing-quote-reminders",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/billing-invoice-reminders",
+      "schedule": "15 9 * * *"
     }
   ]
 }

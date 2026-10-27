@@ -34,13 +34,13 @@ test("photo lisible sans catégorie : suggestion provisoire explicite et compte 
 })
 test("vocabulaire d'une photo courante et absence de compte dans la société", () => {
   assert.equal(normalizeSupplierCategory("Fournitures de bureau"), "autre")
-  assert.equal(normalizeSupplierCategory("Hébergement"), "deplacement")
+  assert.equal(normalizeSupplierCategory("Hébergement"), null)
   assert.equal(normalizeSupplierCategory("Prestation de service"), "services")
   assert.deepEqual(classificationAfterOcr({ category: "location" }, []), { category: "location", expenseAccountId: "", needsReview: false })
 })
 
 test("libellés ambigus ne valent pas une imputation comptable reconnue", () => {
-  for (const category of ["transport", "restauration", "carburant"]) {
+  for (const category of ["transport", "carburant", "hotel", "hebergement"]) {
     assert.equal(normalizeSupplierCategory(category), null)
     assert.deepEqual(classificationAfterOcr({ category, supplier: "Fournisseur fictif" }, [{ id: "provisional", number: "606000" }]), { category: "autre", expenseAccountId: "provisional", needsReview: true })
   }
@@ -50,4 +50,20 @@ test("extraction vide : ni catégorie proposée ni avertissement de proposition 
 })
 test("alias non ambigu : Honoraires résout le compte 622000 de la société", () => {
   assert.deepEqual(classificationAfterOcr({ category: "honoraire" }, [{ id: "fees", number: "622000" }]), { category: "honoraires", expenseAccountId: "fees", needsReview: false })
+})
+
+test("restaurant reconnu sans imposer de compte, même si 625 et 606 sont disponibles", () => {
+  const extraction = parseOcrPayload('{"supplier":"Restaurant fictif","supplierType":"restauration","amountTTC":72.7}')
+  assert.equal(extraction.category, "restauration")
+  assert.deepEqual(classificationAfterOcr(extraction, [{id:"travel",number:"625000"},{id:"supplies",number:"606000"}]), {category:"restauration",expenseAccountId:"",needsReview:false})
+  assert.equal(normalizeSupplierCategory("repas"), "restauration")
+})
+
+test("serveur : restauration sans compte explicite refusée avant toute écriture", async () => {
+  const { validateSupplierInvoice } = await import("@/lib/accounting/c5/supplier-invoice.service")
+  const tx = { $queryRaw: async () => [], supplierInvoice: { findFirst: async () => ({id:"synthetic",companyId:"synthetic",status:"PENDING",category:"restauration",expenseAccountId:null}) } }
+  const db = { $transaction: async (fn: (transaction: unknown) => unknown) => fn(tx) }
+  const result = await validateSupplierInvoice(db as never, {companyId:"synthetic",userId:"synthetic"} as never, "synthetic")
+  assert.equal(result.ok, false)
+  if (!result.ok) assert.match(result.error, /choisissez et confirmez/)
 })

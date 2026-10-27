@@ -11,3 +11,6 @@ Le choix retenu dans ce correctif est la revue humaine, et non un nouveau statut
 Le serveur contrôle l'accès à la société, l'état de la facture, les comptes, l'exercice et les invariants comptables. Il ne possède pas de marqueur persistant « classification OCR confirmée ». Un appel direct à l'action par un utilisateur autorisé peut donc valider une proposition sans passer par le dialogue client : celui-ci n'est pas une protection serveur. Les appelants autorisés restent responsables de cette revue humaine. Aucun test ne doit revendiquer le rejet serveur d'une classification non confirmée.
 
 Un verrou serveur distinct nécessiterait un contrat de confirmation et sa traçabilité persistante, avec invalidation après modification de catégorie/compte ; il ne fait pas partie de ce changement. Aucune nouvelle migration ni activation de comptabilisation automatique n'est incluse.
+
+## Restauration
+La catégorie décrit la nature du ticket, sans déterminer son imputation (mission, réception, etc.). Aucun compte n’est proposé automatiquement. Le serveur refuse la validation sans expenseAccountId explicite, avant création du fournisseur. Le choix du compte reste modifiable ; la confirmation « Valider et comptabiliser » reste nécessaire. Aucun compte par défaut fournisseur ni repli 606/625 ne remplace ce choix.

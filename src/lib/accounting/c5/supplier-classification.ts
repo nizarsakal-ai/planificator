@@ -1,5 +1,5 @@
 // Référentiel partagé navigateur/serveur : suggestions modifiables, jamais une validation comptable.
-export const SUPPLIER_CATEGORIES = ["marchandises", "services", "location", "deplacement", "honoraires", "entretien", "autre"] as const
+export const SUPPLIER_CATEGORIES = ["marchandises", "services", "location", "deplacement", "honoraires", "entretien", "restauration", "autre"] as const
 export type SupplierCategory = typeof SUPPLIER_CATEGORIES[number]
 export const CATEGORY_ACCOUNT: Record<string, string> = { marchandises: "607000", services: "604000", location: "613000", deplacement: "625000", honoraires: "622000", entretien: "615000", autre: "606000" }
 
@@ -9,7 +9,7 @@ export function normalizeSupplierCategory(value: unknown): SupplierCategory | nu
   const key = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase().replace(/\s+/g, " ")
   const aliases: Record<string, SupplierCategory> = {
     fournitures: "autre", "fournitures de bureau": "autre", consommables: "autre", "frais generaux": "autre",
-    hebergement: "deplacement", hotel: "deplacement",
+    restaurant: "restauration", repas: "restauration",
     "prestation de service": "services", "prestations de service": "services", "prestation de services": "services",
     marchandise: "marchandises", achats: "marchandises", service: "services", prestations: "services", "prestations de services": "services",
     locations: "location", deplacements: "deplacement", "frais de deplacement": "deplacement",
