@@ -330,6 +330,20 @@ describe("ImportDraftReviewService", () => {
     if (r.ok) assert.equal(r.outcome, "APPROVED")
   })
 
+  it("approval coupled to transfer keeps uncertain dates editable; confirmed future period can proceed", async () => {
+    for (const complete of [false, true]) {
+      const db = createFakeDb(baseDraft({ proposedStartDate: complete ? new Date("2026-11-02T00:00:00Z") : null, proposedEndDate: complete ? new Date("2026-11-06T00:00:00Z") : null }))
+      const svc = new ImportDraftReviewService({ db: db as never, now: () => new Date("2026-10-27T12:00:00Z") })
+      const result = await svc.approveImportDraft(admin, { draftId: "d1", expectedVersion: 1 }, { requireConfirmedWorkPeriod: true })
+      assert.equal(result.ok, complete)
+      if (!result.ok) {
+        assert.equal(result.code, "WORK_PERIOD_UNCONFIRMED")
+        assert.equal(db.draft.status, "PENDING_REVIEW")
+        assert.equal(db.draft.version, 1)
+      }
+    }
+  })
+
   it("approve dates inversées", async () => {
     const db = createFakeDb(
       baseDraft({

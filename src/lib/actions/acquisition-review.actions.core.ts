@@ -152,11 +152,12 @@ export async function approveImportDraftActionImpl(
       message: "Acquisition désactivée",
     }
   }
+  const conversionEnabled = (deps.isConversionEnabled ?? isAcquisitionConversionFullyEnabled)()
   const approve =
     deps.approveImportDraft ??
-    ((ctx, raw) => importDraftReviewService.approveImportDraft(ctx, raw))
+    ((ctx, raw) => importDraftReviewService.approveImportDraft(ctx, raw, { requireConfirmedWorkPeriod: conversionEnabled }))
   const result = await approve(authz.ctx, input)
-  if (result.ok && (deps.isConversionEnabled ?? isAcquisitionConversionFullyEnabled)()) {
+  if (result.ok && conversionEnabled) {
     let transfer
     try {
       transfer = await (deps.transferApprovedDraft ?? transferApprovedDraft)(authz.ctx, {

@@ -32,6 +32,8 @@ const ALLOWED_ROLES = new Set<Role>(["ADMIN", "SUPER_ADMIN"])
 const EDITABLE_STATUSES: WorksiteImportDraftStatus[] = ["PENDING_REVIEW", "FAILED"]
 
 export type ReviewMutationOptions = {
+  /** Human approval coupled to transfer must remain editable until dates are confirmed. */
+  requireConfirmedWorkPeriod?: boolean
   transactionalOwnershipFence?: TransactionalOwnershipFence
   /**
    * PLAN-ACQ-DETECTION-001-R8 — si présent (AUTO), revalide le hash source
@@ -318,7 +320,7 @@ export class ImportDraftReviewService {
             })
             if (fresh !== "FRESH") throw new ReviewSourceContentStaleError()
           }
-          return this.executeApprove(tx, ctx, input)
+          return this.executeApprove(tx, ctx, input, options?.requireConfirmedWorkPeriod)
         })
       } catch (err) {
         if (err instanceof ReviewLeaseNotOwnedError) {
@@ -342,13 +344,14 @@ export class ImportDraftReviewService {
       }
     }
 
-    return this.executeApprove(this.db, ctx, input)
+    return this.executeApprove(this.db, ctx, input, options?.requireConfirmedWorkPeriod)
   }
 
   private async executeApprove(
     db: ReviewDb,
     ctx: ReviewActorContext,
-    input: ApproveImportDraftInput
+    input: ApproveImportDraftInput,
+    requireConfirmedWorkPeriod = false
   ): Promise<ApproveOutcome> {
     const draft = await db.worksiteImportDraft.findFirst({
       where: { id: input.draftId, companyId: ctx.companyId },
@@ -432,6 +435,9 @@ export class ImportDraftReviewService {
         code: "WORK_PERIOD_OBSOLETE",
         message: "La période de prestation est terminée — consultation obsolète",
       }
+    }
+    if (requireConfirmedWorkPeriod && workPeriod !== "FUTURE" && workPeriod !== "ACTIVE") {
+      return { ok: false, outcome: "VALIDATION_ERROR", code: "WORK_PERIOD_UNCONFIRMED", message: "Confirmer les dates de début et de fin avant de valider et transférer le chantier" }
     }
     // START_ONLY — SYSTEM revérifie la démontrabilité à l’instant de l’approbation
     // (intent gelé avant le passage de la date). Approbation humaine inchangée.
