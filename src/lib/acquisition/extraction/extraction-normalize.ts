@@ -14,6 +14,7 @@ import type {
   ExtractionWarning,
 } from "@/lib/acquisition/extraction/extraction.types"
 import { corroborateCancellationText } from "@/lib/acquisition/extraction/cancellation-corroboration"
+import { guardClientRoles, guardConsultationDate } from "./extraction-semantic-guards"
 import { evidenceQuoteInHaystack } from "@/lib/acquisition/extraction/anthropic-extraction.prompt"
 import {
   isoWeekToDateRange,
@@ -338,6 +339,9 @@ export function applyDeterministicPostEnrichment(
   const evidenceData = { ...normalized.evidenceData }
   const warnings = [...normalized.warnings]
   const receivedAt = ctx.receivedAt ?? null
+  const guarded = { ...normalized, fields, confidenceData, evidenceData, warnings }
+  guardClientRoles(guarded, ctx.body)
+  guardConsultationDate(guarded, ctx)
 
   if (fields.requestedWeekNumber == null) {
     const explicitWeek = extractExplicitCalendarWeek(ctx.subject, ctx.body)

@@ -177,7 +177,10 @@ const optionalPhone = z
     if (v == null) return null
     const t = v.trim()
     if (!t) return null
-    const cleaned = t.replace(/[^\d+]/g, "").slice(0, 32)
+    let cleaned = t.replace(/[^\d+]/g, "").slice(0, 32)
+    if (cleaned.startsWith("0033")) cleaned = `+33${cleaned.slice(4)}`
+    if (/^\+330[1-9]\d{8}$/.test(cleaned)) cleaned = `+33${cleaned.slice(4)}`
+    if (/^0[1-9]\d{8}$/.test(cleaned)) cleaned = `+33${cleaned.slice(1)}`
     return cleaned.length >= 6 ? cleaned : null
   })
 
