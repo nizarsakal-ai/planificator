@@ -846,9 +846,11 @@ async function runDraftExtractionCore(
         })
       : []
     const gate = evaluateExtractionGate(normalized.fields, [
+      // Les marqueurs de provenance sont une barrière AUTO : les conserver avant
+      // les avertissements non fiables du provider (liste persistée limitée à 50).
+      ...derivedWarnings,
       ...normalized.warnings,
       ...attachmentWarnings,
-      ...derivedWarnings,
     ])
     const completedAt = nowFn()
     const extractedData = {

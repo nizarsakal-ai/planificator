@@ -85,6 +85,31 @@ describe("attachment-file-kind — signature magique", () => {
 })
 
 describe("xlsx-text-extract (exceljs)", () => {
+  it("classeur valide relu sans dépendre du timing du flux ZIP", async () => {
+    const buf = await buildXlsx([
+      { name: "Première", rows: [["Client", "ACME"], ["Adresse", "12 rue des Lilas"]] },
+      { name: "Vide", rows: [] },
+      { name: "Dernière", rows: [["Début", new Date("2026-11-02T00:00:00Z")], ["Montant", { formula: "1+1", result: 2 }]] },
+    ])
+    for (let i = 0; i < 3; i++) {
+      const r = await extractXlsxText(buf)
+      assert.equal(r.status, "XLSX_TEXT_EXTRACTED")
+      assert.match(r.text, /Feuille: Première/)
+      assert.match(r.text, /Client \| ACME/)
+      assert.match(r.text, /Début \| 2026-11-02/)
+      assert.match(r.text, /Montant \| 2/)
+      assert.doesNotMatch(r.text, /1\+1/)
+    }
+  })
+
+  it("échéance pendant le chargement : worker arrêté et échec borné", async () => {
+    const buf = await buildXlsx([{ name: "Test", rows: [["Client", "ACME"]] }])
+    const started = Date.now()
+    const r = await extractXlsxText(buf, { timeoutMs: 1 })
+    assert.equal(r.status, "XLSX_PARSE_FAILED")
+    assert.ok(Date.now() - started < 2_000)
+  })
+
   it("feuille par feuille, cellules séparées par ' | '", async () => {
     const buf = await buildXlsx([
       { name: "Croquis", rows: [["Client", "ACME BTP"], ["Adresse", "12 rue des Lilas", "75011 Paris"]] },

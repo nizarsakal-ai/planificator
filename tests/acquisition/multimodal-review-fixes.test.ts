@@ -169,6 +169,63 @@ describe("P0 — une valeur lue en vision ne mène jamais à une décision AUTO"
     )
   })
 
+  describe("provenance conservée quand les 50 warnings provider saturent la liste", () => {
+    useFlags({})
+
+    it("PDF cité comme BODY : policy, validation et worker restent en revue humaine", async () => {
+      const body = "Chantier Tour Alpha pour ACME"
+      const field = (value: string) => ({ value, confidence: 0.9, evidence: ev(value) })
+      const adapter = new AnthropicExtractionAdapter({
+        config: anthropicConfig(),
+        client: {
+          async messagesCreate() {
+            return toolMessage({
+              fields: {
+                worksiteName: field("Tour Alpha"), clientName: field("ACME"),
+                address: field("12 rue des Lilas"), city: field("Paris"),
+              },
+              warnings: Array.from({ length: 50 }, (_, i) => ({ code: "PDF_TEXT_EXTRACTED", field: `piece-${i}` })),
+            })
+          },
+        },
+      })
+      const repo = createFakeExtractionRepo({
+        content: { normalizedText: body, contentHash: "hash-text" },
+        attachments: [storedAttachment({ filename: "commande.pdf", mimeType: "application/pdf" })],
+      })
+      const result = await runDraftExtractionSystem({ companyId: "co1", draftId: "d1" }, {
+        repository: repo as never, provider: adapter,
+        loadAttachmentBytes: async () => buildMinimalTextPdf("12 rue des Lilas Paris"),
+      })
+      assert.equal(result.ok, true, JSON.stringify(result))
+      const p = repo.persists[0]
+      assert.equal(p.warningData.length, 50)
+      assert.equal(p.warningData[0].code, "ATTACHMENT_DERIVED_FIELD")
+      const evidence = (p.extractedData as { evidence: Record<string, { source: string }> }).evidence
+      assert.equal(evidence.address.source, "BODY", "aucun marquage ATTACHMENT_* du provider pour nous protéger")
+      const snapshot = {
+        worksiteName: p.fields.worksiteName, address: p.fields.address, city: p.fields.city,
+        clientName: p.fields.clientName, confidenceData: p.confidenceData,
+        warnings: p.warningData,
+      }
+      const policyInput = buildAutoDecisionPolicyInput({
+        ctx: { snapshot, partnerProfile: null, partner: null } as never,
+        effectiveAutoApproveEnabled: true, effectiveAutoConvertEnabled: true,
+      })
+      for (const autoConvertEnabled of [false, true]) {
+        const decision = evaluateAutoDecisionRules({ ...policyInput, autoConvertEnabled, minConfidence: 0.5, evidenceData: evidence })
+        assert.equal(decision.code, "HUMAN_REVIEW_REQUIRED")
+        assert.ok(decision.reasons.includes("ATTACHMENT_EVIDENCE_REQUIRES_HUMAN"))
+      }
+      const validation = validateConsultation({
+        companyId: "co1", draftId: "d1", classification: "CONSULTATION",
+        extractedSnapshot: snapshot, partnerProfile: null,
+      })
+      assert.equal(validation.code, "QUARANTINE")
+      assert.ok(validation.reasons.includes("ATTACHMENT_EVIDENCE_REQUIRES_HUMAN"))
+    })
+  })
+
   describe("bout en bout : adapter Anthropic mocké + service + décision AUTO / validation / worker", () => {
     useFlags({ ACQUISITION_EXTRACTION_MULTIMODAL_ENABLED: "true", ACQUISITION_EXTRACTION_ATTACHMENTS_ENABLED: "true" })
 
@@ -567,7 +624,7 @@ describe("P1-4 — échéance globale : brouillon toujours libéré", () => {
     assert.deepEqual(r.warnings, ["1 pièce(s) restante(s) seront récupérées par la tâche planifiée"])
   })
 
-  it("xlsx : lecture en flux réellement abandonnée à l'échéance", async () => {
+  it("xlsx : aucun worker lancé après l'échéance", async () => {
     const rows = Array.from({ length: 300 }, (_, i) => [`l${i}`, "x"])
     const buf = await buildXlsx([{ name: "S", rows }])
     const t0 = Date.now()

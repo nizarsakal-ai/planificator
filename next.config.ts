@@ -38,7 +38,7 @@ const withPWA = withPWAInit({
 })
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["@react-pdf/renderer", "unpdf"],
+  serverExternalPackages: ["@react-pdf/renderer", "unpdf", "exceljs"],
   experimental: {
     serverActions: {
       bodySizeLimit: "20mb",

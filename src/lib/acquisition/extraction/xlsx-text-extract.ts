@@ -8,14 +8,18 @@
  * - Rendu feuille par feuille, une ligne par rangée, cellules séparées par " | ".
  * - Plafonds : taille fichier, taille décompressée déclarée (anti zip-bomb),
  *   nb feuilles, nb lignes, nb caractères ; timeout / échéance appliqués
- *   rangée par rangée (lecture en flux, abandon réel).
+ *   dans un worker terminable (chargement et lecture inclus).
  * - Jamais d'exception : statut par fichier.
  *
  * Choix : `exceljs` et non `xlsx` 0.18.5 (vulnérable, prototype pollution / ReDoS).
  */
 
-import { Readable } from "node:stream"
-import ExcelJS from "exceljs"
+import { Worker } from "node:worker_threads"
+import nodeModule from "node:module"
+import { join } from "node:path"
+// Import explicite pour que Next trace ExcelJS et ses dépendances dans la Lambda.
+import "exceljs"
+import { XLSX_WORKER_SOURCE } from "./xlsx-workbook-worker-source"
 
 export type XlsxTextExtractStatus =
   | "XLSX_TEXT_EXTRACTED"
@@ -132,103 +136,44 @@ export function cellValueToText(value: unknown): string {
   return ""
 }
 
-function cleanCell(raw: string): string {
-  return raw
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, XLSX_DEFAULT_MAX_CELL_CHARS)
-}
-
-/**
- * Lecture en flux (WorkbookReader) : chaque rangée est lue à la demande, ce qui
- * permet d'ABANDONNER réellement le parsing (sortie de l'itérateur + destruction
- * du flux source) à l'échéance, et d'éviter de charger tout le classeur.
- */
+/** Le lecteur document est indépendant de l'ordre ZIP. Un worker isolé permet
+ * d'interrompre réellement le chargement XML, même avant la première rangée. */
 async function parseWorkbook(
   buf: Buffer,
   opts: Required<Pick<XlsxExtractOptions, "maxChars" | "maxSheets" | "maxRowsPerSheet">> & {
     deadlineAt: number
   }
 ): Promise<XlsxTextExtractResult> {
-  const source = Readable.from(buf)
-  const reader = new ExcelJS.stream.xlsx.WorkbookReader(source, {
-    sharedStrings: "cache",
-    styles: "cache",
-    hyperlinks: "ignore",
-    worksheets: "emit",
-    entries: "ignore",
+  const remaining = opts.deadlineAt - Date.now()
+  if (remaining <= 0) return result("XLSX_PARSE_FAILED")
+  // createRequire conserve la résolution Node : require.resolve serait remplacé
+  // par un id Webpack inutilisable dans le worker.
+  // L'appel indirect évite également la réécriture createRequire de Webpack.
+  const nodeRequire = Reflect.apply(nodeModule.createRequire, undefined, [join(process.cwd(), "package.json")]) as NodeRequire
+  const exceljsPath = nodeRequire.resolve("exceljs")
+  const worker = new Worker(XLSX_WORKER_SOURCE, {
+    eval: true,
+    workerData: {
+      exceljsPath,
+      bytes: buf,
+      ...opts,
+      maxCellsPerRow: XLSX_DEFAULT_MAX_CELLS_PER_ROW,
+      maxCellChars: XLSX_DEFAULT_MAX_CELL_CHARS,
+    },
+    resourceLimits: { maxOldGenerationSizeMb: 128 },
   })
-
-  const lines: string[] = []
-  let chars = 0
-  let truncated = false
-  let anyValue = false
-  let sheetIndex = 0
-  let timedOut = false
-
-  const push = (line: string): boolean => {
-    const cost = line.length + 1
-    if (chars + cost > opts.maxChars) {
-      const room = opts.maxChars - chars - 1
-      if (room > 0) lines.push(line.slice(0, room))
-      truncated = true
-      return false
-    }
-    lines.push(line)
-    chars += cost
-    return true
-  }
-
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    outer: for await (const sheet of reader) {
-      if (Date.now() > opts.deadlineAt) {
-        timedOut = true
-        break
-      }
-      sheetIndex++
-      if (sheetIndex > opts.maxSheets) {
-        truncated = true
-        break
-      }
-      const sheetLines: string[] = []
-      let rowCount = 0
-      for await (const row of sheet) {
-        if (Date.now() > opts.deadlineAt) {
-          timedOut = true
-          break outer
-        }
-        if (rowCount >= opts.maxRowsPerSheet) {
-          truncated = true
-          break
-        }
-        const cells: string[] = []
-        const values = Array.isArray(row.values) ? row.values : []
-        for (let i = 1; i < values.length && cells.length < XLSX_DEFAULT_MAX_CELLS_PER_ROW; i++) {
-          const text = cleanCell(cellValueToText(values[i]))
-          if (text) cells.push(text)
-        }
-        if (cells.length === 0) continue
-        rowCount++
-        sheetLines.push(cells.join(" | "))
-      }
-      if (sheetLines.length === 0) continue
-      anyValue = true
-      const rawName = (sheet as unknown as { name?: unknown }).name
-      const name = cleanCell(typeof rawName === "string" && rawName ? rawName : `Feuille ${sheetIndex}`).slice(0, 64)
-      if (!push(`--- Feuille: ${name} ---`)) break
-      for (const line of sheetLines) {
-        if (!push(line)) break outer
-      }
-    }
+    return await new Promise<XlsxTextExtractResult>((resolve) => {
+      timer = setTimeout(() => resolve(result("XLSX_PARSE_FAILED")), remaining)
+      worker.once("message", resolve)
+      worker.once("error", () => resolve(result("XLSX_PARSE_FAILED")))
+      worker.once("exit", () => resolve(result("XLSX_PARSE_FAILED")))
+    })
   } finally {
-    source.destroy()
+    if (timer) clearTimeout(timer)
+    await worker.terminate()
   }
-
-  if (timedOut) return result("XLSX_PARSE_FAILED")
-  if (!anyValue) return result("XLSX_EMPTY")
-  const text = lines.join("\n").trim()
-  return result(truncated ? "XLSX_TEXT_TRUNCATED" : "XLSX_TEXT_EXTRACTED", text, truncated)
 }
 
 /**
