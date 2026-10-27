@@ -108,6 +108,8 @@ export type ConsultationProposedFormDto = {
   proposedContactName: string | null
   proposedContactEmail: string | null
   proposedContactPhone: string | null
+  /** YYYY-MM-DD or null; omitted only by older clients. */
+  clientConsultationDate?: string | null
   extractionEnabled: boolean
   /** PLAN-ACQ-MULTIMODAL — EXTRACTING orphelin (> TTL reclaim) : relance manuelle permise. */
   extractionReclaimable?: boolean

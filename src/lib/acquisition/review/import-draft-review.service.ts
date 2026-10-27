@@ -209,6 +209,10 @@ export class ImportDraftReviewService {
           : null,
         proposedEndDate: input.proposedEndDate ? parseDayUtc(input.proposedEndDate) : null,
         proposedDescription: input.proposedDescription,
+        ...(input.proposedContactPhone !== undefined
+          ? { proposedContactPhone: input.proposedContactPhone } : {}),
+        ...(input.clientConsultationDate !== undefined
+          ? { clientConsultationDate: input.clientConsultationDate ? parseDayUtc(input.clientConsultationDate) : null } : {}),
         version: { increment: 1 },
       },
     })

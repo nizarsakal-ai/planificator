@@ -31,6 +31,8 @@ export function toConsultationProposedFormDto(
     proposedContactName: draft.proposedContactName,
     proposedContactEmail: draft.proposedContactEmail,
     proposedContactPhone: draft.proposedContactPhone,
+    clientConsultationDate: draft.clientConsultationDate
+      ? dateToInputValue(draft.clientConsultationDate) || null : null,
     extractionEnabled,
     ...(isExtractingReclaimable(draft.status, draft.extractionStartedAt)
       ? { extractionReclaimable: true }

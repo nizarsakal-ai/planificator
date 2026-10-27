@@ -33,6 +33,8 @@ type FormState = {
   proposedStartDate: string
   proposedEndDate: string
   proposedDescription: string
+  proposedContactPhone: string
+  clientConsultationDate: string
 }
 
 function dtoToForm(dto: ConsultationProposedFormDto): FormState {
@@ -45,6 +47,8 @@ function dtoToForm(dto: ConsultationProposedFormDto): FormState {
     proposedStartDate: dto.proposedStartDate ?? "",
     proposedEndDate: dto.proposedEndDate ?? "",
     proposedDescription: dto.proposedDescription ?? "",
+    proposedContactPhone: dto.proposedContactPhone ?? "",
+    clientConsultationDate: dto.clientConsultationDate ?? "",
   }
 }
 
@@ -197,6 +201,21 @@ export function ConsultationProposedForm({ form: dto }: { form: ConsultationProp
           disabled={readOnly || loading}
           showEmptyValueHint
         />
+        <Field
+          label="Date de consultation client"
+          type="date"
+          value={form.clientConsultationDate}
+          onChange={(v) => setField("clientConsultationDate", v)}
+          disabled={readOnly || loading}
+          showEmptyValueHint
+        />
+        <Field
+          label="Téléphone du contact"
+          type="tel"
+          value={form.proposedContactPhone}
+          onChange={(v) => setField("proposedContactPhone", v)}
+          disabled={readOnly || loading}
+        />
         <div className="sm:col-span-2 space-y-1.5">
           <Label htmlFor="proposedDescription">Description</Label>
           <Textarea
@@ -214,7 +233,6 @@ export function ConsultationProposedForm({ form: dto }: { form: ConsultationProp
           <div className="mb-1 font-medium text-foreground">Contact (lecture seule)</div>
           <div>{dto.proposedContactName ?? "—"}</div>
           <div>{dto.proposedContactEmail ?? "—"}</div>
-          <div>{dto.proposedContactPhone ?? "—"}</div>
         </div>
       )}
 
