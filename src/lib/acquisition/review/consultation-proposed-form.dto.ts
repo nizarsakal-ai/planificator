@@ -18,6 +18,7 @@ export function toConsultationProposedFormDto(
     version: draft.version,
     proposedWorksiteName: draft.proposedWorksiteName,
     proposedClientName: draft.proposedClientName,
+    proposedClientId: draft.proposedClientId,
     proposedAddress: draft.proposedAddress,
     proposedPostalCode: draft.proposedPostalCode,
     proposedCity: draft.proposedCity,

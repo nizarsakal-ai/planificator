@@ -218,7 +218,7 @@ describe("acquisition review — intégration PostgreSQL 005C", RUN, () => {
     const before = await businessCounts(companyA)
     const draftId = await seedDraft(companyA)
     const { ctx, user } = await adminCtx(companyA)
-    const svc = new ImportDraftReviewService({ db })
+    const svc = new ImportDraftReviewService({ db, now: () => new Date("2026-10-01T00:00:00.000Z") })
 
     const save1 = await svc.saveImportDraftCorrections(ctx, {
       draftId,
@@ -285,7 +285,7 @@ describe("acquisition review — intégration PostgreSQL 005C", RUN, () => {
     const before = await businessCounts(companyA)
     const draftId = await seedDraft(companyA)
     const { ctx, user } = await adminCtx(companyA)
-    const svc = new ImportDraftReviewService({ db })
+    const svc = new ImportDraftReviewService({ db, now: () => new Date("2026-10-01T00:00:00.000Z") })
     const draft = await db.worksiteImportDraft.findUniqueOrThrow({ where: { id: draftId } })
 
     const [approve, reject] = await Promise.all([
@@ -307,7 +307,7 @@ describe("acquisition review — intégration PostgreSQL 005C", RUN, () => {
   it("transitions FAILED + blocking inconnu", async () => {
     const failedId = await seedDraft(companyA, { status: "FAILED" })
     const { ctx, user } = await adminCtx(companyA)
-    const svc = new ImportDraftReviewService({ db })
+    const svc = new ImportDraftReviewService({ db, now: () => new Date("2026-10-01T00:00:00.000Z") })
 
     const saveFailed = await svc.saveImportDraftCorrections(ctx, {
       draftId: failedId,

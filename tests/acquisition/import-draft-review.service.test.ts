@@ -95,6 +95,9 @@ function createFakeDb(seed: DraftRow) {
       },
     },
     client: {
+      async findFirst(args: { where: { id: string; companyId: string; active: boolean } }) {
+        return args.where.id === "client-co1" && args.where.companyId === "co1" && args.where.active ? { id: "client-co1" } : null
+      },
       async create() {
         clientCreates++
       },
@@ -189,6 +192,18 @@ describe("ImportDraftReviewService", () => {
     assert.equal(db.draft.proposedClientName, null)
     assert.deepEqual(db.draft.extractedData, { keep: true })
     assert.equal(db.clientCreates + db.worksiteCreates + db.documentCreates, 0)
+  })
+
+  it("le client donneur d’ordre sélectionné reste scoped à l’entreprise", async () => {
+    const db = createFakeDb(baseDraft())
+    const svc = createService(db)
+    const input = { draftId: "d1", expectedVersion: 1, proposedWorksiteName: "Site", proposedClientName: null,
+      proposedAddress: null, proposedPostalCode: null, proposedCity: null, proposedStartDate: null, proposedEndDate: null, proposedDescription: null }
+    assert.equal((await svc.saveImportDraftCorrections(admin, { ...input, proposedClientId: "foreign-client" })).ok, false)
+    assert.equal(db.draft.version, 1)
+    assert.equal((await svc.saveImportDraftCorrections(admin, { ...input, proposedClientId: "client-co1" })).ok, true)
+    assert.equal(db.draft.proposedClientId, "client-co1")
+    assert.equal(db.draft.status, "PENDING_REVIEW")
   })
 
   it("corrige téléphone et efface date incertaine sans approuver ni modifier la source extraite", async () => {

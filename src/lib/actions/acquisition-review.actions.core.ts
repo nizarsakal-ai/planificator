@@ -5,6 +5,8 @@
 
 import { revalidatePath as nextRevalidatePath } from "next/cache"
 import { auth as nextAuth } from "@/auth"
+import { isAcquisitionConversionFullyEnabled } from "@/lib/acquisition/conversion/conversion-feature-flag"
+import { transferApprovedDraft } from "@/lib/acquisition/conversion/approved-draft-transfer.service"
 import type { Role, WorksiteImportDraftStatus } from "@prisma/client"
 import { isAcquisitionEnabled as defaultIsAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
 import { isAcquisitionExtractionEnabled as defaultIsExtractionEnabled } from "@/lib/acquisition/extraction/extraction-feature-flag"
@@ -42,6 +44,8 @@ export type AcquisitionReviewActionDeps = {
     input: unknown
   ) => Promise<SaveCorrectionsOutcome>
   approveImportDraft?: (ctx: ReviewActorContext, input: unknown) => Promise<ApproveOutcome>
+  isConversionEnabled?: () => boolean
+  transferApprovedDraft?: typeof transferApprovedDraft
   rejectImportDraft?: (ctx: ReviewActorContext, input: unknown) => Promise<RejectOutcome>
   getImportDraftStatusForReview?: (input: {
     companyId: string
@@ -152,6 +156,23 @@ export async function approveImportDraftActionImpl(
     deps.approveImportDraft ??
     ((ctx, raw) => importDraftReviewService.approveImportDraft(ctx, raw))
   const result = await approve(authz.ctx, input)
+  if (result.ok && (deps.isConversionEnabled ?? isAcquisitionConversionFullyEnabled)()) {
+    let transfer
+    try {
+      transfer = await (deps.transferApprovedDraft ?? transferApprovedDraft)(authz.ctx, {
+        draftId: result.draftId, expectedVersion: result.version,
+      })
+    } catch {
+      transfer = { ok: false as const, outcome: "INTERNAL_ERROR" as const, code: "INTERNAL_ERROR", message: "Consultation validée ; transfert à reprendre depuis sa fiche" }
+    }
+    revalidateConsultation(result.draftId, deps)
+    if (transfer.ok) {
+      const revalidate = deps.revalidatePath ?? nextRevalidatePath
+      revalidate("/chantiers")
+      revalidate(`/chantiers/${transfer.worksiteId}`)
+    }
+    return { ...result, transfer }
+  }
   if (result.ok) revalidateConsultation(result.draftId, deps)
   return result
 }

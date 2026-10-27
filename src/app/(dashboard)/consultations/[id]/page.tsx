@@ -52,9 +52,9 @@ export default async function ConsultationDetailPage({
   if (!bundle) notFound()
 
   const clients =
-    bundle.draft.status === "APPROVED" || bundle.draft.status === "CONVERTED"
+    ["PENDING_REVIEW", "FAILED", "APPROVED", "CONVERTED"].includes(bundle.draft.status)
       ? await prisma.client.findMany({
-          where: { companyId: session.user.companyId },
+          where: { companyId: session.user.companyId, active: true },
           select: { id: true, name: true },
           orderBy: { name: "asc" },
           take: 200,

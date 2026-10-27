@@ -48,6 +48,7 @@ export const saveImportDraftCorrectionsSchema = z
     expectedVersion: z.number().int().min(0),
     proposedWorksiteName: nullableTrimmed(100),
     proposedClientName: nullableTrimmed(100),
+    proposedClientId: nullableTrimmed(64).optional(),
     proposedAddress: nullableTrimmed(500),
     proposedPostalCode: nullableTrimmed(16),
     proposedCity: nullableTrimmed(100),

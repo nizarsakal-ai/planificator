@@ -11,6 +11,11 @@ import { PrismaClient } from "@prisma/client"
 import { registerIncomingMessage } from "@/lib/acquisition/acquisition.service"
 import { seedLauraluPartnerForCompany } from "./helpers/seed-lauralu-partner"
 import { ImportDraftConversionService } from "@/lib/acquisition/conversion/conversion.service"
+import { ImportDraftReviewService } from "@/lib/acquisition/review/import-draft-review.service"
+import { approveImportDraftActionImpl } from "@/lib/actions/acquisition-review.actions.core"
+import { transferApprovedDraft } from "@/lib/acquisition/conversion/approved-draft-transfer.service"
+import { buildConsultationEvaluationContext } from "@/lib/acquisition/capabilities/consultation-evaluation-context"
+import { matchesState } from "@/lib/chantiers/chantiers-view-filters"
 
 const TEST_URL = process.env.TEST_ACQUISITION_DATABASE_URL
 const enabled = Boolean(TEST_URL && /^postgres(ql)?:\/\//.test(TEST_URL))
@@ -123,7 +128,7 @@ describe("acquisition conversion — intégration PostgreSQL 005D", RUN, () => {
   it("NEW convert + double convert concurrent + zéro Team/Assignment", async () => {
     const draftId = await seedApproved(companyA)
     const { ctx, user } = await admin(companyA)
-    const svc = new ImportDraftConversionService({ db })
+    const svc = new ImportDraftConversionService({ db, now: () => new Date("2026-10-01T00:00:00.000Z") })
 
     const teamsBefore = await db.team.count({ where: { companyId: companyA } })
     const assignBefore = await db.assignment.count({
@@ -172,6 +177,45 @@ describe("acquisition conversion — intégration PostgreSQL 005D", RUN, () => {
     await db.user.delete({ where: { id: user.id } }).catch(() => undefined)
   })
 
+  it("validation humaine → chantier PLANNED, deux onglets, document et transfert idempotent", async () => {
+    const draftId = await seedApproved(companyA)
+    const { ctx } = await admin(companyA)
+    const client = await db.client.create({ data: { name: `Flow-${Date.now()}`, companyId: companyA } })
+    const draft = await db.worksiteImportDraft.update({ where: { id: draftId }, data: {
+      status: "PENDING_REVIEW", proposedClientId: client.id, warningData: [],
+      contentHashAtExtraction: "flow-hash", extractionSchemaVersion: "3",
+    } })
+    await db.acquisitionAttachment.create({ data: {
+      companyId: companyA, acquisitionMessageId: draft.acquisitionMessageId,
+      filename: "plan-flow.pdf", mimeType: "application/pdf", category: "PLAN", status: "STORED",
+      storagePublicId: "test/plan-flow", externalAttachmentId: "flow-att", attachmentKey: "flow-att", sizeBytes: 12,
+    } })
+    const review = new ImportDraftReviewService({ db, now: () => new Date("2026-10-01T00:00:00.000Z") })
+    const conversion = new ImportDraftConversionService({ db, now: () => new Date("2026-10-01T00:00:00.000Z") })
+    const result = await approveImportDraftActionImpl({ draftId, expectedVersion: draft.version }, {
+      auth: async () => ({ user: { id: ctx.actorUserId, role: "ADMIN", companyId: companyA } }),
+      isAcquisitionEnabled: () => true, isConversionEnabled: () => true,
+      approveImportDraft: review.approveImportDraft.bind(review),
+      transferApprovedDraft: (actor, input) => transferApprovedDraft(actor, input, {
+        loadContext: (input) => buildConsultationEvaluationContext({ ...input, deps: { db } }),
+        findPossibleDuplicate: db.worksite.findFirst.bind(db.worksite),
+        convert: conversion.convertImportDraft.bind(conversion),
+      }), revalidatePath: () => {},
+    })
+    assert.ok(result.ok && "transfer" in result && result.transfer?.ok, JSON.stringify(result))
+    if (!result.ok || !("transfer" in result) || !result.transfer?.ok) return
+    const worksite = await db.worksite.findUniqueOrThrow({ where: { id: result.transfer.worksiteId }, include: { _count: { select: { assignments: true, documents: true } } } })
+    assert.equal(worksite.status, "PLANNED")
+    assert.equal(worksite.clientId, client.id)
+    assert.equal(worksite._count.assignments, 0)
+    assert.equal(worksite._count.documents, 1)
+    assert.equal(matchesState(worksite, "planned"), true)
+    assert.equal(matchesState(worksite, "unassigned"), true)
+    assert.equal((await db.worksiteImportDraft.findUniqueOrThrow({ where: { id: draftId } })).status, "CONVERTED")
+    const repeated = await conversion.convertImportDraft(ctx, { draftId, expectedVersion: draft.version, clientMode: "EXISTING", existingClientId: client.id })
+    assert.ok(repeated.ok && repeated.outcome === "ALREADY_CONVERTED")
+  })
+
   it("EXISTING cross-tenant CLIENT_NOT_FOUND", async () => {
     const draftId = await seedApproved(companyA)
     const draftBefore = await db.worksiteImportDraft.findUniqueOrThrow({
@@ -182,7 +226,7 @@ describe("acquisition conversion — intégration PostgreSQL 005D", RUN, () => {
       data: { name: "Foreign", companyId: companyB },
     })
     const { ctx, user } = await admin(companyA)
-    const svc = new ImportDraftConversionService({ db })
+    const svc = new ImportDraftConversionService({ db, now: () => new Date("2026-10-01T00:00:00.000Z") })
 
     const worksitesBefore = await db.worksite.count({ where: { companyId: companyA } })
     const clientsBefore = await db.client.count({ where: { companyId: companyA } })
@@ -251,7 +295,7 @@ describe("acquisition conversion — intégration PostgreSQL 005D", RUN, () => {
       },
     })
     const { ctx, user } = await admin(companyA)
-    const svc = new ImportDraftConversionService({ db })
+    const svc = new ImportDraftConversionService({ db, now: () => new Date("2026-10-01T00:00:00.000Z") })
     const r = await svc.convertImportDraft(ctx, {
       draftId,
       expectedVersion: 3,

@@ -37,6 +37,7 @@ export type ImportDraftReviewAttachment = {
 
 export type ImportDraftReviewBundle = {
   draft: {
+    proposedClientId?: string | null
     id: string
     status: WorksiteImportDraftStatus
     version: number
@@ -92,6 +93,7 @@ export type ReviewProposedFields = {
 
 /** DTO minimal RSC → client pour le formulaire de corrections. */
 export type ConsultationProposedFormDto = {
+  proposedClientId?: string | null
   id: string
   status: WorksiteImportDraftStatus
   version: number
