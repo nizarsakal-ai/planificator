@@ -103,6 +103,37 @@ export async function extractPdfTextLayer(
   }
 }
 
+/**
+ * PLAN-ACQ-MULTIMODAL — Nombre de pages (null si non mesurable : corrompu,
+ * timeout, trop gros). Jamais d'exception.
+ */
+export async function countPdfPages(
+  input: Buffer | Uint8Array,
+  opts?: { timeoutMs?: number; maxBytes?: number }
+): Promise<number | null> {
+  const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const maxBytes = opts?.maxBytes ?? DEFAULT_MAX_BYTES
+  try {
+    const buf = Buffer.isBuffer(input) ? input : Buffer.from(input)
+    if (buf.length < 5 || buf.subarray(0, 5).toString("latin1") !== "%PDF-") return null
+    if (buf.byteLength > maxBytes) return null
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const timed = new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), timeoutMs)
+      })
+      const counted = getDocumentProxy(new Uint8Array(buf))
+        .then((pdf) => (Number.isInteger(pdf.numPages) && pdf.numPages >= 0 ? pdf.numPages : null))
+        .catch(() => null)
+      return await Promise.race([counted, timed])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  } catch {
+    return null
+  }
+}
+
 /** Construit un PDF minimal avec couche texte (fixtures tests). */
 export function buildMinimalTextPdf(text: string): Buffer {
   const escaped = text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)")
