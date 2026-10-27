@@ -26,6 +26,7 @@ export function preExtractionWorkPeriod(subject: string | null, body: string, no
   if (/\b(?:reporte|annule|initialement|anciennes? dates?)\b/.test(subjectText + "\n" + bodyText)) return { kind: "UNKNOWN" as const }
   const candidates: Array<{ start: string; end: string }> = []
   let invalid = false
+  const incomplete: Array<{ a: Day; b: Day }> = []
   for (const [text, isSubject] of [[subjectText, true], [bodyText, false]] as const) {
     for (const line of text.replace(/(dates?\s*:)\s*\n\s*(du\b)/g, "$1 $2").split("\n")) {
       if (!isSubject && !/\b(?:dates?\s*:|intervention\b|montage\b|demontage\b|travaux\b|prestation\b|chantier\b|periode\b)/.test(line)) continue
@@ -34,6 +35,7 @@ export function preExtractionWorkPeriod(subject: string | null, body: string, no
         const a = day(match[1]), b = day(match[2])
         a.month ??= b.month; b.month ??= a.month
         a.year ??= b.year; b.year ??= a.year
+        if (!a.year && !b.year) { incomplete.push({ a, b }); continue }
         const start = ymd(a), end = ymd(b)
         if (!start || !end || start > end) { invalid = true; continue }
         candidates.push({ start, end })
@@ -41,9 +43,17 @@ export function preExtractionWorkPeriod(subject: string | null, body: string, no
     }
   }
   const unique = [...new Map(candidates.map(c => [c.start + c.end, c])).values()]
-  // Different explicit periods may describe different jobs or a subject/body conflict.
-  if (invalid || unique.length !== 1) return { kind: "UNKNOWN" as const }
-  const dates = unique[0]
+  // A complete overall period may contain a detailed schedule (e.g. MIPCOM).
+  // Missing years are resolved only inside that explicit same-year envelope.
+  const envelope = unique.find(c => unique.every(other => c.start <= other.start && c.end >= other.end))
+  if (invalid || !envelope) return { kind: "UNKNOWN" as const }
+  for (const { a, b } of incomplete) {
+    if (envelope.start.slice(0, 4) !== envelope.end.slice(0, 4)) return { kind: "UNKNOWN" as const }
+    const start = ymd({ ...a, year: +envelope.start.slice(0, 4) })
+    const end = ymd({ ...b, year: +envelope.start.slice(0, 4) })
+    if (!start || !end || start > end || start < envelope.start || end > envelope.end) return { kind: "UNKNOWN" as const }
+  }
+  const dates = envelope
   const kind = classifyWorkPeriod(new Date(dates.start + "T00:00:00Z"), new Date(dates.end + "T00:00:00Z"), now)
   return { kind, ...dates }
 }
