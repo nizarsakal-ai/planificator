@@ -98,6 +98,31 @@ describe("extraction PJ seules — intégration PostgreSQL", RUN, () => {
     await db.$disconnect()
   })
 
+  it("past work is skipped before provider/PDF reads; tenant, version and source hash guard the update", async () => {
+    const s = await seedAttachmentsOnly(companyId)
+    const instant = new Date("2026-10-27T12:00:00Z")
+    await db.acquisitionMessageContent.create({ data: { companyId, acquisitionMessageId: s.messageId,
+      normalizedText: "Dates : du 18 au 21 octobre 2026", contentHash: "past-v1", fetchedAt: instant, sanitizedAt: instant } })
+    const repo = new DraftExtractionRepository(db)
+    const before = await db.worksiteImportDraft.findUniqueOrThrow({ where: { id: s.draftId } })
+    for (const mismatch of [{ companyId: "another-tenant" }, { expectedVersion: before.version + 1 }, { expectedContentHash: "stale" }]) {
+      assert.equal(await repo.markObsoleteBeforeExtraction({ companyId, draftId: s.draftId, expectedVersion: before.version, expectedStatus: "PENDING_EXTRACTION", expectedContentHash: "past-v1", ...mismatch }), false)
+    }
+    assert.equal(await repo.markObsoleteBeforeExtraction({ companyId, draftId: s.draftId, expectedVersion: before.version, expectedStatus: "PENDING_EXTRACTION", expectedContentHash: "past-v1", ownershipFence: { assertOwnedAndLock: async () => "NOT_OWNED" } }), false)
+    const result = await runDraftExtraction({ actor, draftId: s.draftId, now: () => instant }, {
+      repository: repo,
+      provider: { extract: async () => { throw new Error("provider must not run") } } as ExtractionProviderPort,
+      loadAttachmentBytes: async () => { throw new Error("PDF must not load") },
+    })
+    assert.ok(result.ok && result.outcome === "SKIPPED_OBSOLETE", JSON.stringify(result))
+    const after = await db.worksiteImportDraft.findUniqueOrThrow({ where: { id: s.draftId } })
+    assert.equal(after.status, "OBSOLETE")
+    assert.equal(after.version, before.version + 1)
+    assert.equal(after.extractionAttemptCount, before.extractionAttemptCount)
+    assert.equal(after.contentHashAtExtraction, before.contentHashAtExtraction)
+    assert.equal(after.createdWorksiteId, null)
+  })
+
   it("MANUEL : mail sans contenu + bon de commande PDF → PENDING_REVIEW, empreinte att1:, issues persistées", async () => {
     const s = await seedAttachmentsOnly(companyId)
     const repo = new DraftExtractionRepository(db)

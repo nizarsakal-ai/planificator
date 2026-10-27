@@ -100,6 +100,11 @@ function createFakeRepo(seed?: {
     async listAttachmentMetadata() {
       return attachments
     },
+    async markObsoleteBeforeExtraction(input: { companyId: string; draftId: string; expectedVersion: number; expectedContentHash: string }) {
+      if (!draft || draft.companyId !== input.companyId || draft.id !== input.draftId || draft.version !== input.expectedVersion || content?.contentHash !== input.expectedContentHash) return false
+      draft = { ...draft, status: "OBSOLETE", version: draft.version + 1 }
+      return true
+    },
     async claimExtracting(input: {
       companyId: string
       draftId: string
@@ -240,6 +245,30 @@ describe("extraction.service R1", () => {
     )
     assert.equal(result.ok, false)
     if (!result.ok) assert.equal(result.outcome, "CONTENT_MISSING")
+  })
+
+  it("past period skips provider, PDF loading and claim in manual and cron paths", async () => {
+    for (const system of [false, true]) {
+      const repo = createFakeRepo({ content: { normalizedText: "Dates : du 18 au 21 octobre 2026", contentHash: "hash-abc" } })
+      const deps = { repository: repo as never, provider: { extract: async () => { throw new Error("provider must not run") } } as ExtractionProviderPort, loadAttachmentBytes: async () => { throw new Error("PDF must not load") } }
+      const result = system
+        ? await runDraftExtractionSystem({ companyId: "co1", draftId: "draft1", now: () => new Date("2026-10-27T12:00:00Z") }, deps)
+        : await runDraftExtraction({ actor: actor(), draftId: "draft1", now: () => new Date("2026-10-27T12:00:00Z") }, deps)
+      assert.ok(result.ok && result.outcome === "SKIPPED_OBSOLETE")
+      assert.equal(repo.draft?.status, "OBSOLETE")
+      assert.equal(repo.claimCount, 0)
+      assert.equal(repo.draft?.extractionAttemptCount, 0)
+      assert.equal(repo.persists.length, 0)
+    }
+  })
+
+  it("future and ongoing ranges continue into extraction", async () => {
+    for (const text of ["Dates : du 02 au 06 novembre 2026", "Intervention du 20/10/2026 au 30/10/2026"]) {
+      const repo = createFakeRepo({ content: { normalizedText: "Chantier : Tour Alpha\n" + text, contentHash: "hash-abc" } })
+      const result = await runDraftExtraction({ actor: actor(), draftId: "draft1", now: () => new Date("2026-10-27T12:00:00Z") }, { repository: repo as never })
+      assert.ok(result.ok && result.outcome === "EXTRACTED", JSON.stringify(result))
+      assert.equal(repo.claimCount, 1)
+    }
   })
 
   it("happy path → PENDING_REVIEW via deterministic", async () => {

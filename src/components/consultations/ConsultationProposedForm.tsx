@@ -176,7 +176,7 @@ export function ConsultationProposedForm({ form: dto, clients = [], transferOnAp
         router.refresh()
         return
       }
-      toast.success("Extraction relancée")
+      toast.success(result.outcome === "SKIPPED_OBSOLETE" ? "Consultation passée — classée obsolète sans extraction" : result.status === "OBSOLETE" ? "Consultation passée — classée obsolète" : "Extraction relancée")
       router.refresh()
     })
   }

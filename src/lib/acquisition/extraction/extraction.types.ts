@@ -17,6 +17,7 @@ export type ExtractionActor = {
 }
 
 export type ExtractionOutcome =
+  | "SKIPPED_OBSOLETE"
   | "EXTRACTED"
   | "ALREADY_EXTRACTED"
   | "IN_PROGRESS"
@@ -93,11 +94,17 @@ export type ExtractionSuccessResult = {
   status: "PENDING_REVIEW" | "OBSOLETE"
   contentHashAtExtraction: string
   warningCount: number
+} | {
+  ok: true
+  outcome: "SKIPPED_OBSOLETE"
+  draftId: string
+  status: "OBSOLETE"
+  warningCount: 0
 }
 
 export type ExtractionFailureResult = {
   ok: false
-  outcome: Exclude<ExtractionOutcome, "EXTRACTED" | "ALREADY_EXTRACTED">
+  outcome: Exclude<ExtractionOutcome, "EXTRACTED" | "ALREADY_EXTRACTED" | "SKIPPED_OBSOLETE">
   code: ExtractionErrorCode
   message: string
   draftId?: string

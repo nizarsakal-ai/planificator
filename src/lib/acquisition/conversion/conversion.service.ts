@@ -258,7 +258,7 @@ export class ImportDraftConversionService {
             code: "VALIDATION_ERROR",
           })
         }
-        // START-ONLY — null/null et START/null autorisés ; null/END et plage inversée refusés.
+        // La période doit être confirmée et encore pertinente au moment du transfert.
         const hasStart = draft.proposedStartDate != null
         const hasEnd = draft.proposedEndDate != null
         if (!hasStart && hasEnd) {
@@ -289,11 +289,15 @@ export class ImportDraftConversionService {
         }
         // START_ONLY — SYSTEM ne crée jamais de Worksite START/null (forme refusée par
         // l’édition chantier standard, invisible au Gantt), même début futur.
-        // Aucune endDate inventée ; conversion humaine inchangée.
+        // Aucune endDate inventée ; la validation de période ci-dessous bloque aussi les humains.
         if (ctx.actorRole === "SYSTEM" && workPeriod === "START_ONLY") {
           throw Object.assign(new Error("START_ONLY_REQUIRES_HUMAN_CONVERSION"), {
             code: "START_ONLY_REQUIRES_HUMAN_CONVERSION",
           })
+        }
+
+        if (workPeriod !== "FUTURE" && workPeriod !== "ACTIVE") {
+          throw Object.assign(new Error("WORK_PERIOD_UNCONFIRMED"), { code: "WORK_PERIOD_UNCONFIRMED" })
         }
 
         const addressKey = normalizeAddressKey({
@@ -516,6 +520,9 @@ export class ImportDraftConversionService {
             "Chantier probable déjà existant — confirmer acknowledgeDuplicateWorksite",
           ...(existingWorksiteId ? { existingWorksiteId } : {}),
         }
+      }
+      if (code === "WORK_PERIOD_UNCONFIRMED") {
+        return fail("VALIDATION_ERROR", code, "Confirmer les dates de début et de fin : seuls les chantiers à venir ou en cours peuvent être transférés")
       }
       if (code === "VALIDATION_ERROR" || code === "MISSING_WORKSITE_NAME" || code === "MISSING_DATES" || code === "DATE_RANGE_INVALID" || code === "WORK_PERIOD_OBSOLETE" || code === "START_ONLY_REQUIRES_HUMAN_CONVERSION") {
         return fail("VALIDATION_ERROR", code || "VALIDATION_ERROR", "Données de conversion invalides")
