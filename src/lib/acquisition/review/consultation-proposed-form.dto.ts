@@ -6,7 +6,7 @@ import type {
   ConsultationProposedFormDto,
   ImportDraftReviewBundle,
 } from "@/lib/acquisition/review/import-draft-review.types"
-import { dateToInputValue } from "@/lib/acquisition/review/consultation-ui"
+import { dateToInputValue, isExtractingReclaimable } from "@/lib/acquisition/review/consultation-ui"
 
 export function toConsultationProposedFormDto(
   draft: ImportDraftReviewBundle["draft"],
@@ -32,5 +32,8 @@ export function toConsultationProposedFormDto(
     proposedContactEmail: draft.proposedContactEmail,
     proposedContactPhone: draft.proposedContactPhone,
     extractionEnabled,
+    ...(isExtractingReclaimable(draft.status, draft.extractionStartedAt)
+      ? { extractionReclaimable: true }
+      : {}),
   }
 }

@@ -325,6 +325,7 @@ export function buildAutoDecisionPolicyInput(input: {
     requiredDocumentUnreadable: Boolean(snap.requiredDocumentUnreadable),
     consultationCancelled: Boolean(snap.consultationCancelled),
     hasResolvedClient: Boolean(snap.hasResolvedClient),
+    attachmentDerivedEvidence: Boolean(snap.attachmentDerivedEvidence),
   }
 }
 

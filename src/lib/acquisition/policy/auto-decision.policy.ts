@@ -41,6 +41,30 @@ export type AutoDecisionInput = {
   hasResolvedClient?: boolean
   /** Instant de référence pour classification temporelle (tests). */
   referenceInstant?: Date
+  /**
+   * PLAN-ACQ-MULTIMODAL — extractedData.evidence (défense en profondeur) : toute
+   * preuve ATTACHMENT_VISUAL / ATTACHMENT_TEXT ⇒ revue humaine obligatoire.
+   */
+  evidenceData?: unknown
+  /** Idem, précalculé (snapshot validation). */
+  attachmentDerivedEvidence?: boolean
+}
+
+/** Codes warnings signalant une valeur issue d'une pièce jointe (jamais AUTO). */
+export const ATTACHMENT_EVIDENCE_WARNING_CODES = [
+  "VISUAL_EVIDENCE_UNVERIFIED",
+  "ATTACHMENT_DERIVED_FIELD",
+] as const
+
+/** true si une evidence (extractedData.evidence) provient d'une pièce jointe. */
+export function hasAttachmentSourcedEvidence(evidenceData: unknown): boolean {
+  if (!evidenceData || typeof evidenceData !== "object" || Array.isArray(evidenceData)) return false
+  for (const v of Object.values(evidenceData as Record<string, unknown>)) {
+    if (!v || typeof v !== "object") continue
+    const source = (v as { source?: unknown }).source
+    if (source === "ATTACHMENT_VISUAL" || source === "ATTACHMENT_TEXT") return true
+  }
+  return false
 }
 
 export type AutoDecisionResult = {
@@ -174,6 +198,16 @@ export function evaluateAutoDecisionRules(
 
   if (hasBlockingWarnings(input.warningData)) {
     reasons.push("BLOCKING_WARNINGS")
+  }
+
+  // PLAN-ACQ-MULTIMODAL (P0) — une valeur issue d'une pièce jointe (vision ou
+  // extrait, ou non citée dans le mail) n'alimente JAMAIS une décision AUTO.
+  if (
+    ATTACHMENT_EVIDENCE_WARNING_CODES.some((c) => codes.has(c)) ||
+    input.attachmentDerivedEvidence === true ||
+    hasAttachmentSourcedEvidence(input.evidenceData)
+  ) {
+    reasons.push("ATTACHMENT_EVIDENCE_REQUIRES_HUMAN")
   }
 
   const requiredConfKeys =

@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma"
 import type { ConsultationClassification } from "@/lib/acquisition/capabilities/consultation-capability.types"
 import type { ConsultationValidationSnapshot } from "@/lib/acquisition/capabilities/validation.capability"
 import type { PartnerExtractionProfile } from "@/lib/acquisition/capabilities/consultation-capability.types"
+import { hasAttachmentSourcedEvidence } from "@/lib/acquisition/policy/auto-decision.policy"
 import { isAutoConversionAuthorizedDetectionClassification } from "@/lib/acquisition/capabilities/consultation-detection.policy"
 import {
   findDuplicateWorksite,
@@ -391,6 +392,9 @@ export async function buildConsultationEvaluationContext(input: {
     requiredDocumentUnreadable: hasRequiredDocUnreadable(draft.warningData),
     consultationCancelled,
     contentMissingRetryable: false,
+    attachmentDerivedEvidence: hasAttachmentSourcedEvidence(
+      isRecord(draft.extractedData) ? draft.extractedData.evidence : null
+    ),
   }
 
   const partnerProfile: PartnerExtractionProfile | null = partner

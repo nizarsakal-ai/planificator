@@ -115,3 +115,68 @@ describe("attachment-policy", () => {
     assert.equal(decodeBase64Url(b64url).toString(), "hello")
   })
 })
+
+describe("attachment-policy — octet-stream résolu par signature (PLAN-ACQ-MULTIMODAL)", () => {
+  const HEIC = (() => {
+    const b = Buffer.alloc(24)
+    b.writeUInt32BE(24, 0)
+    b.write("ftypheic", 4, "ascii")
+    return b
+  })()
+  const ZIP = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00])
+
+  it("IMG_2635.jpeg déclaré octet-stream + signature JPEG → autorisé, MIME résolu image/jpeg", () => {
+    const r = validateAttachmentContent({
+      filename: "IMG_2635.jpeg",
+      declaredMimeType: "application/octet-stream",
+      buffer: JPEG_BUFFER,
+    })
+    assert.deepEqual(r, { allowed: true, resolvedMimeType: "image/jpeg" })
+  })
+
+  it("PDF / PNG / HEIC / xlsx octet-stream avec extension concordante → autorisés", () => {
+    assert.equal(
+      validateAttachmentContent({ filename: "bc.pdf", declaredMimeType: "application/octet-stream", buffer: PDF_BUFFER })
+        .resolvedMimeType,
+      "application/pdf"
+    )
+    assert.equal(
+      validateAttachmentContent({ filename: "p.png", declaredMimeType: "application/octet-stream", buffer: PNG_BUFFER })
+        .resolvedMimeType,
+      "image/png"
+    )
+    assert.equal(
+      validateAttachmentContent({ filename: "p.HEIC", declaredMimeType: "application/octet-stream", buffer: HEIC })
+        .resolvedMimeType,
+      "image/heic"
+    )
+    const x = validateAttachmentContent({
+      filename: "TEMPLATE_CROQUIS.xlsx",
+      declaredMimeType: "application/octet-stream",
+      buffer: ZIP,
+    })
+    assert.equal(x.allowed, true)
+    assert.equal(x.resolvedMimeType, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+  })
+
+  it("extension discordante ou type non autorisé → toujours refusé", () => {
+    for (const [filename, buffer] of [
+      ["photo.png", JPEG_BUFFER],
+      ["photo.jpeg.exe", JPEG_BUFFER],
+      ["photo", JPEG_BUFFER],
+      ["archive.zip", ZIP],
+      ["macro.xlsm", ZIP],
+      ["page.html", Buffer.from("<!doctype html><script>")],
+      ["image.svg", Buffer.from("<svg onload=alert(1)>")],
+      ["script.jpg", Buffer.from("#!/bin/sh\nrm -rf /")],
+      ["prog.jpg", Buffer.from([0x4d, 0x5a, 0x90, 0x00])],
+    ] as const) {
+      const r = validateAttachmentContent({
+        filename,
+        declaredMimeType: "application/octet-stream",
+        buffer: Buffer.from(buffer),
+      })
+      assert.equal(r.allowed, false, filename)
+    }
+  })
+})

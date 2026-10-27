@@ -125,6 +125,26 @@ function isCadOctetStream(filename: string, buffer: Buffer): boolean {
   return false
 }
 
+/**
+ * Octet-stream → type réel, si (signature, extension) forment une paire connue
+ * d'un type déjà dans ALLOWED_MIME_TYPES. Aucun nouveau type ouvert.
+ */
+function resolveOctetStreamByMagic(ext: string, magic: string | null): string | null {
+  if (!magic) return null
+  let resolved: string | null = null
+  if (magic === "application/pdf" && ext === ".pdf") resolved = "application/pdf"
+  else if (magic === "image/jpeg" && (ext === ".jpg" || ext === ".jpeg")) resolved = "image/jpeg"
+  else if (magic === "image/png" && ext === ".png") resolved = "image/png"
+  else if ((magic === "image/heic" || magic === "image/heif") && (ext === ".heic" || ext === ".heif")) {
+    resolved = magic
+  } else if (magic === "application/zip" && ext === ".xlsx") {
+    resolved = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  } else if (magic === "application/zip" && ext === ".docx") {
+    resolved = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  }
+  return resolved && ALLOWED_MIME_TYPES.has(resolved) ? resolved : null
+}
+
 function zipLooksLikeOffice(filename: string): boolean {
   const ext = extensionOf(filename)
   return ext === ".docx" || ext === ".xlsx"
@@ -153,6 +173,13 @@ export function validateAttachmentContent(
   if (declared === "application/octet-stream") {
     if (isCadOctetStream(filename, input.buffer)) {
       return { allowed: true, resolvedMimeType: "application/octet-stream" }
+    }
+    // PLAN-ACQ-MULTIMODAL — clients mail (iOS notamment) qui déclarent une photo /
+    // un PDF / un .xlsx en octet-stream : accepté seulement si signature magique
+    // ET extension concordent avec un type DÉJÀ autorisé. MIME résolu = réel.
+    const resolved = resolveOctetStreamByMagic(ext, magic)
+    if (resolved) {
+      return { allowed: true, resolvedMimeType: resolved }
     }
     return { allowed: false, resolvedMimeType: declared, errorCode: "ATTACHMENT_MIME_NOT_ALLOWED" }
   }

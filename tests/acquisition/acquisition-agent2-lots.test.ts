@@ -5,7 +5,19 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import { evaluateAutoDecision } from "@/lib/acquisition/policy/auto-decision.policy"
 import { buildAcquisitionGmailLookbackQuery } from "@/lib/acquisition/connector/gmail-mail-provider.adapter"
-import { buildAttachmentTextExcerpts } from "@/lib/acquisition/extraction/attachment-text-excerpts"
+import { readAttachmentsForExtraction } from "@/lib/acquisition/extraction/attachment-reading"
+
+/** Ex-API buildAttachmentTextExcerpts (supprimée) : lecture via readAttachmentsForExtraction. */
+async function buildAttachmentTextExcerpts(
+  atts: Array<{ filename: string; mimeType: string; category: string; bytes?: Buffer | null }>
+) {
+  const r = await readAttachmentsForExtraction(
+    atts.map((a) => ({ ...a, sizeBytes: a.bytes?.byteLength ?? 0, status: "STORED", bytes: a.bytes ?? null })),
+    { vision: { enabled: false, reason: "FLAG_OFF" } }
+  )
+  return { excerpts: r.excerpts, outcomes: r.pdfOutcomes }
+}
+import { buildMinimalTextPdf } from "@/lib/acquisition/extraction/pdf-text-extract"
 import { normalizeAddressKey } from "@/lib/acquisition/matching/client-match.service"
 import * as orchestratorWorkers from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
 import { runProductionAcquisitionOrchestrator } from "@/lib/acquisition/orchestrator/acquisition-orchestrator-workers"
@@ -82,13 +94,13 @@ describe("attachment-text-excerpts Lot E", () => {
         filename: "plan.pdf",
         mimeType: "application/pdf",
         category: "PLAN",
-        extractedText: "Surface 120m2",
+        bytes: buildMinimalTextPdf("Surface 120m2"),
       },
       {
         filename: "photo.jpg",
         mimeType: "image/jpeg",
         category: "PHOTO",
-        extractedText: "ignored",
+        bytes: Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
       },
     ])
     assert.equal(excerpts.length, 1)

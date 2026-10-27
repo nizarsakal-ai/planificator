@@ -11,9 +11,18 @@ import {
 } from "@/lib/acquisition/connector/gmail-mail-provider.adapter"
 import { GmailMailProviderAdapter } from "@/lib/acquisition/connector/gmail-mail-provider.adapter"
 import { GmailProviderError } from "@/lib/acquisition/connector/gmail.errors"
-import {
-  buildAttachmentTextExcerpts,
-} from "@/lib/acquisition/extraction/attachment-text-excerpts"
+import { readAttachmentsForExtraction } from "@/lib/acquisition/extraction/attachment-reading"
+
+/** Ex-API buildAttachmentTextExcerpts (supprimée) : lecture via readAttachmentsForExtraction. */
+async function buildAttachmentTextExcerpts(
+  atts: Array<{ filename: string; mimeType: string; category: string; bytes?: Buffer | null }>
+) {
+  const r = await readAttachmentsForExtraction(
+    atts.map((a) => ({ ...a, sizeBytes: a.bytes?.byteLength ?? 0, status: "STORED", bytes: a.bytes ?? null })),
+    { vision: { enabled: false, reason: "FLAG_OFF" } }
+  )
+  return { excerpts: r.excerpts, outcomes: r.pdfOutcomes }
+}
 import {
   buildMinimalTextPdf,
   extractPdfTextLayer,

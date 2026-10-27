@@ -3,6 +3,7 @@
  */
 
 import type { Role, WorksiteImportDraftStatus } from "@prisma/client"
+import type { AttachmentReadingView } from "@/lib/acquisition/review/consultation-ui"
 
 export type ReviewActorContext = {
   actorUserId: string
@@ -61,6 +62,8 @@ export type ImportDraftReviewBundle = {
     rejectionReason: string | null
     createdWorksiteId: string | null
     updatedAt: Date
+    /** PLAN-ACQ-MULTIMODAL — reprise d'un EXTRACTING interrompu. */
+    extractionStartedAt?: Date | null
   }
   message: {
     id: string
@@ -72,6 +75,8 @@ export type ImportDraftReviewBundle = {
     normalizedText: string | null
   }
   attachments: ImportDraftReviewAttachment[]
+  /** PLAN-ACQ-MULTIMODAL — issues de lecture des PJ (dernière extraction). */
+  attachmentReadings?: AttachmentReadingView[]
 }
 
 export type ReviewProposedFields = {
@@ -104,12 +109,16 @@ export type ConsultationProposedFormDto = {
   proposedContactEmail: string | null
   proposedContactPhone: string | null
   extractionEnabled: boolean
+  /** PLAN-ACQ-MULTIMODAL — EXTRACTING orphelin (> TTL reclaim) : relance manuelle permise. */
+  extractionReclaimable?: boolean
 }
 
 export type ImportDraftStatusSnapshot = {
   id: string
   status: WorksiteImportDraftStatus
   version: number
+  /** PLAN-ACQ-MULTIMODAL — pour la reprise d'un EXTRACTING interrompu. */
+  extractionStartedAt?: Date | null
 }
 
 export type SaveCorrectionsOutcome =

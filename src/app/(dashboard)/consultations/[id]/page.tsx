@@ -11,6 +11,14 @@ import { Card, CardContent } from "@/components/ui/card"
 
 export const metadata: Metadata = { title: "Consultation" }
 
+/**
+ * PLAN-ACQ-MULTIMODAL — les Server Actions de la page (relance d'extraction :
+ * récupération contenu + PJ + provider vision) héritent de cette durée.
+ * Aligné sur les routes cron Acquisition (300 s). L'action s'impose une échéance
+ * interne plus courte (RELAUNCH_DEADLINE_MS) pour toujours libérer le brouillon.
+ */
+export const maxDuration = 300
+
 export default async function ConsultationDetailPage({
   params,
 }: {

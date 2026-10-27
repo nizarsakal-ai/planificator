@@ -34,6 +34,8 @@ const FLAG_KEYS = [
   "ACQUISITION_ORCHESTRATOR_CRON_ENABLED",
   "ACQUISITION_AUTO_APPROVE_ENABLED",
   "ACQUISITION_AUTO_CONVERT_ENABLED",
+  "ACQUISITION_EXTRACTION_MULTIMODAL_ENABLED",
+  "ACQUISITION_EXTRACTION_ATTACHMENTS_ENABLED",
 ] as const
 
 function issueCodes(): AcquisitionFlagIssueCode[] {
@@ -340,5 +342,54 @@ describe("acquisition-flag-matrix", () => {
   it("INV: auto-approve sans master", () => {
     process.env.ACQUISITION_AUTO_APPROVE_ENABLED = "true"
     assertExactIssues(["INV_AUTO_APPROVE_WITHOUT_MASTER"])
+  })
+
+  it("multimodal : absent / TRUE → false ; true → true (OFF par défaut)", () => {
+    assert.equal(getAcquisitionFlagMatrix().extractionMultimodal, false)
+    process.env.ACQUISITION_EXTRACTION_MULTIMODAL_ENABLED = "TRUE"
+    assert.equal(getAcquisitionFlagMatrix().extractionMultimodal, false)
+    process.env.ACQUISITION_EXTRACTION_MULTIMODAL_ENABLED = "true"
+    assert.equal(getAcquisitionFlagMatrix().extractionMultimodal, true)
+  })
+
+  it("INV: multimodal ON seul → master + extraction + provider vision requis", () => {
+    process.env.ACQUISITION_EXTRACTION_MULTIMODAL_ENABLED = "true"
+    assertExactIssues([
+      "INV_MULTIMODAL_WITHOUT_MASTER",
+      "INV_MULTIMODAL_WITHOUT_EXTRACTION",
+      "INV_MULTIMODAL_PROVIDER_WITHOUT_VISION",
+    ])
+  })
+
+  it("INV: multimodal ON + chaîne complète mais provider deterministic", () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
+    process.env.ACQUISITION_EXTRACTION_ENABLED = "true"
+    process.env.ACQUISITION_EXTRACTION_MULTIMODAL_ENABLED = "true"
+    assertExactIssues(["INV_MULTIMODAL_PROVIDER_WITHOUT_VISION"])
+  })
+
+  it("multimodal ON + master + content + extraction + anthropic → aucune issue", () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
+    process.env.ACQUISITION_EXTRACTION_ENABLED = "true"
+    process.env.ACQUISITION_EXTRACTION_PROVIDER = "anthropic"
+    process.env.ACQUISITION_EXTRACTION_MULTIMODAL_ENABLED = "true"
+    assertExactIssues([])
+  })
+
+  it("lecture PJ étendue : OFF par défaut ; ON seul → master + extraction requis", () => {
+    assert.equal(getAcquisitionFlagMatrix().extractionAttachments, false)
+    process.env.ACQUISITION_EXTRACTION_ATTACHMENTS_ENABLED = "true"
+    assert.equal(getAcquisitionFlagMatrix().extractionAttachments, true)
+    assertExactIssues(["INV_ATTACHMENTS_WITHOUT_MASTER", "INV_ATTACHMENTS_WITHOUT_EXTRACTION"])
+  })
+
+  it("lecture PJ étendue ON + master + content + extraction → aucune issue", () => {
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
+    process.env.ACQUISITION_EXTRACTION_ENABLED = "true"
+    process.env.ACQUISITION_EXTRACTION_ATTACHMENTS_ENABLED = "true"
+    assertExactIssues([])
   })
 })

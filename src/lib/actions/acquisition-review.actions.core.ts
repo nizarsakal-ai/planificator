@@ -9,10 +9,17 @@ import type { Role, WorksiteImportDraftStatus } from "@prisma/client"
 import { isAcquisitionEnabled as defaultIsAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
 import { isAcquisitionExtractionEnabled as defaultIsExtractionEnabled } from "@/lib/acquisition/extraction/extraction-feature-flag"
 import { runDraftExtraction as defaultRunDraftExtraction } from "@/lib/acquisition/extraction/extraction.service"
+import {
+  prepareManualReExtraction as defaultPrepareManualReExtraction,
+  type ManualReExtractPreparation,
+} from "@/lib/acquisition/extraction/manual-reextract-preparation"
 import type { ExtractDraftResult, ExtractionActor } from "@/lib/acquisition/extraction/extraction.types"
 import { importDraftReadRepository } from "@/lib/acquisition/review/import-draft-read.repository"
 import { importDraftReviewService } from "@/lib/acquisition/review/import-draft-review.service"
-import { getReExtractPolicy } from "@/lib/acquisition/review/consultation-ui"
+import {
+  getReExtractPolicy,
+  isExtractingReclaimable,
+} from "@/lib/acquisition/review/consultation-ui"
 import { reExtractImportDraftSchema } from "@/lib/acquisition/review/import-draft-review.schema"
 import type {
   ApproveOutcome,
@@ -44,9 +51,28 @@ export type AcquisitionReviewActionDeps = {
     actor: ExtractionActor
     draftId: string
     force?: boolean
+    deadlineAt?: number
   }) => Promise<ExtractDraftResult>
+  /**
+   * PLAN-ACQ-MULTIMODAL — récupération du contenu / des pièces manquants
+   * avant la relance manuelle (non bloquant).
+   */
+  prepareManualReExtraction?: (input: {
+    companyId: string
+    draftId: string
+    actorUserId?: string
+    deadlineAt?: number
+  }) => Promise<ManualReExtractPreparation>
+  clock?: () => number
   revalidatePath?: (path: string) => void
 }
+
+/**
+ * PLAN-ACQ-MULTIMODAL — échéance interne de la relance (sous maxDuration = 300 s
+ * de la page) : préparation + lecture PJ + provider. Au-delà, le brouillon est
+ * libéré en FAILED retryable par le service (jamais EXTRACTING orphelin).
+ */
+export const RELAUNCH_DEADLINE_MS = 240_000
 
 async function requireReviewContext(
   deps: AcquisitionReviewActionDeps
@@ -202,7 +228,9 @@ export async function reExtractImportDraftActionImpl(
   }
 
   const status = snapshot.status as WorksiteImportDraftStatus
-  const policy = getReExtractPolicy(status)
+  const policy = getReExtractPolicy(status, {
+    extractingReclaimable: isExtractingReclaimable(status, snapshot.extractionStartedAt),
+  })
   if (!policy.allowed) {
     return {
       ok: false as const,
@@ -210,6 +238,22 @@ export async function reExtractImportDraftActionImpl(
       code: "INVALID_STATE",
       message: "Extraction non autorisée pour ce statut",
     }
+  }
+
+  // PLAN-ACQ-MULTIMODAL — relance autonome : contenu + pièces manquants (non bloquant).
+  const deadlineAt = (deps.clock ?? Date.now)() + RELAUNCH_DEADLINE_MS
+  const prepare = deps.prepareManualReExtraction ?? defaultPrepareManualReExtraction
+  let warnings: string[] = []
+  try {
+    const prepared = await prepare({
+      companyId: authz.ctx.companyId,
+      draftId: parsed.data.draftId,
+      actorUserId: authz.ctx.actorUserId,
+      deadlineAt,
+    })
+    warnings = prepared.warnings.slice(0, 10)
+  } catch {
+    warnings = ["Récupération des sources impossible : extraction avec les données disponibles"]
   }
 
   const runExtraction = deps.runDraftExtraction ?? defaultRunDraftExtraction
@@ -221,6 +265,7 @@ export async function reExtractImportDraftActionImpl(
     },
     draftId: parsed.data.draftId,
     force: policy.force,
+    deadlineAt,
   })
 
   if (result.ok) {
@@ -230,13 +275,17 @@ export async function reExtractImportDraftActionImpl(
       outcome: result.outcome,
       draftId: parsed.data.draftId,
       status: result.status,
+      warnings,
     }
   }
 
+  // L'échec d'extraction peut avoir persisté des issues de lecture (FAILED) : rafraîchir.
+  if (result.draftId) revalidateConsultation(parsed.data.draftId, deps)
   return {
     ok: false as const,
     outcome: result.outcome,
     code: result.code,
     message: result.message,
+    warnings,
   }
 }

@@ -113,4 +113,6 @@ export type RunDraftExtractionInput = {
   draftId: string
   force?: boolean
   now?: () => Date
+  /** PLAN-ACQ-MULTIMODAL — échéance absolue (ms epoch) de la Server Action. */
+  deadlineAt?: number
 }
