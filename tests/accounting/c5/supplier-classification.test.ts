@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { normalizeSupplierCategory, suggestedExpenseAccountId, CATEGORY_ACCOUNT } from "@/lib/accounting/c5/supplier-classification"
+import { classificationAfterOcr, normalizeSupplierCategory, suggestedExpenseAccountId, CATEGORY_ACCOUNT } from "@/lib/accounting/c5/supplier-classification"
 import { parseOcrPayload } from "@/lib/accounting/c5/ocr-provider"
 
 test("normalise les libellés OCR avec accents, espaces et variantes", () => {
@@ -26,4 +26,15 @@ test("chaque catégorie résout le compte attendu, jamais un identifiant extéri
     assert.equal(suggestedExpenseAccountId(category, []), "")
   }
   assert.equal(suggestedExpenseAccountId(null, [{ id: "x", number: "606000" }]), "")
+})
+
+test("photo lisible sans catégorie : suggestion provisoire explicite et compte de la société", () => {
+  assert.deepEqual(classificationAfterOcr({ supplier: "Fictif", totalHTCents: "10000", category: null }, [{ id: "supplies", number: "606000" }]), { category: "autre", expenseAccountId: "supplies", needsReview: true })
+  assert.deepEqual(classificationAfterOcr({}, [{ id: "supplies", number: "606000" }]), { category: "", expenseAccountId: "", needsReview: true })
+})
+test("vocabulaire d'une photo courante et absence de compte dans la société", () => {
+  assert.equal(normalizeSupplierCategory("Fournitures de bureau"), "autre")
+  assert.equal(normalizeSupplierCategory("Hébergement"), "deplacement")
+  assert.equal(normalizeSupplierCategory("Prestation de service"), "services")
+  assert.deepEqual(classificationAfterOcr({ category: "location" }, []), { category: "location", expenseAccountId: "", needsReview: false })
 })
