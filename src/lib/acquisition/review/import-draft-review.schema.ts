@@ -54,6 +54,12 @@ export const saveImportDraftCorrectionsSchema = z
     proposedStartDate: optionalDateYmd,
     proposedEndDate: optionalDateYmd,
     proposedDescription: nullableTrimmed(5000),
+    // Optional for compatibility with existing clients; explicit empty clears.
+    proposedContactPhone: nullableTrimmed(32).refine(
+      (v) => v === null || (/^\+?[\d () .-]+$/.test(v) && v.replace(/\D/g, "").length >= 7 && v.replace(/\D/g, "").length <= 15),
+      "INVALID_PHONE"
+    ).optional(),
+    clientConsultationDate: optionalDateYmd.optional(),
   })
   .strict()
   .superRefine((data, ctx) => {

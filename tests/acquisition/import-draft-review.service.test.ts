@@ -27,6 +27,8 @@ type DraftRow = {
   extractedData: unknown
   confidenceData: unknown
   proposedClientId: string | null
+  proposedContactPhone?: string | null
+  clientConsultationDate?: Date | null
 }
 
 function createFakeDb(seed: DraftRow) {
@@ -185,6 +187,28 @@ describe("ImportDraftReviewService", () => {
     }
     assert.equal(db.draft.proposedWorksiteName, "Nouveau")
     assert.equal(db.draft.proposedClientName, null)
+    assert.deepEqual(db.draft.extractedData, { keep: true })
+    assert.equal(db.clientCreates + db.worksiteCreates + db.documentCreates, 0)
+  })
+
+  it("corrige téléphone et efface date incertaine sans approuver ni modifier la source extraite", async () => {
+    const db = createFakeDb(baseDraft({ proposedContactPhone: "+330512345678", clientConsultationDate: new Date("2026-10-21T00:00:00Z") }))
+    const svc = createService(db)
+    const input = {
+      draftId: "d1", expectedVersion: 1, proposedWorksiteName: "Site", proposedClientName: "Donneur ordre",
+      proposedAddress: null, proposedPostalCode: null, proposedCity: null,
+      proposedStartDate: null, proposedEndDate: "2026-11-27", proposedDescription: "Client final : Mairie",
+    }
+    await svc.saveImportDraftCorrections(admin, input)
+    assert.equal(db.draft.proposedContactPhone, "+330512345678")
+    assert.ok(db.draft.clientConsultationDate instanceof Date)
+    const result = await svc.saveImportDraftCorrections(admin, { ...input, expectedVersion: 2, proposedContactPhone: "+33512345678", clientConsultationDate: "" })
+    assert.equal(result.ok, true)
+    assert.equal(db.draft.proposedContactPhone, "+33512345678")
+    assert.equal(db.draft.clientConsultationDate, null)
+    assert.equal(db.draft.proposedStartDate, null)
+    assert.equal(db.draft.status, "PENDING_REVIEW")
+    assert.equal(db.draft.reviewedAt, null)
     assert.deepEqual(db.draft.extractedData, { keep: true })
     assert.equal(db.clientCreates + db.worksiteCreates + db.documentCreates, 0)
   })

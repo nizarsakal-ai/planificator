@@ -23,6 +23,17 @@ const baseSave = {
 }
 
 describe("import-draft-review.schema", () => {
+  it("corrections téléphone et date : omission préserve, vide efface, formats invalides refusés", () => {
+    const legacy = saveImportDraftCorrectionsSchema.parse(baseSave)
+    assert.equal(legacy.proposedContactPhone, undefined)
+    assert.equal(legacy.clientConsultationDate, undefined)
+    const clear = saveImportDraftCorrectionsSchema.parse({ ...baseSave, proposedContactPhone: "", clientConsultationDate: "" })
+    assert.equal(clear.proposedContactPhone, null)
+    assert.equal(clear.clientConsultationDate, null)
+    assert.equal(saveImportDraftCorrectionsSchema.safeParse({ ...baseSave, proposedContactPhone: "+33512345678" }).success, true)
+    assert.equal(saveImportDraftCorrectionsSchema.safeParse({ ...baseSave, proposedContactPhone: "appeler demain" }).success, false)
+    assert.equal(saveImportDraftCorrectionsSchema.safeParse({ ...baseSave, clientConsultationDate: "2026-02-30" }).success, false)
+  })
   it("normalise vides → null et rejette clés inconnues", () => {
     const ok = saveImportDraftCorrectionsSchema.safeParse({
       ...baseSave,
