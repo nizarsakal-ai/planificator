@@ -1,0 +1,29 @@
+import { test } from "node:test"
+import assert from "node:assert/strict"
+import { normalizeSupplierCategory, suggestedExpenseAccountId, CATEGORY_ACCOUNT } from "@/lib/accounting/c5/supplier-classification"
+import { parseOcrPayload } from "@/lib/accounting/c5/ocr-provider"
+
+test("normalise les libellés OCR avec accents, espaces et variantes", () => {
+  assert.equal(normalizeSupplierCategory("  Déplacements  "), "deplacement")
+  assert.equal(normalizeSupplierCategory("Prestations de services"), "services")
+  assert.equal(normalizeSupplierCategory("Entretien et réparations"), "entretien")
+  assert.equal(normalizeSupplierCategory("instructions malveillantes"), null)
+})
+test("facture photo fictive : catégorie reçue puis compte de la société", () => {
+  const extraction = parseOcrPayload(JSON.stringify({ supplier: "Location Fictive", invoiceNumber: "TEST-LOCATION-001", amountHT: 100, vatAmount: 20, amountTTC: 120, supplierType: "Locations", confidence: { category: .94 } }))
+  assert.equal(extraction.category, "location")
+  assert.equal(extraction.totalTTCCents, BigInt(12000))
+  assert.equal(suggestedExpenseAccountId(extraction.category, [{ id: "company-rental", number: "613000" }]), "company-rental")
+})
+test("tolère category si supplierType manque ou est inconnu", () => {
+  assert.equal(parseOcrPayload('{"category":"Honoraires"}').category, "honoraires")
+  assert.equal(parseOcrPayload('{"supplierType":"inconnu","category":"prestations"}').category, "services")
+  assert.equal(parseOcrPayload('{"supplierType":null}').category, null)
+})
+test("chaque catégorie résout le compte attendu, jamais un identifiant extérieur au plan fourni", () => {
+  for (const [category, number] of Object.entries(CATEGORY_ACCOUNT)) {
+    assert.equal(suggestedExpenseAccountId(category, [{ id: "tenant-account", number }]), "tenant-account")
+    assert.equal(suggestedExpenseAccountId(category, []), "")
+  }
+  assert.equal(suggestedExpenseAccountId(null, [{ id: "x", number: "606000" }]), "")
+})
