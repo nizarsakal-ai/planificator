@@ -8,8 +8,8 @@ export function normalizeSupplierCategory(value: unknown): SupplierCategory | nu
   if (typeof value !== "string") return null
   const key = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase().replace(/\s+/g, " ")
   const aliases: Record<string, SupplierCategory> = {
-    fournitures: "autre", "fournitures de bureau": "autre", consommables: "autre", carburant: "autre", "frais generaux": "autre",
-    transport: "deplacement", restauration: "deplacement", hebergement: "deplacement", hotel: "deplacement",
+    fournitures: "autre", "fournitures de bureau": "autre", consommables: "autre", "frais generaux": "autre",
+    hebergement: "deplacement", hotel: "deplacement",
     "prestation de service": "services", "prestations de service": "services", "prestation de services": "services",
     marchandise: "marchandises", achats: "marchandises", service: "services", prestations: "services", "prestations de services": "services",
     locations: "location", deplacements: "deplacement", "frais de deplacement": "deplacement",
@@ -29,5 +29,5 @@ export function classificationAfterOcr(extraction: { category?: unknown; supplie
   const recognized = normalizeSupplierCategory(extraction.category)
   const hasContent = [extraction.supplier, extraction.invoiceNumber, extraction.totalHTCents].some((v) => typeof v === "string" && v.trim() !== "")
   const category = recognized ?? (hasContent ? "autre" : null)
-  return { category: category ?? "", expenseAccountId: suggestedExpenseAccountId(category, accounts), needsReview: !recognized }
+  return { category: category ?? "", expenseAccountId: suggestedExpenseAccountId(category, accounts), needsReview: !recognized && category === "autre" }
 }

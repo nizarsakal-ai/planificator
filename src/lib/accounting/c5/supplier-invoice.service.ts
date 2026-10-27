@@ -120,6 +120,11 @@ export async function extractSupplierInvoice(db: Db, ctx: AccountingContext, fil
 /**
  * Validation (transaction comptable rejouable, ADMIN revérifié sous verrou par le moteur) : fournisseur créé ou associé par
  * SIRET (sinon nom exact), compte de charge choisi/déduit de la catégorie, statut VALIDATED, écriture d'achat (idempotente).
+ * Validation humaine explicite : l'OCR et ses suggestions ne valent pas approbation.
+ * L'action authentifiée « Valider et comptabiliser » confirme la revue des montants,
+ * de la catégorie et du compte (C5Actions). Pas de statut serveur « classification confirmée » :
+ * un appel direct autorisé n'est pas bloqué par une confirmation distincte. La revue humaine
+ * reste de la responsabilité de l'appelant ; le dialogue client n'est pas un verrou serveur.
  * Idempotent : une facture déjà validée renvoie son écriture.
  */
 export async function validateSupplierInvoice(db: Db, ctx: AccountingContext, id: string): Promise<LifecycleResult<{ entryId: string; supplierId: string }>> {
