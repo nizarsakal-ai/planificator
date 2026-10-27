@@ -4,6 +4,7 @@
 
 import type { PrismaClient, WorksiteImportDraftStatus } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
+import { mapAttachmentReadOutcomes } from "@/lib/acquisition/review/consultation-ui"
 import type {
   ImportDraftListItem,
   ImportDraftReviewBundle,
@@ -112,6 +113,7 @@ export class ImportDraftReadRepository {
         proposedContactPhone: true,
         confidenceData: true,
         warningData: true,
+        extractedData: true,
         extractionProvider: true,
         extractionModel: true,
         lastExtractionErrorCode: true,
@@ -204,6 +206,7 @@ export class ImportDraftReadRepository {
         sizeBytes: a.sizeBytes,
         status: a.status,
       })),
+      attachmentReadings: mapAttachmentReadOutcomes(draft.extractedData),
     }
   }
 }

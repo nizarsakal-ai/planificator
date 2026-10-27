@@ -378,17 +378,3 @@ async function allocateVisualBudget(
   // Ordre du message conservé pour l'envoi au provider.
   return visuals.sort((a, b) => a.index - b.index).map((v) => v.visual)
 }
-
-/** Libellés FR sobres pour l'UI (par issue). */
-export const ATTACHMENT_READ_OUTCOME_LABELS: Record<AttachmentReadOutcomeCode, string> = {
-  READ_TEXT: "Lu (texte)",
-  READ_TEXT_TRUNCATED: "Lu (texte, tronqué)",
-  READ_VISION: "Lu (vision)",
-  IGNORED_FORMAT: "Ignoré : format non pris en charge",
-  IGNORED_TOO_LARGE: "Ignoré : trop gros",
-  IGNORED_HEIC: "Ignoré : HEIC/HEIF non pris en charge (convertir en JPEG)",
-  IGNORED_VISION_DISABLED: "Ignoré : lecture visuelle désactivée",
-  IGNORED_EMPTY: "Ignoré : aucune donnée",
-  UNAVAILABLE: "Non disponible (pièce non téléchargée)",
-  FAILED: "Échec de lecture",
-}

@@ -6,6 +6,7 @@ import {
   formatConfidencePercent,
   mapWarningDataToPublicView,
 } from "@/lib/acquisition/review/consultation-ui"
+import { AttachmentReadingBadge } from "@/components/consultations/AttachmentReadingBadge"
 import { ConsultationProposedForm } from "@/components/consultations/ConsultationProposedForm"
 import { ConsultationConversionPanel } from "@/components/consultations/ConsultationConversionPanel"
 import type { ConversionClientOption } from "@/components/consultations/ConsultationConversionPanel"
@@ -53,6 +54,12 @@ export function ConsultationDetail({
 }) {
   const { draft, message, content, attachments } = bundle
   const warnings = mapWarningDataToPublicView(draft.warningData)
+  // PLAN-ACQ-MULTIMODAL — issue de lecture par fichier (dernière extraction).
+  const readings = bundle.attachmentReadings ?? []
+  const readingByFilename = new Map(readings.map((r) => [r.filename, r]))
+  const unmatchedReadings = readings.filter(
+    (r) => !attachments.some((a) => a.filename.slice(0, 255) === r.filename)
+  )
   const confidence =
     draft.confidenceData && typeof draft.confidenceData === "object"
       ? (draft.confidenceData as Record<string, unknown>)
@@ -124,6 +131,7 @@ export function ConsultationDetail({
             <ul className="space-y-2">
               {attachments.map((a) => {
                 const stored = a.status === "STORED"
+                const reading = readingByFilename.get(a.filename.slice(0, 255))
                 return (
                   <li
                     key={a.id}
@@ -134,6 +142,12 @@ export function ConsultationDetail({
                       <div className="text-xs text-muted-foreground">
                         {a.mimeType} · {a.category} · {formatBytes(a.sizeBytes)} · {a.status}
                       </div>
+                      {reading ? (
+                        <div className="mt-1">
+                          <span className="mr-1 text-xs text-muted-foreground">Extraction :</span>
+                          <AttachmentReadingBadge reading={reading} />
+                        </div>
+                      ) : null}
                     </div>
                     {stored ? (
                       <div className="flex gap-2">
@@ -239,6 +253,19 @@ export function ConsultationDetail({
               </ul>
             )}
           </div>
+          {unmatchedReadings.length > 0 ? (
+            <div>
+              <div className="mb-2 font-medium">Lecture des pièces jointes</div>
+              <ul className="space-y-1">
+                {unmatchedReadings.map((r, i) => (
+                  <li key={`${r.filename}-${i}`} className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs">{r.filename}</span>
+                    <AttachmentReadingBadge reading={r} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {(draft.extractionProvider || draft.lastExtractionErrorCode || draft.rejectionReason) && (
             <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
               {draft.extractionProvider ? (

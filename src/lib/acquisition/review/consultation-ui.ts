@@ -184,3 +184,74 @@ export function dateToInputValue(d: Date | null | undefined): string {
   const iso = new Date(d).toISOString()
   return iso.slice(0, 10)
 }
+
+/**
+ * PLAN-ACQ-MULTIMODAL — Issue de lecture d'une pièce jointe lors de la dernière
+ * extraction (source : extractedData.attachmentReadOutcomes). Codes fermés ;
+ * aucun texte issu du fichier n'est affiché hormis le nom de fichier.
+ */
+export type AttachmentReadingTone = "ok" | "muted" | "warn" | "error"
+
+export type AttachmentReadingView = {
+  filename: string
+  outcome: string
+  label: string
+  tone: AttachmentReadingTone
+}
+
+const ATTACHMENT_READING_LABELS: Record<string, { label: string; tone: AttachmentReadingTone }> = {
+  READ_TEXT: { label: "Lu (texte)", tone: "ok" },
+  READ_TEXT_TRUNCATED: { label: "Lu (texte, tronqué)", tone: "ok" },
+  READ_VISION: { label: "Lu (vision)", tone: "ok" },
+  IGNORED_FORMAT: { label: "Ignoré : format non pris en charge", tone: "muted" },
+  IGNORED_TOO_LARGE: { label: "Ignoré : trop gros", tone: "warn" },
+  IGNORED_HEIC: { label: "Ignoré : photo HEIC (demander un JPEG)", tone: "warn" },
+  IGNORED_VISION_DISABLED: { label: "Ignoré : lecture visuelle désactivée", tone: "muted" },
+  IGNORED_EMPTY: { label: "Ignoré : aucune donnée", tone: "muted" },
+  UNAVAILABLE: { label: "Non lu : pièce non téléchargée", tone: "warn" },
+  FAILED: { label: "Échec de lecture", tone: "error" },
+}
+
+const READING_REASON_SUFFIX: Record<string, string> = {
+  FLAG_OFF: "flag OFF",
+  PROVIDER_NOT_VISION: "fournisseur sans vision",
+  MAX_VISUAL_FILES: "plus de 5 fichiers visuels",
+  VISUAL_FILE_BYTES: "> 5 Mo",
+  VISUAL_TOTAL_BUDGET: "budget visuel dépassé",
+  PDF_PAGES: "> 10 pages",
+  IMAGE_DIMENSIONS: "> 8000 px",
+  FILE_BYTES: "> 10 Mo",
+  TEXT_BUDGET: "budget texte atteint",
+  XLSX_LIMITS: "classeur trop volumineux",
+}
+
+export const ATTACHMENT_READING_TONE_CLASS: Record<AttachmentReadingTone, string> = {
+  ok: "bg-green-100 text-green-800",
+  muted: "bg-slate-100 text-slate-700",
+  warn: "bg-amber-100 text-amber-800",
+  error: "bg-red-100 text-red-800",
+}
+
+export function mapAttachmentReadOutcomes(extractedData: unknown): AttachmentReadingView[] {
+  if (!extractedData || typeof extractedData !== "object" || Array.isArray(extractedData)) return []
+  const raw = (extractedData as { attachmentReadOutcomes?: unknown }).attachmentReadOutcomes
+  if (!Array.isArray(raw)) return []
+  const out: AttachmentReadingView[] = []
+  for (const item of raw.slice(0, 50)) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue
+    const filename = (item as { filename?: unknown }).filename
+    const outcome = (item as { outcome?: unknown }).outcome
+    if (typeof filename !== "string" || typeof outcome !== "string") continue
+    const cat = ATTACHMENT_READING_LABELS[outcome]
+    if (!cat) continue
+    const reasonRaw = (item as { reason?: unknown }).reason
+    const suffix = typeof reasonRaw === "string" ? READING_REASON_SUFFIX[reasonRaw] : undefined
+    out.push({
+      filename: filename.slice(0, 255),
+      outcome,
+      label: suffix ? `${cat.label} (${suffix})` : cat.label,
+      tone: cat.tone,
+    })
+  }
+  return out
+}

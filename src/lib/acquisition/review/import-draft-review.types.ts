@@ -3,6 +3,7 @@
  */
 
 import type { Role, WorksiteImportDraftStatus } from "@prisma/client"
+import type { AttachmentReadingView } from "@/lib/acquisition/review/consultation-ui"
 
 export type ReviewActorContext = {
   actorUserId: string
@@ -72,6 +73,8 @@ export type ImportDraftReviewBundle = {
     normalizedText: string | null
   }
   attachments: ImportDraftReviewAttachment[]
+  /** PLAN-ACQ-MULTIMODAL — issues de lecture des PJ (dernière extraction). */
+  attachmentReadings?: AttachmentReadingView[]
 }
 
 export type ReviewProposedFields = {

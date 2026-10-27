@@ -129,8 +129,14 @@ export function ConsultationProposedForm({ form: dto }: { form: ConsultationProp
     startTransition(async () => {
       const result = await reExtractImportDraftAction({ draftId: dto.id })
       setBusy(null)
+      // PLAN-ACQ-MULTIMODAL — avertissements non bloquants de la récupération
+      // du contenu / des pièces (flags OFF, pièce refusée, etc.).
+      const warnings = "warnings" in result && Array.isArray(result.warnings) ? result.warnings : []
+      for (const w of warnings.slice(0, 3)) toast.warning(w)
+      if (warnings.length > 3) toast.warning(`${warnings.length - 3} autre(s) avertissement(s)`)
       if (!result.ok) {
         toast.error(result.message)
+        router.refresh()
         return
       }
       toast.success("Extraction relancée")
