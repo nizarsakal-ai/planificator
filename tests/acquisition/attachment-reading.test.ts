@@ -8,6 +8,7 @@ import assert from "node:assert/strict"
 import {
   MAX_VISUAL_FILES,
   isPotentiallyReadableAttachment,
+  planAttachmentLoads,
   readAttachmentsForExtraction,
   shouldLoadAttachmentBytes,
   type AttachmentForReading,
@@ -250,5 +251,30 @@ describe("pré-sélection (avant claim)", () => {
       false
     )
     assert.equal(shouldLoadAttachmentBytes({ ...base, filename: "a.heic", mimeType: "image/heic" }, { visionEnabled: true }), false)
+  })
+})
+
+describe("planAttachmentLoads — bornes mémoire", () => {
+  it("≤ 10 candidats visuels chargés, ≤ 60 Mo déclarés ; hors budget → IGNORED_TOO_LARGE (LOAD_BUDGET)", async () => {
+    const metas = [
+      ...Array.from({ length: 12 }, (_, i) => ({ filename: `p${i}.jpg`, mimeType: "image/jpeg", status: "STORED", sizeBytes: 1000 })),
+      { filename: "a.pdf", mimeType: "application/pdf", status: "STORED", sizeBytes: 9 * 1024 * 1024 },
+    ]
+    const plan = planAttachmentLoads(metas, { visionEnabled: true })
+    assert.deepEqual(plan.slice(0, 10), Array(10).fill("LOAD"))
+    assert.deepEqual(plan.slice(10, 12), ["BUDGET", "BUDGET"])
+    assert.equal(plan[12], "LOAD")
+    assert.deepEqual(planAttachmentLoads(metas, { visionEnabled: false }).slice(0, 12), Array(12).fill("SKIP"))
+
+    const many = Array.from({ length: 8 }, (_, i) => ({ filename: `b${i}.pdf`, mimeType: "application/pdf", status: "STORED", sizeBytes: 9 * 1024 * 1024 }))
+    const p2 = planAttachmentLoads(many, { visionEnabled: false })
+    assert.equal(p2.filter((x) => x === "LOAD").length, 6)
+    assert.equal(p2[6], "BUDGET")
+
+    const r = await readAttachmentsForExtraction(
+      [{ filename: "b6.pdf", mimeType: "application/pdf", category: "PLAN", sizeBytes: 9, status: "STORED", bytes: null, loadSkippedForBudget: true }],
+      { vision: { enabled: true } }
+    )
+    assert.deepEqual(r.outcomes[0], { filename: "b6.pdf", kind: "pdf", outcome: "IGNORED_TOO_LARGE", reason: "LOAD_BUDGET" })
   })
 })

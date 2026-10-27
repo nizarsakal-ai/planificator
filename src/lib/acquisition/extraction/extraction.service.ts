@@ -34,8 +34,8 @@ import {
 import { appendAttachmentTextToBody } from "@/lib/acquisition/extraction/attachment-text-excerpts"
 import {
   isPotentiallyReadableAttachment,
+  planAttachmentLoads,
   readAttachmentsForExtraction,
-  shouldLoadAttachmentBytes,
   type AttachmentReadOutcome,
   type AttachmentReadingOptions,
 } from "@/lib/acquisition/extraction/attachment-reading"
@@ -578,10 +578,11 @@ async function runDraftExtractionCore(
   try {
     const loadBytes = deps.loadAttachmentBytes ?? defaultAttachmentBytesLoader
     const attachmentList = attachments
+    const loadPlan = planAttachmentLoads(attachmentList, { visionEnabled })
     const withBytes = await Promise.all(
-      attachmentList.map(async (a) => {
+      attachmentList.map(async (a, index) => {
         let bytes: Buffer | null = null
-        if (shouldLoadAttachmentBytes(a, { visionEnabled })) {
+        if (loadPlan[index] === "LOAD") {
           try {
             bytes = await loadBytes({
               filename: a.filename,
@@ -600,6 +601,7 @@ async function runDraftExtractionCore(
           sizeBytes: a.sizeBytes,
           status: a.status,
           bytes,
+          loadSkippedForBudget: loadPlan[index] === "BUDGET",
         }
       })
     )
@@ -636,7 +638,8 @@ async function runDraftExtractionCore(
       }
       return warnings
     })
-    const attachmentWarnings = [...pdfWarnings, ...readOutcomeWarnings(reading.outcomes)]
+    // Borné : les issues détaillées restent dans extractedData.attachmentReadOutcomes.
+    const attachmentWarnings = [...pdfWarnings, ...readOutcomeWarnings(reading.outcomes)].slice(0, 30)
     const attachmentReadOutcomes = reading.outcomes
 
     log("EXTRACTION_ATTACHMENTS_READ", {

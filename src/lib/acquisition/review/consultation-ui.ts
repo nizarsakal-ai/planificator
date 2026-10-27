@@ -223,6 +223,7 @@ const READING_REASON_SUFFIX: Record<string, string> = {
   FILE_BYTES: "> 10 Mo",
   TEXT_BUDGET: "budget texte atteint",
   XLSX_LIMITS: "classeur trop volumineux",
+  LOAD_BUDGET: "trop de pièces volumineuses",
 }
 
 export const ATTACHMENT_READING_TONE_CLASS: Record<AttachmentReadingTone, string> = {

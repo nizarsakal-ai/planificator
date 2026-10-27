@@ -43,6 +43,9 @@ export const MAX_VISUAL_IMAGE_DIMENSION = 8_000
 /** Au-delà, les octets ne sont pas lus (plafond lecture texte PDF/xlsx inclus). */
 export const MAX_READ_FILE_BYTES = 10 * 1024 * 1024
 const MAX_OUTCOMES = 50
+/** Bornes mémoire du chargement des octets (avant lecture). */
+export const MAX_LOADED_VISUAL_CANDIDATES = 2 * MAX_VISUAL_FILES
+export const MAX_TOTAL_LOADED_BYTES = 60 * 1024 * 1024
 
 export const ATTACHMENT_READ_OUTCOME_CODES = [
   "READ_TEXT",
@@ -79,6 +82,8 @@ export type AttachmentForReading = {
   status: string
   /** Octets chargés (STORED) ; null si indisponibles / non chargés. */
   bytes: Buffer | null
+  /** Non chargé faute de budget mémoire (voir planAttachmentLoads). */
+  loadSkippedForBudget?: boolean
 }
 
 export type AttachmentLegacyPdfOutcome = {
@@ -137,6 +142,30 @@ export function shouldLoadAttachmentBytes(
   return opts.visionEnabled && (meta.mimeType || "").toLowerCase().startsWith("application/octet-stream")
 }
 
+/**
+ * Plan de chargement des octets, dans l'ordre du message, borné :
+ * ≤ 10 candidats visuels (images / octet-stream) et ≤ 60 Mo déclarés au total.
+ * "SKIP" = pas besoin de lire ; "BUDGET" = lisible mais hors budget mémoire.
+ */
+export function planAttachmentLoads(
+  metas: Array<{ filename: string; mimeType: string; status: string; sizeBytes: number }>,
+  opts: { visionEnabled: boolean }
+): Array<"LOAD" | "SKIP" | "BUDGET"> {
+  let visualCandidates = 0
+  let totalBytes = 0
+  return metas.map((m) => {
+    if (!shouldLoadAttachmentBytes(m, opts)) return "SKIP"
+    const kind = guessAttachmentKindFromMeta(m).kind
+    const isVisualCandidate = kind === "image" || kind === "unsupported"
+    const size = Number.isFinite(m.sizeBytes) && m.sizeBytes > 0 ? m.sizeBytes : 0
+    if (isVisualCandidate && visualCandidates >= MAX_LOADED_VISUAL_CANDIDATES) return "BUDGET"
+    if (totalBytes + size > MAX_TOTAL_LOADED_BYTES) return "BUDGET"
+    if (isVisualCandidate) visualCandidates++
+    totalBytes += size
+    return "LOAD"
+  })
+}
+
 type VisualCandidate = {
   index: number
   filename: string
@@ -192,6 +221,12 @@ export async function readAttachmentsForExtraction(
 
     if (metaKind.kind === "heic") {
       record({ kind: "heic", outcome: "IGNORED_HEIC", reason: "HEIC_NOT_SUPPORTED" })
+      continue
+    }
+
+    if (att.loadSkippedForBudget && !att.bytes) {
+      if (metaKind.kind === "pdf") pdfOutcomes.push({ filename, status: "PDF_PARSE_FAILED" })
+      record({ kind: kindLabel(metaKind), outcome: "IGNORED_TOO_LARGE", reason: "LOAD_BUDGET" })
       continue
     }
 
