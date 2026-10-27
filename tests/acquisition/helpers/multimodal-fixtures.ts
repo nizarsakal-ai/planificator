@@ -56,3 +56,28 @@ export async function buildXlsx(
   }
   return Buffer.from(await wb.xlsx.writeBuffer())
 }
+
+/** PDF sans couche texte (scan simulé) avec `pages` pages vides. */
+export function buildBlankPdfWithPages(pages: number): Buffer {
+  const kids = Array.from({ length: pages }, (_, i) => `${3 + i} 0 R`).join(" ")
+  const objects = [
+    "1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n",
+    `2 0 obj<< /Type /Pages /Kids [${kids}] /Count ${pages} >>endobj\n`,
+    ...Array.from(
+      { length: pages },
+      (_, i) => `${3 + i} 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>endobj\n`
+    ),
+  ]
+  let body = "%PDF-1.4\n"
+  const offsets: number[] = [0]
+  for (const obj of objects) {
+    offsets.push(Buffer.byteLength(body, "latin1"))
+    body += obj
+  }
+  const xrefPos = Buffer.byteLength(body, "latin1")
+  const size = objects.length + 1
+  body += `xref\n0 ${size}\n0000000000 65535 f \n`
+  for (let i = 1; i < size; i++) body += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`
+  body += `trailer<< /Size ${size} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF\n`
+  return Buffer.from(body, "latin1")
+}

@@ -13,6 +13,7 @@ import {
 } from "@/lib/acquisition/extraction/extraction.schema"
 import {
   ANTHROPIC_MAX_CONFIDENCE,
+  ANTHROPIC_VISUAL_MAX_CONFIDENCE,
   EXTRACTION_TOOL_NAME,
 } from "@/lib/acquisition/extraction/anthropic-extraction.config"
 import { evidenceQuoteInHaystack } from "@/lib/acquisition/extraction/anthropic-extraction.prompt"
@@ -207,6 +208,12 @@ const ALLOWED_WARNING = new Set<string>(EXTRACTION_WARNING_CODES)
  * Map raw tool input → ExtractionProviderResult.
  * Quote doit apparaître dans `haystack` (texte réellement envoyé).
  * Confidence plafonnée. Champs forts sans evidence crédible → omis.
+ *
+ * PLAN-ACQ-MULTIMODAL — si des pièces visuelles ont été transmises
+ * (`visualEvidenceAllowed`), une evidence `ATTACHMENT_VISUAL` dont la quote
+ * n'est pas dans le texte est acceptée MAIS : confiance ≤ 0.6 (sous le seuil
+ * AUTO par défaut) + warning VISUAL_EVIDENCE_UNVERIFIED sur le champ.
+ * Sans pièce visuelle, la source ATTACHMENT_VISUAL ne débloque rien.
  */
 export function mapAnthropicRawToProviderResult(input: {
   raw: unknown
@@ -214,6 +221,7 @@ export function mapAnthropicRawToProviderResult(input: {
   model: string
   latencyMs: number
   extraWarningCodes?: string[]
+  visualEvidenceAllowed?: boolean
 }): ExtractionProviderResult {
   const parsed = anthropicExtractionRawSchema.safeParse(input.raw)
   if (!parsed.success) {
@@ -221,6 +229,7 @@ export function mapAnthropicRawToProviderResult(input: {
   }
 
   const fields: ExtractionProviderResult["fields"] = {}
+  const visualWarnings: ExtractionProviderResult["warnings"] = []
   for (const [key, field] of Object.entries(parsed.data.fields)) {
     if (!field) continue
     let confidence = Math.min(Number(field.confidence), ANTHROPIC_MAX_CONFIDENCE)
@@ -229,11 +238,28 @@ export function mapAnthropicRawToProviderResult(input: {
     const evidence = field.evidence as
       | { source: (typeof EXTRACTION_EVIDENCE_SOURCES)[number]; quote: string }
       | undefined
+    const quoteInText = Boolean(
+      evidence?.quote && evidenceQuoteInHaystack(input.haystack, evidence.quote)
+    )
+    const visualOnly =
+      input.visualEvidenceAllowed === true &&
+      evidence?.source === "ATTACHMENT_VISUAL" &&
+      Boolean(evidence.quote?.trim()) &&
+      !quoteInText
+    if (visualOnly && evidence) {
+      fields[key] = {
+        value: field.value,
+        confidence: Math.min(confidence, ANTHROPIC_VISUAL_MAX_CONFIDENCE),
+        evidence: { source: "ATTACHMENT_VISUAL", quote: evidence.quote.slice(0, MAX_EVIDENCE_QUOTE) },
+      }
+      visualWarnings.push({ code: "VISUAL_EVIDENCE_UNVERIFIED", field: key })
+      continue
+    }
     if (STRONG_FIELDS.has(key)) {
-      if (!evidence?.quote || !evidenceQuoteInHaystack(input.haystack, evidence.quote)) {
+      if (!evidence?.quote || !quoteInText) {
         continue
       }
-    } else if (evidence?.quote && !evidenceQuoteInHaystack(input.haystack, evidence.quote)) {
+    } else if (evidence?.quote && !quoteInText) {
       fields[key] = { value: field.value, confidence: Math.min(confidence, 0.35) }
       continue
     }
@@ -257,6 +283,10 @@ export function mapAnthropicRawToProviderResult(input: {
   }
   for (const code of input.extraWarningCodes ?? []) {
     warnings.push({ code })
+  }
+  for (const w of visualWarnings) {
+    if (warnings.length >= MAX_PROVIDER_WARNINGS) break
+    warnings.push(w)
   }
 
   const result = {

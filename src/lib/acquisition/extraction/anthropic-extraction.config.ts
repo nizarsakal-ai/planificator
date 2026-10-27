@@ -25,6 +25,12 @@ export const DEFAULT_ANTHROPIC_EXTRACTION_MODEL: AnthropicExtractionModelId = "c
 
 /** Confiance max acceptée depuis Anthropic (conservateur). */
 export const ANTHROPIC_MAX_CONFIDENCE = 0.85
+/**
+ * PLAN-ACQ-MULTIMODAL — plafond de confiance d'une valeur dont la preuve vient
+ * d'une pièce visuelle (non vérifiable littéralement). Volontairement sous le
+ * seuil AUTO par défaut (0.75) : revue humaine.
+ */
+export const ANTHROPIC_VISUAL_MAX_CONFIDENCE = 0.6
 
 export const EXTRACTION_TOOL_NAME = "extract_worksite_fields" as const
 

@@ -1,7 +1,9 @@
 /**
  * PLAN-ACQ-V2 Lot E / R3 — Multimodal progressif (PDF texte d’abord).
- * Images/plans vision : hors sous-lot.
  * Parse couche texte via unpdf (pas d’OCR).
+ * PLAN-ACQ-MULTIMODAL : la lecture complète (xlsx, vision photos / PDF scannés)
+ * est dans attachment-reading.ts ; ce module conserve les plafonds partagés,
+ * `appendAttachmentTextToBody` et l’API historique `buildAttachmentTextExcerpts`.
  */
 
 import type { AttachmentTextExcerpt } from "@/lib/acquisition/extraction/extraction-provider.port"
@@ -10,9 +12,9 @@ import {
   type PdfTextExtractStatus,
 } from "@/lib/acquisition/extraction/pdf-text-extract"
 
-const MAX_EXCERPT_CHARS = 8_000
-const MAX_TOTAL_CHARS = 24_000
-const PDF_PARSE_TIMEOUT_MS = 3_000
+export const MAX_EXCERPT_CHARS = 8_000
+export const MAX_TOTAL_CHARS = 24_000
+export const PDF_PARSE_TIMEOUT_MS = 3_000
 
 export type StoredAttachmentForText = {
   filename: string
@@ -107,7 +109,7 @@ export async function buildAttachmentTextExcerpts(
   return { excerpts, outcomes }
 }
 
-/** Enrichit le corps email avec les extraits PDF. */
+/** Enrichit le corps email avec les extraits texte des PJ (PDF, xlsx). */
 export function appendAttachmentTextToBody(
   body: string,
   excerpts: AttachmentTextExcerpt[]

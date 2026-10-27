@@ -4,6 +4,7 @@
  */
 
 import type {
+  ContentBlockParam,
   Message,
   MessageCreateParamsNonStreaming,
   ToolChoiceTool,
@@ -19,13 +20,17 @@ import {
   mapAnthropicSdkError,
   type AnthropicExtractionClient,
 } from "@/lib/acquisition/extraction/anthropic-extraction.client"
-import { buildAnthropicExtractionPrompt } from "@/lib/acquisition/extraction/anthropic-extraction.prompt"
+import {
+  buildAnthropicExtractionPrompt,
+  buildAnthropicSystemPrompt,
+} from "@/lib/acquisition/extraction/anthropic-extraction.prompt"
 import {
   EXTRACTION_TOOL_DEFINITION,
   mapAnthropicRawToProviderResult,
 } from "@/lib/acquisition/extraction/anthropic-extraction.schema"
 import { ExtractionProviderError } from "@/lib/acquisition/extraction/extraction-provider.errors"
 import type {
+  AttachmentVisualInput,
   ExtractionProviderPort,
   ExtractionProviderResult,
   NormalizedExtractInput,
@@ -106,6 +111,41 @@ function extractToolInput(message: Message, maxResponseBytes: number): unknown {
   return input
 }
 
+/** Garde-fou adapter (le service borne déjà en amont). */
+const MAX_VISUAL_BLOCKS = 5
+
+/**
+ * PLAN-ACQ-MULTIMODAL — Contenu user : JSON texte (inchangé) puis, pour chaque
+ * pièce visuelle, un bloc texte JSON d'étiquette + bloc natif image/document.
+ * Le nom de fichier n'est jamais concaténé hors JSON.stringify.
+ */
+export function buildAnthropicUserContent(
+  userJson: string,
+  visuals: AttachmentVisualInput[] | undefined
+): string | ContentBlockParam[] {
+  const list = (visuals ?? []).slice(0, MAX_VISUAL_BLOCKS)
+  if (list.length === 0) return userJson
+  const blocks: ContentBlockParam[] = [{ type: "text", text: userJson }]
+  for (const v of list) {
+    blocks.push({
+      type: "text",
+      text: JSON.stringify({ attachmentVisual: v.filename.slice(0, 255) }),
+    })
+    if (v.kind === "pdf") {
+      blocks.push({
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: v.base64 },
+      })
+    } else {
+      blocks.push({
+        type: "image",
+        source: { type: "base64", media_type: v.mediaType, data: v.base64 },
+      })
+    }
+  }
+  return blocks
+}
+
 function throwMapped(mapped: ReturnType<typeof mapAnthropicSdkError>): never {
   switch (mapped.kind) {
     case "AUTH":
@@ -156,6 +196,8 @@ function isTransientMapped(
 }
 
 export class AnthropicExtractionAdapter implements ExtractionProviderPort {
+  /** PLAN-ACQ-MULTIMODAL — blocs natifs image / document supportés. */
+  readonly supportsVisualInputs = true
   private readonly client: AnthropicExtractionClient
   private readonly config: AnthropicPublicConfig
   private readonly sleep: (ms: number) => Promise<void>
@@ -210,12 +252,15 @@ export class AnthropicExtractionAdapter implements ExtractionProviderPort {
       disable_parallel_tool_use: true,
     }
 
+    const visuals = (input.attachmentVisuals ?? []).slice(0, MAX_VISUAL_BLOCKS)
+    const hasVisuals = visuals.length > 0
+
     const body: MessageCreateParamsNonStreaming = {
       model,
       max_tokens: this.config.maxTokens,
       temperature: 0,
-      system: prompt.system,
-      messages: [{ role: "user", content: prompt.user }],
+      system: hasVisuals ? buildAnthropicSystemPrompt({ hasVisualAttachments: true }) : prompt.system,
+      messages: [{ role: "user", content: buildAnthropicUserContent(prompt.user, visuals) }],
       tools: [EXTRACTION_TOOL_DEFINITION],
       tool_choice: toolChoice,
     }
@@ -225,6 +270,8 @@ export class AnthropicExtractionAdapter implements ExtractionProviderPort {
       model,
       promptBytes: prompt.totalUserBytes,
       truncated: prompt.truncated,
+      visualCount: visuals.length,
+      visualBytes: visuals.reduce((n, v) => n + v.byteLength, 0),
     })
 
     let attempt = 0
@@ -256,6 +303,7 @@ export class AnthropicExtractionAdapter implements ExtractionProviderPort {
             model,
             latencyMs: Date.now() - started,
             extraWarningCodes: extraWarnings,
+            visualEvidenceAllowed: hasVisuals,
           })
         } catch {
           throw new ExtractionProviderError(

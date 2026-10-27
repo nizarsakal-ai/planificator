@@ -11,6 +11,8 @@ export const EXTRACTION_EVIDENCE_SOURCES = [
   "ATTACHMENT_META",
   "ATTACHMENT_TEXT",
   "HEURISTIC",
+  /** PLAN-ACQ-MULTIMODAL — fait lu dans une pièce visuelle (non vérifiable littéralement). */
+  "ATTACHMENT_VISUAL",
 ] as const
 
 export const REQUEST_CLASSIFICATIONS = [
@@ -43,6 +45,9 @@ export const EXTRACTION_WARNING_CODES = [
   "PDF_TEXT_TRUNCATED",
   "REQUIRED_DOCUMENT_UNREADABLE",
   "CONSULTATION_CANCELLED",
+  "VISUAL_EVIDENCE_UNVERIFIED",
+  "ATTACHMENT_HEIC_UNSUPPORTED",
+  "ATTACHMENT_NOT_READ",
 ] as const
 
 export const EXTRACTION_WARNING_SEVERITIES = ["INFO", "WARNING", "ERROR"] as const
@@ -402,6 +407,21 @@ export const EXTRACTION_WARNING_CATALOG: Record<
     severity: "ERROR",
     blocking: true,
     message: "Consultation annulée — aucune conversion automatique",
+  },
+  VISUAL_EVIDENCE_UNVERIFIED: {
+    severity: "WARNING",
+    blocking: false,
+    message: "Valeur lue sur une pièce visuelle (photo / scan) — à vérifier",
+  },
+  ATTACHMENT_HEIC_UNSUPPORTED: {
+    severity: "WARNING",
+    blocking: false,
+    message: "Photo HEIC/HEIF non lue — demander un JPEG",
+  },
+  ATTACHMENT_NOT_READ: {
+    severity: "INFO",
+    blocking: false,
+    message: "Pièce jointe non exploitée (voir la liste des pièces)",
   },
 }
 
