@@ -69,6 +69,13 @@ jobs:
         run: |
           set -o pipefail
           npm run -s test:billing:fix:pg | tee ci-evidence/fix-pg-summary.log
+      - name: Acquisition multimodal regression tests
+        env:
+          NODE_ENV: test
+        run: |
+          set -o pipefail
+          node --import tsx --test tests/acquisition/attachment-file-kind-xlsx.test.ts tests/acquisition/attachment-reading.test.ts tests/acquisition/anthropic-extraction.multimodal.test.ts tests/acquisition/extraction-attachments-only.test.ts tests/acquisition/manual-reextract-preparation.test.ts tests/acquisition/consultation-attachment-readings.test.tsx tests/acquisition/multimodal-review-fixes.test.ts | tee ci-evidence/acquisition-multimodal.log
+          sh tests/billing/pg/with-disposable-db.sh ci_acquisition_multimodal sh -c 'TEST_ACQUISITION_DATABASE_URL="$DATABASE_URL" node --import tsx --test tests/acquisition/extraction-attachments-only.integration.test.ts' | tee ci-evidence/acquisition-multimodal-pg.log
       - name: PostgreSQL non-regression
         env:
           NODE_ENV: test
