@@ -52,10 +52,10 @@ test("alias non ambigu : Honoraires résout le compte 622000 de la société", (
   assert.deepEqual(classificationAfterOcr({ category: "honoraire" }, [{ id: "fees", number: "622000" }]), { category: "honoraires", expenseAccountId: "fees", needsReview: false })
 })
 
-test("restaurant reconnu sans imposer de compte, même si 625 et 606 sont disponibles", () => {
+test("restaurant reconnu avec proposition 625 modifiable, sans repli 606", () => {
   const extraction = parseOcrPayload('{"supplier":"Restaurant fictif","supplierType":"restauration","amountTTC":72.7}')
   assert.equal(extraction.category, "restauration")
-  assert.deepEqual(classificationAfterOcr(extraction, [{id:"travel",number:"625000"},{id:"supplies",number:"606000"}]), {category:"restauration",expenseAccountId:"",needsReview:false})
+  assert.deepEqual(classificationAfterOcr(extraction, [{id:"travel",number:"625000"},{id:"supplies",number:"606000"}]), {category:"restauration",expenseAccountId:"travel",needsReview:false})
   assert.equal(normalizeSupplierCategory("repas"), "restauration")
 })
 
@@ -66,4 +66,16 @@ test("serveur : restauration sans compte explicite refusée avant toute écritur
   const result = await validateSupplierInvoice(db as never, {companyId:"synthetic",userId:"synthetic"} as never, "synthetic")
   assert.equal(result.ok, false)
   if (!result.ok) assert.match(result.error, /choisissez et confirmez/)
+})
+
+test("restauration : un compte proposé doit être confirmé à l'identique sous verrou", async () => {
+  const { validateSupplierInvoice } = await import("@/lib/accounting/c5/supplier-invoice.service")
+  const tx = { $queryRaw: async () => [], supplierInvoice: { findFirst: async () => ({id:"synthetic",companyId:"synthetic",status:"PENDING",category:"restauration",expenseAccountId:"proposed"}) } }
+  const db = { $transaction: async (fn: (transaction: unknown) => unknown) => fn(tx) }
+  for (const confirmation of [undefined,"old-account"]) {
+    const result=await validateSupplierInvoice(db as never,{companyId:"synthetic",userId:"synthetic"} as never,"synthetic",confirmation)
+    assert.equal(result.ok,false)
+    if(!result.ok) assert.match(result.error,/confirmez/)
+  }
+  assert.equal(suggestedExpenseAccountId("restauration",[{id:"other",number:"606000"}]),"")
 })
