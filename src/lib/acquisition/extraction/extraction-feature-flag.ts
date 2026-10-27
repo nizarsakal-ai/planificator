@@ -10,6 +10,15 @@ export function isAcquisitionExtractionEnabled(): boolean {
   return process.env.ACQUISITION_EXTRACTION_ENABLED === "true"
 }
 
+/**
+ * PLAN-ACQ-MULTIMODAL — Lecture visuelle (photos, PDF scannés) via blocs natifs
+ * Anthropic. OFF par défaut. Sans effet si le provider n'est pas Anthropic.
+ * Prérequis : master + extraction (voir acquisition-flag-matrix).
+ */
+export function isAcquisitionExtractionMultimodalEnabled(): boolean {
+  return process.env.ACQUISITION_EXTRACTION_MULTIMODAL_ENABLED === "true"
+}
+
 export function getExtractionProviderId(): ExtractionProviderId {
   const raw = (process.env.ACQUISITION_EXTRACTION_PROVIDER ?? "deterministic").trim().toLowerCase()
   if (raw === "anthropic") return "anthropic"
