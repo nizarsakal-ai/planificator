@@ -34,7 +34,7 @@ export function ConsultationConversionPanel({
   const [mode, setMode] = useState<"EXISTING" | "NEW">(
     clients.length > 0 ? "EXISTING" : "NEW"
   )
-  const [existingClientId, setExistingClientId] = useState(clients[0]?.id ?? "")
+  const [existingClientId, setExistingClientId] = useState("")
   const [newName, setNewName] = useState(proposedClientName ?? "")
   const [newEmail, setNewEmail] = useState("")
   const [newPhone, setNewPhone] = useState("")
@@ -135,6 +135,7 @@ export function ConsultationConversionPanel({
             onChange={(e) => setExistingClientId(e.target.value)}
             disabled={pending || clients.length === 0}
           >
+            <option value="">Choisir le client donneur d’ordre</option>
             {clients.length === 0 ? (
               <option value="">Aucun client</option>
             ) : (
