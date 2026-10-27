@@ -15,6 +15,7 @@ import {
   readAnthropicApiKey,
   type AnthropicPublicConfig,
 } from "@/lib/acquisition/extraction/anthropic-extraction.config"
+import { APIError, BadRequestError } from "@anthropic-ai/sdk"
 import {
   createAnthropicExtractionClient,
   mapAnthropicSdkError,
@@ -146,6 +147,12 @@ export function buildAnthropicUserContent(
   return blocks
 }
 
+function isVisualInputRejection(error: unknown): boolean {
+  if (error instanceof BadRequestError) return true
+  if (error instanceof APIError && (error.status === 400 || error.status === 413)) return true
+  return false
+}
+
 function throwMapped(mapped: ReturnType<typeof mapAnthropicSdkError>): never {
   switch (mapped.kind) {
     case "AUTH":
@@ -253,7 +260,7 @@ export class AnthropicExtractionAdapter implements ExtractionProviderPort {
     }
 
     const visuals = (input.attachmentVisuals ?? []).slice(0, MAX_VISUAL_BLOCKS)
-    const hasVisuals = visuals.length > 0
+    let hasVisuals = visuals.length > 0
 
     const body: MessageCreateParamsNonStreaming = {
       model,
@@ -331,6 +338,20 @@ export class AnthropicExtractionAdapter implements ExtractionProviderPort {
             retryCount: attempt - 1,
           })
           throw error
+        }
+
+        // P1-3 — une pièce visuelle refusée par l'API (400 / 413 : taille, format,
+        // dimensions) ne doit jamais faire échouer toute l'extraction : une seule
+        // relance en texte seul, warning VISUAL_INPUTS_DROPPED (le service marque
+        // alors les pièces concernées comme non lues).
+        if (hasVisuals && isVisualInputRejection(error)) {
+          hasVisuals = false
+          body.system = prompt.system
+          body.messages = [{ role: "user", content: prompt.user }]
+          extraWarnings.push("VISUAL_INPUTS_DROPPED")
+          safeLog(this.log, "ANTHROPIC_EXTRACT_VISUALS_DROPPED", { provider: "anthropic", model })
+          attempt-- // relance dédiée, ne consomme pas le retry transitoire
+          continue
         }
 
         const mapped = mapAnthropicSdkError(error)
