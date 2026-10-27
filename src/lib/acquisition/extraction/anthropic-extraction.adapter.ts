@@ -69,6 +69,9 @@ function safeLog(
  * Les blocs texte éventuels sont ignorés (jamais lus/loggés/persistés).
  */
 function extractToolInput(message: Message, maxResponseBytes: number): unknown {
+  if (message.stop_reason === "max_tokens") {
+    throw new ExtractionProviderError("PROVIDER_INVALID_OUTPUT", "Réponse fournisseur tronquée", false)
+  }
   const serialized = JSON.stringify(message.content)
   if (Buffer.byteLength(serialized, "utf8") > maxResponseBytes) {
     throw new ExtractionProviderError(
@@ -214,7 +217,7 @@ export class AnthropicExtractionAdapter implements ExtractionProviderPort {
     const config = deps.config ?? getAnthropicPublicConfig()
     this.config = config
     this.sleep = deps.sleep ?? defaultSleep
-    this.log = deps.log
+    this.log = deps.log ?? ((event, payload) => console.info(event, payload))
 
     if (deps.client) {
       this.client = deps.client
@@ -282,6 +285,7 @@ export class AnthropicExtractionAdapter implements ExtractionProviderPort {
     })
 
     let attempt = 0
+    let outputRepairAttempted = false
     const deadline = started + this.config.timeoutMs
 
     while (attempt <= MAX_ADAPTER_RETRIES) {
@@ -301,6 +305,10 @@ export class AnthropicExtractionAdapter implements ExtractionProviderPort {
           maxRetries: 0,
         })
 
+        safeLog(this.log, "ANTHROPIC_EXTRACT_RESPONSE", {
+          stopReason: message.stop_reason,
+          outputTokens: message.usage.output_tokens,
+        })
         const toolInput = extractToolInput(message, this.config.maxResponseBytes)
         let result: ExtractionProviderResult
         try {
@@ -331,6 +339,23 @@ export class AnthropicExtractionAdapter implements ExtractionProviderPort {
         return result
       } catch (error) {
         if (error instanceof ExtractionProviderError) {
+          // A fresh constrained request, never a partial response accepted as data.
+          // Share neither rejected output nor document contents in diagnostics.
+          if (error.code === "PROVIDER_INVALID_OUTPUT" && !outputRepairAttempted &&
+              Date.now() + MIN_RETRY_CALL_MS < deadline) {
+            outputRepairAttempted = true
+            body.system = `${body.system} La précédente réponse ne respectait pas le schéma. ` +
+              "Omet entièrement les champs absents ou incertains (pas de null). " +
+              "Chaque champ fourni contient value et confidence numérique entre 0 et 1. " +
+              "Evidence est omise ou contient source autorisée et quote littérale de 1 à 120 caractères. " +
+              "Warnings contient uniquement code et éventuellement field, jamais de texte libre. " +
+              "Respecte strictement toutes les clés et limites du schéma de l'outil."
+            body.max_tokens = Math.min(8192, Math.max(body.max_tokens, this.config.maxTokens * 2))
+            extraWarnings.push("PROVIDER_PARTIAL_RESULT")
+            safeLog(this.log, "ANTHROPIC_EXTRACT_OUTPUT_RETRY", { provider: "anthropic" })
+            attempt--
+            continue
+          }
           safeLog(this.log, "ANTHROPIC_EXTRACT_FAIL", {
             provider: "anthropic",
             model,
