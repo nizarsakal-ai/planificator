@@ -48,6 +48,8 @@ export const EXTRACTION_WARNING_CODES = [
   "VISUAL_EVIDENCE_UNVERIFIED",
   "ATTACHMENT_HEIC_UNSUPPORTED",
   "ATTACHMENT_NOT_READ",
+  "ATTACHMENT_DERIVED_FIELD",
+  "VISUAL_INPUTS_DROPPED",
 ] as const
 
 export const EXTRACTION_WARNING_SEVERITIES = ["INFO", "WARNING", "ERROR"] as const
@@ -422,6 +424,18 @@ export const EXTRACTION_WARNING_CATALOG: Record<
     severity: "INFO",
     blocking: false,
     message: "Pièce jointe non exploitée (voir la liste des pièces)",
+  },
+  // Non bloquant pour l'humain (approbation manuelle possible) ; BLOQUANT pour
+  // toute décision AUTO (auto-decision.policy → ATTACHMENT_EVIDENCE_REQUIRES_HUMAN).
+  ATTACHMENT_DERIVED_FIELD: {
+    severity: "WARNING",
+    blocking: false,
+    message: "Valeur issue d'une pièce jointe (non citée dans le mail) — revue humaine requise",
+  },
+  VISUAL_INPUTS_DROPPED: {
+    severity: "WARNING",
+    blocking: false,
+    message: "Pièces visuelles refusées par le fournisseur — extraction faite sans elles",
   },
 }
 

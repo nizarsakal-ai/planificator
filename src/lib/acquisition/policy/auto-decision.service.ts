@@ -232,6 +232,11 @@ async function appendJournalLegacyOrFenced(input: {
   }
 }
 
+function readEvidenceData(extractedData: unknown): unknown {
+  if (!extractedData || typeof extractedData !== "object" || Array.isArray(extractedData)) return null
+  return (extractedData as { evidence?: unknown }).evidence ?? null
+}
+
 export async function maybeRunAutoDecisionAfterExtraction(input: {
   companyId: string
   draftId: string
@@ -393,6 +398,7 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
     consultationCancelled,
     hasResolvedClient: Boolean(clientMatch.clientId),
     referenceInstant: input.deps?.referenceInstant,
+    evidenceData: readEvidenceData(draft.extractedData),
   })
 
   decision = gateAutoDecisionByDetectionProof({

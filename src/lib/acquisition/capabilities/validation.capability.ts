@@ -52,6 +52,8 @@ export type ConsultationValidationSnapshot = {
   consultationCancelled?: boolean
   /** Contenu temporairement indisponible (extraction retryable). */
   contentMissingRetryable?: boolean
+  /** PLAN-ACQ-MULTIMODAL — evidence issue d'une pièce jointe ⇒ jamais AUTO. */
+  attachmentDerivedEvidence?: boolean
 }
 
 const WARNING_CODE_SET = new Set<string>(EXTRACTION_WARNING_CODES)
@@ -132,6 +134,7 @@ export function parseConsultationValidationSnapshot(
     requiredDocumentUnreadable: asOptionalBoolean(raw.requiredDocumentUnreadable),
     consultationCancelled: asOptionalBoolean(raw.consultationCancelled),
     contentMissingRetryable: asOptionalBoolean(raw.contentMissingRetryable),
+    attachmentDerivedEvidence: asOptionalBoolean(raw.attachmentDerivedEvidence),
   }
 }
 
@@ -296,6 +299,7 @@ export function validateConsultation(
     requiredDocumentUnreadable: Boolean(snap.requiredDocumentUnreadable),
     consultationCancelled: Boolean(snap.consultationCancelled),
     hasResolvedClient: Boolean(snap.hasResolvedClient),
+    attachmentDerivedEvidence: Boolean(snap.attachmentDerivedEvidence),
   })
 
   if (auto.code === "AUTO_REJECT_CANCELLED") {
