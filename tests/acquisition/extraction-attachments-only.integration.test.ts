@@ -64,6 +64,7 @@ describe("extraction PJ seules — intégration PostgreSQL", RUN, () => {
     "ACQUISITION_EXTRACTION_ENABLED",
     "ACQUISITION_EXTRACTION_PROVIDER",
     "ACQUISITION_EXTRACTION_MULTIMODAL_ENABLED",
+    "ACQUISITION_EXTRACTION_ATTACHMENTS_ENABLED",
   ] as const
   const backup: Record<string, string | undefined> = {}
   const actor = { userId: "u-admin", role: "ADMIN" as const, companyId: "" }
@@ -76,6 +77,7 @@ describe("extraction PJ seules — intégration PostgreSQL", RUN, () => {
     process.env.ACQUISITION_EXTRACTION_ENABLED = "true"
     process.env.ACQUISITION_EXTRACTION_PROVIDER = "deterministic"
     delete process.env.ACQUISITION_EXTRACTION_MULTIMODAL_ENABLED
+    process.env.ACQUISITION_EXTRACTION_ATTACHMENTS_ENABLED = "true"
     const c = await db.company.create({ data: { name: "MM", slug: `mm-${Date.now()}` } })
     companyId = c.id
     actor.companyId = companyId
@@ -107,9 +109,15 @@ describe("extraction PJ seules — intégration PostgreSQL", RUN, () => {
     assert.match(d.proposedWorksiteName ?? "", /Lilas/)
     const extracted = d.extractedData as { sourceKind?: string; attachmentReadOutcomes?: unknown[] }
     assert.equal(extracted.sourceKind, "ATTACHMENTS_ONLY")
-    assert.deepEqual(extracted.attachmentReadOutcomes, [
-      { filename: "BC-2026-114.pdf", kind: "pdf", outcome: "READ_TEXT" },
-    ])
+    const outcomes = extracted.attachmentReadOutcomes as Array<Record<string, unknown>>
+    assert.equal(outcomes.length, 1)
+    assert.deepEqual(
+      { filename: outcomes[0].filename, kind: outcomes[0].kind, outcome: outcomes[0].outcome },
+      { filename: "BC-2026-114.pdf", kind: "pdf", outcome: "READ_TEXT" }
+    )
+    // P1-1 — issue liée à l'id réel de la pièce en base.
+    const att = await db.acquisitionAttachment.findFirstOrThrow({ where: { acquisitionMessageId: s.messageId } })
+    assert.equal(outcomes[0].attachmentId, att.id)
 
     // Barrière AUTO en TX réelle (SELECT … FOR UPDATE) : toujours STALE.
     const fresh = await db.$transaction((tx) =>

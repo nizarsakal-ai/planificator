@@ -65,10 +65,12 @@ function createRepo(seed: Seed = {}) {
     attachments: seed.attachments ?? [],
   }
   const persists: PersistExtractionInput[] = []
+  const markFails: Array<Record<string, unknown>> = []
   let claimCount = 0
   const repo = {
     state,
     persists,
+    markFails,
     get claimCount() {
       return claimCount
     },
@@ -124,6 +126,7 @@ function createRepo(seed: Seed = {}) {
       return "OK" as const
     },
     async markFailedWhileExtracting(input: { expectedVersion: number }) {
+      markFails.push(input as unknown as Record<string, unknown>)
       if (draft.version !== input.expectedVersion) return "STATE_CHANGED" as const
       draft = { ...draft, status: "FAILED", version: draft.version + 1 }
       return "OK" as const
@@ -180,6 +183,7 @@ const FLAG_KEYS = [
   "ACQUISITION_EXTRACTION_ENABLED",
   "ACQUISITION_EXTRACTION_PROVIDER",
   "ACQUISITION_EXTRACTION_MULTIMODAL_ENABLED",
+  "ACQUISITION_EXTRACTION_ATTACHMENTS_ENABLED",
 ] as const
 
 describe("extraction — barrière 005A & pièces jointes seules", () => {
@@ -190,6 +194,7 @@ describe("extraction — barrière 005A & pièces jointes seules", () => {
     process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
     process.env.ACQUISITION_EXTRACTION_ENABLED = "true"
     process.env.ACQUISITION_EXTRACTION_PROVIDER = "deterministic"
+    process.env.ACQUISITION_EXTRACTION_ATTACHMENTS_ENABLED = "true"
     delete process.env.ACQUISITION_EXTRACTION_MULTIMODAL_ENABLED
   })
   afterEach(() => {
@@ -224,7 +229,7 @@ describe("extraction — barrière 005A & pièces jointes seules", () => {
     )
     assert.equal(persisted.extractedData.sourceKind, "ATTACHMENTS_ONLY")
     assert.deepEqual(persisted.extractedData.attachmentReadOutcomes, [
-      { filename: "BC-2026.pdf", kind: "pdf", outcome: "READ_TEXT" },
+      { attachmentId: "att-BC-2026.pdf", filename: "BC-2026.pdf", kind: "pdf", outcome: "READ_TEXT" },
     ])
     assert.equal(repo.draft.status, "PENDING_REVIEW")
   })
@@ -260,14 +265,23 @@ describe("extraction — barrière 005A & pièces jointes seules", () => {
     assert.equal(r.ok, false)
     if (!r.ok) assert.equal(r.code, "CONTENT_MISSING")
     assert.equal(provider.calls.length, 0)
-    const p = repo.persists[0]
-    assert.equal(p.status, "FAILED")
+    // P2-2 — FAILED sans écraser les champs proposés : markFailed + fusion extractedData.
+    assert.equal(repo.persists.length, 0)
+    const p = repo.markFails[0] as {
+      errorCode: string
+      extractionRetryable: boolean
+      warnings: Array<{ code: string }>
+      extractedDataMerge: { attachmentReadOutcomes: unknown[]; sourceKind: string }
+    }
     assert.equal(p.errorCode, "CONTENT_MISSING")
     assert.equal(p.extractionRetryable, false)
-    assert.deepEqual(p.extractedData.attachmentReadOutcomes, [
-      { filename: "scan.pdf", kind: "pdf", outcome: "IGNORED_VISION_DISABLED", reason: "FLAG_OFF" },
+    assert.equal(p.extractedDataMerge.sourceKind, "ATTACHMENTS_ONLY")
+    assert.deepEqual(p.extractedDataMerge.attachmentReadOutcomes, [
+      { attachmentId: "att-scan.pdf", filename: "scan.pdf", kind: "pdf", outcome: "IGNORED_VISION_DISABLED", reason: "FLAG_OFF" },
     ])
-    assert.ok(p.warningData.some((w) => w.code === "REQUIRED_DOCUMENT_UNREADABLE"))
+    assert.ok(p.warnings.some((w) => w.code === "REQUIRED_DOCUMENT_UNREADABLE"))
+    // Vision OFF par flag : pas d'avertissement bruyant « pièce non exploitée ».
+    assert.ok(!p.warnings.some((w) => w.code === "ATTACHMENT_NOT_READ"))
   })
 
   it("MANUEL : PDF scanné + vision ON + provider vision → bloc document transmis, pas de REQUIRED_DOCUMENT_UNREADABLE", async () => {
@@ -290,8 +304,10 @@ describe("extraction — barrière 005A & pièces jointes seules", () => {
     const p = repo.persists[0]
     assert.ok(!p.warningData.some((w) => w.code === "REQUIRED_DOCUMENT_UNREADABLE"))
     assert.deepEqual(p.extractedData.attachmentReadOutcomes, [
-      { filename: "scan.pdf", kind: "pdf", outcome: "READ_VISION" },
+      { attachmentId: "att-scan.pdf", filename: "scan.pdf", kind: "pdf", outcome: "READ_VISION" },
     ])
+    // Valeurs issues de PJ (non citées dans le mail) → marquées pour revue humaine.
+    assert.ok(p.warningData.some((w) => w.code === "ATTACHMENT_DERIVED_FIELD"))
   })
 
   it("vision ON mais provider déterministe → aucun visuel, issue PROVIDER_NOT_VISION", async () => {
@@ -307,7 +323,13 @@ describe("extraction — barrière 005A & pièces jointes seules", () => {
     assert.equal(provider.calls[0].attachmentVisuals, undefined)
     assert.deepEqual(loader.loaded, [], "octets image non chargés inutilement")
     assert.deepEqual(repo.persists[0].extractedData.attachmentReadOutcomes, [
-      { filename: "IMG_2635.jpeg", kind: "image", outcome: "IGNORED_VISION_DISABLED", reason: "PROVIDER_NOT_VISION" },
+      {
+        attachmentId: "att-IMG_2635.jpeg",
+        filename: "IMG_2635.jpeg",
+        kind: "image",
+        outcome: "IGNORED_VISION_DISABLED",
+        reason: "PROVIDER_NOT_VISION",
+      },
     ])
   })
 
@@ -410,6 +432,7 @@ describe("extraction — mode AUTO inchangé", () => {
     process.env.ACQUISITION_EXTRACTION_ENABLED = "true"
     process.env.ACQUISITION_EXTRACTION_PROVIDER = "deterministic"
     process.env.ACQUISITION_EXTRACTION_MULTIMODAL_ENABLED = "true"
+    process.env.ACQUISITION_EXTRACTION_ATTACHMENTS_ENABLED = "true"
   })
   afterEach(() => {
     for (const k of FLAG_KEYS) {

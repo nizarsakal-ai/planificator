@@ -354,25 +354,49 @@ export class DraftExtractionRepository {
     now: Date
     warnings?: ExtractionWarning[]
     extractionRetryable?: boolean
+    /**
+     * PLAN-ACQ-MULTIMODAL — clés fusionnées dans extractedData existant (issues de
+     * lecture) SANS toucher aux champs proposés. Lecture + update dans une TX,
+     * prédicat version + EXTRACTING.
+     */
+    extractedDataMerge?: Record<string, unknown>
   }): Promise<MarkFailedOutcome> {
-    const updated = await this.db.worksiteImportDraft.updateMany({
-      where: {
-        id: input.draftId,
-        companyId: input.companyId,
-        version: input.expectedVersion,
-        status: "EXTRACTING",
-      },
-      data: {
-        status: "FAILED",
-        version: { increment: 1 },
-        extractionCompletedAt: input.now,
-        lastExtractionErrorCode: input.errorCode,
-        lastExtractionErrorAt: input.now,
-        extractionRetryable: input.extractionRetryable ?? false,
-        warningData: (input.warnings ?? []) as unknown as Prisma.InputJsonValue,
-      },
+    const baseData = {
+      status: "FAILED" as const,
+      version: { increment: 1 },
+      extractionCompletedAt: input.now,
+      lastExtractionErrorCode: input.errorCode,
+      lastExtractionErrorAt: input.now,
+      extractionRetryable: input.extractionRetryable ?? false,
+      warningData: (input.warnings ?? []) as unknown as Prisma.InputJsonValue,
+    }
+    const where = {
+      id: input.draftId,
+      companyId: input.companyId,
+      version: input.expectedVersion,
+      status: "EXTRACTING" as const,
+    }
+    if (!input.extractedDataMerge) {
+      const updated = await this.db.worksiteImportDraft.updateMany({ where, data: baseData })
+      return updated.count === 1 ? "OK" : "STATE_CHANGED"
+    }
+    const merge = input.extractedDataMerge
+    return this.db.$transaction(async (tx) => {
+      const current = await tx.worksiteImportDraft.findFirst({
+        where,
+        select: { extractedData: true },
+      })
+      if (!current) return "STATE_CHANGED" as const
+      const prev =
+        current.extractedData && typeof current.extractedData === "object" && !Array.isArray(current.extractedData)
+          ? (current.extractedData as Record<string, unknown>)
+          : {}
+      const updated = await tx.worksiteImportDraft.updateMany({
+        where,
+        data: { ...baseData, extractedData: { ...prev, ...merge } as Prisma.InputJsonValue },
+      })
+      return updated.count === 1 ? ("OK" as const) : ("STATE_CHANGED" as const)
     })
-    return updated.count === 1 ? "OK" : "STATE_CHANGED"
   }
 }
 
