@@ -394,6 +394,18 @@ export function applyDeterministicPostEnrichment(
     }
   }
 
+  // Two explicit intervention ranges with different starts require human review.
+  // Compare day/month only: subjects commonly omit the year.
+  const subjectRange = ctx.subject?.match(/\b(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?\s*(?:au|à|[-–])\s*\d{1,2}\//i)
+  const bodyRange = ctx.body?.match(/(?:dates?\s+(?:d['’])?intervention|intervention)\s*:?\s*(?:du\s+)?(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?\s*(?:au|à|[-–])\s*\d{1,2}\//i)
+  if (subjectRange && bodyRange &&
+      (Number(subjectRange[1]) !== Number(bodyRange[1]) || Number(subjectRange[2]) !== Number(bodyRange[2]))) {
+    fields.requestedStartDate = null
+    delete confidenceData.requestedStartDate
+    delete evidenceData.requestedStartDate
+    warnings.unshift(catalogWarning("DATE_AMBIGUOUS", { field: "requestedStartDate", source: "SERVICE" }))
+  }
+
   const classifiedCancelled = fields.requestClassification === "CANCELLED_CONSULTATION"
   const corroborated = corroborateCancellationText(ctx.subject, ctx.body)
   const evidenceValid = hasValidCancelEvidence(evidenceData, ctx)

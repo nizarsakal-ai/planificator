@@ -160,7 +160,7 @@ export const EXTRACTION_TOOL_INPUT_JSON_SCHEMA: {
                 required: ["source", "quote"],
                 properties: {
                   source: { type: "string", enum: [...EXTRACTION_EVIDENCE_SOURCES] },
-                  quote: { type: "string", maxLength: MAX_EVIDENCE_QUOTE },
+                  quote: { type: "string", minLength: 1, maxLength: MAX_EVIDENCE_QUOTE },
                 },
               },
             },
@@ -176,7 +176,7 @@ export const EXTRACTION_TOOL_INPUT_JSON_SCHEMA: {
         additionalProperties: false,
         required: ["code"],
         properties: {
-          code: { type: "string", maxLength: 64 },
+          code: { type: "string", minLength: 1, maxLength: 64 },
           field: { type: "string", maxLength: 64 },
         },
       },
@@ -225,6 +225,11 @@ export function mapAnthropicRawToProviderResult(input: {
 }): ExtractionProviderResult {
   const parsed = anthropicExtractionRawSchema.safeParse(input.raw)
   if (!parsed.success) {
+    // Issue codes only: paths, messages and values can contain untrusted data.
+    console.info("ANTHROPIC_EXTRACT_SCHEMA_REJECTED", {
+      codes: [...new Set(parsed.error.issues.map((issue) => issue.code))],
+      issueCount: parsed.error.issues.length,
+    })
     throw new Error("PROVIDER_INVALID_OUTPUT")
   }
 
@@ -281,13 +286,9 @@ export function mapAnthropicRawToProviderResult(input: {
       warnings.push({ code: "PROVIDER_PARTIAL_RESULT" })
     }
   }
-  for (const code of input.extraWarningCodes ?? []) {
-    warnings.push({ code })
-  }
-  for (const w of visualWarnings) {
-    if (warnings.length >= MAX_PROVIDER_WARNINGS) break
-    warnings.push(w)
-  }
+  // Adapter safety warnings must survive a provider already at the warning cap.
+  warnings.unshift(...(input.extraWarningCodes ?? []).map((code) => ({ code })), ...visualWarnings)
+  warnings.splice(MAX_PROVIDER_WARNINGS)
 
   const result = {
     fields,

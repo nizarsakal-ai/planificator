@@ -862,7 +862,27 @@ describe("AnthropicExtractionAdapter", () => {
     assert.equal(JSON.stringify(logs).includes(secret), false)
   })
 
-  it("invalid output → aucun retry", async () => {
+  it("répare une sortie invalide sans réinjecter sa valeur et conserve les preuves", async () => {
+    let n = 0
+    const logs: unknown[] = []
+    const client: AnthropicExtractionClient = {
+      async messagesCreate(request) {
+        n++
+        if (n === 1) return toolMessage({ fields: "PRIVATE-REJECTED-OUTPUT", warnings: [] })
+        assert.equal(JSON.stringify(request).includes("PRIVATE-REJECTED-OUTPUT"), false)
+        assert.equal(request.max_tokens, 2048)
+        return toolMessage(validToolInput("Tour Alpha"))
+      },
+    }
+    const adapter = new AnthropicExtractionAdapter({ client, config: baseConfig(), log: (e, p) => logs.push([e, p]) })
+    const result = await adapter.extract({ subject: null, normalizedText: body, locale: "fr-FR", attachmentMetadata: [], extractionSchemaVersion: "1" })
+    assert.equal(n, 2)
+    assert.equal(result.fields.worksiteName?.value, "Tour Alpha")
+    assert.ok(result.warnings.some(w => w.code === "PROVIDER_PARTIAL_RESULT"))
+    assert.equal(JSON.stringify(logs).includes("PRIVATE-REJECTED-OUTPUT"), false)
+  })
+
+  it("invalid output persistant → une seule réparation puis rejet", async () => {
     let n = 0
     const client: AnthropicExtractionClient = {
       async messagesCreate() {
@@ -886,7 +906,7 @@ describe("AnthropicExtractionAdapter", () => {
         }),
       (e: unknown) => e instanceof ExtractionProviderError && e.code === "PROVIDER_INVALID_OUTPUT"
     )
-    assert.equal(n, 1)
+    assert.equal(n, 2)
   })
 })
 
