@@ -9,6 +9,10 @@ import type { Role, WorksiteImportDraftStatus } from "@prisma/client"
 import { isAcquisitionEnabled as defaultIsAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
 import { isAcquisitionExtractionEnabled as defaultIsExtractionEnabled } from "@/lib/acquisition/extraction/extraction-feature-flag"
 import { runDraftExtraction as defaultRunDraftExtraction } from "@/lib/acquisition/extraction/extraction.service"
+import {
+  prepareManualReExtraction as defaultPrepareManualReExtraction,
+  type ManualReExtractPreparation,
+} from "@/lib/acquisition/extraction/manual-reextract-preparation"
 import type { ExtractDraftResult, ExtractionActor } from "@/lib/acquisition/extraction/extraction.types"
 import { importDraftReadRepository } from "@/lib/acquisition/review/import-draft-read.repository"
 import { importDraftReviewService } from "@/lib/acquisition/review/import-draft-review.service"
@@ -45,6 +49,15 @@ export type AcquisitionReviewActionDeps = {
     draftId: string
     force?: boolean
   }) => Promise<ExtractDraftResult>
+  /**
+   * PLAN-ACQ-MULTIMODAL — récupération du contenu / des pièces manquants
+   * avant la relance manuelle (non bloquant).
+   */
+  prepareManualReExtraction?: (input: {
+    companyId: string
+    draftId: string
+    actorUserId?: string
+  }) => Promise<ManualReExtractPreparation>
   revalidatePath?: (path: string) => void
 }
 
@@ -212,6 +225,20 @@ export async function reExtractImportDraftActionImpl(
     }
   }
 
+  // PLAN-ACQ-MULTIMODAL — relance autonome : contenu + pièces manquants (non bloquant).
+  const prepare = deps.prepareManualReExtraction ?? defaultPrepareManualReExtraction
+  let warnings: string[] = []
+  try {
+    const prepared = await prepare({
+      companyId: authz.ctx.companyId,
+      draftId: parsed.data.draftId,
+      actorUserId: authz.ctx.actorUserId,
+    })
+    warnings = prepared.warnings.slice(0, 10)
+  } catch {
+    warnings = ["Récupération des sources impossible : extraction avec les données disponibles"]
+  }
+
   const runExtraction = deps.runDraftExtraction ?? defaultRunDraftExtraction
   const result = await runExtraction({
     actor: {
@@ -230,13 +257,17 @@ export async function reExtractImportDraftActionImpl(
       outcome: result.outcome,
       draftId: parsed.data.draftId,
       status: result.status,
+      warnings,
     }
   }
 
+  // L'échec d'extraction peut avoir persisté des issues de lecture (FAILED) : rafraîchir.
+  if (result.draftId) revalidateConsultation(parsed.data.draftId, deps)
   return {
     ok: false as const,
     outcome: result.outcome,
     code: result.code,
     message: result.message,
+    warnings,
   }
 }
