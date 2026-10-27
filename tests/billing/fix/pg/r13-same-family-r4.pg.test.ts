@@ -54,6 +54,7 @@ describe("T1 #3 / T2 #6 — période déclarée : événements tardifs détecté
     const Q1 = [D("2026-01-01"), D("2026-03-31")] as const
     const d = await withClock(AFTER_PERIODS, () => declareVat(db, A, Q1[0], Q1[1], "ENCAISSEMENTS")); assert.ok(d.ok, js(d)); if (!d.ok) return
     const stored = await db.vatDeclaration.findUniqueOrThrow({ where: { id: d.value.id } })
+    assert.ok(stored.declaredAt, "une déclaration figée possède un horodatage")
     // Saisies tardives : paiement antidaté au 10/02 puis sa contre-passation ⇒ totaux du trimestre inchangés, mais événements postérieurs à la déclaration.
     const p = await recordPayment(db, A, inv, { amountCents: BigInt(3000), method: "TRANSFER", paidAt: D("2026-02-10"), reference: null, notes: null }, AFTER_PERIODS); assert.ok(p.ok); if (!p.ok) return
     // declaredAt utilise l'horloge réelle, distincte de l'horloge métier de test.
