@@ -4,6 +4,8 @@ import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
+import Link from "next/link"
+import type { ConversionClientOption } from "./ConsultationConversionPanel"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -52,7 +54,11 @@ function dtoToForm(dto: ConsultationProposedFormDto): FormState {
   }
 }
 
-export function ConsultationProposedForm({ form: dto }: { form: ConsultationProposedFormDto }) {
+export function ConsultationProposedForm({ form: dto, clients = [], transferOnApprovalEnabled = false }: {
+  form: ConsultationProposedFormDto
+  clients?: ConversionClientOption[]
+  transferOnApprovalEnabled?: boolean
+}) {
   const router = useRouter()
   const actions = getConsultationUiActions(dto.status, {
     extractionEnabled: dto.extractionEnabled,
@@ -60,6 +66,8 @@ export function ConsultationProposedForm({ form: dto }: { form: ConsultationProp
   })
   const [version, setVersion] = useState(dto.version)
   const [form, setForm] = useState<FormState>(() => dtoToForm(dto))
+  const [clientId, setClientId] = useState(dto.proposedClientId ?? "")
+  const [existingWorksiteId, setExistingWorksiteId] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
   const [busy, setBusy] = useState<string | null>(null)
   const [rejectOpen, setRejectOpen] = useState(false)
@@ -78,6 +86,7 @@ export function ConsultationProposedForm({ form: dto }: { form: ConsultationProp
         draftId: dto.id,
         expectedVersion: version,
         ...form,
+        ...(transferOnApprovalEnabled ? { proposedClientId: clientId || null } : {}),
       })
       setBusy(null)
       if (!result.ok) {
@@ -94,9 +103,21 @@ export function ConsultationProposedForm({ form: dto }: { form: ConsultationProp
   function approve() {
     setBusy("approve")
     startTransition(async () => {
+      // Save exactly the reviewed values before approval, including the chosen client.
+      const saved = await saveImportDraftCorrectionsAction({
+        draftId: dto.id, expectedVersion: version, ...form,
+        ...(transferOnApprovalEnabled ? { proposedClientId: clientId || null } : {}),
+      })
+      if (!saved.ok) {
+        setBusy(null)
+        toast.error(saved.message)
+        if (saved.outcome === "STATE_CHANGED") router.refresh()
+        return
+      }
+      setVersion(saved.version)
       const result = await approveImportDraftAction({
         draftId: dto.id,
-        expectedVersion: version,
+        expectedVersion: saved.version,
       })
       setBusy(null)
       if (!result.ok) {
@@ -104,7 +125,18 @@ export function ConsultationProposedForm({ form: dto }: { form: ConsultationProp
         if (result.outcome === "STATE_CHANGED") router.refresh()
         return
       }
-      toast.success("Consultation approuvée")
+      if ("transfer" in result && result.transfer) {
+        if (result.transfer.ok) {
+          toast.success("Chantier créé — planifié et à affecter")
+          router.push(`/chantiers/${result.transfer.worksiteId}`)
+          return
+        }
+        setExistingWorksiteId(result.transfer.existingWorksiteId ?? null)
+        const existingId = result.transfer.existingWorksiteId
+        toast.warning(`Consultation validée. ${result.transfer.message}`, {
+          action: existingId ? { label: "Ouvrir le chantier existant", onClick: () => router.push(`/chantiers/${existingId}`) } : undefined,
+        })
+      } else toast.success("Consultation approuvée")
       router.refresh()
     })
   }
@@ -154,6 +186,17 @@ export function ConsultationProposedForm({ form: dto }: { form: ConsultationProp
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2">
+        {transferOnApprovalEnabled && (
+          <div className="sm:col-span-2 space-y-1.5">
+            <Label htmlFor="review-client-id">Client donneur d’ordre</Label>
+            <select id="review-client-id" className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              value={clientId} onChange={(e) => setClientId(e.target.value)} disabled={readOnly || loading}>
+              <option value="">Choisir le client pour le chantier</option>
+              {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+            </select>
+            <p className="text-xs text-muted-foreground">Après validation, le chantier sera transféré dans « Planifiés » et « À affecter ». <Link href="/clients" className="underline">Gérer les clients</Link></p>
+          </div>
+        )}
         <Field
           label="Nom du chantier"
           value={form.proposedWorksiteName}
@@ -237,6 +280,7 @@ export function ConsultationProposedForm({ form: dto }: { form: ConsultationProp
       )}
 
       <div className="flex flex-wrap gap-2">
+        {existingWorksiteId && <Link className="self-center text-sm underline" href={`/chantiers/${existingWorksiteId}`}>Ouvrir le chantier existant</Link>}
         {actions.canSave ? (
           <Button type="button" onClick={save} disabled={loading}>
             {busy === "save" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -244,9 +288,9 @@ export function ConsultationProposedForm({ form: dto }: { form: ConsultationProp
           </Button>
         ) : null}
         {actions.canApprove ? (
-          <Button type="button" variant="default" onClick={approve} disabled={loading}>
+          <Button type="button" variant="default" onClick={approve} disabled={loading || (transferOnApprovalEnabled && !clientId)}>
             {busy === "approve" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Approuver
+            {transferOnApprovalEnabled ? "Valider et transférer en chantier" : "Approuver"}
           </Button>
         ) : null}
         {actions.canReject ? (

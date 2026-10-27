@@ -54,7 +54,7 @@ describe("import-draft-review.schema", () => {
 
     const bad = saveImportDraftCorrectionsSchema.safeParse({
       ...baseSave,
-      proposedClientId: "evil",
+      createdWorksiteId: "evil",
     })
     assert.equal(bad.success, false)
   })

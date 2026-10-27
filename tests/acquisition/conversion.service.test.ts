@@ -372,7 +372,7 @@ describe("ImportDraftConversionService", () => {
         },
       ],
     })
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
     const r = await svc.convertImportDraft(admin, {
       draftId: "d1",
       expectedVersion: 2,
@@ -393,7 +393,7 @@ describe("ImportDraftConversionService", () => {
 
   it("NEW crée client", async () => {
     const db = createFakeDb({ draft: baseDraft() })
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
     const r = await svc.convertImportDraft(admin, {
       draftId: "d1",
       expectedVersion: 2,
@@ -409,7 +409,7 @@ describe("ImportDraftConversionService", () => {
       draft: baseDraft(),
       clients: [{ id: "c1", companyId: "other" }],
     })
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
     const r = await svc.convertImportDraft(admin, {
       draftId: "d1",
       expectedVersion: 2,
@@ -426,7 +426,7 @@ describe("ImportDraftConversionService", () => {
       draft: baseDraft({ version: 5 }),
       clients: [{ id: "c1", companyId: "co1" }],
     })
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
     const r = await svc.convertImportDraft(admin, {
       draftId: "d1",
       expectedVersion: 2,
@@ -452,7 +452,7 @@ describe("ImportDraftConversionService", () => {
       endDate: null,
       status: "PLANNED",
     })
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
     const r = await svc.convertImportDraft(admin, {
       draftId: "d1",
       expectedVersion: 9,
@@ -482,7 +482,7 @@ describe("ImportDraftConversionService", () => {
         },
       ],
     })
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
     const r = await svc.convertImportDraft(admin, {
       draftId: "d1",
       expectedVersion: 2,
@@ -501,7 +501,7 @@ describe("ImportDraftConversionService", () => {
     const db = createFakeDb({
       draft: baseDraft({ proposedWorksiteName: "x".repeat(101) }),
     })
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
     const r = await svc.convertImportDraft(admin, {
       draftId: "d1",
       expectedVersion: 2,
@@ -516,7 +516,7 @@ describe("ImportDraftConversionService", () => {
   it("flags OFF → DISABLED", async () => {
     process.env.ACQUISITION_CONVERSION_ENABLED = "false"
     const db = createFakeDb({ draft: baseDraft() })
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
     const r = await svc.convertImportDraft(admin, {
       draftId: "d1",
       expectedVersion: 2,
@@ -529,7 +529,7 @@ describe("ImportDraftConversionService", () => {
 
   it("EMPLOYEE interdit", async () => {
     const db = createFakeDb({ draft: baseDraft() })
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
     const r = await svc.convertImportDraft(
       { actorUserId: "e", actorRole: "EMPLOYEE", companyId: "co1" },
       {
@@ -561,7 +561,7 @@ describe("ImportDraftConversionService", () => {
         },
       ],
     })
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
     const r = await svc.convertImportDraft(admin, {
       draftId: "d1",
       expectedVersion: 2,
@@ -593,7 +593,7 @@ describe("ImportDraftConversionService", () => {
         },
       ],
     })
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
     const r = await svc.convertImportDraft(admin, {
       draftId: "d1",
       expectedVersion: 2,
@@ -624,7 +624,7 @@ describe("ImportDraftConversionService", () => {
         },
       ],
     })
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
     const r = await svc.convertImportDraft(
       { actorUserId: "sys", actorRole: "SYSTEM", companyId: "co1" },
       {
@@ -654,7 +654,7 @@ describe("ImportDraftConversionService", () => {
       }),
       clients: [{ id: "c1", companyId: "co1" }],
     })
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
     const r = await svc.convertImportDraft(admin, {
       draftId: "d1",
       expectedVersion: 2,
@@ -705,7 +705,7 @@ describe("ImportDraftConversionService", () => {
       draft: baseDraft({ proposedStartDate: null, proposedEndDate: new Date("2026-10-01T00:00:00.000Z") }),
       clients: [{ id: "c1", companyId: "co1" }],
     })
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
     const r = await svc.convertImportDraft(admin, {
       draftId: "d1", expectedVersion: 2, clientMode: "EXISTING", existingClientId: "c1",
     })
@@ -722,7 +722,7 @@ describe("ImportDraftConversionService", () => {
       }),
       clients: [{ id: "c1", companyId: "co1" }],
     })
-    const svc = new ImportDraftConversionService({ db: db as never })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
     const r = await svc.convertImportDraft(admin, {
       draftId: "d1",
       expectedVersion: 2,

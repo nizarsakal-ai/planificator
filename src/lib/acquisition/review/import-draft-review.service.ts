@@ -190,6 +190,12 @@ export class ImportDraftReviewService {
       }
     }
     const input: SaveImportDraftCorrectionsInput = parsed.data
+    if (input.proposedClientId) {
+      const client = await this.db.client.findFirst({
+        where: { id: input.proposedClientId, companyId: ctx.companyId, active: true }, select: { id: true },
+      })
+      if (!client) return { ok: false, outcome: "VALIDATION_ERROR", code: "VALIDATION_ERROR", message: "Client indisponible pour cette entreprise" }
+    }
 
     const result = await this.db.worksiteImportDraft.updateMany({
       where: {
@@ -201,6 +207,7 @@ export class ImportDraftReviewService {
       data: {
         proposedWorksiteName: input.proposedWorksiteName,
         proposedClientName: input.proposedClientName,
+        ...(input.proposedClientId !== undefined ? { proposedClientId: input.proposedClientId } : {}),
         proposedAddress: input.proposedAddress,
         proposedPostalCode: input.proposedPostalCode,
         proposedCity: input.proposedCity,
