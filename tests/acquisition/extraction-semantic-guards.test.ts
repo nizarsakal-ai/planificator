@@ -45,7 +45,7 @@ it("preserves a correct donor and existing end-client distinction", () => {
 })
 
 it("retains explicit consultation issue dates in text and visual quotes, including French month names", () => {
-  for (const quote of ["Date de consultation : 20/08/2026", "Consultation du 20 août 2026", "Date d’émission de la consultation : 2026-08-20"]) {
+  for (const quote of ["Date de consultation : 20/08/2026", "Date de consultation client : 20/08/2026", "Consultation du 20 août 2026", "Date d’émission de la consultation : 2026-08-20"]) {
     for (const source of ["BODY", "ATTACHMENT_VISUAL"]) {
       const r = extract({ clientConsultationDate: field("2026-08-20", quote, source) }, source === "BODY" ? quote : "Mail sans date")
       assert.equal(r.fields.clientConsultationDate, "2026-08-20")

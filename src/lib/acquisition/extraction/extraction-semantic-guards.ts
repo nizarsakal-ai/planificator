@@ -46,7 +46,7 @@ export function guardConsultationDate(result: NormalizedExtraction, ctx: Determi
   const sourceAllowed = visual || ["BODY", "SUBJECT", "ATTACHMENT_TEXT"].includes(evidence?.source ?? "")
   const verified = sourceAllowed && quote.trim() && (visual || evidenceQuoteInHaystack(text, quote))
   const source = (visual ? quote : text).normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-  const dates = [...source.matchAll(/(?:date\s+(?:de\s+)?(?:la\s+)?consultation|consultation\s+(?:(?:emise|datee)\s+)?(?:du|le)|date\s+d['’]emission\s+de\s+la\s+consultation)\s*:?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}|\d{1,2}\s+[a-z]+\s+\d{4})/gi)]
+  const dates = [...source.matchAll(/(?:date\s+(?:de\s+)?(?:la\s+)?consultation(?:\s+client)?|consultation\s+(?:(?:emise|datee)\s+)?(?:du|le)|date\s+d['’]emission\s+de\s+la\s+consultation)\s*:?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}|\d{1,2}\s+[a-z]+\s+\d{4})/gi)]
   const months = ["janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet", "aout", "septembre", "octobre", "novembre", "decembre"]
   const explicitMatch = dates.some(m => {
     const token = m[1].toLowerCase()
