@@ -249,7 +249,7 @@ describe("extraction.service R1", () => {
 
   it("past period skips provider, PDF loading and claim in manual and cron paths", async () => {
     for (const system of [false, true]) {
-      const repo = createFakeRepo({ content: { normalizedText: "Dates : du 18 au 21 octobre 2026", contentHash: "hash-abc" } })
+      const repo = createFakeRepo({ content: { normalizedText: "Dates : du 18 au 21 octobre 2026\nPlanning :\nDu 18 au 19 octobre : démontage des structures\nDu 20 au 21 octobre : démontage planchers", contentHash: "hash-abc" } })
       const deps = { repository: repo as never, provider: { extract: async () => { throw new Error("provider must not run") } } as ExtractionProviderPort, loadAttachmentBytes: async () => { throw new Error("PDF must not load") } }
       const result = system
         ? await runDraftExtractionSystem({ companyId: "co1", draftId: "draft1", now: () => new Date("2026-10-27T12:00:00Z") }, deps)

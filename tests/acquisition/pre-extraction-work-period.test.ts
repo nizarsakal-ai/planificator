@@ -18,3 +18,9 @@ it("missing, conflicting or invalid dates remain unknown for AI qualification", 
 it("event, consultation, signature and quoted dates cannot discard a worksite", () => {
   for (const body of ["Événement : du 18 au 21 octobre 2026", "Consultation du 18 au 21 octobre 2026", "Bonjour\nCordialement\nDates : du 18 au 21 octobre 2026", "Bonjour\nDe : client@example.fr\nIntervention du 18 au 21 octobre 2026", "Dates de signature : du 18 au 21 octobre 2026"]) assert.equal(preExtractionWorkPeriod(null, body, now).kind, "UNKNOWN", body)
 })
+
+it("MIPCOM overall dated period contains its two yearless detailed work phases", () => {
+  const body = "Suite à nos échanges, voici les informations concernant le démontage du Mipcom\nDates : du 18 au 21 Octobre 2026\nPlanning :\nDu 18 au 19 Octobre : démontage des structures\nDu 20 au 21 Octobre : démontage planchers"
+  assert.equal(preExtractionWorkPeriod("MIPCOM 2026 - Démontage", body, now).kind, "OBSOLETE")
+  assert.equal(preExtractionWorkPeriod(null, "Dates : du 18 au 21 octobre 2026\nMontage du 02 au 06 novembre", now).kind, "UNKNOWN")
+})
