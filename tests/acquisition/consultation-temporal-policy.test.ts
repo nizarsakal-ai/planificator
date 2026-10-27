@@ -46,7 +46,7 @@ function createFakeRepo() {
       return { ...draft }
     },
     async findContent() {
-      return { normalizedText: "Chantier : Site X\nRéf REF-1", contentHash: "hash-abc" }
+      return { normalizedText: "Chantier : Site X\nRéf REF-1\nDate de consultation : 20/08/2026", contentHash: "hash-abc" }
     },
     async findMessage() {
       return {
@@ -109,7 +109,7 @@ describe("TEMPORAL extraction lifecycle", () => {
             worksiteName: { value: "Site X", confidence: 0.8 },
             requestedStartDate: { value: "2026-10-01", confidence: 0.8 },
             requestedEndDate: { value: "2026-10-15", confidence: 0.8 },
-            clientConsultationDate: { value: "2026-08-20", confidence: 0.8 },
+            clientConsultationDate: { value: "2026-08-20", confidence: 0.8, evidence: { source: "BODY", quote: "Date de consultation : 20/08/2026" } },
           },
           warnings: [],
           providerMetadata: { providerId: "deterministic" },
@@ -132,6 +132,30 @@ describe("TEMPORAL extraction lifecycle", () => {
     assert.equal(p.fields.requestedEndDate, "2026-10-15")
     // receivedAt message = 2026-01-15 — jamais copié
     assert.notEqual(p.fields.clientConsultationDate, "2026-01-15")
+  })
+
+  it("service persiste les trois garde-fous, sans dates inventées", async () => {
+    const repo = createFakeRepo()
+    repo.findContent = async () => ({ normalizedText: "Chantier : Site X\nPour notre client : MAIRIE TEST\n(+33) 05 12 34 56 78", contentHash: "hash-abc" })
+    const result = await runDraftExtraction({ actor: actor(), draftId: "draft1" }, {
+      repository: repo as never,
+      provider: { async extract() { return {
+        fields: {
+          worksiteName: { value: "Site X", confidence: 0.8 },
+          clientName: { value: "MAIRIE TEST", confidence: 0.8, evidence: { source: "BODY" as const, quote: "MAIRIE TEST" } },
+          contactPhone: { value: "+330512345678", confidence: 0.8 },
+          clientConsultationDate: { value: "2026-10-21", confidence: 0.6, evidence: { source: "ATTACHMENT_VISUAL" as const, quote: "Bon pour accord le 21/10/2026" } },
+        }, warnings: [], providerMetadata: { providerId: "anthropic" },
+      } } },
+    })
+    assert.equal(result.ok, true)
+    const persisted = repo.persists[0]!
+    assert.equal(persisted.status, "PENDING_REVIEW")
+    assert.equal(persisted.fields.clientName, null)
+    assert.equal(persisted.fields.endClientName, "MAIRIE TEST")
+    assert.equal(persisted.fields.clientConsultationDate, null)
+    assert.equal(persisted.fields.contactPhone, "+33512345678")
+    assert.equal(persisted.fields.requestedStartDate, null)
   })
 
   it("clientConsultationDate absente → NULL", () => {
