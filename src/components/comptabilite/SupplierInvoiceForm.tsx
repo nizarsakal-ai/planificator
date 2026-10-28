@@ -1,5 +1,6 @@
 "use client"
 // Saisie / vérification d'une facture fournisseur : import ou capture (caméra) du fichier, extraction OCR (si activée), champs avec confiance.
+import { supplierOcrMetadata } from "@/lib/supplier-intake/ocr-metadata"
 import { classificationAfterOcr, suggestedExpenseAccountId } from "@/lib/accounting/c5/supplier-classification"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
@@ -59,7 +60,7 @@ export function SupplierInvoiceForm({ mode, invoiceId, initial, accounts, confid
     try {
       const payload = { ...v, category: v.category || undefined, expenseAccountId: v.expenseAccountId || undefined, siret: v.siret || undefined, dueDate: v.dueDate || "", vatRate: v.vatRate || undefined, notes: v.notes || undefined }
       if (mode === "create") {
-        const data = { ...payload, fileId: fileId ?? undefined, ocr: ocr ? { ...ocr, rawText: undefined } : null }
+        const data = { ...payload, fileId: fileId ?? undefined, ocr: supplierOcrMetadata(ocr) }
         const r = await (intake ? createIntakeInvoiceAction(data, fileProof) : createSupplierInvoiceAction(data))
         if (!r.ok) { toast.error(r.error); return }
         toast.success("Facture fournisseur enregistrée (à valider)."); router.push(`${basePath}/${r.id}`)

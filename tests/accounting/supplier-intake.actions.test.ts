@@ -1,5 +1,7 @@
 import assert from "node:assert/strict"
 import { before, beforeEach, describe, it, mock } from "node:test"
+import { supplierOcrMetadata } from "@/lib/supplier-intake/ocr-metadata"
+import { setOcrProviderForTests } from "@/lib/accounting/c5/ocr-provider"
 const ctx = { userId: "intake-test-user", companyId: "intake-test-company" }
 const state = { allowed: true, owner: ctx.userId, company: ctx.companyId, status: "PENDING", writes: 0, creates: 0, duplicate: false, transactionMode: "", fileWhere: null as unknown }
 const matches = (where: any) => where.companyId === state.company && (!where.createdById || where.createdById === state.owner) && (!where.status || typeof where.status !== "string" || where.status === state.status)
@@ -36,6 +38,7 @@ before(async () => {
 })
 beforeEach(() => {
   Object.assign(state, { allowed: true, owner: ctx.userId, company: ctx.companyId, status: "PENDING", writes: 0, creates: 0, duplicate: false, transactionMode: "", fileWhere: null })
+  setOcrProviderForTests(null)
   delete process.env.BILLING_OCR_ENABLED
   process.env.AUTH_SECRET = "test-only-signing-secret-at-least-thirty-two-characters"
 })
@@ -78,6 +81,22 @@ describe("real restricted supplier actions", () => {
     assert.equal(r.extraction, null)
     assert.ok(r.extractionError)
     assert.equal(proof.verifyFileProof(ctx, r.fileId, r.fileProof, process.env.AUTH_SECRET!), true)
+  })
+  it("round-trips imported OCR metadata through the real creation action", async () => {
+    setOcrProviderForTests({ name: "synthetic-test", extract: async () => ({
+      supplier: "Fournisseur test", siret: null, invoiceNumber: "TEST-1", date: "2026-10-28", totalHTCents: 10000n, vatCents: 2000n,
+      totalTTCCents: 12000n, vatRateBp: 2000, category: "services", confidence: { supplier: 0.9 }, amountsAdjusted: false, rawText: "synthetic OCR text",
+    }) })
+    const form = new FormData(); form.set("file", new File(["%PDF-1.4 test"], "test.pdf", { type: "application/pdf" }))
+    const r = await actions.uploadIntakeFileAction(form)
+    assert.equal(r.ok, true)
+    if (!r.ok) throw Error("upload failed")
+    assert.ok(r.extraction)
+    const metadata = supplierOcrMetadata(r.extraction)
+    assert.equal(Object.hasOwn(metadata!, "rawText"), false)
+    assert.equal((await actions.createIntakeInvoiceAction({ ...input(), fileId: r.fileId, ocr: metadata }, r.fileProof)).ok, true)
+    assert.equal(state.creates, 1)
+    setOcrProviderForTests(null)
   })
   it("guards the actual file route by author and company and disables caching", async () => {
     const get = () => route.GET(new Request("http://localhost/factures-fournisseurs/invoice1/fichier"), { params: Promise.resolve({ id: "invoice1" }) })
