@@ -84,8 +84,8 @@ describe("real restricted supplier actions", () => {
   })
   it("round-trips imported OCR metadata through the real creation action", async () => {
     setOcrProviderForTests({ name: "synthetic-test", extract: async () => ({
-      supplier: "Fournisseur test", siret: null, invoiceNumber: "TEST-1", date: "2026-10-28", totalHTCents: 10000n, vatCents: 2000n,
-      totalTTCCents: 12000n, vatRateBp: 2000, category: "services", confidence: { supplier: 0.9 }, amountsAdjusted: false, rawText: "synthetic OCR text",
+      supplier: "Fournisseur test", siret: null, invoiceNumber: "TEST-1", date: "2026-10-28", totalHTCents: BigInt(10000), vatCents: BigInt(2000),
+      totalTTCCents: BigInt(12000), vatRateBp: 2000, category: "services", confidence: { supplier: 0.9 }, amountsAdjusted: false, rawText: "synthetic OCR text",
     }) })
     const form = new FormData(); form.set("file", new File(["%PDF-1.4 test"], "test.pdf", { type: "application/pdf" }))
     const r = await actions.uploadIntakeFileAction(form)
