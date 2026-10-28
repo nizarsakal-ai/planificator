@@ -13,7 +13,7 @@ import {
   getNavItems,
   getActiveNavHref,
   withAccountingNavItem,
-  withBillingNavItems,
+  withBillingNavItems, withSupplierIntakeNavItem,
   ROLE_LABELS,
   type NavItem,
 } from "@/lib/navigation/nav-config"
@@ -32,6 +32,7 @@ interface SidebarUser {
   accountingNavVisible?: boolean
   /** Lot C : lien « Devis » (drapeau BILLING_COMPLETE_ENABLED) ; affichage seulement. */
   billingNavVisible?: boolean
+  supplierIntakeNavVisible?: boolean
 }
 
 // ─── Composant NavItem ────────────────────────────────────────────────────────
@@ -68,7 +69,7 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 
 export function Sidebar({ user }: { user: SidebarUser }) {
   const pathname = usePathname()
-  const navItems = withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true)
+  const navItems = withSupplierIntakeNavItem(withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true), user.supplierIntakeNavVisible === true)
   const activeHref = getActiveNavHref(navItems, pathname)
 
   return (

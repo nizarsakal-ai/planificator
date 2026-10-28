@@ -13,6 +13,7 @@ interface NavbarUser {
   role: Role
   companyId: string | null
   accountingNavVisible?: boolean
+  supplierIntakeNavVisible?: boolean
 }
 
 export function Navbar({ user }: { user: NavbarUser }) {

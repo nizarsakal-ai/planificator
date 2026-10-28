@@ -8,7 +8,7 @@ import { Menu, X, LogOut, ChevronRight } from "lucide-react"
 import { cn, getInitials } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { PlanificatorLogo } from "@/components/brand/PlanificatorLogo"
-import { getActiveNavHref, getNavItems, withAccountingNavItem, withBillingNavItems, ROLE_LABELS } from "@/lib/navigation/nav-config"
+import { getActiveNavHref, getNavItems, withAccountingNavItem, withBillingNavItems, withSupplierIntakeNavItem, ROLE_LABELS } from "@/lib/navigation/nav-config"
 import type { Role } from "@prisma/client"
 
 interface MobileNavUser {
@@ -21,12 +21,13 @@ interface MobileNavUser {
   accountingNavVisible?: boolean
   /** Lot C : lien « Devis » (drapeau BILLING_COMPLETE_ENABLED) ; affichage seulement. */
   billingNavVisible?: boolean
+  supplierIntakeNavVisible?: boolean
 }
 
 export function MobileNav({ user }: { user: MobileNavUser }) {
   const [open, setOpen] = useState(false)
   const pathname = usePathname()
-  const navItems = withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true)
+  const navItems = withSupplierIntakeNavItem(withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true), user.supplierIntakeNavVisible === true)
   const activeHref = getActiveNavHref(navItems, pathname)
 
   return (

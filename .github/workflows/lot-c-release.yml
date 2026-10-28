@@ -60,6 +60,7 @@ jobs:
           NODE_ENV: test
         run: |
           set -o pipefail
+          node --import tsx --experimental-test-module-mocks --test tests/accounting/supplier-intake.test.ts tests/accounting/supplier-intake.actions.test.ts | tee ci-evidence/supplier-intake.log
           for suite in test:accounting test:accounting:c5 test:billing test:billing:c1 test:billing:c2 test:billing:c3 test:billing:c4 test:billing:fix test:navigation; do
             npm run -s "$suite" | tee "ci-evidence/${suite//:/_}.log"
           done

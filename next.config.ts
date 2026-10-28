@@ -22,6 +22,7 @@ const withPWA = withPWAInit({
         || url.pathname.startsWith("/api/pdf/devis/") || url.pathname.startsWith("/api/pdf/facture/")
         || url.pathname === "/devis" || url.pathname.startsWith("/devis/")
         || url.pathname === "/factures" || url.pathname.startsWith("/factures/")
+        || url.pathname === "/factures-fournisseurs" || url.pathname.startsWith("/factures-fournisseurs/")
         || url.pathname === "/comptabilite" || url.pathname.startsWith("/comptabilite/")
       ),
       handler: "NetworkOnly",

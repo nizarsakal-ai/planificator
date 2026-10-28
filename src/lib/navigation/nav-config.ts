@@ -194,3 +194,14 @@ export const ROLE_LABELS: Record<Role, string> = {
   EMPLOYEE: "Employé",
   CLIENT: "Client",
 }
+
+/** Supplemental, server-resolved intake capability. Visibility never authorizes an action. */
+export function withSupplierIntakeNavItem(items: readonly NavItem[], visible: boolean): NavItem[] {
+  const result = [...items]
+  if (visible !== true || result.some(i => i.href === "/factures-fournisseurs")) return result
+  const profile = result.findIndex(i => i.href === "/profil")
+  result.splice(profile < 0 ? result.length : profile, 0, {
+    label: "Factures fournisseurs & OCR", href: "/factures-fournisseurs", icon: Receipt,
+  })
+  return result
+}
