@@ -63,7 +63,7 @@ function validateInput(i: SupplierInvoiceInput): string | null {
 }
 
 /** Crée une facture fournisseur en attente (après téléversement + OCR éventuel, ou saisie manuelle). */
-export async function createSupplierInvoice(db: Db, ctx: AccountingContext, input: SupplierInvoiceInput, extra: { fileId: string | null; ocr: OcrExtraction | null }): Promise<LifecycleResult<{ id: string }>> {
+export async function createSupplierInvoice(db: Pick<Db, "supplierInvoiceFile" | "accountingAccount" | "supplierInvoice" | "historyLog">, ctx: AccountingContext, input: SupplierInvoiceInput, extra: { fileId: string | null; ocr: OcrExtraction | null }): Promise<LifecycleResult<{ id: string }>> {
   const err = validateInput(input)
   if (err) return { ok: false, error: err }
   if (extra.fileId) {
@@ -89,7 +89,7 @@ export async function createSupplierInvoice(db: Db, ctx: AccountingContext, inpu
   return { ok: true, value: created }
 }
 
-export async function updateSupplierInvoice(db: Db, ctx: AccountingContext, id: string, input: SupplierInvoiceInput): Promise<LifecycleResult> {
+export async function updateSupplierInvoice(db: Db, ctx: AccountingContext, id: string, input: SupplierInvoiceInput, authorOnly = false): Promise<LifecycleResult> {
   const err = validateInput(input)
   if (err) return { ok: false, error: err }
   if (input.expenseAccountId) {
@@ -97,10 +97,10 @@ export async function updateSupplierInvoice(db: Db, ctx: AccountingContext, id: 
     if (!a) return { ok: false, error: "Compte de charge introuvable." }
   }
   const u = await db.supplierInvoice.updateMany({
-    where: { id, companyId: ctx.companyId, status: "PENDING" },
+    where: { id, companyId: ctx.companyId, status: "PENDING", ...(authorOnly ? { createdById: ctx.userId } : {}) },
     data: { supplierName: input.supplierName.trim().slice(0, 200), siret: input.siret, number: input.number.trim().slice(0, 64), date: input.date, dueDate: input.dueDate, totalHTCents: input.totalHTCents, vatCents: input.vatCents, totalTTCCents: input.totalTTCCents, vatRateBp: input.vatRateBp, category: input.category, expenseAccountId: input.expenseAccountId, notes: input.notes },
   })
-  if (u.count !== 1) return { ok: false, error: (await db.supplierInvoice.findFirst({ where: { id, companyId: ctx.companyId }, select: { id: true } })) ? SUPPLIER_ERRORS.notPending : SUPPLIER_ERRORS.notFound }
+  if (u.count !== 1) return { ok: false, error: (await db.supplierInvoice.findFirst({ where: { id, companyId: ctx.companyId, ...(authorOnly ? { createdById: ctx.userId } : {}) }, select: { id: true } })) ? SUPPLIER_ERRORS.notPending : SUPPLIER_ERRORS.notFound }
   return { ok: true, value: undefined }
 }
 

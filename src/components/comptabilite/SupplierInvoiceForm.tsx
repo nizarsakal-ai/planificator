@@ -11,14 +11,18 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
 import { createSupplierInvoiceAction, updateSupplierInvoiceAction, uploadSupplierFileAction } from "@/lib/actions/accounting-c5.actions"
 
+import { createIntakeInvoiceAction, updateIntakeInvoiceAction, uploadIntakeFileAction } from "@/lib/actions/supplier-intake.actions"
+
 export interface SupplierFormValues { supplierName: string; siret: string; number: string; date: string; dueDate: string; totalHT: string; vat: string; totalTTC: string; vatRate: string; category: string; expenseAccountId: string; notes: string }
 const CATS = [["", "—"], ["marchandises", "Marchandises"], ["services", "Prestations"], ["location", "Locations"], ["deplacement", "Déplacements"], ["honoraires", "Honoraires"], ["entretien", "Entretien"], ["restauration", "Restauration"], ["autre", "Autre"]]
 const empty: SupplierFormValues = { supplierName: "", siret: "", number: "", date: new Date().toISOString().slice(0, 10), dueDate: "", totalHT: "", vat: "", totalTTC: "", vatRate: "20", category: "", expenseAccountId: "", notes: "" }
 
 function Conf({ c }: { c?: number }) { if (c === undefined) return null; const pct = Math.round(c * 100); return <span className={`ml-1 text-[10px] ${pct >= 80 ? "text-green-700" : pct >= 50 ? "text-amber-700" : "text-red-700"}`} title="Confiance de l'extraction">{pct} %</span> }
 
-export function SupplierInvoiceForm({ mode, invoiceId, initial, accounts, confidence = {}, fileId: initialFileId = null, fileMime = null }: { mode: "create" | "edit"; invoiceId?: string; initial?: SupplierFormValues; accounts: { id: string; number: string; label: string }[]; confidence?: Record<string, number>; fileId?: string | null; fileMime?: string | null }) {
+export function SupplierInvoiceForm({ mode, invoiceId, initial, accounts, confidence = {}, fileId: initialFileId = null, fileMime = null, intake = false }: { intake?: boolean; mode: "create" | "edit"; invoiceId?: string; initial?: SupplierFormValues; accounts: { id: string; number: string; label: string }[]; confidence?: Record<string, number>; fileId?: string | null; fileMime?: string | null }) {
   const router = useRouter()
+  const [fileProof, setFileProof] = useState<string>()
+  const basePath = intake ? "/factures-fournisseurs" : "/comptabilite/fournisseurs"
   const [v, setV] = useState<SupplierFormValues>(initial ?? empty)
   const [conf, setConf] = useState<Record<string, number>>(confidence)
   const [fileId, setFileId] = useState<string | null>(initialFileId)
@@ -34,9 +38,10 @@ export function SupplierInvoiceForm({ mode, invoiceId, initial, accounts, confid
     setLoading(true)
     try {
       const fd = new FormData(); fd.append("file", file)
-      const r = await uploadSupplierFileAction(fd)
+      const r = await (intake ? uploadIntakeFileAction(fd) : uploadSupplierFileAction(fd))
       if (!r.ok) { toast.error(r.error); return }
       setFileId(r.fileId)
+      if ("fileProof" in r && typeof r.fileProof === "string") setFileProof(r.fileProof)
       if (r.extraction) {
         const e = r.extraction as Record<string, unknown>
         const cents = (x: unknown) => (typeof x === "string" ? (Number(x) / 100).toFixed(2) : "")
@@ -54,11 +59,12 @@ export function SupplierInvoiceForm({ mode, invoiceId, initial, accounts, confid
     try {
       const payload = { ...v, category: v.category || undefined, expenseAccountId: v.expenseAccountId || undefined, siret: v.siret || undefined, dueDate: v.dueDate || "", vatRate: v.vatRate || undefined, notes: v.notes || undefined }
       if (mode === "create") {
-        const r = await createSupplierInvoiceAction({ ...payload, fileId: fileId ?? undefined, ocr: ocr ? { ...ocr, rawText: undefined } : null })
+        const data = { ...payload, fileId: fileId ?? undefined, ocr: ocr ? { ...ocr, rawText: undefined } : null }
+        const r = await (intake ? createIntakeInvoiceAction(data, fileProof) : createSupplierInvoiceAction(data))
         if (!r.ok) { toast.error(r.error); return }
-        toast.success("Facture fournisseur enregistrée (à valider)."); router.push(`/comptabilite/fournisseurs/${r.id}`)
+        toast.success("Facture fournisseur enregistrée (à valider)."); router.push(`${basePath}/${r.id}`)
       } else {
-        const r = await updateSupplierInvoiceAction(invoiceId, payload)
+        const r = await (intake ? updateIntakeInvoiceAction(invoiceId, payload) : updateSupplierInvoiceAction(invoiceId, payload))
         if (!r.ok) { toast.error(r.error); return }
         toast.success("Facture mise à jour.")
       }
@@ -91,7 +97,7 @@ export function SupplierInvoiceForm({ mode, invoiceId, initial, accounts, confid
         <p className="sm:col-span-2 text-xs text-slate-500">La catégorie et le compte suggérés sont à vérifier et restent modifiables. Si aucun compte correspondant n’est disponible, sélectionnez un compte de charge.</p>
         <div className="sm:col-span-2"><Label htmlFor="no">Notes</Label><Input id="no" maxLength={1000} value={v.notes} onChange={set("notes")} /></div>
       </CardContent></Card>
-      <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => router.back()}>Annuler</Button><Button type="submit" disabled={loading}>{loading && <Loader2 className="h-4 w-4 animate-spin" />} {mode === "create" ? "Enregistrer (à valider)" : "Enregistrer les corrections"}</Button></div>
+      <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => router.back()}>Annuler</Button><Button type="submit" disabled={loading}>{loading && <Loader2 className="h-4 w-4 animate-spin" />} {mode === "create" ? (intake ? "Soumettre à validation" : "Enregistrer (à valider)") : "Enregistrer les corrections"}</Button></div>
     </form>
   )
 }

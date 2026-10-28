@@ -1,3 +1,4 @@
+import { resolveSupplierIntakeAccess } from "@/lib/supplier-intake/access"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { Sidebar } from "@/components/layout/Sidebar"
@@ -31,7 +32,8 @@ export default async function DashboardLayout({
   })
   // Lien « Devis » (Lot C) : drapeau serveur + rôle ADMIN/SUPER_ADMIN + société ; affichage seulement.
   const billingNavVisible = isBillingCompleteEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
-  const user = { ...session.user, role, companyId, accountingNavVisible, billingNavVisible }
+  const supplierIntakeNavVisible = !!(await resolveSupplierIntakeAccess())
+  const user = { ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible }
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
