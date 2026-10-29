@@ -29,6 +29,9 @@ before(async () => {
     ids[`tx${k}`] = (await db.bankTransaction.findFirstOrThrow({ where: { importId: ids[`imp${k}`], amountCents: BigInt(5000) } })).id
     ids[`txd${k}`] = (await db.bankTransaction.findFirstOrThrow({ where: { importId: ids[`imp${k}`], amountCents: BigInt(-12000) } })).id
     const f = await storeSupplierFile(db, ctx, Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from(`png-${k}`)]), `f${k}.png`); if (!f.ok) throw new Error(f.error); ids[`file${k}`] = f.value.fileId
+    // 29/10/2026 (index supplier_invoices_one_active_per_file_key) : file{k} est rattaché ci-dessous à une facture VALIDÉE ; un second fichier
+    // NON rattaché sert au cas « lien interne valide » du test SQL direct (le premier sert à la preuve « pièce déjà active refusée »).
+    const free = await storeSupplierFile(db, ctx, Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from(`png-free-${k}`)]), `free${k}.png`); if (!free.ok) throw new Error(free.error); ids[`file${k}Free`] = free.value.fileId
     const s = await createSupplierInvoice(db, ctx, { supplierName: `Fournisseur ${k}`, siret: null, number: `F-${k}`, date: D("2026-03-05"), dueDate: null, totalHTCents: BigInt(10000), vatCents: BigInt(2000), totalTTCCents: BigInt(12000), vatRateBp: 2000, category: "services", expenseAccountId: null, notes: null }, { fileId: ids[`file${k}`], ocr: null }); if (!s.ok) throw new Error(s.error); ids[`sup${k}`] = s.value.id
     const v = await validateSupplierInvoice(db, ctx, ids[`sup${k}`]); if (!v.ok) throw new Error(v.error); ids[`supplier${k}`] = v.value.supplierId
     ids[`quote${k}`] = await acceptedQuote(db, ctx, w, [{ designation: "Q", quantity: "1", unitPrice: "10", vatRate: "20" }])
@@ -41,8 +44,12 @@ describe("P2-02 — SQL direct (rôle applicatif) : INSERT et UPDATE de chaque l
     const ins = (supplier: string, file: string, id: string) => `INSERT INTO supplier_invoices(id,"companyId","supplierName",number,date,"totalHTCents","vatCents","totalTTCCents","createdById","updatedAt","supplierId","fileId") VALUES ('${id}','coA','X','N-${id}','2026-03-01',1,0,1,'admA',now(),${supplier ? `'${supplier}'` : "NULL"},${file ? `'${file}'` : "NULL"})`
     assert.match(await sqlError(app, ins(ids.supplierB, "", "si1")), FK)
     assert.match(await sqlError(app, ins("", ids.fileB, "si2")), FK)
-    assert.equal(await sqlError(app, ins(ids.supplierA, ids.fileA, "si3")), "NO_ERROR")
+    assert.equal(await sqlError(app, ins(ids.supplierA, ids.fileAFree, "si3")), "NO_ERROR", "lien interne valide : fichier A non encore rattaché")
     assert.equal(await sqlError(app, ins("", "", "si4")), "NO_ERROR", "liens optionnels nuls")
+    // Distinct du contrôle FK : fileA est déjà rattaché à la facture VALIDÉE supA ⇒ l'index unique partiel (une facture active par pièce) refuse.
+    const activeDup = await sqlError(app, ins(ids.supplierA, ids.fileA, "si5"))
+    assert.match(activeDup, /one_active_per_file|23505|duplicate key|Unique constraint/, "pièce déjà active : refus par l'index, pas par une FK")
+    assert.doesNotMatch(activeDup, FK)
     assert.match(await sqlError(app, `UPDATE supplier_invoices SET "supplierId"='${ids.supplierB}' WHERE id='si3'`), FK)
     assert.match(await sqlError(app, `UPDATE supplier_invoices SET "fileId"='${ids.fileB}' WHERE id='si3'`), FK)
   })
