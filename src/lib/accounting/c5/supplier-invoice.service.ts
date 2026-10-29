@@ -247,7 +247,7 @@ export async function listSupplierInvoices(db: Db, ctx: { companyId: string }, f
   const page = Math.max(1, Math.min(10_000, Math.trunc(f.page ?? 1)))
   const [total, rows] = await Promise.all([
     db.supplierInvoice.count({ where }),
-    db.supplierInvoice.findMany({ where, orderBy: [{ date: "desc" }, { createdAt: "desc" }], skip: (page - 1) * SUPPLIER_PAGE_SIZE, take: SUPPLIER_PAGE_SIZE, select: { id: true, supplierName: true, siret: true, number: true, date: true, dueDate: true, totalHTCents: true, vatCents: true, totalTTCCents: true, status: true, category: true, paidAt: true, fileId: true, expenseAccount: { select: { number: true, label: true } }, supplier: { select: { id: true, name: true } } } }),
+    db.supplierInvoice.findMany({ where, orderBy: [{ date: "desc" }, { createdAt: "desc" }], skip: (page - 1) * SUPPLIER_PAGE_SIZE, take: SUPPLIER_PAGE_SIZE, select: { id: true, supplierName: true, siret: true, number: true, date: true, dueDate: true, totalHTCents: true, vatCents: true, totalTTCCents: true, status: true, category: true, paidAt: true, fileId: true, expenseAccountId: true, expenseAccount: { select: { number: true, label: true } }, supplier: { select: { id: true, name: true } } } }),
   ])
   return { total, page, pageSize: SUPPLIER_PAGE_SIZE, rows }
 }
