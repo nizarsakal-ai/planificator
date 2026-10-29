@@ -1,4 +1,5 @@
 import { resolveSupplierIntakeAccess } from "@/lib/supplier-intake/access"
+import { CompanyBrand } from "@/components/company/CompanyBrand"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { Sidebar } from "@/components/layout/Sidebar"
@@ -40,7 +41,10 @@ export default async function DashboardLayout({
       <Sidebar user={user} />
       <div className="flex flex-col flex-1 overflow-hidden">
         <Navbar user={user} />
-        <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-4 md:p-6">
+          {companyId && <CompanyBrand companyId={companyId} />}
+          {children}
+        </main>
       </div>
       <InstallPrompt />
     </div>
