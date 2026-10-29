@@ -10,6 +10,8 @@ interface NavbarUser {
   name?: string | null
   email?: string | null
   image?: string | null
+  companyLogo?: string | null
+  companyName?: string | null
   role: Role
   companyId: string | null
   accountingNavVisible?: boolean
@@ -32,8 +34,8 @@ export function Navbar({ user }: { user: NavbarUser }) {
 
         {/* Avatar */}
         <div className="flex items-center gap-2">
-          <Avatar className="h-7 w-7">
-            <AvatarImage src={user.image ?? undefined} />
+          <Avatar className={user.companyLogo ? "h-8 w-8 rounded-md border border-slate-200 bg-white p-0.5" : "h-7 w-7"}>
+            <AvatarImage src={user.companyLogo ?? user.image ?? undefined} alt={user.companyLogo ? `Logo ${user.companyName ?? "de la société"}` : "Photo de profil"} className={user.companyLogo ? "object-contain bg-white" : undefined} />
             <AvatarFallback className="bg-[#0f3460] text-white text-xs font-medium">
               {getInitials(user.name ?? user.email ?? "?")}
             </AvatarFallback>

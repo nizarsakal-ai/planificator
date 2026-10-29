@@ -1,5 +1,7 @@
 import { resolveSupplierIntakeAccess } from "@/lib/supplier-intake/access"
 import { CompanyBrand } from "@/components/company/CompanyBrand"
+import { prisma } from "@/lib/prisma"
+import { logoForPdf } from "@/lib/company-logo"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { Sidebar } from "@/components/layout/Sidebar"
@@ -34,7 +36,11 @@ export default async function DashboardLayout({
   // Lien « Devis » (Lot C) : drapeau serveur + rôle ADMIN/SUPER_ADMIN + société ; affichage seulement.
   const billingNavVisible = isBillingCompleteEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
   const supplierIntakeNavVisible = !!(await resolveSupplierIntakeAccess())
-  const user = { ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible }
+  const company = companyId ? await prisma.company.findUnique({
+    where: { id: companyId }, select: { name: true, logoUrl: true },
+  }) : null
+  const companyLogo = logoForPdf(company?.logoUrl)
+  const user = { ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, companyLogo, companyName: company?.name }
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
@@ -42,7 +48,7 @@ export default async function DashboardLayout({
       <div className="flex flex-col flex-1 overflow-hidden">
         <Navbar user={user} />
         <main className="flex-1 overflow-y-auto p-4 md:p-6">
-          {companyId && <CompanyBrand companyId={companyId} />}
+          {company && <CompanyBrand name={company.name} logo={companyLogo} />}
           {children}
         </main>
       </div>
