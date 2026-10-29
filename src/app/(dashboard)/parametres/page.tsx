@@ -8,12 +8,10 @@ import { CompanyForm } from "@/components/parametres/CompanyForm"
 import { SettingsForm } from "@/components/parametres/SettingsForm"
 import { GmailConnectionCard } from "@/components/parametres/GmailConnectionCard"
 import { AcquisitionGmailConnectionsCard } from "@/components/parametres/AcquisitionGmailConnectionsCard"
-import { CompanyLogoCard } from "@/components/parametres/CompanyLogoCard"
 import { CompanyIdentityCard } from "@/components/parametres/CompanyIdentityCard"
 import { FileBadge } from "lucide-react"
 import { getBillingSettings } from "@/lib/billing/settings"
 import { assessIssuerIdentity, issuerLegalFooter } from "@/lib/billing/company-identity"
-import { isManagedLogo } from "@/lib/company-logo"
 
 export const metadata: Metadata = { title: "Paramètres" }
 
@@ -139,7 +137,7 @@ export default async function ParametresPage({
           <CardContent className="grid gap-6 lg:grid-cols-2">
             <div className="space-y-2">
               <p className="text-xs font-medium uppercase text-slate-500">Logo de l&apos;entreprise</p>
-              <CompanyLogoCard companyName={company.name} logoUrl={company.logoUrl} managed={isManagedLogo(company.logoUrl)} />
+              <a href="/profil" className="text-sm text-blue-700 underline">Importer ou télécharger le logo depuis Mon profil</a>
             </div>
             <div className="space-y-2">
               <p className="text-xs font-medium uppercase text-slate-500">Identité juridique sur les devis et factures</p>

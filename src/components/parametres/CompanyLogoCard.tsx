@@ -73,7 +73,7 @@ export function CompanyLogoCard({ companyName, logoUrl, managed }: Props) {
         <div className="flex flex-wrap gap-2">
           <Button type="button" size="sm" onClick={() => inputRef.current?.click()} disabled={busy !== null} className="bg-[#0f3460] hover:bg-[#0a2540]">
             {busy === "upload" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-            {preview ? "Remplacer" : "Importer"}
+            {preview ? "Remplacer le logo" : "Importer un logo"}
           </Button>
           {managed && (
             <Button type="button" size="sm" variant="outline" asChild>
