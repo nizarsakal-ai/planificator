@@ -178,6 +178,8 @@ const STRONG_SUBJECT_CONFIRMATION_PATTERNS: RegExp[] = [
 const CANCELLATION_PATTERNS: RegExp[] = [
   /reservation annulee/,
   /votre reservation a ete annulee/,
+  /votre reservation a bien ete annulee/,
+  /reservation a l['’]etablissement .{1,160} (?:a ete )?annulee/,
   /annulation de (?:votre )?reservation/,
   /booking cancelled/,
   /booking canceled/,
@@ -276,6 +278,7 @@ const STRUCT_DATES: RegExp[] = [
 const STRUCT_REF: RegExp[] = [
   /numero de (?:confirmation|reservation)/,
   /confirmation number/,
+  /\bconfirmation\s*:\s*\d[\d. -]{4,}/,
   /booking number/,
   /reservation (?:number|id)/,
   /\bref(?:erence)?\s*[:#]\s*[a-z0-9-]+/i,
@@ -466,7 +469,8 @@ export function classifyBookingEmailIntent(input: {
     }
   }
 
-  if (anyMatch(combined, AUTRE_PATTERNS, evidence, "neg:other")) {
+  // Les mentions marketing/identité dans le pied de page ne définissent pas le sujet du mail.
+  if (anyMatch(`${subject}\n${body.slice(0, HOST_BODY_OPENING_MAX_CHARS)}`, AUTRE_PATTERNS, evidence, "neg:other")) {
     return {
       intent: "AUTRE_PROUVE",
       confidence: "high",

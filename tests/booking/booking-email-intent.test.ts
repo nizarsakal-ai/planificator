@@ -666,6 +666,39 @@ Payment receipt total: $320
     assert.equal(r.intent, "AMBIGU")
   })
 
+  it("confirmation réelle au format Confirmation : numéro, dates et CTA hôte → CONFIRMATION", () => {
+    const r = classifyBookingEmailIntent({
+      subject: "Merci ! Votre réservation à l’établissement Maison Exemple est confirmée",
+      bodyText: "Booking.com Confirmation : 1234567890 Merci ! Votre appartement est confirmé. Contactez votre hôte pour faire une demande. Établissement : Maison Exemple Adresse : 12 rue Exemple Arrivée : 2026-11-01 Départ : 2026-11-03",
+    })
+    assert.equal(r.intent, "CONFIRMATION")
+    assert.equal(resolveBookingIntentScanDisposition(r).action, "PROCEED_CONFIRMATION")
+  })
+
+  it("confirmation structurée avec mention marketing en pied de page reste une confirmation", () => {
+    const subject = "Merci ! Votre réservation à l’établissement Maison Exemple est confirmée"
+    const bodyText = "Booking.com Confirmation : 1234567890 Merci ! Votre appartement est confirmé. " + CONFIRMATION_BODY_FR + " Informations pratiques pour votre séjour. ".repeat(8) + "Préférences marketing : gérez vos communications."
+    const r = classifyBookingEmailIntent({ subject, bodyText })
+    assert.equal(r.intent, "CONFIRMATION")
+    assert.equal(resolveBookingIntentScanDisposition(r).action, "PROCEED_CONFIRMATION")
+    for (const input of [
+      { subject: "Newsletter promotion Booking", bodyText: CONFIRMATION_BODY_FR },
+      { subject: "Booking.com", bodyText: "Offre spéciale pour votre voyage. " + CONFIRMATION_BODY_FR },
+    ]) assert.equal(classifyBookingEmailIntent(input).intent, "AUTRE_PROUVE")
+  })
+
+  it("annulation Booking avec bien et nom de propriété intercalé reste une annulation", () => {
+    for (const [subject, bodyText] of [
+      ["Réservation à l’établissement Maison Exemple annulée", "Votre réservation a bien été annulée gratuitement."],
+      ["Booking.com", "Nous vous confirmons que votre réservation à l’établissement Maison Exemple a été annulée. " + CONFIRMATION_BODY_FR],
+      ["Booking.com", "Votre réservation a bien été annulée gratuitement. " + CONFIRMATION_BODY_FR],
+    ]) {
+      const r = classifyBookingEmailIntent({ subject, bodyText })
+      assert.equal(r.intent, "ANNULATION")
+      assert.equal(resolveBookingIntentScanDisposition(r).action, "PERMANENT_IGNORE")
+    }
+  })
+
   it("annulation avec ref + dates + adresse → ANNULATION", () => {
     const r = classifyBookingEmailIntent({
       subject: "Réservation annulée",
