@@ -240,6 +240,7 @@ describe("A1 — périmètre du moteur comptable (aucun branchement facture, auc
       "src/lib/accounting/ui/labels.ts",
       "src/lib/accounting/ui/page-context.ts",
       "src/lib/accounting/ui/route-guard.ts",
+      "src/lib/accounting/ui/supplier-row-action.ts", // 29/10/2026 : action par ligne de la liste fournisseurs (pure, aucun accès base)
     ])
   })
 })
