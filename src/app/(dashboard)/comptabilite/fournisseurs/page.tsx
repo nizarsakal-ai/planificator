@@ -33,7 +33,8 @@ export default async function FournisseursPage({ searchParams }: { searchParams:
       {/* 29/10/2026 — découvrabilité (retour Nizar : « le bouton à côté de À valider ») : dans la cellule Statut, juste à côté du badge, un
           bouton explicite OUVRE LA FICHE (« Vérifier / valider » pour une facture à valider, « Consulter » sinon). Aucune validation directe
           depuis la liste ; les commandes « Valider et comptabiliser » / « Rejeter » restent sur la fiche. Tableau défilable horizontalement
-          sur petit écran ; la cellule Statut (badge + bouton) reste visible à toutes les largeurs. */}
+          sur petit écran ; la cellule Statut (badge + bouton) reste visible à toutes les largeurs : côte à côte dès `sm` (flex-nowrap),
+          bouton à libellé repliable et largeur bornée sur mobile. */}
       <Card><CardContent className="p-0">
         <div className="overflow-x-auto">
         <table className="w-full text-sm"><thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">Fournisseur</th><th className="hidden px-3 py-2 sm:table-cell">N°</th><th className="hidden px-3 py-2 sm:table-cell">Date</th><th className="hidden px-3 py-2 text-right lg:table-cell">HT</th><th className="hidden px-3 py-2 text-right lg:table-cell">TVA</th><th className="px-3 py-2 text-right">TTC</th><th className="hidden px-3 py-2 md:table-cell">Compte de charge</th><th className="px-3 py-2">Statut</th></tr></thead>
@@ -45,9 +46,9 @@ export default async function FournisseursPage({ searchParams }: { searchParams:
               <td className="hidden px-3 py-2 text-right tabular-nums lg:table-cell">{formatEuro(s.totalHTCents)}</td><td className="hidden px-3 py-2 text-right tabular-nums lg:table-cell">{formatEuro(s.vatCents)}</td><td className="px-3 py-2 text-right tabular-nums">{formatEuro(s.totalTTCCents)}</td>
               <td className="hidden px-3 py-2 md:table-cell">{s.expenseAccount ? `${s.expenseAccount.number} ${s.expenseAccount.label}` : s.category ? CATEGORY_LABEL[s.category] : "—"}</td>
               <td className="px-3 py-2">{(() => { const a = supplierRowAction({ id: s.id, status: s.status, number: s.number, supplierName: s.supplier?.name ?? s.supplierName }); return (
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:whitespace-nowrap">
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS[s.status]?.cls}`}>{STATUS[s.status]?.label ?? s.status}</span>
-                  <Button asChild size="sm" variant={a.variant}><Link href={a.href} aria-label={a.ariaLabel}>{a.label}</Link></Button>
+                  <Button asChild size="sm" variant={a.variant} className="h-auto min-h-8 max-w-[9.5rem] whitespace-normal py-1 text-left leading-tight sm:max-w-none sm:whitespace-nowrap"><Link href={a.href} aria-label={a.ariaLabel}>{a.label}</Link></Button>
                 </div>
               ) })()}{s.paidAt && <div className="mt-1 text-xs text-slate-400">payée {dateFr.format(s.paidAt)}</div>}</td>
             </tr>)}

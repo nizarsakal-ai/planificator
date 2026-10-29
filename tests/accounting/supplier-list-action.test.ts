@@ -26,9 +26,9 @@ describe("supplierRowAction — règle d'action par ligne", () => {
 })
 
 describe("page liste /comptabilite/fournisseurs — source", () => {
-  it("le bouton est rendu dans la cellule Statut, juste à côté du badge (flex-wrap), via supplierRowAction, avec aria-label ; pas de colonne séparée", () => {
+  it("le bouton est rendu dans la cellule Statut, juste à côté du badge (côte à côte dès sm, repliable et borné sur mobile), via supplierRowAction, avec aria-label ; pas de colonne séparée", () => {
     assert.match(code, /supplierRowAction\(\{ id: s\.id, status: s\.status/)
-    assert.match(code, /<div className="flex flex-wrap items-center gap-2">\s*<span className=\{`rounded-full[^`]*`\}>\{STATUS\[s\.status\]\?\.label \?\? s\.status\}<\/span>\s*<Button asChild size="sm" variant=\{a\.variant\}><Link href=\{a\.href\} aria-label=\{a\.ariaLabel\}>\{a\.label\}<\/Link><\/Button>/)
+    assert.match(code, /<div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:whitespace-nowrap">\s*<span className=\{`rounded-full[^`]*`\}>\{STATUS\[s\.status\]\?\.label \?\? s\.status\}<\/span>\s*<Button asChild size="sm" variant=\{a\.variant\} className="[^"]*whitespace-normal[^"]*sm:whitespace-nowrap[^"]*"><Link href=\{a\.href\} aria-label=\{a\.ariaLabel\}>\{a\.label\}<\/Link><\/Button>/)
     assert.doesNotMatch(code, /<th[^>]*>Action<\/th>/)
     assert.equal((code.match(/<th /g) ?? []).length, 8, "nombre de colonnes inchangé")
   })
