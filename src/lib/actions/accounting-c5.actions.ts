@@ -13,6 +13,7 @@ import { DocumentIntegrityError } from "@/lib/billing/document-integrity"
 import { declareVat } from "@/lib/accounting/c5/vat-declaration"
 import { autoReconcile, importBankStatement, matchTransaction, resolveBankCollision, resolveImportCollisions } from "@/lib/accounting/c5/bank.service"
 import { guessBankMapping, previewCsv } from "@/lib/accounting/c5/bank-import"
+import { withLifecycleAbort } from "@/lib/billing/lifecycle-abort"
 import { createSupplierInvoice, extractSupplierInvoice, rejectSupplierInvoice, storeSupplierFile, updateSupplierInvoice, validateSupplierInvoice, SUPPLIER_CATEGORIES } from "@/lib/accounting/c5/supplier-invoice.service"
 
 type Result<T = Record<never, never>> = ({ ok: true } & T) | { ok: false; error: string }
@@ -144,7 +145,9 @@ export async function createSupplierInvoiceAction(raw: unknown): Promise<Result<
   const o = p.value.ocr
   const big = (v: string | null | undefined) => (v === null || v === undefined ? null : BigInt(v))
   const ocr: Parameters<typeof createSupplierInvoice>[3]["ocr"] = o ? { supplier: o.supplier ?? null, siret: o.siret ?? null, invoiceNumber: o.invoiceNumber ?? null, date: o.date ?? null, totalHTCents: big(o.totalHTCents), vatCents: big(o.vatCents), totalTTCCents: big(o.totalTTCCents), vatRateBp: o.vatRateBp ?? null, category: o.category ?? null, confidence: o.confidence ?? {}, amountsAdjusted: o.amountsAdjusted === true, rawText: "" } : null
-  const r = await run((ctx) => createSupplierInvoice(prisma, ctx, p.value.input, { fileId: p.value.fileId, ocr }))
+  // 29/10/2026 (M2) : création atomique (facture + journal) dans une transaction ; une course sur la même pièce lève LifecycleAbort
+  // dans la transaction (ROLLBACK) et devient une erreur explicite ici.
+  const r = await run((ctx) => withLifecycleAbort(() => prisma.$transaction((tx) => createSupplierInvoice(tx, ctx, p.value.input, { fileId: p.value.fileId, ocr }))))
   return r.ok ? { ok: true, id: r.value.id } : r
 }
 

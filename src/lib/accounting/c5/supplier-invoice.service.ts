@@ -4,7 +4,7 @@
 // Contexte = requireAccountingAdmin (société de session).
 // ═══════════════════════════════════════════════════════════════════════════
 import { createHash } from "node:crypto"
-import type { Prisma, PrismaClient } from "@prisma/client"
+import { Prisma, type PrismaClient } from "@prisma/client"
 import type { AccountingContext } from "@/lib/accounting/engine/posting"
 import { runAccountingTransaction } from "@/lib/accounting/engine/transaction"
 import { ensureBaseReferential } from "@/lib/accounting/engine/setup"
@@ -23,6 +23,7 @@ export const SUPPLIER_ERRORS = {
   fileType: "Fichier refusé : seuls JPEG, PNG, WebP et PDF sont acceptés (type vérifié par signature).",
   fileSize: "Fichier trop volumineux (10 Mo maximum).",
   duplicateFile: "Ce fichier a déjà été importé.",
+  duplicateSubmission: "Ce fichier a déjà été soumis.",
   notFound: "Facture fournisseur introuvable.",
   notPending: "Seule une facture en attente peut être modifiée ou validée.",
   amounts: "Montants incohérents : HT + TVA doit être égal au TTC.",
@@ -33,18 +34,45 @@ export const SUPPLIER_ERRORS = {
 
 export interface UploadResult { fileId: string; mime: string; size: number; sha256: string; duplicate: boolean }
 
-/** Stocke le fichier (signature binaire, taille, empreinte) ; doublon ⇒ refus. */
+/** P2002 dont la cible est exactement la contrainte unique donnée (ordre indifférent) ; tout autre cas ⇒ faux (l'erreur doit remonter). */
+export function isUniqueViolationOn(error: unknown, columns: readonly string[]): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") return false
+  const target = (error.meta as { target?: unknown } | undefined)?.target
+  return Array.isArray(target) && target.length === columns.length && columns.every((c) => target.includes(c))
+}
+
+/** Fichier déjà stocké pour (société, sha256) : réutilisable s'il n'est rattaché à aucune facture active (non REJETÉE), sinon doublon. */
+async function reuseStoredFile(db: Pick<Db, "supplierInvoiceFile">, ctx: AccountingContext, sha256: string, mime: string, size: number): Promise<LifecycleResult<UploadResult> | null> {
+  const existing = await db.supplierInvoiceFile.findFirst({ where: { companyId: ctx.companyId, sha256 }, select: { id: true, invoices: { where: { status: { not: "REJECTED" } }, select: { id: true }, take: 1 } } })
+  if (!existing) return null
+  // Fichier déjà stocké mais jamais rattaché (formulaire abandonné) ou rattaché seulement à une facture REJETÉE : réutilisé ;
+  // rattaché à une facture en cours/validée : doublon refusé (audit R3, #8).
+  return existing.invoices.length ? { ok: false, error: SUPPLIER_ERRORS.duplicateFile } : { ok: true, value: { fileId: existing.id, mime, size, sha256, duplicate: true } }
+}
+
+/**
+ * Stocke le fichier (signature binaire, taille, empreinte) ; doublon ⇒ refus.
+ * Correction M1 (29/10/2026) : deux imports simultanés du même fichier étaient arbitrés par l'UNIQUE (companyId, sha256) mais le
+ * perdant recevait une erreur Prisma brute ; il relit désormais la ligne gagnante et applique la même règle (réutilisation ou doublon
+ * explicite). À appeler HORS transaction interactive (comme les deux actions existantes) : P2002 y rendrait la transaction inutilisable.
+ */
 export async function storeSupplierFile(db: Db, ctx: AccountingContext, data: Buffer, originalName: string): Promise<LifecycleResult<UploadResult>> {
   if (data.length === 0 || data.length > MAX_OCR_FILE_BYTES) return { ok: false, error: SUPPLIER_ERRORS.fileSize }
   const mime = sniffMime(data)
   if (!mime) return { ok: false, error: SUPPLIER_ERRORS.fileType }
   const sha256 = createHash("sha256").update(data).digest("hex")
-  const existing = await db.supplierInvoiceFile.findFirst({ where: { companyId: ctx.companyId, sha256 }, select: { id: true, invoices: { where: { status: { not: "REJECTED" } }, select: { id: true }, take: 1 } } })
-  // Fichier déjà stocké mais jamais rattaché (formulaire abandonné) ou rattaché seulement à une facture REJETÉE : réutilisé ;
-  // rattaché à une facture en cours/validée : doublon refusé (audit R3, #8).
-  if (existing) return existing.invoices.length ? { ok: false, error: SUPPLIER_ERRORS.duplicateFile } : { ok: true, value: { fileId: existing.id, mime, size: data.length, sha256, duplicate: true } }
-  const f = await db.supplierInvoiceFile.create({ data: { companyId: ctx.companyId, sha256, mime, size: data.length, data, originalName: originalName.slice(0, 200) }, select: { id: true } })
-  return { ok: true, value: { fileId: f.id, mime, size: data.length, sha256, duplicate: false } }
+  const reused = await reuseStoredFile(db, ctx, sha256, mime, data.length)
+  if (reused) return reused
+  try {
+    const f = await db.supplierInvoiceFile.create({ data: { companyId: ctx.companyId, sha256, mime, size: data.length, data, originalName: originalName.slice(0, 200) }, select: { id: true } })
+    return { ok: true, value: { fileId: f.id, mime, size: data.length, sha256, duplicate: false } }
+  } catch (error) {
+    if (!isUniqueViolationOn(error, ["companyId", "sha256"])) throw error
+    // Course : un import concurrent a gagné ; relecture hors transaction, même règle que ci-dessus.
+    const winner = await reuseStoredFile(db, ctx, sha256, mime, data.length)
+    if (!winner) throw new Error("SUPPLIER_FILE_INCONSISTENT: contrainte (companyId, sha256) violée mais fichier gagnant introuvable", { cause: error }) // fail-closed, jamais masqué
+    return winner
+  }
 }
 
 export interface SupplierInvoiceInput {
@@ -69,22 +97,37 @@ export async function createSupplierInvoice(db: Pick<Db, "supplierInvoiceFile" |
   if (extra.fileId) {
     const f = await db.supplierInvoiceFile.findFirst({ where: { id: extra.fileId, companyId: ctx.companyId }, select: { id: true } })
     if (!f) return { ok: false, error: "Fichier introuvable." }
+    // Correction M2 (29/10/2026) : une pièce ne se rattache qu'à UNE facture active (non REJETÉE) de la société, par tout chemin
+    // (admin comme intake). Pré-contrôle explicite ; le filet en base est l'index unique partiel
+    // supplier_invoices_one_active_per_file_key (migration candidate), traduit ci-dessous hors transaction.
+    const active = await db.supplierInvoice.findFirst({ where: { companyId: ctx.companyId, fileId: extra.fileId, status: { not: "REJECTED" } }, select: { id: true } })
+    if (active) return { ok: false, error: SUPPLIER_ERRORS.duplicateSubmission }
   }
   if (input.expenseAccountId) {
     const a = await db.accountingAccount.findFirst({ where: { id: input.expenseAccountId, companyId: ctx.companyId, active: true }, select: { id: true } })
     if (!a) return { ok: false, error: "Compte de charge introuvable." }
   }
-  const created = await db.supplierInvoice.create({
-    data: {
-      companyId: ctx.companyId, supplierName: input.supplierName.trim().slice(0, 200), siret: input.siret, number: input.number.trim().slice(0, 64), date: input.date, dueDate: input.dueDate,
-      totalHTCents: input.totalHTCents, vatCents: input.vatCents, totalTTCCents: input.totalTTCCents, vatRateBp: input.vatRateBp, category: input.category, expenseAccountId: input.expenseAccountId,
-      notes: input.notes, status: "PENDING", fileId: extra.fileId, createdById: ctx.userId,
-      ocrProvider: extra.ocr ? "ocr" : null,
-      ocrRaw: extra.ocr ? { supplier: extra.ocr.supplier, siret: extra.ocr.siret, invoiceNumber: extra.ocr.invoiceNumber, date: extra.ocr.date, totalHTCents: extra.ocr.totalHTCents?.toString() ?? null, vatCents: extra.ocr.vatCents?.toString() ?? null, totalTTCCents: extra.ocr.totalTTCCents?.toString() ?? null, vatRateBp: extra.ocr.vatRateBp, category: extra.ocr.category, amountsAdjusted: extra.ocr.amountsAdjusted } : undefined,
-      ocrConfidence: extra.ocr ? extra.ocr.confidence : undefined,
-    },
-    select: { id: true },
-  })
+  let created: { id: string }
+  try {
+    created = await db.supplierInvoice.create({
+      data: {
+        companyId: ctx.companyId, supplierName: input.supplierName.trim().slice(0, 200), siret: input.siret, number: input.number.trim().slice(0, 64), date: input.date, dueDate: input.dueDate,
+        totalHTCents: input.totalHTCents, vatCents: input.vatCents, totalTTCCents: input.totalTTCCents, vatRateBp: input.vatRateBp, category: input.category, expenseAccountId: input.expenseAccountId,
+        notes: input.notes, status: "PENDING", fileId: extra.fileId, createdById: ctx.userId,
+        ocrProvider: extra.ocr ? "ocr" : null,
+        ocrRaw: extra.ocr ? { supplier: extra.ocr.supplier, siret: extra.ocr.siret, invoiceNumber: extra.ocr.invoiceNumber, date: extra.ocr.date, totalHTCents: extra.ocr.totalHTCents?.toString() ?? null, vatCents: extra.ocr.vatCents?.toString() ?? null, totalTTCCents: extra.ocr.totalTTCCents?.toString() ?? null, vatRateBp: extra.ocr.vatRateBp, category: extra.ocr.category, amountsAdjusted: extra.ocr.amountsAdjusted } : undefined,
+        ocrConfidence: extra.ocr ? extra.ocr.confidence : undefined,
+      },
+      select: { id: true },
+    })
+  } catch (error) {
+    // M2 : course entre deux créations sur la même pièce ⇒ l'index partiel supplier_invoices_one_active_per_file_key arbitre.
+    // Exception TYPÉE (revue Codex) : `createSupplierInvoice` s'exécute dans une transaction (intake Serializable, action admin) ; après
+    // un P2002 la transaction PostgreSQL est avortée, on ne « retourne » donc pas un résultat — on lève LifecycleAbort, converti en
+    // { ok: false } par `withLifecycleAbort` HORS de la transaction (ROLLBACK complet, facture + journal atomiques).
+    if (isUniqueViolationOn(error, ["companyId", "fileId"])) throw new LifecycleAbort(SUPPLIER_ERRORS.duplicateSubmission)
+    throw error
+  }
   await db.historyLog.create({ data: { companyId: ctx.companyId, actorId: ctx.userId, action: "CREATED", entityType: "SupplierInvoice", entityId: created.id, detail: `Facture fournisseur ${input.number} (${input.supplierName}) enregistrée en attente` } })
   return { ok: true, value: created }
 }

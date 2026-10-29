@@ -5,6 +5,7 @@ import { requireSupplierIntake } from "@/lib/supplier-intake/access"
 import { issueFileProof, verifyFileProof } from "@/lib/supplier-intake/file-proof"
 import { parseSupplierForm } from "@/lib/supplier-intake/input"
 import { createSupplierInvoice, updateSupplierInvoice, storeSupplierFile, extractSupplierInvoice } from "@/lib/accounting/c5/supplier-invoice.service"
+import { withLifecycleAbort } from "@/lib/billing/lifecycle-abort"
 const denied = { ok: false as const, error: "Opération refusée ou accès indisponible." }
 const signingSecret = () => process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET ?? ""
 
@@ -37,13 +38,15 @@ export async function createIntakeInvoiceAction(raw: unknown, fileProof?: string
       totalHTCents: big(o.totalHTCents), vatCents: big(o.vatCents), totalTTCCents: big(o.totalTTCCents),
       vatRateBp: o.vatRateBp ?? null, category: o.category ?? null, confidence: o.confidence ?? {}, amountsAdjusted: o.amountsAdjusted === true, rawText: "",
     } : null
-    const r = await prisma.$transaction(async tx => {
+    // 29/10/2026 (M2) : la course sur la même pièce arbitrée par l'index partiel lève LifecycleAbort dans la transaction (ROLLBACK) ;
+    // convertie ici en erreur explicite au lieu du refus générique.
+    const r = await withLifecycleAbort(() => prisma.$transaction(async tx => {
       if (p.value.fileId) {
         const duplicate = await tx.supplierInvoice.findFirst({ where: { companyId: ctx.companyId, fileId: p.value.fileId, status: { not: "REJECTED" } }, select: { id: true } })
         if (duplicate) return { ok: false as const, error: "Ce fichier a déjà été soumis." }
       }
       return createSupplierInvoice(tx, ctx, p.value.input, { fileId: p.value.fileId, ocr })
-    }, { isolationLevel: "Serializable" })
+    }, { isolationLevel: "Serializable" }))
     if (!r.ok) return r
     revalidatePath("/factures-fournisseurs"); revalidatePath("/comptabilite/fournisseurs")
     return { ok: true as const, id: r.value.id }
