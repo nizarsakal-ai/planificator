@@ -2,8 +2,16 @@ import type { Prisma, PrismaClient } from "@prisma/client"
 import { decimalToCents, formatEuro } from "@/lib/billing/money"
 import { getBillingSettings } from "@/lib/billing/settings"
 import { assertStoredTotalsMatch } from "@/lib/billing/document-integrity"
-import { buyerParty, fmtDate, legalMentions, linesAndTotals, sellerParty, type DocumentPdfData } from "./document-data"
+import { buyerParty, fmtDate, legalMentions, linesAndTotals, sellerParty, type DocumentPdfData, type PdfParty } from "./document-data"
 import { readDocumentSnapshot } from "./document-snapshot"
+import { issuerLegalFooter } from "@/lib/billing/company-identity"
+import { logoForPdf } from "@/lib/company-logo"
+
+/** 29/10/2026 — pied de page d'une pièce figée : identité du snapshot (lignes d'identité juridique de `sellerParty`, sans contact). */
+function legalFooterFromSnapshotSeller(seller: PdfParty): string | null {
+  const identity = seller.lines.filter((l) => /^(SIRET|SIREN|RCS|RM|TVA)\b|au capital de|^(SAS|SASU|SARL|EURL|EI|SA|SNC|SCI|SCOP|Micro)/i.test(l))
+  return [seller.name, ...identity].filter(Boolean).join(" — ") || null
+}
 
 type Db = PrismaClient | Prisma.TransactionClient
 const dateFr = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" })
@@ -23,7 +31,7 @@ export async function buildInvoicePdfData(db: Db, companyId: string, invoiceId: 
       number: true, status: true, kind: true, issueDate: true, dueDate: true, periodStart: true, periodEnd: true, subject: true, notes: true, paymentTerms: true, globalDiscountBp: true, vatReverseCharge: true, totalHT: true, totalVAT: true, totalTTC: true, creditReason: true, depositBp: true,
       depositDeductions: { select: { amountTTCCents: true, deposit: { select: { number: true, issueDate: true } } } },
       creditNotes: { where: { creditScope: "PARTIAL", status: { not: "CANCELLED" } }, select: { number: true, totalTTC: true } },
-      company: { select: { name: true, address: true, siret: true, email: true, phone: true } },
+      company: { select: { name: true, address: true, siret: true, email: true, phone: true, logoUrl: true } },
       client: { select: { name: true, address: true, siret: true, vatNumber: true, email: true } },
       worksite: { select: { name: true } }, quote: { select: { number: true } }, creditedInvoice: { select: { number: true, issueDate: true } },
       lines: { orderBy: { position: "asc" }, select: { designation: true, description: true, unit: true, quantity: true, unitPrice: true, vatRate: true, lineHT: true, discountBp: true, deductsDepositId: true } },
@@ -65,14 +73,16 @@ export async function buildInvoicePdfData(db: Db, companyId: string, invoiceId: 
   if (isCredit && credited) extraBlocks.push({ title: "Avoir", rows: [`Avoir sur la facture ${credited.number} du ${fmtDate(new Date(credited.issueDate))}.`, ...(inv.creditReason ? [`Motif : ${inv.creditReason}`] : []), "Montant à déduire de la prochaine facture ou à rembourser."] })
   if (inv.depositDeductions.length > 0) extraBlocks.push({ title: "Acomptes déduits", rows: inv.depositDeductions.map((d) => `Facture d'acompte ${d.deposit.number} du ${fmtDate(d.deposit.issueDate)} : ${formatEuro(d.amountTTCCents)} TTC`) })
   if (isDeposit && quoteNumber) extraBlocks.push({ title: "Acompte", rows: [`${inv.depositBp ? `Acompte de ${inv.depositBp / 100} %` : "Acompte"} sur le devis ${quoteNumber}. Le solde sera facturé à l'issue des prestations, déduction faite du présent acompte.`] })
-  let seller: DocumentPdfData["seller"], buyer: DocumentPdfData["buyer"], mentions: string[], footer: string | null
+  let seller: DocumentPdfData["seller"], buyer: DocumentPdfData["buyer"], mentions: string[], footer: string | null, legalFooter: string | null
   if (snapshot) {
     seller = snapshot.seller; buyer = snapshot.buyer; mentions = [...snapshot.document.mentions]; footer = snapshot.document.footer
+    legalFooter = legalFooterFromSnapshotSeller(snapshot.seller)
   } else {
     const settings = await getBillingSettings(db, companyId)
     seller = sellerParty(inv.company, settings); buyer = buyerParty(inv.client); footer = settings.invoiceFooter
     mentions = legalMentions(settings, { vatReverseCharge: inv.vatReverseCharge, paymentTerms: inv.paymentTerms, kind: isCredit ? "credit" : "invoice", vatExempt: !settings.vatNumber && raw.totalVATCents === BigInt(0) && !inv.vatReverseCharge })
     if (!draft) mentions.push(NO_SNAPSHOT_MENTION)
+    legalFooter = issuerLegalFooter({ name: inv.company.name, address: inv.company.address, siret: inv.company.siret, email: inv.company.email, phone: inv.company.phone, settings })
   }
   return {
     title: draft ? `${title} (brouillon — non émise)` : title, number: inv.number, meta,
@@ -80,5 +90,8 @@ export async function buildInvoicePdfData(db: Db, companyId: string, invoiceId: 
     mentions, notes: snapshot ? snapshot.document.notes : inv.notes, footer, extraBlocks,
     reissue: { source: draft ? "DRAFT" : snapshot ? "SNAPSHOT" : "CURRENT_NO_SNAPSHOT", capturedAt: snapshot?.createdAt.toISOString() ?? null },
     settlement,
+    // 29/10/2026 — présentation : logo géré courant (le contenu documentaire figé n'est pas modifié) et pied de page d'identité.
+    logoDataUrl: logoForPdf(inv.company.logoUrl),
+    legalFooter,
   }
 }

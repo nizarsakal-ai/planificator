@@ -15,6 +15,7 @@ import { InvoiceStatusBadge } from "@/components/factures/InvoiceStatusBadge"
 import { listQuoteDeposits } from "@/lib/billing/invoices/deposit.service"
 import { getBillingSettings } from "@/lib/billing/settings"
 import { decimalToCents, formatEuro } from "@/lib/billing/money"
+import { assessIssuerIdentity, isPlausibleVatNumber } from "@/lib/billing/company-identity"
 
 export const metadata: Metadata = { title: "Devis" }
 const MAIL_KIND: Record<string, string> = { QUOTE_SENT: "Envoi du devis", QUOTE_REMINDER_J3: "Relance J+3", QUOTE_REMINDER_J7: "Relance J+7", QUOTE_REMINDER_J15: "Relance J+15" }
@@ -33,9 +34,23 @@ export default async function DevisDetailPage({ params }: { params: Promise<{ id
   const depositRemaining = decimalToCents(q.totalTTC) - depositsTTC
   const finalIssued = !!invoice && invoice.status !== "DRAFT"
   const canDeposit = (q.status === "ACCEPTED" || q.status === "CONVERTED") && !finalIssued && depositRemaining > BigInt(0)
+  // 29/10/2026 — avant émission : données juridiques de l'émetteur manquantes et TVA client incohérente signalées (jamais masquées).
+  const issuer = q.status === "DRAFT" ? await prisma.company.findUnique({ where: { id: ctx.companyId }, select: { name: true, address: true, siret: true, email: true, phone: true } }) : null
+  const identityBlocking = issuer ? assessIssuerIdentity({ ...issuer, settings }).blocking : []
+  const clientVatInvalid = !!q.client.vatNumber && !isPlausibleVatNumber(q.client.vatNumber)
 
   return (
     <div className="space-y-4">
+      {q.status === "DRAFT" && identityBlocking.length > 0 && (
+        <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+          Identité juridique de l&apos;émetteur incomplète : {identityBlocking.join(", ")}. Complétez-la dans <Link href="/parametres" className="underline">Paramètres</Link> et <Link href="/factures/parametres" className="underline">Paramètres de facturation</Link> avant d&apos;envoyer ce devis ; le pied de page du PDF ne contient que les données présentes.
+        </p>
+      )}
+      {clientVatInvalid && (
+        <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+          Le numéro de TVA enregistré pour ce client ({q.client.vatNumber}) n&apos;a pas la forme d&apos;un numéro intracommunautaire : il n&apos;est pas imprimé sur le devis. Corrigez-le ci-dessous (un SIRET se saisit dans le champ SIRET / SIREN).
+        </p>
+      )}
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="text-sm text-slate-500"><Link href="/devis" className="hover:underline">Devis</Link> / {q.number}</p>

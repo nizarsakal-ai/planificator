@@ -8,6 +8,10 @@ import { CompanyForm } from "@/components/parametres/CompanyForm"
 import { SettingsForm } from "@/components/parametres/SettingsForm"
 import { GmailConnectionCard } from "@/components/parametres/GmailConnectionCard"
 import { AcquisitionGmailConnectionsCard } from "@/components/parametres/AcquisitionGmailConnectionsCard"
+import { CompanyIdentityCard } from "@/components/parametres/CompanyIdentityCard"
+import { FileBadge } from "lucide-react"
+import { getBillingSettings } from "@/lib/billing/settings"
+import { assessIssuerIdentity, issuerLegalFooter } from "@/lib/billing/company-identity"
 
 export const metadata: Metadata = { title: "Paramètres" }
 
@@ -28,6 +32,12 @@ export default async function ParametresPage({
   if (!company) redirect("/dashboard")
 
   const { gmail: gmailParam, acquisition_gmail: acquisitionGmailParam } = await searchParams
+
+  // 29/10/2026 — Identité et documents : logo géré + contrôle de complétude de l'identité juridique (devis / factures).
+  const billingSettings = await getBillingSettings(prisma, company.id)
+  const identityInput = { name: company.name, address: company.address, siret: company.siret, email: company.email, phone: company.phone, settings: billingSettings }
+  const identity = assessIssuerIdentity(identityInput)
+  const legalFooter = issuerLegalFooter(identityInput)
 
   // Statistiques rapides + connexions Gmail (Booking vs Acquisition)
   const [nbEmployes, nbEquipes, nbChantiers, gmailConnection, acquisitionGmailConnections] =
@@ -114,6 +124,25 @@ export default async function ParametresPage({
           </CardHeader>
           <CardContent>
             <SettingsForm settings={company.settings} />
+          </CardContent>
+        </Card>
+
+        {/* Identité et documents (29/10/2026) : logo par entreprise, identité juridique des devis et factures */}
+        <Card className="lg:col-span-2">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <FileBadge className="h-4 w-4" /> Identité et documents
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-6 lg:grid-cols-2">
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase text-slate-500">Logo de l&apos;entreprise</p>
+              <a href="/profil" className="text-sm text-blue-700 underline">Importer ou télécharger le logo depuis Mon profil</a>
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase text-slate-500">Identité juridique sur les devis et factures</p>
+              <CompanyIdentityCard assessment={identity} legalFooter={legalFooter} />
+            </div>
           </CardContent>
         </Card>
 
