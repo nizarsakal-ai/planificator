@@ -9,6 +9,7 @@ import { isBillingOcrEnabled } from "@/lib/billing/billing-feature-flag"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { supplierRowAction } from "@/lib/accounting/ui/supplier-row-action"
 
 export const metadata: Metadata = { title: "Comptabilité — Factures fournisseurs" }
 const STATUS: Record<string, { label: string; cls: string }> = { PENDING: { label: "À valider", cls: "bg-amber-50 text-amber-700" }, VALIDATED: { label: "Validée", cls: "bg-green-50 text-green-700" }, REJECTED: { label: "Rejetée", cls: "bg-red-50 text-red-600" } }
@@ -29,18 +30,30 @@ export default async function FournisseursPage({ searchParams }: { searchParams:
         <Button asChild><Link href="/comptabilite/fournisseurs/nouvelle">Scanner / importer une facture</Link></Button>
       </div>
       <p className="text-xs text-slate-500">Extraction automatique (OCR Claude) : {isBillingOcrEnabled() ? "activée" : "désactivée — saisie manuelle après import du fichier"}. Les valeurs extraites doivent toujours être vérifiées avant validation.</p>
+      {/* 29/10/2026 — découvrabilité (retour Nizar : « le bouton à côté de À valider ») : dans la cellule Statut, juste à côté du badge, un
+          bouton explicite OUVRE LA FICHE (« Vérifier / valider » pour une facture à valider, « Consulter » sinon). Aucune validation directe
+          depuis la liste ; les commandes « Valider et comptabiliser » / « Rejeter » restent sur la fiche. Tableau défilable horizontalement
+          sur petit écran ; la cellule Statut (badge + bouton) reste visible à toutes les largeurs : côte à côte dès `sm` (flex-nowrap),
+          bouton à libellé repliable et largeur bornée sur mobile. */}
       <Card><CardContent className="p-0">
-        <table className="w-full text-sm"><thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">Fournisseur</th><th className="px-3 py-2">N°</th><th className="px-3 py-2">Date</th><th className="px-3 py-2 text-right">HT</th><th className="px-3 py-2 text-right">TVA</th><th className="px-3 py-2 text-right">TTC</th><th className="hidden px-3 py-2 md:table-cell">Compte de charge</th><th className="px-3 py-2">Statut</th></tr></thead>
+        <div className="overflow-x-auto">
+        <table className="w-full text-sm"><thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">Fournisseur</th><th className="hidden px-3 py-2 sm:table-cell">N°</th><th className="hidden px-3 py-2 sm:table-cell">Date</th><th className="hidden px-3 py-2 text-right lg:table-cell">HT</th><th className="hidden px-3 py-2 text-right lg:table-cell">TVA</th><th className="px-3 py-2 text-right">TTC</th><th className="hidden px-3 py-2 md:table-cell">Compte de charge</th><th className="px-3 py-2">Statut</th></tr></thead>
           <tbody>
             {list.rows.length === 0 && <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400">Aucune facture fournisseur.</td></tr>}
             {list.rows.map((s) => <tr key={s.id} className="border-t hover:bg-slate-50">
-              <td className="px-3 py-2"><Link className="font-medium text-[#0f3460] hover:underline" href={`/comptabilite/fournisseurs/${s.id}`}>{s.supplier?.name ?? s.supplierName}</Link>{s.siret && <div className="text-xs text-slate-400">SIRET {s.siret}</div>}</td>
-              <td className="px-3 py-2">{s.number}</td><td className="px-3 py-2">{dateFr.format(s.date)}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{formatEuro(s.totalHTCents)}</td><td className="px-3 py-2 text-right tabular-nums">{formatEuro(s.vatCents)}</td><td className="px-3 py-2 text-right tabular-nums">{formatEuro(s.totalTTCCents)}</td>
+              <td className="px-3 py-2"><Link className="font-medium text-[#0f3460] hover:underline" href={`/comptabilite/fournisseurs/${s.id}`}>{s.supplier?.name ?? s.supplierName}</Link>{s.siret && <div className="text-xs text-slate-400">SIRET {s.siret}</div>}<div className="text-xs text-slate-500 sm:hidden">{s.number} · {dateFr.format(s.date)}</div></td>
+              <td className="hidden px-3 py-2 sm:table-cell">{s.number}</td><td className="hidden px-3 py-2 sm:table-cell">{dateFr.format(s.date)}</td>
+              <td className="hidden px-3 py-2 text-right tabular-nums lg:table-cell">{formatEuro(s.totalHTCents)}</td><td className="hidden px-3 py-2 text-right tabular-nums lg:table-cell">{formatEuro(s.vatCents)}</td><td className="px-3 py-2 text-right tabular-nums">{formatEuro(s.totalTTCCents)}</td>
               <td className="hidden px-3 py-2 md:table-cell">{s.expenseAccount ? `${s.expenseAccount.number} ${s.expenseAccount.label}` : s.category ? CATEGORY_LABEL[s.category] : "—"}</td>
-              <td className="px-3 py-2"><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS[s.status]?.cls}`}>{STATUS[s.status]?.label ?? s.status}</span>{s.paidAt && <div className="text-xs text-slate-400">payée {dateFr.format(s.paidAt)}</div>}</td>
+              <td className="px-3 py-2">{(() => { const a = supplierRowAction({ id: s.id, status: s.status, number: s.number, supplierName: s.supplier?.name ?? s.supplierName }); return (
+                <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:whitespace-nowrap">
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS[s.status]?.cls}`}>{STATUS[s.status]?.label ?? s.status}</span>
+                  <Button asChild size="sm" variant={a.variant} className="h-auto min-h-8 max-w-[9.5rem] whitespace-normal py-1 text-left leading-tight sm:max-w-none sm:whitespace-nowrap"><Link href={a.href} aria-label={a.ariaLabel}>{a.label}</Link></Button>
+                </div>
+              ) })()}{s.paidAt && <div className="mt-1 text-xs text-slate-400">payée {dateFr.format(s.paidAt)}</div>}</td>
             </tr>)}
           </tbody></table>
+        </div>
         {list.total > list.pageSize && <div className="flex justify-between border-t px-3 py-2 text-sm"><span>Page {list.page} / {Math.ceil(list.total / list.pageSize)}</span></div>}
       </CardContent></Card>
     </div>
