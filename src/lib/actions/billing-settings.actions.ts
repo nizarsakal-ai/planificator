@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { prisma } from "@/lib/prisma"
 import { BillingAccessError, billingAccessMessage, requireBillingAdmin } from "@/lib/billing/access"
+import { isPlausibleVatNumber, vatMatchesSiren } from "@/lib/billing/company-identity"
 
 const text = (max: number) => z.string().trim().max(max)
 const schema = z.object({
@@ -47,9 +48,13 @@ export async function saveClientBillingIdsAction(raw: unknown): Promise<{ ok: tr
   if (!p.success) return { ok: false, error: "Saisie invalide." }
   const siret = p.data.siret.replace(/\s/g, "")
   if (siret && !/^\d{9}$|^\d{14}$/.test(siret)) return { ok: false, error: "SIRET (14 chiffres) ou SIREN (9 chiffres) invalide." }
+  // 29/10/2026 — le numéro de TVA intracommunautaire n'est pas un SIRET : forme UE exigée (FR + 2 caractères + 9 chiffres du SIREN).
+  const vatNumber = p.data.vatNumber.replace(/\s/g, "").toUpperCase()
+  if (vatNumber && !isPlausibleVatNumber(vatNumber)) return { ok: false, error: /^\d+$/.test(vatNumber) ? "Ce numéro de TVA ressemble à un SIRET/SIREN : le numéro intracommunautaire commence par le code pays (ex. FR12 123 456 789)." : "Numéro de TVA intracommunautaire invalide (ex. FR12 123 456 789)." }
+  if (vatNumber && siret && vatMatchesSiren(vatNumber, siret) === false) return { ok: false, error: "Numéro de TVA incohérent avec le SIREN du client (les 9 derniers chiffres doivent être le SIREN)." }
   try {
     const ctx = await requireBillingAdmin()
-    const u = await prisma.client.updateMany({ where: { id: p.data.clientId, companyId: ctx.companyId }, data: { siret: siret || null, vatNumber: p.data.vatNumber ? p.data.vatNumber.replace(/\s/g, "").toUpperCase() : null } })
+    const u = await prisma.client.updateMany({ where: { id: p.data.clientId, companyId: ctx.companyId }, data: { siret: siret || null, vatNumber: vatNumber || null } })
     if (u.count !== 1) return { ok: false, error: "Client introuvable." }
     revalidatePath("/devis", "layout"); revalidatePath("/factures", "layout")
     return { ok: true }

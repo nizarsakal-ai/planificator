@@ -4,12 +4,15 @@ import { prisma } from "@/lib/prisma"
 import { requireBillingPage } from "@/lib/billing/access"
 import { DEFAULT_LATE_PENALTY_TEXT, getBillingSettings, sirenFromSiret } from "@/lib/billing/settings"
 import { BillingSettingsForm } from "@/components/factures/BillingSettingsForm"
+import { CompanyIdentityCard } from "@/components/parametres/CompanyIdentityCard"
+import { assessIssuerIdentity, issuerLegalFooter } from "@/lib/billing/company-identity"
 
 export const metadata: Metadata = { title: "Paramètres de facturation" }
 
 export default async function ParametresFacturationPage() {
   const ctx = await requireBillingPage()
-  const [s, company] = await Promise.all([getBillingSettings(prisma, ctx.companyId), prisma.company.findUnique({ where: { id: ctx.companyId }, select: { name: true, siret: true, address: true } })])
+  const [s, company] = await Promise.all([getBillingSettings(prisma, ctx.companyId), prisma.company.findUnique({ where: { id: ctx.companyId }, select: { name: true, siret: true, address: true, email: true, phone: true } })])
+  const identityInput = company ? { name: company.name, address: company.address, siret: company.siret, email: company.email, phone: company.phone, settings: s } : null
   const initial = {
     vatNumber: s.vatNumber ?? "", legalForm: s.legalForm ?? "", shareCapital: s.shareCapital ?? "", rcs: s.rcs ?? "", iban: s.iban ?? "", bic: s.bic ?? "",
     quoteValidityDays: s.quoteValidityDays, paymentTermsDays: s.paymentTermsDays, latePenaltyText: s.latePenaltyText ?? "", quoteFooter: s.quoteFooter ?? "", invoiceFooter: s.invoiceFooter ?? "",
@@ -21,6 +24,7 @@ export default async function ParametresFacturationPage() {
       <p className="text-sm text-slate-500"><Link href="/factures" className="hover:underline">Factures</Link> / Paramètres</p>
       <h1 className="text-2xl font-bold text-slate-900">Paramètres de facturation</h1>
       <p className="text-sm text-slate-600">Société : <strong>{company?.name}</strong>{company?.siret ? ` — SIRET ${company.siret} (SIREN ${siren ?? "invalide"})` : " — SIRET manquant (à renseigner dans Paramètres de l'entreprise : obligatoire sur les factures et pour le FEC)"}{company?.address ? "" : " — adresse manquante"}</p>
+      {identityInput && <div className="rounded-md border p-4"><CompanyIdentityCard assessment={assessIssuerIdentity(identityInput)} legalFooter={issuerLegalFooter(identityInput)} billingLink={false} /></div>}
       <BillingSettingsForm initial={initial} defaultPenalty={DEFAULT_LATE_PENALTY_TEXT} />
     </div>
   )
