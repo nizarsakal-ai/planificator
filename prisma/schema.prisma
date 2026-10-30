@@ -119,6 +119,9 @@ enum NotificationType {
   // Véhicules V3 — ajouts des lots isolés.
   VEHICLE_DOCUMENT_EXPIRING // V3 : document véhicule bientôt échu (rappel interne)
   VEHICLE_DOCUMENT_EXPIRED  // V3 : document véhicule expiré (rappel interne)
+
+  // SPEC-WORKSITE-PHOTOS-001 — Photos d'engins.
+  WORKSITE_PHOTO_UNSENT     // Photo d'engin non envoyée au client à J+7 (alerte administrateurs, jamais de purge)
 }
 
 enum AccommodationStatus {
@@ -424,6 +427,13 @@ model Company {
   vehicleDocumentReminderSetting VehicleDocumentReminderSetting?
   vehicleDocumentReminders    VehicleDocumentReminder[]
   vehicleAuditLogs            VehicleAuditLog[]
+
+  // SPEC-WORKSITE-PHOTOS-001 — photos d'engins (relations inverses, sans effet SQL).
+  worksiteTruckPhotos             WorksiteTruckPhoto[]
+  worksitePhotoUploadReservations WorksitePhotoUploadReservation[]
+  worksitePhotoEvents             WorksitePhotoEvent[]
+  worksitePhotoDriveConnection    WorksitePhotoDriveConnection?
+  worksitePhotoDriveFolders       WorksitePhotoDriveFolder[]
 }
 
 // Paramètres de l'entreprise — extensible sans toucher au schéma principal
@@ -1018,11 +1028,14 @@ model Worksite {
   completedAt DateTime?      // date de passage au statut COMPLETED
   archivedAt  DateTime?      // date d'archivage effectif
   delayedUntil DateTime?     // date de décalage (statut DELAYED)
+  // SPEC-WORKSITE-PHOTOS-001 D6 — contact client (e-mail) renseigné par l'agent Hermes ; nullable.
+  clientContact String?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
   // Relations
   client       Client        @relation(fields: [clientId], references: [id])
+  truckPhotos  WorksiteTruckPhoto[]
   company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   documents    Document[]
   assignments  Assignment[]
@@ -1604,6 +1617,9 @@ model Truck {
   vehicleDocuments         VehicleDocument[]
   vehicleDocumentVersions  VehicleDocumentVersion[]
   vehicleDocumentReminders VehicleDocumentReminder[]
+
+  // SPEC-WORKSITE-PHOTOS-001 — photos d'engins (relation inverse, sans effet SQL).
+  worksitePhotos WorksiteTruckPhoto[]
 }
 
 // Entretien V2 : journal séparé du kilométrage ; les interventions ne changent pas le compteur.
@@ -3144,4 +3160,186 @@ model VatDeclaration {
 
   @@unique([companyId, periodStart, periodEnd])
   @@map("vat_declarations")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHOTOS D'ENGINS — SPEC-WORKSITE-PHOTOS-001 (ADR-PLAN-005), Lot 1
+// Isolation : companyId partout, FK composites RESTRICT. Aucune URL Drive persistée.
+// Les auteurs sont des identifiants scalaires avec snapshot de nom (pas de FK users).
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum WorksitePhotoPhase {
+  BEFORE // Avant chantier
+  AFTER  // Après chantier
+}
+
+enum WorksitePhotoStatus {
+  PENDING // en attente d'envoi par Hermes
+  SENT    // envoyée (preuve d'envoi complète et figée)
+  DELETED // corbeille Drive confirmée (uniquement depuis SENT)
+}
+
+enum WorksitePhotoReservationState {
+  RESERVED  // clé réservée, identifiant Drive préalloué, aucun octet envoyé
+  UPLOADING // tentative détentrice du bail en cours d'envoi vers Drive
+  COMMITTED // photo rattachée (terminal)
+  ABANDONED // bail expiré ou échec applicatif ; non réutilisable ; surveillé sans limite de durée
+  CLEANING  // nettoyage exclusif par le cron de réconciliation
+  CLOSED    // suppression distante confirmée, ou clôture motivée par un administrateur (terminal)
+}
+
+enum WorksitePhotoReservationCloseReason {
+  FILE_DELETED
+  OPERATOR
+}
+
+enum WorksitePhotoDriveFolderState {
+  RESERVED
+  CREATED
+}
+
+enum WorksitePhotoDriveConnectionStatus {
+  ACTIVE
+  ERROR        // refresh refusé par Google (invalid_grant), quelle qu'en soit la cause
+  DISCONNECTED // tokens effacés localement ; aucune révocation Google (D16)
+}
+
+model WorksiteTruckPhoto {
+  id                     String              @id // = reservation.photoId, attribué à la réservation (D15)
+  companyId              String
+  worksiteId             String
+  truckId                String
+  reservationId          String              @unique
+  phase                  WorksitePhotoPhase
+  status                 WorksitePhotoStatus @default(PENDING)
+  driveFileId            String              // identifiant Drive opaque préalloué ; jamais d'URL
+  drivePath              String              // snapshot du chemin logique /Chantiers/<client>-<chantier>~<id6>/<yyyy-MM-dd>/<fichier>
+  originalFilename       String
+  mimeType               String              // image/jpeg | image/png, issu des magic bytes
+  sizeBytes              Int
+  sha256                 String              @db.Char(64)
+  takenAt                DateTime?           @db.Timestamptz(3) // déclaré par le client, informatif
+  uploadedAt             DateTime            @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  uploadedById           String              // identifiant scalaire sans FK (patron Task.createdById)
+  uploadedByNameSnapshot String
+  // Preuve d'envoi déclarée par Hermes (D17) : complète et non vide pour SENT/DELETED, figée après SENT.
+  sentAt                 DateTime?           @db.Timestamptz(3)
+  sentByAgent            String?
+  sentTo                 String?
+  sentMessageId          String?
+  sentTransportKind      String?             // smtp | provider:<nom>
+  sentTransportRef       String?
+  // Suppression en deux phases : demande en base, corbeille Drive, confirmation ; purge différée.
+  trashRequestedAt       DateTime?           @db.Timestamptz(3)
+  trashedAt              DateTime?           @db.Timestamptz(3)
+  purgedAt               DateTime?           @db.Timestamptz(3)
+  unsentAlertedAt        DateTime?           @db.Timestamptz(3)
+
+  company     Company                        @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  worksite    Worksite                       @relation(fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  truck       Truck                          @relation(fields: [truckId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  reservation WorksitePhotoUploadReservation @relation(fields: [reservationId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  events      WorksitePhotoEvent[]
+
+  @@unique([id, companyId])
+  @@unique([reservationId, companyId])
+  @@unique([companyId, driveFileId])
+  @@index([companyId, worksiteId, status, uploadedAt])
+  @@index([status, uploadedAt])
+  @@map("worksite_truck_photos")
+}
+
+model WorksitePhotoUploadReservation {
+  id                 String                               @id @default(cuid())
+  companyId          String
+  idempotencyKey     String                               @db.Uuid
+  requestHash        String                               @db.Char(64)
+  worksiteId         String
+  truckId            String
+  uploadedById       String
+  photoId            String                               @unique // devient l'id de la photo au commit
+  driveFileId        String                               @unique // préalloué par files.generateIds (D15)
+  state              WorksitePhotoReservationState        @default(RESERVED)
+  attemptGeneration  Int                                  @default(1)
+  attemptOwner       String                               @db.Uuid
+  leaseExpiresAt     DateTime                             @db.Timestamptz(3)
+  driveFileCreatedAt DateTime?                            @db.Timestamptz(3)
+  abandonedAt        DateTime?                            @db.Timestamptz(3)
+  lastRemoteCheckAt  DateTime?                            @db.Timestamptz(3)
+  remoteCheckCount   Int                                  @default(0)
+  unresolvedAlertedAt DateTime?                           @db.Timestamptz(3)
+  closedAt           DateTime?                            @db.Timestamptz(3)
+  closeReason        WorksitePhotoReservationCloseReason?
+  closeNote          String?
+  createdAt          DateTime                             @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  updatedAt          DateTime                             @updatedAt @db.Timestamptz(3)
+
+  company Company             @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  photo   WorksiteTruckPhoto?
+
+  @@unique([companyId, idempotencyKey])
+  @@unique([id, companyId])
+  @@index([state, leaseExpiresAt])
+  @@index([state, lastRemoteCheckAt])
+  @@map("worksite_photo_upload_reservations")
+}
+
+model WorksitePhotoEvent {
+  id                String   @id @default(cuid())
+  companyId         String
+  photoId           String?
+  worksiteId        String?
+  action            String   // RESERVED | UPLOAD_SUPERSEDED | UPLOADED | SENT | TRASH_REQUESTED | TRASHED | PURGED | CONTACT_SET | UNSENT_ALERT | ACCESS_GRANTED | ACCESS_DENIED | FILE_MISSING | CLEANUP_FAILED | UNRESOLVED_ABANDON | OPERATOR_CLOSE | RECONCILED
+  actorKind         String   // USER | AGENT | SYSTEM
+  actorId           String
+  actorNameSnapshot String
+  outcome           String   // DONE | FAILED | GRANTED | DENIED
+  detail            Json?    // jamais d'URL ni de secret
+  createdAt         DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+
+  company Company             @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  photo   WorksiteTruckPhoto? @relation(fields: [photoId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([companyId, photoId, createdAt])
+  @@index([companyId, worksiteId, createdAt])
+  @@map("worksite_photo_events")
+}
+
+model WorksitePhotoDriveConnection {
+  id             String                             @id @default(cuid())
+  companyId      String                             @unique
+  accountEmail   String
+  accessToken    String                             // chiffré AES-256-GCM (src/lib/encryption.ts)
+  refreshToken   String                             // chiffré AES-256-GCM
+  tokenExpiry    DateTime                           @db.Timestamptz(3)
+  rootFolderId   String?                            // dossier racine « Chantiers » créé par l'application (scope drive.file)
+  status         WorksitePhotoDriveConnectionStatus @default(ACTIVE)
+  lastErrorCode  String?
+  lastErrorAt    DateTime?                          @db.Timestamptz(3)
+  connectedById  String
+  connectedAt    DateTime                           @default(now()) @db.Timestamptz(3)
+  disconnectedAt DateTime?                          @db.Timestamptz(3)
+  updatedAt      DateTime                           @updatedAt @db.Timestamptz(3)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("worksite_photo_drive_connections")
+}
+
+model WorksitePhotoDriveFolder {
+  id            String                        @id @default(cuid())
+  companyId     String
+  // Identité du dossier : racine (worksiteId et day nuls), chantier (day nul), jour. Sentinelles pour l'unicité : voir migration.
+  worksiteId    String?
+  day           DateTime?                     @db.Date
+  driveFolderId String                        @unique // préalloué par files.generateIds, création idempotente
+  path          String                        // libellé décoratif tel que créé
+  state         WorksitePhotoDriveFolderState @default(RESERVED)
+  createdAt     DateTime                      @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  // Unicité par identité avec NULLS NOT DISTINCT (PostgreSQL ≥ 15) : posée en SQL dans la migration.
+  @@unique([companyId, worksiteId, day])
+  @@map("worksite_photo_drive_folders")
 }

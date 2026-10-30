@@ -13,7 +13,7 @@ import {
   getNavItems,
   getActiveNavHref,
   withAccountingNavItem,
-  withBillingNavItems, withSupplierIntakeNavItem,
+  withBillingNavItems, withSupplierIntakeNavItem, withWorksitePhotosNavItem,
   ROLE_LABELS,
   type NavItem,
 } from "@/lib/navigation/nav-config"
@@ -33,6 +33,8 @@ interface SidebarUser {
   /** Lot C : lien « Devis » (drapeau BILLING_COMPLETE_ENABLED) ; affichage seulement. */
   billingNavVisible?: boolean
   supplierIntakeNavVisible?: boolean
+  /** Photos d'engins (SPEC-WORKSITE-PHOTOS-001) : drapeau serveur + rôle interne ; affichage seulement. */
+  worksitePhotosNavVisible?: boolean
 }
 
 // ─── Composant NavItem ────────────────────────────────────────────────────────
@@ -69,7 +71,7 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 
 export function Sidebar({ user }: { user: SidebarUser }) {
   const pathname = usePathname()
-  const navItems = withSupplierIntakeNavItem(withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true), user.supplierIntakeNavVisible === true)
+  const navItems = withWorksitePhotosNavItem(withSupplierIntakeNavItem(withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true), user.supplierIntakeNavVisible === true), user.worksitePhotosNavVisible === true)
   const activeHref = getActiveNavHref(navItems, pathname)
 
   return (

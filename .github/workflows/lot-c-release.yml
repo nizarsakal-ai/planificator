@@ -86,6 +86,15 @@ jobs:
             name="ci_${suite//:/_}"
             sh tests/billing/pg/with-disposable-db.sh "$name" npm run -s "$suite" | tee "ci-evidence/${name}.log"
           done
+      - name: Worksite photos (unit and disposable PostgreSQL)
+        env:
+          NODE_ENV: test
+        run: |
+          set -o pipefail
+          npm run -s test:worksite-photos | tee ci-evidence/worksite-photos.log
+          # Base jetable DÉDIÉE (le test de migration exécute ROLLBACK.sql puis redéploie) ; DATABASE_URL vidé pour le seul
+          # processus de test, afin que le garde-fou WORKSITE_PHOTOS_TEST_DATABASE_URL ≠ DATABASE_URL reste actif.
+          sh tests/billing/pg/with-disposable-db.sh ci_worksite_photos sh -c 'WORKSITE_PHOTOS_TEST_DATABASE_URL="$DATABASE_URL" DATABASE_URL= npm run -s test:worksite-photos:pg' | tee ci-evidence/worksite-photos-pg.log
       - name: Legacy migration and precheck scenarios
         env:
           NODE_ENV: test
