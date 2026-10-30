@@ -1,4 +1,5 @@
 import { assertMutationOrigin } from "../request-origin"
+import { readBoundedBodyBytes } from "@/lib/http/bounded-body"
 /**
  * Véhicules V3 — aides HTTP communes aux routes privées.
  * Réponses `private, no-store`, codes d'erreur contrôlés (jamais de message SQL),
@@ -38,25 +39,8 @@ export function idempotencyKeyOf(request: Request): string | null {
 
 /** Corps réellement borné avant concaténation/parsing ; Content-Length n'est jamais une preuve de taille. */
 export async function readV3BodyBytes(request: Request, maxBytes: number, sizeCode = "PAYLOAD_TOO_LARGE"): Promise<Uint8Array> {
-  const length = request.headers.get("content-length")
-  if (length !== null && (!/^\d+$/.test(length) || !Number.isSafeInteger(Number(length)))) throw new MileageDomainError("INVALID_CONTENT_LENGTH", 400)
-  if (length !== null && Number(length) > maxBytes) throw new MileageDomainError(sizeCode, 413)
-  if (!request.body) throw new MileageDomainError("INVALID_PAYLOAD", 400)
-  const reader = request.body.getReader(), chunks: Uint8Array[] = []
-  let size = 0
-  try {
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) break
-      size += value.byteLength
-      if (size > maxBytes) { await reader.cancel(); throw new MileageDomainError(sizeCode, 413) }
-      chunks.push(value)
-    }
-  } finally { reader.releaseLock() }
-  const result = new Uint8Array(size)
-  let offset = 0
-  for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.byteLength }
-  return result
+  // Implémentation partagée dans src/lib/http/bounded-body.ts (SPEC-WORKSITE-PHOTOS-001 Lot 1) ; erreur V3 conservée.
+  return readBoundedBodyBytes(request, maxBytes, { sizeCode, reject: (code, status) => { throw new MileageDomainError(code, status) } })
 }
 
 export async function v3JsonBody(request: Request): Promise<Record<string, unknown>> {
