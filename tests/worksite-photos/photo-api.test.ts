@@ -93,17 +93,48 @@ describe("POST upload", () => {
     assert.equal(res.status, 403)
     assert.equal(((await res.json()) as { code: string }).code, "INVALID_ORIGIN")
   })
+  /**
+   * Corps de requête CONTRÔLÉ, pour prouver la non-consommation : `pull` ne se déclenche que sur une lecture effective
+   * (highWaterMark 0, jamais à la construction) et `cancel` enregistre l'annulation, après laquelle la source ne produit plus rien.
+   * Un corps issu d'un `FormData` ne convient pas ici : sous Node 24, undici continue de le sérialiser après `cancel()` et écrit
+   * dans un flux fermé (ERR_INVALID_STATE en rejet non géré, après la fin du test). Les octets multipart restent réels.
+   */
+  async function controlledMultipart(parts: Parameters<typeof multipart>[0]) {
+    const form = new FormData()
+    for (const p of parts) typeof p.value === "string" ? form.append(p.name, p.value) : form.append(p.name, new Blob([p.value.slice()], { type: p.type ?? "image/jpeg" }), p.filename ?? "photo.jpg")
+    const encoded = new Response(form) // sérialisation complète AVANT la requête : aucune écriture différée
+    const contentType = encoded.headers.get("content-type")!
+    const bytes = new Uint8Array(await encoded.arrayBuffer())
+    const state = { read: false, cancelled: false }
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) { state.read = true; controller.enqueue(bytes); controller.close() },
+      cancel() { state.cancelled = true },
+    }, { highWaterMark: 0 })
+    const request = new Request("https://app.example.test/api/worksite-photos/worksites/w1/trucks/t1", {
+      method: "POST", headers: { ...ORIGIN, "Content-Type": contentType, "Idempotency-Key": "11111111-1111-4111-8111-111111111111" }, body, duplex: "half",
+    } as RequestInit)
+    return { request, state }
+  }
+
   it("pré-autorisation refusée ⇒ le flux n'est PAS consommé (chantier inconnu, engin inconnu)", async () => {
-    let read = false
-    // highWaterMark 0 : `pull` ne se déclenche que sur une lecture effective (jamais à la construction).
-    const body = new ReadableStream<Uint8Array>({ pull() { read = true } }, { highWaterMark: 0 })
-    const req = new Request("https://app.example.test/api/x", { method: "POST", headers: { ...ORIGIN, "Content-Type": "multipart/form-data; boundary=x" }, body, duplex: "half" } as RequestInit)
-    const res = await handlePhotoUpload(req, { worksiteId: "w-inconnu", truckId: "t1" }, deps(admin))
+    const parts = [{ name: "payload", value: JSON.stringify({ phase: "BEFORE" }) }, { name: "file", value: JPEG }]
+    const unknownWorksite = await controlledMultipart(parts)
+    const res = await handlePhotoUpload(unknownWorksite.request, { worksiteId: "w-inconnu", truckId: "t1" }, deps(admin))
     assert.equal(res.status, 404)
     assert.equal(((await res.json()) as { code: string }).code, "WORKSITE_NOT_FOUND")
-    assert.equal(read, false, "aucun octet lu")
-    const res2 = await handlePhotoUpload(multipart([{ name: "payload", value: "{}" }, { name: "file", value: JPEG }]), { worksiteId: "w1", truckId: "t-inconnu" }, deps(admin))
+    assert.equal(unknownWorksite.state.read, false, "aucun octet lu")
+    assert.equal(unknownWorksite.state.cancelled, true, "corps annulé sans lecture")
+    const unknownTruck = await controlledMultipart(parts)
+    const res2 = await handlePhotoUpload(unknownTruck.request, { worksiteId: "w1", truckId: "t-inconnu" }, deps(admin))
     assert.equal(res2.status, 404)
+    assert.equal(((await res2.json()) as { code: string }).code, "TRUCK_NOT_FOUND")
+    assert.equal(unknownTruck.state.read, false, "aucun octet lu")
+    assert.equal(unknownTruck.state.cancelled, true, "corps annulé sans lecture")
+    // Témoin : sans refus, le même corps contrôlé est bien lu (le double ne fait pas passer le test par construction).
+    const accepted = await controlledMultipart([{ name: "payload", value: JSON.stringify({ phase: "BEFORE", worksiteId: "w1", truckId: "t1" }) }, { name: "file", value: JPEG }])
+    const ok = await handlePhotoUpload(accepted.request, { worksiteId: "w1", truckId: "t1" }, deps(admin))
+    assert.equal(ok.status, 201)
+    assert.equal(accepted.state.read, true, "le corps accepté est lu")
   })
   it("nominal ⇒ 201, reçu sans identifiant Drive, Idempotency-Replayed=false ; rejeu ⇒ 201 Idempotency-Replayed=true", async () => {
     const d = deps(admin)
