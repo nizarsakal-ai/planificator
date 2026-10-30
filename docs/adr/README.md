@@ -2,7 +2,7 @@
 
 | Champ | Valeur |
 |-------|--------|
-| **Statut** | Guide — aucun ADR listé ici |
+| **Statut** | Guide et index des ADR du dépôt |
 | **Audience** | Contributeurs, architecture |
 | **Norme** | [ENGINEERING-STANDARD-001](../constitution/ENGINEERING-STANDARD-001.md) §21 |
 
@@ -83,3 +83,4 @@ Un ADR **DOIT** contenir au minimum (ES-001-§21.2) :
 | ID | Titre | Statut |
 |----|-------|--------|
 | [ADR-PLAN-003](ADR-PLAN-003-comptabilite-partie-double.md) | Comptabilité en partie double native, multi-société | Proposé |
+| [ADR-PLAN-005](ADR-PLAN-005-photos-engins-drive-oauth-agent.md) | Photos d'engins : stockage Drive par OAuth utilisateur, upload par proxy borné, agent externe à jeton dédié | Accepté |
