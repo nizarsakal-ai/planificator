@@ -37,8 +37,16 @@ export interface DriveApiClient {
   createFolder(accessToken: string, input: CreateFolderInput): Promise<DriveFileMetadata>
   createFile(accessToken: string, input: CreateFileInput): Promise<DriveFileMetadata>
   getFile(accessToken: string, fileId: string): Promise<DriveFileMetadata>
+  /** Contenu du fichier (`alt=media`) en flux ; l'appelant le relaie sans jamais exposer d'URL Drive. */
+  downloadFile(accessToken: string, fileId: string): Promise<DriveDownload>
   trashFile(accessToken: string, fileId: string): Promise<void>
   deleteFile(accessToken: string, fileId: string): Promise<void>
+}
+
+export interface DriveDownload {
+  stream: ReadableStream<Uint8Array>
+  contentType: string | null
+  contentLength: number | null
 }
 
 const FIELDS = "id,name,mimeType,size,md5Checksum,trashed,parents"
@@ -115,6 +123,19 @@ export class FetchDriveApiClient implements DriveApiClient {
   async getFile(accessToken: string, fileId: string): Promise<DriveFileMetadata> {
     const response = await this.call(accessToken, `${DRIVE_BASE}/files/${encodeURIComponent(fileId)}?fields=${encodeURIComponent(FIELDS)}`, { method: "GET" })
     return toMetadata(await this.json(response))
+  }
+
+  async downloadFile(accessToken: string, fileId: string): Promise<DriveDownload> {
+    const response = await this.call(accessToken, `${DRIVE_BASE}/files/${encodeURIComponent(fileId)}?alt=media`, { method: "GET" })
+    if (!response.body) throw new DriveProviderError("DRIVE_INVALID_RESPONSE", 502, false)
+    const length = response.headers.get("content-length")
+    // `fetch` décode un corps `Content-Encoding` à la volée : la longueur annoncée ne décrit alors plus le flux rendu.
+    const encoded = (response.headers.get("content-encoding") ?? "identity").toLowerCase() !== "identity"
+    return {
+      stream: response.body,
+      contentType: response.headers.get("content-type"),
+      contentLength: !encoded && length !== null && /^\d+$/.test(length) ? Number(length) : null,
+    }
   }
 
   async trashFile(accessToken: string, fileId: string): Promise<void> {

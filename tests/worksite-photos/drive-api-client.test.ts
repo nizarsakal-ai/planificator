@@ -100,6 +100,20 @@ describe("FetchDriveApiClient", () => {
     }
   })
 
+  it("downloadFile : alt=media, flux et longueur ; longueur ignorée si le corps est encodé (gzip)", async () => {
+    const { calls, fetchImpl } = fakeFetch((_c, i) => new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: i === 0
+      ? { "Content-Type": "image/jpeg", "Content-Length": "3" }
+      : { "Content-Type": "image/jpeg", "Content-Length": "3", "Content-Encoding": "gzip" } }))
+    const client = new FetchDriveApiClient(fetchImpl)
+    const plain = await client.downloadFile("tok", "f 1")
+    assert.match(calls[0].url, /\/files\/f%201\?alt=media$/)
+    assert.equal(calls[0].init.method, "GET")
+    assert.deepEqual([plain.contentType, plain.contentLength], ["image/jpeg", 3])
+    assert.deepEqual(Array.from(new Uint8Array(await new Response(plain.stream).arrayBuffer())), [1, 2, 3])
+    const encoded = await client.downloadFile("tok", "f2")
+    assert.equal(encoded.contentLength, null)
+    assert.equal((await expectDriveError(new FetchDriveApiClient(fakeFetch(() => googleError(404, "notFound")).fetchImpl).downloadFile("tok", "nope"))).code, "DRIVE_NOT_FOUND")
+  })
   it("getFile / trashFile / deleteFile : verbes et champs", async () => {
     const { calls, fetchImpl } = fakeFetch((call) => call.init.method === "GET"
       ? ok({ id: "f", name: "n", mimeType: "image/jpeg", trashed: true })

@@ -161,6 +161,16 @@ describe("dossiers Drive par identité", () => {
     assert.equal(state.rows.length, 1)
     assert.equal(state.rows[0].driveFolderId, "gen-1")
   })
+  it("identité DATE incohérente avec le libellé du jour ⇒ refus avant tout appel (contrat jour civil, L3-R3)", async () => {
+    const { db, state } = fakeDb()
+    const { drive, calls } = fakeDrive()
+    await assert.rejects(
+      resolvePhotoFolders({ db, drive, accessToken: "tok", companyId: "c1", rootFolderId: null }, { worksiteId: "w1", worksiteLabel: "L", day: new Date("2026-10-30T23:30:00.000Z"), dayLabel: "2026-10-31" }),
+      /identité de dossier 2026-10-30 incohérente avec le libellé 2026-10-31/,
+    )
+    assert.deepEqual(calls, [])
+    assert.equal(state.rows.length, 0)
+  })
   it("erreur Drive autre que 404/409 remonte telle quelle (aucune suppression de ligne)", async () => {
     const { db, state } = fakeDb([{ id: "row-r", companyId: "c1", worksiteId: null, day: null, driveFolderId: "root", path: "Chantiers", state: "CREATED" }])
     const { drive } = fakeDrive()

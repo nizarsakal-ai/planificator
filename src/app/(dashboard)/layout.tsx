@@ -10,6 +10,7 @@ import { InstallPrompt } from "@/components/pwa/InstallPrompt"
 import { isAccountingModuleEnabled } from "@/lib/accounting/accounting-feature-flag"
 import { isAccountingNavVisible } from "@/lib/accounting/access/accounting-access.core"
 import { isBillingCompleteEnabled } from "@/lib/billing/billing-feature-flag"
+import { isWorksitePhotosEnabled } from "@/lib/worksite-photos/feature-flag"
 import type { Role } from "@prisma/client"
 
 export default async function DashboardLayout({
@@ -36,11 +37,13 @@ export default async function DashboardLayout({
   // Lien « Devis » (Lot C) : drapeau serveur + rôle ADMIN/SUPER_ADMIN + société ; affichage seulement.
   const billingNavVisible = isBillingCompleteEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
   const supplierIntakeNavVisible = !!(await resolveSupplierIntakeAccess())
+  // Photos d'engins (SPEC-WORKSITE-PHOTOS-001) : drapeau serveur + rôle interne + société ; affichage seulement.
+  const worksitePhotosNavVisible = isWorksitePhotosEnabled() && ["EMPLOYEE", "TEAM_LEADER", "ADMIN", "SUPER_ADMIN"].includes(role) && !!companyId
   const company = companyId ? await prisma.company.findUnique({
     where: { id: companyId }, select: { name: true, logoUrl: true },
   }) : null
   const companyLogo = logoForPdf(company?.logoUrl)
-  const user = { ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, companyLogo, companyName: company?.name }
+  const user = { ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, worksitePhotosNavVisible, companyLogo, companyName: company?.name }
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">

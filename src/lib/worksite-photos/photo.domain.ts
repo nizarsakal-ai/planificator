@@ -185,6 +185,12 @@ export function civilDayLabel(instant: Date, timeZone: string): string {
   return businessDay(instant, timeZone).toISOString().slice(0, 10)
 }
 
+/** Identité DATE d'un jour civil (`yyyy-MM-dd` ⇒ minuit UTC de ce jour) : la clé SQL du dossier du jour suit le libellé, jamais l'instant brut. */
+export function civilDayDate(dayLabel: string): Date {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayLabel)) throw new WorksitePhotoDomainError("SERVER_ERROR", 500)
+  return new Date(`${dayLabel}T00:00:00.000Z`)
+}
+
 /** Nom de fichier Drive : `<yyyyMMdd-HHmmss>_<matricule>_<AVANT|APRES>_<id8>.<ext>` (heure civile du fuseau). */
 export function photoFileName(input: { instant: Date; timeZone: string; matricule: string; phase: PhotoPhase; photoId: string; extension: string }): string {
   const parts = new Intl.DateTimeFormat("en-US", {

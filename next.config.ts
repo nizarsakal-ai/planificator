@@ -24,6 +24,10 @@ const withPWA = withPWAInit({
         || url.pathname === "/factures" || url.pathname.startsWith("/factures/")
         || url.pathname === "/factures-fournisseurs" || url.pathname.startsWith("/factures-fournisseurs/")
         || url.pathname === "/comptabilite" || url.pathname.startsWith("/comptabilite/")
+        // Photos d'engins (SPEC-WORKSITE-PHOTOS-001) : page et API privées, fichiers par proxy — jamais de cache SW.
+        || url.pathname === "/photos-engins" || url.pathname.startsWith("/photos-engins/")
+        || url.pathname === "/api/worksite-photos" || url.pathname.startsWith("/api/worksite-photos/")
+        || url.pathname.startsWith("/api/auth/drive")
       ),
       handler: "NetworkOnly",
       method: "GET",

@@ -115,6 +115,10 @@ export interface ResolvedPhotoFolders { rootId: string; worksiteFolderId: string
  */
 export async function resolvePhotoFolders(deps: DriveFoldersDeps, input: { worksiteId: string; worksiteLabel: string; day: Date; dayLabel: string }): Promise<ResolvedPhotoFolders> {
   const dayIdentity: FolderIdentity = { worksiteId: input.worksiteId, day: normalizeDay(input.day) }
+  // Contrat : l'identité DATE et le libellé désignent le MÊME jour civil (sinon un dossier porterait les photos d'un autre jour).
+  if (dayIdentity.day!.toISOString().slice(0, 10) !== input.dayLabel) {
+    throw new Error(`WORKSITE_PHOTOS: identité de dossier ${dayIdentity.day!.toISOString().slice(0, 10)} incohérente avec le libellé ${input.dayLabel}`)
+  }
   const cachedDay = await findByIdentity(deps, dayIdentity)
   if (cachedDay?.state === "CREATED") {
     const [cachedRoot, cachedWorksite] = await Promise.all([

@@ -32,6 +32,7 @@ import {
   Truck,
   Mail,
   Calculator,
+  Camera,
 } from "lucide-react"
 
 export interface NavItem {
@@ -193,6 +194,18 @@ export const ROLE_LABELS: Record<Role, string> = {
   TEAM_LEADER: "Chef d'équipe",
   EMPLOYEE: "Employé",
   CLIENT: "Client",
+}
+
+/**
+ * SPEC-WORKSITE-PHOTOS-001 — entrée « Photos engins » (drapeau serveur PLANIFICATOR_WORKSITE_PHOTOS_ENABLED, rôles internes).
+ * Affichage seulement : chaque route du module refuse côté serveur.
+ */
+export function withWorksitePhotosNavItem(items: readonly NavItem[], visible: boolean): NavItem[] {
+  const result = [...items]
+  if (visible !== true || result.some(i => i.href === "/photos-engins")) return result
+  const chantiers = result.findIndex(i => i.href === "/chantiers")
+  result.splice(chantiers < 0 ? result.length : chantiers + 1, 0, { label: "Photos engins", href: "/photos-engins", icon: Camera })
+  return result
 }
 
 /** Supplemental, server-resolved intake capability. Visibility never authorizes an action. */
