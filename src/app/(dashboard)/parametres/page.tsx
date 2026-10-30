@@ -8,6 +8,8 @@ import { CompanyForm } from "@/components/parametres/CompanyForm"
 import { SettingsForm } from "@/components/parametres/SettingsForm"
 import { GmailConnectionCard } from "@/components/parametres/GmailConnectionCard"
 import { AcquisitionGmailConnectionsCard } from "@/components/parametres/AcquisitionGmailConnectionsCard"
+import { WorksitePhotosDriveCard } from "@/components/parametres/WorksitePhotosDriveCard"
+import { isWorksitePhotosEnabled } from "@/lib/worksite-photos/feature-flag"
 import { CompanyIdentityCard } from "@/components/parametres/CompanyIdentityCard"
 import { FileBadge } from "lucide-react"
 import { getBillingSettings } from "@/lib/billing/settings"
@@ -18,7 +20,7 @@ export const metadata: Metadata = { title: "Paramètres" }
 export default async function ParametresPage({
   searchParams,
 }: {
-  searchParams: Promise<{ gmail?: string; acquisition_gmail?: string }>
+  searchParams: Promise<{ gmail?: string; acquisition_gmail?: string; drive?: string; reason?: string }>
 }) {
   const session = await auth()
   if (!session?.user) redirect("/login")
@@ -31,7 +33,16 @@ export default async function ParametresPage({
 
   if (!company) redirect("/dashboard")
 
-  const { gmail: gmailParam, acquisition_gmail: acquisitionGmailParam } = await searchParams
+  const { gmail: gmailParam, acquisition_gmail: acquisitionGmailParam, drive: driveParam, reason: reasonParam } = await searchParams
+
+  // SPEC-WORKSITE-PHOTOS-001 Lot 2 — connexion Drive des photos d'engins (carte visible seulement drapeau actif ; le serveur refuse de toute façon).
+  const worksitePhotosEnabled = isWorksitePhotosEnabled()
+  const driveConnection = worksitePhotosEnabled
+    ? await prisma.worksitePhotoDriveConnection.findUnique({
+        where: { companyId: company.id },
+        select: { accountEmail: true, status: true, connectedAt: true, lastErrorCode: true },
+      })
+    : null
 
   // 29/10/2026 — Identité et documents : logo géré + contrôle de complétude de l'identité juridique (devis / factures).
   const billingSettings = await getBillingSettings(prisma, company.id)
@@ -154,6 +165,11 @@ export default async function ParametresPage({
           connections={acquisitionGmailConnections}
           acquisitionGmailParam={acquisitionGmailParam}
         />
+
+        {/* Photos d'engins — connexion Google Drive (drapeau serveur) */}
+        {worksitePhotosEnabled && (
+          <WorksitePhotosDriveCard connection={driveConnection} driveParam={driveParam} reasonParam={reasonParam} />
+        )}
       </div>
     </div>
   )
