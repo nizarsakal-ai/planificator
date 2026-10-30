@@ -12,6 +12,7 @@ import { readV3BodyBytes } from "@/lib/vehicules/v3/v3-http"
 import { MileageDomainError } from "@/lib/vehicules/mileage-domain"
 import { detectMagicMime } from "@/lib/files/magic-mime"
 import { detectMagicMime as vehiclesDetectMagicMime } from "@/lib/vehicules/v3/document-domain"
+import { testEnv } from "./test-env"
 
 function request(headers: Record<string, string>, body: BodyInit | null = null, url = "https://app.example.test/api/x"): Request {
   return new Request(url, { method: "POST", headers, body })
@@ -39,9 +40,9 @@ describe("request-origin partagé", () => {
     assert.equal(guard(() => assertMutationOrigin(request({ host: "app.example.test", origin: "https://evil.example.test" }), "ORIGINE_REFUSEE")).code, "ORIGINE_REFUSEE")
   })
   it("origines de confiance (coque Capacitor) via PLANIFICATOR_TRUSTED_ORIGINS ; X-Forwarded-* sans autorité", () => {
-    const env = { PLANIFICATOR_TRUSTED_ORIGINS: "capacitor://localhost, https://autre.example.test" }
+    const env = testEnv({ PLANIFICATOR_TRUSTED_ORIGINS: "capacitor://localhost, https://autre.example.test" })
     assert.doesNotThrow(() => assertMutationOrigin(request({ host: "app.example.test", origin: "capacitor://localhost" }), "INVALID_ORIGIN", env))
-    assert.equal(guard(() => assertMutationOrigin(request({ host: "app.example.test", origin: "capacitor://localhost" }), "INVALID_ORIGIN", {})).code, "INVALID_ORIGIN")
+    assert.equal(guard(() => assertMutationOrigin(request({ host: "app.example.test", origin: "capacitor://localhost" }), "INVALID_ORIGIN", testEnv())).code, "INVALID_ORIGIN")
     assert.equal(guard(() => assertMutationOrigin(request({ host: "app.example.test", origin: "https://evil.example.test", "x-forwarded-host": "app.example.test" }), "INVALID_ORIGIN", env)).code, "INVALID_ORIGIN")
   })
   it("fail-closed : un reject qui ne lève pas n'admet rien et ne lit rien", async () => {

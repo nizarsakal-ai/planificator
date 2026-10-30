@@ -38,7 +38,7 @@ const PUBLIC_MESSAGES: Record<string, string> = {
 
 export function photoFailure(error: unknown, log: (event: string, payload?: Record<string, unknown>) => void = () => undefined): Response {
   if (error instanceof WorksitePhotoDomainError || error instanceof DriveProviderError || error instanceof HttpGuardError) {
-    const retryAfter = error instanceof WorksitePhotoDomainError && error.code === "UPLOAD_IN_PROGRESS" ? { "Retry-After": "5" } : {}
+    const retryAfter: Record<string, string> = error instanceof WorksitePhotoDomainError && error.code === "UPLOAD_IN_PROGRESS" ? { "Retry-After": "5" } : {}
     if (error instanceof DriveProviderError) log("DRIVE_ERROR", { code: error.code, httpStatus: error.httpStatus, reason: error.reason })
     return photoJson({ code: error.code, error: PUBLIC_MESSAGES[error.code] ?? "Opération refusée" }, { status: error.status, headers: retryAfter })
   }

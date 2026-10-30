@@ -21,8 +21,10 @@ export async function readBoundedBodyBytes(request: Request, maxBytes: number, o
   const length = request.headers.get("content-length")
   if (length !== null && (!/^\d+$/.test(length) || !Number.isSafeInteger(Number(length)))) refuse("INVALID_CONTENT_LENGTH", 400)
   if (length !== null && Number(length) > maxBytes) refuse(sizeCode, 413)
-  if (!request.body) refuse("INVALID_PAYLOAD", 400)
-  const reader = request.body.getReader(), chunks: Uint8Array[] = []
+  // `return` rend le refus terminal pour le typage ; `refuse` reste fail-closed même si `reject` revient.
+  const body = request.body
+  if (!body) return refuse("INVALID_PAYLOAD", 400)
+  const reader = body.getReader(), chunks: Uint8Array[] = []
   let size = 0
   try {
     while (true) {

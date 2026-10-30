@@ -73,8 +73,11 @@ export async function findDriveConnection(companyId: string, deps: DriveConnecti
   return deps.db.worksitePhotoDriveConnection.findUnique({ where: { companyId } })
 }
 
+/** Connexion prouvée utilisable : le prédicat n'affirme que ce qu'il vérifie (ACTIVE), une connexion ERROR ou DISCONNECTED reste lisible ailleurs. */
+export type UsableDriveConnection = DriveConnectionRecord & { status: "ACTIVE" }
+
 /** Connexion utilisable : présente, ACTIVE, tokens non effacés. */
-export function isDriveConnectionUsable(connection: DriveConnectionRecord | null): connection is DriveConnectionRecord {
+export function isDriveConnectionUsable(connection: DriveConnectionRecord | null): connection is UsableDriveConnection {
   return !!connection && connection.status === "ACTIVE" && connection.refreshToken !== CLEARED_TOKEN
 }
 

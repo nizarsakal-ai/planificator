@@ -14,6 +14,7 @@ import {
   sentProofEquals, validatePhotoFile, worksiteFolderLabel,
 } from "@/lib/worksite-photos/photo.domain"
 import { isWorksitePhotosAgentEnabled, isWorksitePhotosEnabled } from "@/lib/worksite-photos/feature-flag"
+import { testEnv } from "./test-env"
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1])
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d])
@@ -29,11 +30,11 @@ function code(fn: () => unknown): { code: string; status: number } {
 
 describe("drapeaux", () => {
   it("module et agent désactivés par défaut ; agent exige le module", () => {
-    assert.equal(isWorksitePhotosEnabled({}), false)
-    assert.equal(isWorksitePhotosEnabled({ PLANIFICATOR_WORKSITE_PHOTOS_ENABLED: "TRUE" }), false)
-    assert.equal(isWorksitePhotosEnabled({ PLANIFICATOR_WORKSITE_PHOTOS_ENABLED: " true " }), true)
-    assert.equal(isWorksitePhotosAgentEnabled({ WORKSITE_PHOTOS_AGENT_ENABLED: "true" }), false)
-    assert.equal(isWorksitePhotosAgentEnabled({ PLANIFICATOR_WORKSITE_PHOTOS_ENABLED: "true", WORKSITE_PHOTOS_AGENT_ENABLED: "true" }), true)
+    assert.equal(isWorksitePhotosEnabled(testEnv()), false)
+    assert.equal(isWorksitePhotosEnabled(testEnv({ PLANIFICATOR_WORKSITE_PHOTOS_ENABLED: "TRUE" })), false)
+    assert.equal(isWorksitePhotosEnabled(testEnv({ PLANIFICATOR_WORKSITE_PHOTOS_ENABLED: " true " })), true)
+    assert.equal(isWorksitePhotosAgentEnabled(testEnv({ WORKSITE_PHOTOS_AGENT_ENABLED: "true" })), false)
+    assert.equal(isWorksitePhotosAgentEnabled(testEnv({ PLANIFICATOR_WORKSITE_PHOTOS_ENABLED: "true", WORKSITE_PHOTOS_AGENT_ENABLED: "true" })), true)
   })
 })
 
@@ -69,21 +70,21 @@ describe("transitions", () => {
 
 describe("bornes de configuration", () => {
   it("taille : défaut 3 Mio, plafond dur 4 Mio, valeurs invalides ignorées", () => {
-    assert.equal(getPhotoMaxBytes({}), DEFAULT_PHOTO_MAX_BYTES)
-    assert.equal(getPhotoMaxBytes({ WORKSITE_PHOTOS_MAX_BYTES: String(10 * 1024 * 1024) }), HARD_PHOTO_MAX_BYTES)
-    assert.equal(getPhotoMaxBytes({ WORKSITE_PHOTOS_MAX_BYTES: "1048576" }), 1048576)
-    assert.equal(getPhotoMaxBytes({ WORKSITE_PHOTOS_MAX_BYTES: "abc" }), DEFAULT_PHOTO_MAX_BYTES)
-    assert.equal(getPhotoMaxBytes({ WORKSITE_PHOTOS_MAX_BYTES: "0" }), DEFAULT_PHOTO_MAX_BYTES)
+    assert.equal(getPhotoMaxBytes(testEnv()), DEFAULT_PHOTO_MAX_BYTES)
+    assert.equal(getPhotoMaxBytes(testEnv({ WORKSITE_PHOTOS_MAX_BYTES: String(10 * 1024 * 1024) })), HARD_PHOTO_MAX_BYTES)
+    assert.equal(getPhotoMaxBytes(testEnv({ WORKSITE_PHOTOS_MAX_BYTES: "1048576" })), 1048576)
+    assert.equal(getPhotoMaxBytes(testEnv({ WORKSITE_PHOTOS_MAX_BYTES: "abc" })), DEFAULT_PHOTO_MAX_BYTES)
+    assert.equal(getPhotoMaxBytes(testEnv({ WORKSITE_PHOTOS_MAX_BYTES: "0" })), DEFAULT_PHOTO_MAX_BYTES)
   })
   it("bail [5,60], calme [1,72], alerte [1,365], purge [1,30]", () => {
-    assert.equal(getReservationTtlMinutes({}), 15)
-    assert.equal(getReservationTtlMinutes({ WORKSITE_PHOTOS_RESERVATION_TTL_MINUTES: "2" }), 15)
-    assert.equal(getReservationTtlMinutes({ WORKSITE_PHOTOS_RESERVATION_TTL_MINUTES: "600" }), 60)
-    assert.equal(getAbandonQuietHours({}), 24)
-    assert.equal(getAbandonQuietHours({ WORKSITE_PHOTOS_ABANDON_QUIET_HOURS: "100" }), 72)
-    assert.equal(getUnsentAlertDays({}), 7)
-    assert.equal(getPurgeAfterDays({}), 30)
-    assert.equal(getPurgeAfterDays({ WORKSITE_PHOTOS_PURGE_AFTER_DAYS: "45" }), 30)
+    assert.equal(getReservationTtlMinutes(testEnv()), 15)
+    assert.equal(getReservationTtlMinutes(testEnv({ WORKSITE_PHOTOS_RESERVATION_TTL_MINUTES: "2" })), 15)
+    assert.equal(getReservationTtlMinutes(testEnv({ WORKSITE_PHOTOS_RESERVATION_TTL_MINUTES: "600" })), 60)
+    assert.equal(getAbandonQuietHours(testEnv()), 24)
+    assert.equal(getAbandonQuietHours(testEnv({ WORKSITE_PHOTOS_ABANDON_QUIET_HOURS: "100" })), 72)
+    assert.equal(getUnsentAlertDays(testEnv()), 7)
+    assert.equal(getPurgeAfterDays(testEnv()), 30)
+    assert.equal(getPurgeAfterDays(testEnv({ WORKSITE_PHOTOS_PURGE_AFTER_DAYS: "45" })), 30)
   })
 })
 

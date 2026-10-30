@@ -10,10 +10,11 @@ import {
   type DriveConnectionDb, type DriveConnectionRecord,
 } from "@/lib/worksite-photos/drive/drive-connection.client"
 import { DriveProviderError } from "@/lib/worksite-photos/drive/drive.errors"
+import { testEnv } from "./test-env"
 
 const NOW = new Date("2026-10-30T12:00:00.000Z")
 const crypto = { encrypt: (s: string) => `enc(${s})`, decrypt: (s: string) => { const m = s.match(/^enc\((.*)\)$/); if (!m) throw new Error("undecryptable"); return m[1] } }
-const env = { GOOGLE_CLIENT_ID: "cid", GOOGLE_CLIENT_SECRET: "csecret" }
+const env = testEnv({ GOOGLE_CLIENT_ID: "cid", GOOGLE_CLIENT_SECRET: "csecret" })
 
 function record(over: Partial<DriveConnectionRecord> = {}): DriveConnectionRecord {
   return {

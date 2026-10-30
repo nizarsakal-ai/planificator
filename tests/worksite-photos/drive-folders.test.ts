@@ -58,6 +58,7 @@ function fakeDrive(options: { existingIds?: Set<string>; missingIds?: Set<string
       return meta(input.id, input.name)
     },
     createFile: async () => { throw new Error("not used") },
+    downloadFile: async () => { throw new Error("not used") },
     getFile: async (_t, id) => {
       calls.push(`getFile:${id}`)
       if (missing.has(id)) throw new DriveProviderError("DRIVE_NOT_FOUND", 404, false, 404, "notFound")

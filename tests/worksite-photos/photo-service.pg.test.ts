@@ -285,7 +285,7 @@ describe("service d'upload × adaptateur Prisma × PostgreSQL jetable", () => {
     const { deps: d } = deps()
     const key = randomUUID()
     const target = await authorizeUploadTarget(leader, { worksiteId: ids.worksite, truckId: ids.truck }, d)
-    let outcome: { code?: string; message: string } | null = null
+    const seen: { outcome: { code?: string; message: string } | null } = { outcome: null }
     interceptAfterLockedRead(d, async () => {
       const second = new PrismaClient({ datasources: { db: { url: disposableUrl() } } })
       try {
@@ -293,18 +293,19 @@ describe("service d'upload × adaptateur Prisma × PostgreSQL jetable", () => {
           await s.$executeRawUnsafe("SET LOCAL lock_timeout = '700ms'")
           await s.$executeRawUnsafe(`UPDATE "teams" SET "leaderId"='${ids.employee}' WHERE "id"='${ids.team}'`)
         })
-        outcome = { message: "UPDATE accepté sans attendre" }
+        seen.outcome = { message: "UPDATE accepté sans attendre" }
       } catch (error) {
         const e = error as { code?: string; meta?: { code?: string }; message: string }
-        outcome = { code: e.meta?.code ?? e.code, message: e.message }
+        seen.outcome = { code: e.meta?.code ?? e.code, message: e.message }
       } finally {
         await second.$disconnect()
       }
     })
     try {
       const receipt = await uploadPhoto(target, file, payload, key, d)
+      const outcome = seen.outcome
       assert.ok(outcome, "la seconde connexion a été exercée")
-      assert.match(outcome!.message, /lock timeout|55P03/i, `le changement de chef doit attendre le verrou : ${outcome!.message}`)
+      assert.match(outcome.message, /lock timeout|55P03/i, `le changement de chef doit attendre le verrou : ${outcome.message}`)
       assert.equal((await prisma.team.findUnique({ where: { id: ids.team } }))?.leaderId, ids.leaderEmployee, "équipe inchangée")
       assert.equal((await prisma.worksiteTruckPhoto.findUnique({ where: { id: receipt.photoId } }))?.status, "PENDING")
     } finally {

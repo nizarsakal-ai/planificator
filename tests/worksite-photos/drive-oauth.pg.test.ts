@@ -19,6 +19,7 @@ import {
   DRIVE_OAUTH_COOKIE, DRIVE_SCOPE_FILE, handleDriveConnectStart, handleDriveDisconnect, handleDriveOAuthCallback,
   type DriveOAuthDb, type DriveOAuthSession,
 } from "@/lib/worksite-photos/drive/drive-oauth"
+import { testEnv } from "./test-env"
 
 function disposableUrl(): string {
   const url = process.env.WORKSITE_PHOTOS_TEST_DATABASE_URL?.trim()
@@ -30,10 +31,10 @@ function disposableUrl(): string {
 }
 
 const RUN = randomUUID().slice(0, 8)
-const ENV = {
+const ENV = testEnv({
   PLANIFICATOR_WORKSITE_PHOTOS_ENABLED: "true", CRON_SECRET: "test-cron-secret-for-oauth-state", GOOGLE_CLIENT_ID: "cid", GOOGLE_CLIENT_SECRET: "csecret",
   DRIVE_OAUTH_REDIRECT_URI: "https://app.example.test/api/auth/drive/callback", NEXTAUTH_URL: "https://app.example.test",
-}
+})
 const jsonRes = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
 const settingsParams = (res: Response) => new URL(res.headers.get("location")!).searchParams
 

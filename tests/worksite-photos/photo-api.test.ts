@@ -8,8 +8,9 @@ import { handleContextGet, handlePhotoFile, handlePhotoUpload, handlePhotosList,
 import { WorksitePhotoDomainError } from "@/lib/worksite-photos/photo.domain"
 import type { PhotoStoragePort } from "@/lib/worksite-photos/photo-storage.port"
 import type { PhotoDb, PhotoSession } from "@/lib/worksite-photos/photo.service"
+import { testEnv } from "./test-env"
 
-const ENV = { PLANIFICATOR_WORKSITE_PHOTOS_ENABLED: "true" }
+const ENV = testEnv({ PLANIFICATOR_WORKSITE_PHOTOS_ENABLED: "true" })
 const ORIGIN = { host: "app.example.test", origin: "https://app.example.test" }
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1])
 
@@ -62,13 +63,13 @@ const admin: PhotoSession = { user: { id: "u1", role: "ADMIN", companyId: "c1" }
 
 function multipart(parts: Array<{ name: string; value: string | Uint8Array; filename?: string; type?: string }>, extraHeaders: Record<string, string> = {}): Request {
   const form = new FormData()
-  for (const p of parts) typeof p.value === "string" ? form.append(p.name, p.value) : form.append(p.name, new Blob([p.value], { type: p.type ?? "image/jpeg" }), p.filename ?? "photo.jpg")
+  for (const p of parts) typeof p.value === "string" ? form.append(p.name, p.value) : form.append(p.name, new Blob([p.value.slice()], { type: p.type ?? "image/jpeg" }), p.filename ?? "photo.jpg")
   return new Request("https://app.example.test/api/worksite-photos/worksites/w1/trucks/t1", { method: "POST", headers: { ...ORIGIN, "Idempotency-Key": "11111111-1111-4111-8111-111111111111", ...extraHeaders }, body: form })
 }
 
 describe("enveloppe commune", () => {
   it("drapeau absent ⇒ 404 FEATURE_DISABLED ; sans session ⇒ 401 ; en-têtes privés ; aucun détail interne", async () => {
-    const off = await handleContextGet(new Request("https://app.example.test/api/worksite-photos/context"), deps(admin, { env: {} }))
+    const off = await handleContextGet(new Request("https://app.example.test/api/worksite-photos/context"), deps(admin, { env: testEnv() }))
     assert.equal(off.status, 404)
     assert.deepEqual(await off.json(), { code: "FEATURE_DISABLED", error: "Introuvable" })
     const anon = await handleContextGet(new Request("https://app.example.test/api/worksite-photos/context"), deps(null))

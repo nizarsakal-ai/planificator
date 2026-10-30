@@ -12,12 +12,13 @@ import {
   handleDriveConnectStart, handleDriveDisconnect, handleDriveOAuthCallback, resolveDriveAdmin,
   type DriveOAuthDb, type DriveOAuthSession,
 } from "@/lib/worksite-photos/drive/drive-oauth"
+import { testEnv } from "./test-env"
 
 const SECRET = "test-cron-secret-for-oauth-state"
-const ENV = {
+const ENV = testEnv({
   PLANIFICATOR_WORKSITE_PHOTOS_ENABLED: "true", CRON_SECRET: SECRET, GOOGLE_CLIENT_ID: "cid", GOOGLE_CLIENT_SECRET: "csecret",
   DRIVE_OAUTH_REDIRECT_URI: "https://app.example.test/api/auth/drive/callback", NEXTAUTH_URL: "https://app.example.test",
-}
+})
 const crypto = { encrypt: (s: string) => `enc(${s})`, decrypt: (s: string) => s.replace(/^enc\((.*)\)$/, "$1") }
 const admin: DriveOAuthSession = { user: { id: "u1", role: "ADMIN", companyId: "c1" } }
 const T0 = new Date("2026-10-30T12:00:00.000Z")
