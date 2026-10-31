@@ -4,7 +4,9 @@ import { redirect, notFound } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { MapPin, Calendar, Clock, Users, HardHat, FileText, Download } from "lucide-react"
+import { MapPin, Calendar, Clock, Users, HardHat, FileText, Download, Mail } from "lucide-react"
+import { initialRecipientState } from "@/lib/chantiers/photo-recipients"
+import { canReadPhotoRecipients } from "@/lib/chantiers/photo-recipients-access"
 import { ChantierStatusActions } from "@/components/chantiers/ChantierStatusActions"
 import { ChantierEditForm } from "@/components/chantiers/ChantierEditForm"
 import { AffecterEquipeForm } from "@/components/chantiers/AffecterEquipeForm"
@@ -116,6 +118,20 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
 
   if (!chantier) notFound()
 
+  // Destinataires des photos : lus SEULEMENT pour un SUPER_ADMIN confirmé EN BASE (compte actif, rôle global, entreprise
+  // active) — une session périmée ne lit aucune adresse ; rien n'est sérialisé vers les autres rôles.
+  const isSuperAdmin = await canReadPhotoRecipients(prisma, session)
+  const photoRecipientRows = isSuperAdmin
+    ? await prisma.worksitePhotoRecipient.findMany({
+        where: { worksiteId: chantier.id, companyId: session.user.companyId! },
+        orderBy: { position: "asc" },
+        select: { label: true, email: true, active: true },
+      })
+    : []
+  const photoRecipientState = isSuperAdmin
+    ? initialRecipientState({ recipients: photoRecipientRows, configuredAt: chantier.photoRecipientsConfiguredAt, clientContact: chantier.clientContact })
+    : null
+
   const status = statusLabels[chantier.status] ?? { label: chantier.status, variant: "secondary" as const }
 
   // Calcul des blocs groupés
@@ -197,11 +213,34 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
                         : "",
                       dailyHours:  chantier.dailyHours,
                     }}
+                    {...(photoRecipientState ? { photoRecipients: photoRecipientState } : {})}
                   />
                 )}
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
+              {photoRecipientState && (
+                <div className="flex items-start gap-2 text-sm text-slate-600">
+                  <Mail className="h-4 w-4 shrink-0 mt-0.5 text-slate-400" />
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <p className="text-xs text-slate-500">Destinataires des photos</p>
+                    {photoRecipientRows.length === 0 ? (
+                      <p className="text-slate-400 italic">{chantier.photoRecipientsConfiguredAt ? "Aucun destinataire (liste vidée)" : "Non configurés"}</p>
+                    ) : (
+                      <ul className="space-y-0.5">
+                        {photoRecipientRows.map((r) => (
+                          <li key={r.email} className={`break-all ${r.active ? "text-slate-700" : "text-slate-400 line-through"}`}>
+                            {r.label ? `${r.label} — ` : ""}{r.email}{r.active ? "" : " (inactif)"}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {photoRecipientState.historicSuggestion && (
+                      <p className="text-xs text-amber-700 break-all">Adresse historique (non utilisée) : {photoRecipientState.historicSuggestion}</p>
+                    )}
+                  </div>
+                </div>
+              )}
               {chantier.address && (
                 <div className="flex items-start gap-2 text-sm text-slate-600">
                   <MapPin className="h-4 w-4 shrink-0 mt-0.5 text-slate-400" />

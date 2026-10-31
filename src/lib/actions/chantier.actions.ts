@@ -6,6 +6,8 @@ import { auth } from "@/auth"
 import { addEmployeeToBlockCore } from "@/lib/actions/chantier-block.core"
 import { createWorksiteCore } from "@/lib/actions/chantier-create.core"
 import { assignTeamCore } from "@/lib/actions/assignment-team.core"
+import { updateWorksiteWithPhotoRecipients } from "@/lib/actions/chantier-photo-recipients.core"
+import { PHOTO_RECIPIENTS_FORBIDDEN, readPhotoRecipientsField } from "@/lib/chantiers/photo-recipients"
 import type { CoreResult, WriteActor } from "@/lib/actions/write-actor"
 import {
   updateChantierSchema,
@@ -70,6 +72,12 @@ export async function createChantier(formData: FormData) {
 export async function updateChantier(worksiteId: string, formData: FormData) {
   const user = await requireAdmin()
 
+  // Destinataires des photos : champ réservé au SUPER_ADMIN. Fourni par un autre rôle, ou mal formé (répété, fichier,
+  // JSON invalide, doublon, plus de 20…) ⇒ refus AVANT toute lecture ou écriture. Absent ⇒ configuration conservée.
+  const photoRecipients = readPhotoRecipientsField(formData)
+  if (photoRecipients.kind !== "absent" && user.role !== "SUPER_ADMIN") return { error: PHOTO_RECIPIENTS_FORBIDDEN }
+  if (photoRecipients.kind === "invalid") return { error: photoRecipients.message }
+
   const raw = {
     name:        formData.get("name")        as string,
     description: formData.get("description") as string,
@@ -104,20 +112,28 @@ export async function updateChantier(worksiteId: string, formData: FormData) {
     }
   }
 
-  await prisma.worksite.update({
-    where: { id: worksiteId },
-    data: {
-      name:        parsed.data.name,
-      description: parsed.data.description || null,
-      address:     parsed.data.address     || null,
-      clientId:    parsed.data.clientId,
-      startDate:   updateDateFieldToDb(parsed.data.startDate),
-      endDate:     updateDateFieldToDb(parsed.data.endDate),
-      dailyHours:  parsed.data.dailyHours,
-      latitude,
-      longitude,
-    },
-  })
+  const data = {
+    name:        parsed.data.name,
+    description: parsed.data.description || null,
+    address:     parsed.data.address     || null,
+    clientId:    parsed.data.clientId,
+    startDate:   updateDateFieldToDb(parsed.data.startDate),
+    endDate:     updateDateFieldToDb(parsed.data.endDate),
+    dailyHours:  parsed.data.dailyHours,
+    latitude,
+    longitude,
+  }
+
+  if (photoRecipients.kind === "absent") {
+    // Écriture historique inchangée : les destinataires ne sont jamais touchés quand le champ n'est pas fourni.
+    await prisma.worksite.update({ where: { id: worksiteId }, data })
+  } else {
+    // Champs + liste + marqueur + audit dans UNE transaction, autorité SUPER_ADMIN relue sous verrous (aucun réseau dedans).
+    const result = await updateWorksiteWithPhotoRecipients(prisma, {
+      companyId: user.companyId!, actorUserId: user.id!, worksiteId, data, recipients: photoRecipients.recipients,
+    })
+    if (!result.ok) return { error: result.code === "FORBIDDEN" ? PHOTO_RECIPIENTS_FORBIDDEN : "Chantier introuvable." }
+  }
 
   revalidatePath("/chantiers")
   revalidatePath(`/chantiers/${worksiteId}`)
