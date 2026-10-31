@@ -1,5 +1,9 @@
 import type { AcquisitionAttachmentStatus, PrismaClient } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
+import {
+  bridgeStoredAttachmentInTransaction,
+  lockDraftByMessageForUpdate,
+} from "@/lib/acquisition/conversion/stored-attachment-worksite-bridge.service"
 import type {
   AttachmentFailureUpdate,
   AttachmentMessageContext,
@@ -102,7 +106,13 @@ function isCompleteStored(attachment: AttachmentRecord): boolean {
 
 /** Accès Prisma tenant-scopé pour les pièces jointes Acquisition. */
 export class AcquisitionAttachmentRepository implements AcquisitionAttachmentRepositoryPort {
-  constructor(private readonly db: PrismaClient = prisma) {}
+  constructor(
+    private readonly db: PrismaClient = prisma,
+    private readonly log: (event: string, payload?: Record<string, unknown>) => void = (
+      event,
+      payload
+    ) => console.error(`[acquisition-attachment-repository] ${event}`, payload ?? {})
+  ) {}
 
   async findAttachmentWithMessage(
     companyId: string,
@@ -183,34 +193,92 @@ export class AcquisitionAttachmentRepository implements AcquisitionAttachmentRep
     return resolveLatest()
   }
 
+  /**
+   * Transition PENDING_DOWNLOAD → STORED, protocole v2 avec la conversion (voir
+   * stored-attachment-worksite-bridge.service.ts) : UNE transaction qui verrouille le brouillon
+   * du message, effectue la transition puis, si le brouillon est déjà CONVERTED, crée le Document
+   * du chantier. Si le pont échoue, la transaction entière est annulée (retour FAILED) et le
+   * retry existant reprend. Le pont n'est jamais appelé pour ALREADY_STORED.
+   */
   async markStored(
     companyId: string,
     attachmentId: string,
     update: StoredAttachmentUpdate
   ): Promise<MarkStoredResult> {
-    const result = await this.db.acquisitionAttachment.updateMany({
-      where: { id: attachmentId, companyId, status: "PENDING_DOWNLOAD" },
-      data: {
-        status: "STORED",
-        sha256: update.sha256,
-        storageUrl: update.storageUrl,
-        storagePublicId: update.storagePublicId,
-        storedAt: update.storedAt,
-        sizeBytes: update.sizeBytes,
-        mimeType: update.mimeType,
-        lastErrorCode: null,
-        lastErrorAt: null,
-        downloadClaimedAt: null,
-        downloadNextRetryAt: null,
-      },
-    })
+    let transitioned: MarkStoredResult | null
+    try {
+      transitioned = await this.db.$transaction(
+        async (tx): Promise<MarkStoredResult | null> => {
+          // Borne l'attente du verrou si une conversion longue le garde (PostgreSQL).
+          await tx.$executeRaw`SET LOCAL lock_timeout = '4s'`
 
-    if (result.count === 1) {
-      const row = await this.db.acquisitionAttachment.findFirstOrThrow({
-        where: { id: attachmentId, companyId },
-      })
-      return { status: "STORED", attachment: mapRecord(row) }
+          const owner = await tx.acquisitionAttachment.findFirst({
+            where: { id: attachmentId, companyId },
+            select: { acquisitionMessageId: true },
+          })
+          const draft = owner
+            ? await lockDraftByMessageForUpdate(tx, {
+                companyId,
+                acquisitionMessageId: owner.acquisitionMessageId,
+              })
+            : null
+
+          const result = await tx.acquisitionAttachment.updateMany({
+            where: { id: attachmentId, companyId, status: "PENDING_DOWNLOAD" },
+            data: {
+              status: "STORED",
+              sha256: update.sha256,
+              storageUrl: update.storageUrl,
+              storagePublicId: update.storagePublicId,
+              storedAt: update.storedAt,
+              sizeBytes: update.sizeBytes,
+              mimeType: update.mimeType,
+              lastErrorCode: null,
+              lastErrorAt: null,
+              downloadClaimedAt: null,
+              downloadNextRetryAt: null,
+            },
+          })
+          if (result.count !== 1) return null
+
+          const row = await tx.acquisitionAttachment.findFirstOrThrow({
+            where: { id: attachmentId, companyId },
+          })
+          if (row.storagePublicId) {
+            await bridgeStoredAttachmentInTransaction(tx, {
+              companyId,
+              draft,
+              attachment: {
+                id: row.id,
+                filename: row.filename,
+                mimeType: row.mimeType,
+                sizeBytes: row.sizeBytes,
+                category: row.category,
+                storagePublicId: row.storagePublicId,
+              },
+            })
+          }
+          return { status: "STORED", attachment: mapRecord(row) }
+        },
+        { maxWait: 5000, timeout: 15000 }
+      )
+    } catch (error) {
+      // Transaction annulée : l'attachement n'est PAS STORED. Le service compense l'upload
+      // Cloudinary puis marque l'échec (retry planifié).
+      // Le journal est injectable : s'il lève, il ne doit jamais empêcher le retour FAILED,
+      // sans quoi la compensation Cloudinary et le retry seraient perdus.
+      try {
+        this.log("MARK_STORED_ROLLED_BACK", {
+          attachmentId,
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        })
+      } catch {
+        /* journal défaillant : ignoré */
+      }
+      return { status: "FAILED" }
     }
+
+    if (transitioned) return transitioned
 
     const latest = await this.findAttachmentWithMessage(companyId, attachmentId)
     if (latest && isCompleteStored(latest.attachment)) {

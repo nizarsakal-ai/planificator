@@ -83,6 +83,7 @@ function createFakeDb(seed: { draft: Draft; clients?: Array<{ id: string; compan
       count: () => Promise<number>
     }
     $transaction: <T>(fn: (tx: typeof api) => Promise<T>) => Promise<T>
+    $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown[]>
   } = {
     draft,
     worksites,
@@ -161,6 +162,10 @@ function createFakeDb(seed: { draft: Draft; clients?: Array<{ id: string; compan
     },
     async $transaction<T>(fn: (tx: typeof api) => Promise<T>) {
       return fn(api)
+    },
+    async $queryRaw() {
+      order.push("lock-draft")
+      return []
     },
   }
   return api
@@ -384,6 +389,27 @@ describe("LOT-3F — conversion transactional ownership fence", () => {
       transactionalOwnershipFence: fence,
     })
     assert.deepEqual(sequence.slice(0, 2), ["fence", "worksite"])
+  })
+
+  it("G — verrou brouillon APRÈS la fence et AVANT toute mutation métier", async () => {
+    const db = createFakeDb({ draft: baseDraft() })
+    const fence: ConversionTransactionalOwnershipFence = {
+      async assertOwnedAndLock() {
+        db.order.push("fence")
+        return "OWNED"
+      },
+    }
+    const svc = new ImportDraftConversionService({
+      db: db as never,
+      now: () => CONVERSION_NOW,
+    })
+    await svc.convertImportDraft(system, convertBody, {
+      transactionalOwnershipFence: fence,
+    })
+    assert.deepEqual(db.order.slice(0, 2), ["fence", "lock-draft"])
+    assert.ok(db.order.indexOf("fence") < db.order.indexOf("lock-draft"))
+    assert.ok(db.order.indexOf("lock-draft") < db.order.indexOf("worksite.create"))
+    assert.ok(db.order.indexOf("lock-draft") < db.order.indexOf("draft.updateMany"))
   })
 
   it("aucun hook test-only production dans conversion.service", () => {

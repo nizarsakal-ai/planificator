@@ -5,8 +5,6 @@
  */
 
 import type {
-  AcquisitionAttachmentCategory,
-  DocumentType,
   PrismaClient,
   Role,
 } from "@prisma/client"
@@ -31,6 +29,8 @@ import {
   normalizeAddressKey,
 } from "@/lib/acquisition/matching/client-match.service"
 import { classifyWorkPeriod } from "@/lib/acquisition/policy/work-period-classification"
+import { mapAttachmentCategoryToDocumentType } from "@/lib/acquisition/conversion/attachment-document-type"
+import { lockDraftByIdForUpdate } from "@/lib/acquisition/conversion/stored-attachment-worksite-bridge.service"
 
 const LOG_PREFIX = "[acquisition-conversion]"
 const ALLOWED_ROLES = new Set<Role>(["ADMIN", "SUPER_ADMIN"])
@@ -80,13 +80,7 @@ export function buildWorksiteAddress(draft: {
   return parts.join(", ")
 }
 
-export function mapAttachmentCategoryToDocumentType(
-  category: AcquisitionAttachmentCategory
-): DocumentType {
-  if (category === "PLAN") return "PLAN"
-  if (category === "PHOTO") return "PHOTO"
-  return "DOCUMENT"
-}
+export { mapAttachmentCategoryToDocumentType }
 
 async function resolveAlreadyConverted(
   db: PrismaClient,
@@ -220,6 +214,15 @@ export class ImportDraftConversionService {
           }
         }
 
+        // Protocole de sérialisation avec AcquisitionAttachmentRepository.markStored :
+        // verrou de la ligne brouillon AVANT toute lecture (brouillon, pièces jointes).
+        // - téléchargement d'abord : markStored a commité STORED, la lecture ci-dessous le voit et copie ;
+        // - conversion d'abord : markStored attend ce commit, voit CONVERTED et crée le Document
+        //   dans sa propre transaction.
+        // Ordre des verrous : bail orchestrateur → contenu source → brouillon (aucun chemin ne
+        // verrouille un brouillon avant le bail).
+        await lockDraftByIdForUpdate(tx, { companyId: ctx.companyId, draftId: input.draftId })
+
         const draft = await tx.worksiteImportDraft.findFirst({
           where: { id: input.draftId, companyId: ctx.companyId },
           select: {
@@ -239,6 +242,12 @@ export class ImportDraftConversionService {
 
         if (!draft) {
           throw Object.assign(new Error("NOT_FOUND"), { code: "NOT_FOUND" })
+        }
+        // Après attente du verrou, une conversion concurrente a pu committer : le brouillon est
+        // alors CONVERTED. Même contrat idempotent qu'avant le verrou (rollback puis
+        // resolveAlreadyConverted hors transaction → ALREADY_CONVERTED), jamais INVALID_STATE.
+        if (draft.status === "CONVERTED") {
+          throw new ConversionClaimConflictError()
         }
         if (draft.status !== "APPROVED") {
           throw Object.assign(new Error("INVALID_STATE"), { code: "INVALID_STATE" })
