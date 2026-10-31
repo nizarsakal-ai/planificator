@@ -172,7 +172,7 @@ function reviewWhere(query: ReviewQuery): Prisma.WorksiteTruckPhotoWhereInput {
     case "SENT": and.push({ status: "SENT", trashRequestedAt: null }); break
     case "TO_RESUME": and.push({ OR: [{ status: "PENDING", rejectRequestedAt: { not: null } }, { status: "SENT", trashRequestedAt: { not: null } }] }); break
     case "REMOVED": and.push({ status: { in: ["REJECTED", "DELETED"] } }); break
-    case "ALL": break
+    case "ALL": and.push({ status: { notIn: ["REJECTED", "DELETED"] } }); break
   }
   if (query.cursor) and.push({ OR: [{ uploadedAt: { lt: query.cursor.uploadedAt } }, { uploadedAt: query.cursor.uploadedAt, id: { lt: query.cursor.id } }] })
   return { AND: and }

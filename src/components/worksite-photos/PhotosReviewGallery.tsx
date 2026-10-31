@@ -188,7 +188,7 @@ interface Props {
 export function matchesFilter(photo: ReviewItem, filter: FilterValue, worksiteId: string): boolean {
   if (worksiteId && photo.worksite.id !== worksiteId) return false
   switch (filter) {
-    case "ALL": return true
+    case "ALL": return photo.status !== "REJECTED" && photo.status !== "DELETED"
     case "TO_REVIEW": return photo.status === "PENDING" && photo.approval.state === "TO_REVIEW" && photo.deletion.state === "NONE"
     case "APPROVED": return photo.status === "PENDING" && photo.approval.state === "APPROVED" && photo.deletion.state === "NONE"
     case "SENT": return photo.status === "SENT" && photo.deletion.state === "NONE"
@@ -210,7 +210,7 @@ export function detailAfterRefresh(photoId: string, photos: ReviewItem[] | null)
 export function PhotosReviewGallery({ worksites, initialPage }: Props) {
   const [worksiteId, setWorksiteId] = useState("")
   const [filter, setFilter] = useState<FilterValue>("ALL")
-  const [items, setItems] = useState<ReviewItem[]>(initialPage.photos)
+  const [items, setItems] = useState<ReviewItem[]>(() => initialPage.photos.filter((photo) => matchesFilter(photo, "ALL", "")))
   const [nextCursor, setNextCursor] = useState<string | null>(initialPage.nextCursor)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)

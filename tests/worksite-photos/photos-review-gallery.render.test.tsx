@@ -47,6 +47,18 @@ describe("galerie de contrôle", () => {
     assert.match(html, /Actualiser/, "relecture manuelle toujours disponible")
     assert.equal(/drive-|driveFileId|drivePath|googleapis|Hermes/.test(html), false)
   })
+  it("Toutes masque les cartes supprimées ; Supprimées conserve leur historique et les reprises restent visibles", () => {
+    for (const removed of [rejected, deleted]) {
+      assert.equal(matchesFilter(removed, "ALL", ""), false)
+      assert.equal(matchesFilter(removed, "REMOVED", ""), true)
+    }
+    assert.equal(matchesFilter(toResume, "ALL", ""), true)
+    const html = renderToStaticMarkup(createElement(PhotosReviewGallery, {
+      worksites: [], initialPage: { photos: [rejected, deleted], nextCursor: null },
+    }))
+    assert.doesNotMatch(html, /Voir la photo/)
+    assert.match(html, /Aucune photo pour ces filtres/)
+  })
   it("commandes selon l'état", () => {
     assert.deepEqual(actionsFor(item("p1")), { approve: true, trash: true, resume: false })
     assert.deepEqual(actionsFor(approved), { approve: false, trash: true, resume: false })
