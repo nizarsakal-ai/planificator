@@ -1030,6 +1030,9 @@ model Worksite {
   delayedUntil DateTime?     // date de décalage (statut DELAYED)
   // SPEC-WORKSITE-PHOTOS-001 D6 — contact client (e-mail) renseigné par l'agent Hermes ; nullable.
   clientContact String?
+  /// Marqueur durable : premier enregistrement de la liste des destinataires des photos (y compris une liste vide).
+  /// NULL = jamais configurée ⇒ seule situation où l'adresse historique `clientContact` peut être PROPOSÉE à l'édition.
+  photoRecipientsConfiguredAt DateTime? @db.Timestamptz(3)
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
@@ -1048,6 +1051,7 @@ model Worksite {
   importDrafts WorksiteImportDraft[]
   mileageTrips MileageTrip[] @relation("MileageWorksite")
   tasks        Task[]
+  photoRecipients WorksitePhotoRecipient[] // destinataires des photos (configuration, SUPER_ADMIN)
 
   @@unique([id, companyId])
   @@index([companyId])
@@ -3356,4 +3360,30 @@ model WorksitePhotoDriveFolder {
   // Unicité par identité avec NULLS NOT DISTINCT (PostgreSQL ≥ 15) : posée en SQL dans la migration.
   @@unique([companyId, worksiteId, day])
   @@map("worksite_photo_drive_folders")
+}
+
+/// Destinataires des photos d'un chantier (configuration éditée par un SUPER_ADMIN ; AUCUN envoi automatique).
+/// Plusieurs par chantier (20 au plus), désactivables sans effacement. `emailKey` = lower(email), unique par chantier.
+/// `Worksite.clientContact` (contrat agent v1, une adresse) n'est ni remplacé ni modifié par cette table.
+model WorksitePhotoRecipient {
+  id          String   @id @default(cuid())
+  companyId   String
+  worksiteId  String
+  label       String?  // nom / fonction, facultatif, ≤ 120
+  email       String   // trimé, ≤ 254, une seule adresse
+  emailKey    String   // lower(email), imposé par CHECK
+  active      Boolean  @default(true)
+  position    Int      // 0..19, ordre d'affichage
+  createdById String   // scalaire sans FK (patron Task.createdById)
+  updatedById String
+  createdAt   DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  updatedAt   DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+
+  // Tenant garanti par la FK composite (worksiteId, companyId) → worksites(id, companyId) ; configuration supprimée avec le chantier.
+  // Nom explicite hors du motif `worksite_photo%_fkey` compté par les assertions du Lot 1 (aucun couplage).
+  worksite Worksite @relation(fields: [worksiteId, companyId], references: [id, companyId], onDelete: Cascade, onUpdate: Restrict, map: "photo_recipients_worksite_companyId_fkey")
+
+  @@unique([worksiteId, emailKey])
+  @@index([companyId, worksiteId, position])
+  @@map("worksite_photo_recipients")
 }

@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { updateChantier } from "@/lib/actions/chantier.actions"
+import type { PhotoRecipientRow } from "@/lib/chantiers/photo-recipients"
+import { PhotoRecipientsEditor } from "@/components/chantiers/PhotoRecipientsEditor"
 
 interface Client {
   id: string
@@ -26,23 +28,36 @@ interface Props {
     dailyHours:  number
   }
   clients: Client[]
+  /**
+   * Destinataires des photos : fournis par la page UNIQUEMENT pour un SUPER_ADMIN (minimisation). Absents ⇒ ni éditeur ni
+   * adresse dans le formulaire, donc rien d'envoyé : le serveur conserve la configuration existante.
+   */
+  photoRecipients?: { rows: PhotoRecipientRow[]; historicSuggestion: string | null }
 }
 
-export function ChantierEditForm({ worksiteId, defaultValues, clients }: Props) {
+export function ChantierEditForm({ worksiteId, defaultValues, clients, photoRecipients }: Props) {
   const router = useRouter()
   const [editing, setEditing] = useState(false)
   const [loading, setLoading] = useState(false)
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    setLoading(true)
+    if (loading) return
+    // Données lues AVANT le passage en chargement (les champs désactivés ne seraient plus envoyés).
     const fd = new FormData(e.currentTarget)
-    const result = await updateChantier(worksiteId, fd)
-    setLoading(false)
-    if (result?.error) { toast.error(result.error); return }
-    toast.success("Chantier mis à jour.")
-    setEditing(false)
-    router.refresh()
+    setLoading(true)
+    try {
+      const result = await updateChantier(worksiteId, fd)
+      if (result?.error) { toast.error(result.error); return }
+      toast.success("Chantier mis à jour.")
+      setEditing(false)
+      router.refresh()
+    } catch {
+      // Échec réseau ou serveur : la saisie reste affichée pour un nouvel essai.
+      toast.error("Enregistrement impossible, réessayez.")
+    } finally {
+      setLoading(false)
+    }
   }
 
   if (!editing) {
@@ -81,6 +96,9 @@ export function ChantierEditForm({ worksiteId, defaultValues, clients }: Props) 
           ))}
         </select>
       </div>
+
+      {/* Destinataires des photos — SUPER_ADMIN uniquement (contrôlé aussi au serveur) */}
+      {photoRecipients && <PhotoRecipientsEditor initialRows={photoRecipients.rows} historicSuggestion={photoRecipients.historicSuggestion} disabled={loading} />}
 
       {/* Adresse */}
       <div className="space-y-1">
