@@ -52,7 +52,7 @@ const storage: PhotoStoragePort = {
   createFile: async (_c, i) => ({ created: true, info: { id: i.id, size: i.bytes.byteLength, md5: null, trashed: false } }),
   getFile: async () => null,
   download: async () => ({ stream: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode("img")); c.close() } }), contentType: "image/jpeg", contentLength: 3 }),
-  trash: async () => undefined,
+  trash: async () => ({ missing: false }),
   delete: async () => undefined,
 }
 

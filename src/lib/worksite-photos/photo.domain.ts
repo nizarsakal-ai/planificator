@@ -24,13 +24,18 @@ export class WorksitePhotoDomainError extends Error {
 export const PHOTO_PHASES = ["BEFORE", "AFTER"] as const
 export type PhotoPhase = (typeof PHOTO_PHASES)[number]
 
-export const PHOTO_STATUSES = ["PENDING", "SENT", "DELETED"] as const
+/**
+ * `PENDING` = non envoyée ; `SENT` = envoi déclaré avec preuve de transport figée ; `DELETED` = envoyée puis mise à la
+ * corbeille ; `REJECTED` = rejetée AVANT envoi puis mise à la corbeille (LOT-ADMIN-REVIEW, D20). Terminaux : DELETED, REJECTED.
+ */
+export const PHOTO_STATUSES = ["PENDING", "SENT", "DELETED", "REJECTED"] as const
 export type PhotoStatus = (typeof PHOTO_STATUSES)[number]
 
 const PHOTO_TRANSITIONS: Readonly<Record<PhotoStatus, readonly PhotoStatus[]>> = {
-  PENDING: ["SENT"],
+  PENDING: ["SENT", "REJECTED"],
   SENT: ["DELETED"],
   DELETED: [],
+  REJECTED: [],
 }
 
 export function canTransitionPhoto(from: PhotoStatus, to: PhotoStatus): boolean {
@@ -366,6 +371,109 @@ export const TRASH_RECONCILE_AFTER_MS = 10 * 60_000
 export function isTrashReconcileDue(photo: { status: PhotoStatus; trashRequestedAt: Date | null; trashedAt: Date | null }, now: Date): boolean {
   if (photo.status !== "SENT" || photo.trashRequestedAt === null || photo.trashedAt !== null) return false
   return now.getTime() - photo.trashRequestedAt.getTime() >= TRASH_RECONCILE_AFTER_MS
+}
+
+// ─── Contrôle Super Admin : validation interne et suppression (LOT-ADMIN-REVIEW, D19–D21) ─
+
+/** Champs de revue d'une photo (lecture). Les horodatages sont posés par la base ; `null` = jamais posé. */
+export interface ReviewFields {
+  status: PhotoStatus
+  sentAt: Date | null
+  approvedAt: Date | null
+  rejectRequestedAt: Date | null
+  rejectedAt: Date | null
+  trashRequestedAt: Date | null
+  trashedAt: Date | null
+}
+
+/**
+ * Deux dimensions DISTINCTES (exigence produit) :
+ * - validation interne : `APPROVED` (validée), `TO_REVIEW` (non envoyée, à valider), `NOT_TRACKED` (photo envoyée ou
+ *   supprimée sans validation enregistrée : historique antérieur au contrôle, aucune approbation n'est inventée),
+ *   `NOT_APPROVED` (rejetée sans avoir été validée) ;
+ * - envoi au client : `SENT` seulement si la photo porte une preuve de transport (statut SENT ou DELETED), sinon `NOT_SENT`.
+ * Suppression : `NONE`, `TO_RESUME` (intention posée, corbeille ou finalisation inachevée), `TRASHED` (corbeille confirmée).
+ */
+export type ApprovalState = "APPROVED" | "TO_REVIEW" | "NOT_TRACKED" | "NOT_APPROVED"
+export type DeliveryState = "SENT" | "NOT_SENT"
+export type DeletionState = "NONE" | "TO_RESUME" | "TRASHED"
+
+export function approvalStateOf(photo: ReviewFields): ApprovalState {
+  if (photo.approvedAt) return "APPROVED"
+  if (photo.status === "PENDING") return "TO_REVIEW"
+  if (photo.status === "REJECTED") return "NOT_APPROVED"
+  return "NOT_TRACKED"
+}
+
+export function deliveryStateOf(photo: ReviewFields): DeliveryState {
+  return photo.status === "SENT" || photo.status === "DELETED" ? "SENT" : "NOT_SENT"
+}
+
+export function deletionStateOf(photo: ReviewFields): DeletionState {
+  if (photo.status === "REJECTED" || photo.status === "DELETED") return "TRASHED"
+  if ((photo.status === "PENDING" && photo.rejectRequestedAt) || (photo.status === "SENT" && photo.trashRequestedAt)) return "TO_RESUME"
+  return "NONE"
+}
+
+/** Validation : rejeu si déjà validée ; sinon seulement une photo non envoyée, sans suppression engagée. */
+export function decideApproval(photo: ReviewFields): "APPROVE" | "REPLAY" {
+  if (photo.approvedAt) return "REPLAY"
+  if (photo.status === "REJECTED" || photo.status === "DELETED") throw new WorksitePhotoDomainError("PHOTO_REMOVED", 409)
+  if (photo.status !== "PENDING") throw new WorksitePhotoDomainError("PHOTO_NOT_PENDING", 409)
+  if (photo.rejectRequestedAt) throw new WorksitePhotoDomainError("PHOTO_DELETION_IN_PROGRESS", 409)
+  return "APPROVE"
+}
+
+/**
+ * Suppression, phase 1 : chemin selon le statut. PENDING ⇒ rejet avant envoi (`rejectRequested*` → REJECTED) ;
+ * SENT ⇒ cycle existant après envoi (`trashRequested*` → DELETED, preuve intacte). Une photo envoyée n'est jamais
+ * requalifiée REJECTED. `writeIntent` = l'intention n'est pas encore posée ; sinon reprise sans nouvelle écriture.
+ */
+export type DeletionDecision = { kind: "DONE" } | { kind: "REJECT" | "TRASH"; writeIntent: boolean }
+export function decideDeletion(photo: ReviewFields): DeletionDecision {
+  if (photo.status === "REJECTED" || photo.status === "DELETED") return { kind: "DONE" }
+  if (photo.status === "PENDING") return { kind: "REJECT", writeIntent: photo.rejectRequestedAt === null }
+  return { kind: "TRASH", writeIntent: photo.trashRequestedAt === null }
+}
+
+/** Suppression, phase 3 (sous verrou, après la corbeille Drive) : finaliser une seule fois, ou constater que c'est fait. */
+export function decideDeletionFinalize(photo: ReviewFields): "FINALIZE_REJECT" | "FINALIZE_TRASH" | "ALREADY_DONE" {
+  if (photo.status === "REJECTED" || photo.status === "DELETED") return "ALREADY_DONE"
+  if (photo.status === "PENDING" && photo.rejectRequestedAt) return "FINALIZE_REJECT"
+  if (photo.status === "SENT" && photo.trashRequestedAt) return "FINALIZE_TRASH"
+  // Intention disparue : impossible (figée en SQL) ; refus explicite plutôt qu'une écriture aveugle.
+  throw new WorksitePhotoDomainError("PHOTO_DELETION_CONFLICT", 409)
+}
+
+export const REVIEW_FILTERS = ["ALL", "TO_REVIEW", "APPROVED", "SENT", "TO_RESUME", "REMOVED"] as const
+export type ReviewFilter = (typeof REVIEW_FILTERS)[number]
+
+export function parseReviewFilter(raw: string | null): ReviewFilter {
+  if (raw == null || raw === "") return "ALL"
+  const value = raw.trim().toUpperCase()
+  if (!(REVIEW_FILTERS as readonly string[]).includes(value)) throw new WorksitePhotoDomainError("INVALID_PAYLOAD", 400)
+  return value as ReviewFilter
+}
+
+/** Curseur opaque de la galerie (keyset `uploadedAt DESC, id DESC`) : stable même si une photo change d'état entre deux pages. */
+export interface ReviewCursor { uploadedAt: Date; id: string }
+
+export function encodeReviewCursor(cursor: ReviewCursor): string {
+  return Buffer.from(JSON.stringify({ u: cursor.uploadedAt.toISOString(), i: cursor.id })).toString("base64url")
+}
+
+export function decodeReviewCursor(raw: string | null): ReviewCursor | null {
+  if (raw == null || raw === "") return null
+  try {
+    if (raw.length > 512) throw new Error("too long")
+    const value = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as { u?: unknown; i?: unknown }
+    if (typeof value.u !== "string" || typeof value.i !== "string" || value.i.length === 0 || value.i.length > 64) throw new Error("shape")
+    const uploadedAt = new Date(value.u)
+    if (Number.isNaN(uploadedAt.getTime())) throw new Error("date")
+    return { uploadedAt, id: value.i }
+  } catch {
+    throw new WorksitePhotoDomainError("INVALID_PAYLOAD", 400)
+  }
 }
 
 // ─── Journal : filtre anti-fuite (patron v3-audit) ───────────────────────────

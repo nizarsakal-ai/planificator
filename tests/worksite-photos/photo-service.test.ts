@@ -116,7 +116,7 @@ function fakeStorage(options: { existing?: Map<string, StoredFileInfo> } = {}) {
     },
     getFile: async (_c, id) => { calls.push(`get:${id}`); return files.get(id) ?? null },
     download: async (_c, id) => { calls.push(`download:${id}`); return { stream: new ReadableStream(), contentType: "image/jpeg", contentLength: files.get(id)?.size ?? null } },
-    trash: async (_c, id) => { calls.push(`trash:${id}`) },
+    trash: async (_c, id) => { calls.push(`trash:${id}`); return { missing: false } },
     delete: async (_c, id) => { calls.push(`delete:${id}`) },
   }
   return { storage, calls, files }

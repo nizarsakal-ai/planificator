@@ -37,7 +37,11 @@ export interface PhotoStoragePort {
   /** `null` si le fichier n'existe pas (404). */
   getFile(companyId: string, fileId: string): Promise<StoredFileInfo | null>
   download(companyId: string, fileId: string): Promise<DriveDownload>
-  trash(companyId: string, fileId: string): Promise<void>
+  /**
+   * Corbeille (récupérable ; jamais une suppression définitive), idempotente. `missing: true` = le fichier n'existait plus
+   * côté fournisseur (404), traité comme « déjà en corbeille » ; l'appelant le journalise (`FILE_MISSING`).
+   */
+  trash(companyId: string, fileId: string): Promise<{ missing: boolean }>
   /** Suppression définitive : réservée au cron de réconciliation (orphelins) et à la purge. */
   delete(companyId: string, fileId: string): Promise<void>
 }
@@ -106,10 +110,10 @@ export class DrivePhotoStorage implements PhotoStoragePort {
     return withDriveAccess(companyId, this.connectionDeps, (token) => this.drive.downloadFile(token, fileId))
   }
 
-  trash(companyId: string, fileId: string): Promise<void> {
+  trash(companyId: string, fileId: string): Promise<{ missing: boolean }> {
     return withDriveAccess(companyId, this.connectionDeps, async (token) => {
-      try { await this.drive.trashFile(token, fileId) } catch (error) {
-        if (error instanceof DriveProviderError && error.code === "DRIVE_NOT_FOUND") return
+      try { await this.drive.trashFile(token, fileId); return { missing: false } } catch (error) {
+        if (error instanceof DriveProviderError && error.code === "DRIVE_NOT_FOUND") return { missing: true }
         throw error
       }
     })

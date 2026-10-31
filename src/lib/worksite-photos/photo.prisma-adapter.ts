@@ -8,6 +8,8 @@
  */
 import { Prisma, type PrismaClient } from "@prisma/client"
 import type { ActorReader, ActorRow, EmployeeRow, PhotoDb, PhotoRow, PhotoTx, ReservationRow, TruckRow, WorksiteQuery, WorksiteRow } from "./photo.service"
+import type { ReviewDb, ReviewPhotoRow, ReviewQuery, ReviewTx } from "./photo-review.service"
+import { WorksitePhotoDomainError } from "./photo.domain"
 
 type Db = Pick<PrismaClient, "user" | "company" | "employee" | "companySettings" | "worksite" | "truck" | "worksitePhotoUploadReservation" | "worksiteTruckPhoto" | "worksitePhotoEvent" | "$transaction">
 type Tx = Prisma.TransactionClient
@@ -139,5 +141,91 @@ export function prismaPhotoDb(prisma: Db): PhotoDb {
     }) as Promise<PhotoRow[]>,
     createEvent: (data) => prisma.worksitePhotoEvent.create({ data: data as Prisma.WorksitePhotoEventUncheckedCreateInput }),
     transaction: (fn) => prisma.$transaction((tx) => fn(txPort(tx)), TX_OPTIONS),
+  }
+}
+
+// ─── Contrôle Super Admin (LOT-ADMIN-REVIEW) ─────────────────────────────────
+// Toutes les écritures portent `companyId` ; la garde SQL des photos impose les transitions, les horodatages (clock_timestamp)
+// et le figement. Les écritures de la suppression APRÈS envoi utilisent `clock_timestamp()` côté base ; celles de la validation
+// et du rejet passent une valeur que la garde remplace par l'heure de la base.
+
+const reviewSelect = {
+  id: true, companyId: true, worksiteId: true, truckId: true, phase: true, status: true, driveFileId: true, uploadedAt: true, uploadedByNameSnapshot: true,
+  sentAt: true, approvedAt: true, approvedByNameSnapshot: true, rejectRequestedAt: true, rejectRequestedByNameSnapshot: true, rejectedAt: true,
+  trashRequestedAt: true, trashRequestedByNameSnapshot: true, trashedAt: true,
+  worksite: { select: { name: true, client: { select: { name: true } } } }, truck: { select: { matricule: true } },
+} as const
+
+type ReviewSelected = Prisma.WorksiteTruckPhotoGetPayload<{ select: typeof reviewSelect }>
+
+function toReviewRow(row: ReviewSelected): ReviewPhotoRow {
+  const { worksite, truck, ...rest } = row
+  return { ...rest, worksiteName: worksite.name, clientName: worksite.client.name, truckMatricule: truck.matricule }
+}
+
+function reviewWhere(query: ReviewQuery): Prisma.WorksiteTruckPhotoWhereInput {
+  const and: Prisma.WorksiteTruckPhotoWhereInput[] = [{ companyId: query.companyId }]
+  if (query.worksiteId) and.push({ worksiteId: query.worksiteId })
+  switch (query.filter) {
+    case "TO_REVIEW": and.push({ status: "PENDING", approvedAt: null, rejectRequestedAt: null }); break
+    case "APPROVED": and.push({ status: "PENDING", approvedAt: { not: null }, rejectRequestedAt: null }); break
+    case "SENT": and.push({ status: "SENT", trashRequestedAt: null }); break
+    case "TO_RESUME": and.push({ OR: [{ status: "PENDING", rejectRequestedAt: { not: null } }, { status: "SENT", trashRequestedAt: { not: null } }] }); break
+    case "REMOVED": and.push({ status: { in: ["REJECTED", "DELETED"] } }); break
+    case "ALL": break
+  }
+  if (query.cursor) and.push({ OR: [{ uploadedAt: { lt: query.cursor.uploadedAt } }, { uploadedAt: query.cursor.uploadedAt, id: { lt: query.cursor.id } }] })
+  return { AND: and }
+}
+
+function reviewTxPort(tx: Tx): ReviewTx {
+  const one = (count: number) => { if (count !== 1) throw new WorksitePhotoDomainError("PHOTO_DELETION_CONFLICT", 409) }
+  return {
+    ...actorReader(tx, true),
+    async lockPhoto(companyId, photoId) {
+      await tx.$queryRaw`SELECT "id" FROM "worksite_truck_photos" WHERE "id" = ${photoId} AND "companyId" = ${companyId} FOR UPDATE`
+      const row = await tx.worksiteTruckPhoto.findFirst({ where: { id: photoId, companyId }, select: reviewSelect })
+      return row ? toReviewRow(row) : null
+    },
+    async approve(companyId, photoId, by) {
+      const { count } = await tx.worksiteTruckPhoto.updateMany({
+        where: { id: photoId, companyId, status: "PENDING", approvedAt: null, rejectRequestedAt: null },
+        data: { approvedAt: new Date(), approvedById: by.id, approvedByNameSnapshot: by.name },
+      })
+      if (count !== 1) throw new WorksitePhotoDomainError("PHOTO_NOT_PENDING", 409)
+    },
+    async requestReject(companyId, photoId, by) {
+      one((await tx.worksiteTruckPhoto.updateMany({
+        where: { id: photoId, companyId, status: "PENDING", rejectRequestedAt: null },
+        data: { rejectRequestedAt: new Date(), rejectRequestedById: by.id, rejectRequestedByNameSnapshot: by.name },
+      })).count)
+    },
+    async finalizeReject(companyId, photoId) {
+      one((await tx.worksiteTruckPhoto.updateMany({
+        where: { id: photoId, companyId, status: "PENDING", rejectRequestedAt: { not: null } },
+        data: { status: "REJECTED", rejectedAt: new Date() },
+      })).count)
+    },
+    async requestTrash(companyId, photoId, by) {
+      one(await tx.$executeRaw`UPDATE "worksite_truck_photos" SET "trashRequestedAt" = clock_timestamp(), "trashRequestedById" = ${by.id}, "trashRequestedByNameSnapshot" = ${by.name}
+        WHERE "id" = ${photoId} AND "companyId" = ${companyId} AND "status" = 'SENT' AND "trashRequestedAt" IS NULL`)
+    },
+    async finalizeTrash(companyId, photoId) {
+      one(await tx.$executeRaw`UPDATE "worksite_truck_photos" SET "status" = 'DELETED', "trashedAt" = clock_timestamp()
+        WHERE "id" = ${photoId} AND "companyId" = ${companyId} AND "status" = 'SENT' AND "trashRequestedAt" IS NOT NULL`)
+    },
+    createEvent: (data) => tx.worksitePhotoEvent.create({ data: data as Prisma.WorksitePhotoEventUncheckedCreateInput }),
+  }
+}
+
+export function prismaReviewDb(prisma: Db): ReviewDb {
+  return {
+    ...actorReader(prisma, false),
+    async findReviewPhotos(query) {
+      const rows = await prisma.worksiteTruckPhoto.findMany({ where: reviewWhere(query), select: reviewSelect, orderBy: [{ uploadedAt: "desc" }, { id: "desc" }], take: query.take })
+      return rows.map(toReviewRow)
+    },
+    createEvent: (data) => prisma.worksitePhotoEvent.create({ data: data as Prisma.WorksitePhotoEventUncheckedCreateInput }),
+    reviewTransaction: (fn) => prisma.$transaction((tx) => fn(reviewTxPort(tx)), TX_OPTIONS),
   }
 }

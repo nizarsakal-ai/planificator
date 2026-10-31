@@ -26,11 +26,23 @@ describe("PhotosEnginsView", () => {
     assert.match(html, /AA-111-AA/)
     assert.match(html, /role="radiogroup"[^>]*aria-label="Phase"/)
     assert.match(html, /type="file"[^>]*accept="image\/jpeg,image\/png"[^>]*capture="environment"/)
-    assert.match(html, /En attente d(&#x27;|')envoi/)
+    // LOT-ADMIN-REVIEW : le statut d'envoi est un constat (« Non envoyée »), sans promesse d'envoi automatique au client.
+    assert.match(html, /Non envoyée/)
+    assert.equal(/En attente d(&#x27;|')envoi|transmises? au client|Hermes/.test(html), false)
     assert.match(html, /Envoyée au client/)
     assert.match(html, /src="\/api\/worksite-photos\/p1\/file"/)
     assert.match(html, /src="\/api\/worksite-photos\/p2\/file"/)
     assert.equal(/drive\.google|googleapis|driveFileId/.test(html), false)
+  })
+  it("photos supprimées avant ou après envoi : libellés distincts, aucune vignette (fichier en corbeille)", () => {
+    const removed: PhotoListItem[] = [
+      { ...photos[0], id: "p3", status: "REJECTED" },
+      { ...photos[1], id: "p4", status: "DELETED" },
+    ]
+    const html = renderToStaticMarkup(createElement(PhotosEnginsView, { context, initialPhotos: removed }))
+    assert.match(html, /Supprimée avant envoi/)
+    assert.match(html, /Supprimée après envoi/)
+    assert.equal(/\/api\/worksite-photos\/p3\/file|\/api\/worksite-photos\/p4\/file/.test(html), false)
   })
   it("liste vide ⇒ message ; aucun chantier visible ⇒ prise de vue impossible", () => {
     const html = renderToStaticMarkup(createElement(PhotosEnginsView, { context: { ...context, worksites: [] }, initialPhotos: [] }))
