@@ -31,7 +31,7 @@ D1 à D14 : **validées** par Nizar le 30/10/2026 (« Valider, Lot 0 »). D15 à
 | D6 | `contact_client` | `Worksite.clientContact String?`, adresse e-mail validée (Zod `email`, ≤ 254) |
 | D7 | Octets pour Hermes | Via l'API Planificator (proxy) ; Hermes n'a pas d'accès Drive propre |
 | D8 | Chantiers photographiables | `EMPLOYEE` : chantiers où il est affecté ; `TEAM_LEADER` : chantiers où **son équipe** est affectée (filtre de la page détail `/chantiers/[id]` ; la page liste, plus large pour le chef, n'est **pas** reprise) ; `ADMIN`/`SUPER_ADMIN` : tous les chantiers non archivés ; élargissement = décision métier explicite |
-| D9 | Suppression UI | Aucune en V1 |
+| D9 | Suppression UI | Aucune en V1 — **remplacée par D21** ([LOT-ADMIN-REVIEW](LOT-ADMIN-REVIEW.md)), sur demande explicite de l'utilisateur du 31/10/2026, en revue |
 | D10 | Alerte J+7 | Notification in-app aux administrateurs actifs, **une par chantier** (nombre de photos indiqué), chaque photo alertée une seule fois ; badge dans la page |
 | D11 | Purge définitive | Cron, 30 jours après la mise en corbeille |
 | D12 | Base de travail | Branche neuve depuis `origin/main` ; checkout local antérieur abandonné |
@@ -357,3 +357,7 @@ Décisions D15, D16, D17, D18 (D18 précisée : clôture par opérateur seulemen
 - Revue finale Codex de la révision 4 arbitrée : **GO documentaire**, aucun point bloquant ni majeur restant ; seule remarque éditoriale (« quatre champs de preuve ») corrigée en §7.2.
 - **Acceptation formelle** de l'ADR-PLAN-005 et de cette SPEC par Nizar le 30/10/2026 (« Accepter ADR et SPEC ») : statuts **Accepté**, module **SPECIFIED**.
 - Ce GO et cette acceptation portent sur les documents : ils ne valident aucune implémentation et n'autorisent ni push, ni PR, ni build, ni migration, ni activation. Le Lot 1 s'ouvre sur instruction de Nizar, dans le respect de la consigne budget Vercel du 29/10/2026.
+
+### Révision 5 (proposée, en revue) — contrôle Super Admin (2026-10-31)
+
+Décisions D19 à D21 et point ouvert D22 : voir [LOT-ADMIN-REVIEW](LOT-ADMIN-REVIEW.md). Statut `REJECTED` ajouté au cycle de vie (rejet avant envoi, terminal) ; validation interne indépendante du statut d'envoi ; suppression UI SUPER_ADMIN vers la corbeille Drive, sur les deux chemins (`PENDING → REJECTED`, `SENT → DELETED`). Aucune règle du Lot 1 n'est retirée.

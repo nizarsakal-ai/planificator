@@ -19,21 +19,28 @@ export interface PhotosContext {
   trucks: Array<{ id: string; matricule: string }>
 }
 export interface PhotoListItem {
-  id: string; worksiteId: string; truckId: string; phase: "BEFORE" | "AFTER"; status: "PENDING" | "SENT" | "DELETED"; drivePath: string
+  id: string; worksiteId: string; truckId: string; phase: "BEFORE" | "AFTER"; status: "PENDING" | "SENT" | "DELETED" | "REJECTED"; drivePath: string
   originalFilename: string; sizeBytes: number; uploadedAt: string; uploadedByName: string; sentAt: string | null
 }
 
-interface Props { context: PhotosContext; initialPhotos: PhotoListItem[] }
+interface Props {
+  context: PhotosContext
+  initialPhotos: PhotoListItem[]
+  /** `false` : formulaire d'ajout seul (SUPER_ADMIN, dont la galerie de contrôle remplace la liste ouvrière). */
+  showList?: boolean
+}
 
 type PendingUpload = { key: string; blob: Blob; sha256: string; worksiteId: string; truckId: string; phase: "BEFORE" | "AFTER"; takenAt: string; previewUrl: string }
 
+// Statut d'ENVOI uniquement (aucune promesse d'envoi automatique : « Non envoyée » est un constat, pas une file d'attente).
 const STATUS_LABEL: Record<PhotoListItem["status"], { label: string; className: string; icon: typeof Clock }> = {
-  PENDING: { label: "En attente d'envoi", className: "bg-amber-50 text-amber-800 border-amber-100", icon: Clock },
+  PENDING: { label: "Non envoyée", className: "bg-slate-50 text-slate-700 border-slate-200", icon: Clock },
   SENT: { label: "Envoyée au client", className: "bg-green-50 text-green-800 border-green-100", icon: Send },
-  DELETED: { label: "Supprimée", className: "bg-slate-100 text-slate-500 border-slate-200", icon: Trash2 },
+  DELETED: { label: "Supprimée après envoi", className: "bg-slate-100 text-slate-500 border-slate-200", icon: Trash2 },
+  REJECTED: { label: "Supprimée avant envoi", className: "bg-slate-100 text-slate-500 border-slate-200", icon: Trash2 },
 }
 
-export function PhotosEnginsView({ context, initialPhotos }: Props) {
+export function PhotosEnginsView({ context, initialPhotos, showList = true }: Props) {
   const [worksiteId, setWorksiteId] = useState(context.worksites[0]?.id ?? "")
   const [truckId, setTruckId] = useState(context.trucks[0]?.id ?? "")
   const [phase, setPhase] = useState<"BEFORE" | "AFTER">("BEFORE")
@@ -48,13 +55,13 @@ export function PhotosEnginsView({ context, initialPhotos }: Props) {
   // La liste suit le chantier sélectionné (les photos initiales viennent du premier chantier, rendu par le serveur).
   const [listedWorksiteId, setListedWorksiteId] = useState(worksiteId)
   useEffect(() => {
-    if (!worksiteId || worksiteId === listedWorksiteId) return
+    if (!showList || !worksiteId || worksiteId === listedWorksiteId) return
     let cancelled = false
     fetch(`/api/worksite-photos?worksiteId=${encodeURIComponent(worksiteId)}&limit=50`, { cache: "no-store" })
       .then(async (res) => { if (!cancelled && res.ok) { setPhotos(((await res.json()) as { photos: PhotoListItem[] }).photos); setListedWorksiteId(worksiteId) } })
       .catch(() => undefined)
     return () => { cancelled = true }
-  }, [worksiteId, listedWorksiteId])
+  }, [worksiteId, listedWorksiteId, showList])
 
   const worksiteById = useMemo(() => new Map(context.worksites.map((w) => [w.id, w])), [context.worksites])
   const truckById = useMemo(() => new Map(context.trucks.map((t) => [t.id, t])), [context.trucks])
@@ -99,7 +106,7 @@ export function PhotosEnginsView({ context, initialPhotos }: Props) {
       toast.success(res.headers.get("Idempotency-Replayed") === "true" ? "Photo déjà enregistrée" : "Photo enregistrée")
       setPending(null)
       // La photo est enregistrée : un échec du rafraîchissement ne doit pas être présenté comme un échec d'envoi.
-      await refreshPhotos(upload.worksiteId).catch(() => setError("Photo enregistrée, mais la liste n'a pas pu être actualisée."))
+      if (showList) await refreshPhotos(upload.worksiteId).catch(() => setError("Photo enregistrée, mais la liste n'a pas pu être actualisée."))
     } catch {
       setError("Réseau indisponible : la photo est conservée, appuyez sur Réessayer.")
     } finally {
@@ -155,7 +162,7 @@ export function PhotosEnginsView({ context, initialPhotos }: Props) {
         </CardContent>
       </Card>
 
-      <Card>
+      {showList && <Card>
         <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold">Photos du chantier</CardTitle></CardHeader>
         <CardContent>
           {photos.length === 0 ? (
@@ -167,7 +174,7 @@ export function PhotosEnginsView({ context, initialPhotos }: Props) {
                 const Icon = status.icon
                 return (
                   <li key={p.id} className="flex items-center gap-3 py-2">
-                    {p.status !== "DELETED" ? (
+                    {p.status !== "DELETED" && p.status !== "REJECTED" ? (
                       <img src={`/api/worksite-photos/${encodeURIComponent(p.id)}/file`} alt="" className="h-12 w-12 rounded object-cover bg-slate-100" loading="lazy" />
                     ) : <div className="h-12 w-12 rounded bg-slate-100" />}
                     <div className="flex-1 min-w-0">
@@ -183,7 +190,7 @@ export function PhotosEnginsView({ context, initialPhotos }: Props) {
             </ul>
           )}
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   )
 }

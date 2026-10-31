@@ -10,9 +10,12 @@ import { DriveProviderError } from "./drive/drive.errors"
 import { isWorksitePhotosEnabled } from "./feature-flag"
 import { MULTIPART_OVERHEAD_BYTES, PAYLOAD_MAX_BYTES, WorksitePhotoDomainError, getPhotoMaxBytes } from "./photo.domain"
 import { authorizeUploadTarget, listPhotos, listUploadContext, openPhotoFile, uploadPhoto, type PhotoServiceDeps, type PhotoSession } from "./photo.service"
+import { approvePhoto, listReviewPhotos, trashPhoto, type ReviewDb, type ReviewServiceDeps } from "./photo-review.service"
 
 export interface PhotoApiDeps extends PhotoServiceDeps {
   auth: () => Promise<PhotoSession | null>
+  /** Contrôle Super Admin (LOT-ADMIN-REVIEW) ; absent ⇒ les routes de contrôle répondent 500 (composition incomplète). */
+  reviewDb?: ReviewDb
 }
 
 export const PRIVATE_HEADERS: Record<string, string> = { "Cache-Control": "private, no-store", Vary: "Cookie" }
@@ -33,6 +36,8 @@ const PUBLIC_MESSAGES: Record<string, string> = {
   DRIVE_NOT_CONNECTED: "Stockage non connecté : prévenez votre responsable", DRIVE_QUOTA_EXCEEDED: "Espace de stockage plein : prévenez votre responsable",
   DRIVE_UNAVAILABLE: "Stockage indisponible, réessayez", DRIVE_RATE_LIMITED: "Stockage saturé, réessayez dans un instant", DRIVE_FORBIDDEN: "Stockage refusé : prévenez votre responsable",
   DRIVE_UNAUTHORIZED: "Stockage indisponible, réessayez", DRIVE_INVALID_RESPONSE: "Stockage indisponible, réessayez", DRIVE_NOT_FOUND: "Fichier introuvable", DRIVE_ID_EXISTS: "Stockage indisponible, réessayez",
+  PHOTO_NOT_PENDING: "Photo déjà envoyée : validation impossible", PHOTO_REMOVED: "Photo déjà supprimée",
+  PHOTO_DELETION_IN_PROGRESS: "Suppression en cours : reprenez la suppression", PHOTO_DELETION_CONFLICT: "Suppression concurrente, actualisez",
   DRIVE_CONFLICT: "Conflit de stockage : reprenez la photo", DRIVE_OAUTH_MISCONFIGURED: "Stockage mal configuré : prévenez votre responsable", DRIVE_OAUTH_PROTOCOL_ERROR: "Stockage indisponible : prévenez votre responsable",
 }
 
@@ -132,5 +137,37 @@ export function handlePhotoFile(request: Request, photoId: string, deps: PhotoAp
     }
     if (file.contentLength != null) headers["Content-Length"] = String(file.contentLength)
     return new Response(file.stream, { status: 200, headers })
+  })
+}
+
+// ─── Contrôle Super Admin (LOT-ADMIN-REVIEW) ─────────────────────────────────
+
+function reviewDeps(deps: PhotoApiDeps): ReviewServiceDeps {
+  if (!deps.reviewDb) throw new WorksitePhotoDomainError("SERVER_ERROR", 500)
+  return { reviewDb: deps.reviewDb, storage: deps.storage }
+}
+
+/** GET /api/worksite-photos/review?worksiteId=&filter=&cursor=&limit= — galerie SUPER_ADMIN, curseur opaque, sans identifiant Drive. */
+export function handleReviewList(request: Request, deps: PhotoApiDeps): Promise<Response> {
+  return photoRoute(request, deps, async () => {
+    const url = new URL(request.url)
+    const query = { worksiteId: url.searchParams.get("worksiteId"), filter: url.searchParams.get("filter"), cursor: url.searchParams.get("cursor"), limit: url.searchParams.get("limit") }
+    return photoJson(await listReviewPhotos(await deps.auth(), query, reviewDeps(deps)))
+  })
+}
+
+/** POST /api/worksite-photos/:id/approve — validation interne (n'envoie rien) ; rejouable. */
+export function handlePhotoApprove(request: Request, photoId: string, deps: PhotoApiDeps): Promise<Response> {
+  return photoRoute(request, deps, async () => {
+    const result = await approvePhoto(await deps.auth(), photoId, reviewDeps(deps))
+    return photoJson({ photo: result.photo }, { headers: { "Idempotency-Replayed": String(result.replayed) } })
+  })
+}
+
+/** POST /api/worksite-photos/:id/trash — corbeille Drive en deux phases (avant envoi ⇒ REJECTED, après ⇒ DELETED) ; rejouable, reprend après panne. */
+export function handlePhotoTrash(request: Request, photoId: string, deps: PhotoApiDeps): Promise<Response> {
+  return photoRoute(request, deps, async () => {
+    const result = await trashPhoto(await deps.auth(), photoId, reviewDeps(deps))
+    return photoJson({ photo: result.photo, resumed: result.resumed }, { headers: { "Idempotency-Replayed": String(result.replayed) } })
   })
 }

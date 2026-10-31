@@ -99,14 +99,14 @@ export interface ActorContext {
   timezone: string
 }
 
-type ActorIdentity = { id: string; role: string; companyId: string }
+export type ActorIdentity = { id: string; role: string; companyId: string }
 
 /**
  * Autorité courante d'un acteur : compte actif, entreprise active, rôle effectif (SUPER_ADMIN global ; sinon la fiche employé
  * de l'entreprise fait foi ; sinon le compte lui-même pour les administrateurs historiques) égal au rôle de session, visibilité D8.
  * Appelée à l'admission (hors transaction) ET relue dans la transaction de publication sur le même `reader` verrouillé.
  */
-async function resolveActorRows(reader: ActorReader, identity: ActorIdentity): Promise<Omit<ActorContext, "timezone">> {
+export async function resolveActorRows(reader: ActorReader, identity: ActorIdentity): Promise<Omit<ActorContext, "timezone">> {
   const [actor, company] = await Promise.all([reader.findActor(identity.id), reader.findCompany(identity.companyId)])
   if (!actor?.active) throw new WorksitePhotoDomainError("UNAUTHENTICATED", 401)
   if (!company?.active) throw new WorksitePhotoDomainError("FORBIDDEN", 403)
@@ -331,7 +331,8 @@ export async function openPhotoFile(session: PhotoSession | null, photoId: strin
   const actor = await resolveActor(session, deps)
   const [photo] = await deps.db.findPhotos({ companyId: actor.companyId, photoId, take: 1 })
   const visible = photo ? await deps.db.findWorksites({ companyId: actor.companyId, visibility: actor.visibility, worksiteId: photo.worksiteId, excludeArchived: false, take: 1 }) : []
-  if (!photo || visible.length === 0 || photo.status === "DELETED") {
+  // Photo mise à la corbeille (après envoi : DELETED ; avant envoi : REJECTED) : plus aucune lecture par le proxy.
+  if (!photo || visible.length === 0 || photo.status === "DELETED" || photo.status === "REJECTED") {
     await event(deps, { companyId: actor.companyId, photoId: photo?.id ?? null, action: "ACCESS_DENIED", actor, outcome: "DENIED", detail: { requested: photoId.slice(0, 64) } })
     throw new WorksitePhotoDomainError("PHOTO_NOT_FOUND", 404)
   }

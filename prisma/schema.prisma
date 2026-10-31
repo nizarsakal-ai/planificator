@@ -3177,6 +3177,7 @@ enum WorksitePhotoStatus {
   PENDING // en attente d'envoi par Hermes
   SENT    // envoyée (preuve d'envoi complète et figée)
   DELETED // corbeille Drive confirmée (uniquement depuis SENT)
+  REJECTED // rejetée avant envoi par un Super Admin, corbeille Drive confirmée (terminal, sans preuve d'envoi ; LOT-ADMIN-REVIEW)
 }
 
 enum WorksitePhotoReservationState {
@@ -3234,6 +3235,18 @@ model WorksiteTruckPhoto {
   trashedAt              DateTime?           @db.Timestamptz(3)
   purgedAt               DateTime?           @db.Timestamptz(3)
   unsentAlertedAt        DateTime?           @db.Timestamptz(3)
+  // Contrôle Super Admin (LOT-ADMIN-REVIEW, D19–D21) : validation interne INDÉPENDANTE du statut (PENDING reste « non envoyée »),
+  // rejet avant envoi en deux phases (intention, corbeille Drive, finalisation REJECTED). Horodatages posés par la base, figés.
+  approvedAt                    DateTime? @db.Timestamptz(3)
+  approvedById                  String?
+  approvedByNameSnapshot        String?
+  rejectRequestedAt             DateTime? @db.Timestamptz(3)
+  rejectRequestedById           String?
+  rejectRequestedByNameSnapshot String?
+  rejectedAt                    DateTime? @db.Timestamptz(3) // corbeille Drive confirmée pour une photo rejetée
+  // Auteur d'une suppression APRÈS envoi (cycle SENT → DELETED, trashRequestedAt / trashedAt) : posé avec la demande, figé.
+  trashRequestedById            String?
+  trashRequestedByNameSnapshot  String?
 
   company     Company                        @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   worksite    Worksite                       @relation(fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
@@ -3246,6 +3259,7 @@ model WorksiteTruckPhoto {
   @@unique([companyId, driveFileId])
   @@index([companyId, worksiteId, status, uploadedAt])
   @@index([status, uploadedAt])
+  @@index([companyId, uploadedAt, id])
   @@map("worksite_truck_photos")
 }
 
