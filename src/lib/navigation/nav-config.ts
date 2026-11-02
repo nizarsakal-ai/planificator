@@ -218,3 +218,11 @@ export function withSupplierIntakeNavItem(items: readonly NavItem[], visible: bo
   })
   return result
 }
+
+/** RH documents: supplemental server-resolved capabilities, never authority by menu visibility. */
+export function withHrDocumentNavItems(items: readonly NavItem[], own: boolean, manage: boolean): NavItem[] {
+  const result = [...items]
+  if (own === true && !result.some(i => i.href === "/mes-documents")) result.push({label:"Mes documents",href:"/mes-documents",icon:FileText})
+  if (manage === true && !result.some(i => i.href === "/rh/documents")) result.push({label:"Documents RH",href:"/rh/documents",icon:FileText})
+  return result
+}

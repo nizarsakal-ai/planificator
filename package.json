@@ -71,7 +71,10 @@
     "verify:vehicules:v3:real-providers": "tsx scripts/verification/vehicle-v3-real-providers.ts",
     "test:vehicules:v3:pglite": "node --import tsx --test tests/vehicules/v3/v3-migration.pglite.test.ts",
     "test:vehicules:v3:integration": "node --import tsx --test tests/vehicules/v3/integration.pg.test.ts",
-    "test:vehicules:v3:pg": "node --import tsx --test --test-concurrency=1 tests/vehicules/document-fixes.pg.test.ts tests/vehicules/expense-costs.pg.test.ts tests/vehicules/expense-trip-costs.pg.test.ts tests/vehicules/import-service.pg.test.ts tests/vehicules/v3/tour.pg.test.ts tests/vehicules/v3/integration.pg.test.ts tests/vehicules/cartography-cache.pg.test.ts tests/vehicules/routing-cache.pg.test.ts tests/vehicules/maintenance-corrections.pg.test.ts"
+    "test:vehicules:v3:pg": "node --import tsx --test --test-concurrency=1 tests/vehicules/document-fixes.pg.test.ts tests/vehicules/expense-costs.pg.test.ts tests/vehicules/expense-trip-costs.pg.test.ts tests/vehicules/import-service.pg.test.ts tests/vehicules/v3/tour.pg.test.ts tests/vehicules/v3/integration.pg.test.ts tests/vehicules/cartography-cache.pg.test.ts tests/vehicules/routing-cache.pg.test.ts tests/vehicules/maintenance-corrections.pg.test.ts",
+    "test:hr-documents": "node --import tsx --experimental-test-module-mocks --test tests/hr-documents/boundaries.test.ts tests/hr-documents/routes.test.ts tests/hr-documents/employee-preservation.test.ts",
+    "test:hr-documents:pg": "node --import tsx --test tests/hr-documents/hr-documents.pg.test.ts",
+    "typecheck:hr-documents": "tsc --project tsconfig.hr-documents.json --noEmit"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
