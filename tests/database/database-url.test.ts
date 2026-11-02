@@ -38,7 +38,14 @@ test("leaves missing, unparseable and non-PostgreSQL URLs untouched", () => {
   assert.equal(withServerlessPoolDefaults("mysql://u:p@h/db"), "mysql://u:p@h/db")
 })
 
-test("serverlessDatasources omits the override when DATABASE_URL is absent", () => {
+test("serverlessDatasources omits the override when DATABASE_URL is absent", (t) => {
+  // Sans argument, la fonction lit process.env.DATABASE_URL (défini en CI) : l'absence se teste en le retirant.
+  const saved = process.env.DATABASE_URL
+  delete process.env.DATABASE_URL
+  t.after(() => {
+    if (saved !== undefined) process.env.DATABASE_URL = saved
+  })
+  assert.deepEqual(serverlessDatasources(), {})
   assert.deepEqual(serverlessDatasources(undefined), {})
   const option = serverlessDatasources("postgresql://u:p@h/db")
   assert.deepEqual(params(option.datasources?.db?.url), SERVERLESS_POOL_DEFAULTS)
