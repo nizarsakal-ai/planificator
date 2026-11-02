@@ -14,7 +14,7 @@ export function project(doc:DocumentRecord):PublicDocument {
 }
 export interface Tx {
   actor(identity:Identity):Promise<Actor>
-  employee(companyId:string,id:string):Promise<{id:string;userId:string;email?:string}|null>
+  employee(companyId:string,id:string):Promise<{id:string;userId:string;email?:string;firstName?:string;lastName?:string}|null>
   storage(companyId:string):Promise<Storage|null>
   connection(companyId:string):Promise<{generation:string;accountEmail:string}|null>
   store(value:Storage):Promise<void>

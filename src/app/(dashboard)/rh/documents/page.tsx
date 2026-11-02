@@ -1,3 +1,4 @@
+import { auth } from "@/auth"
 import { notFound } from "next/navigation"
 import { Documents } from "@/components/hr-documents/Documents"
 import { hrDocumentsEnabled,hrIdentity,hrDb } from "@/lib/hr-documents/runtime"
@@ -15,9 +16,13 @@ export default async function HrDocuments({searchParams}:{searchParams:Promise<{
   if(!actor.capabilities.includes("READ"))notFound()
   const selected=employeeSelectionSchema.safeParse((await searchParams).employeeId)
   if(!selected.success)notFound()
+  let employeeContext:{id:string;firstName:string;lastName:string}|undefined
   if(selected.data){
     const employee=await new PrismaHrRepository(hrDb()).run(identity,(tx,a)=>tx.employee(a.companyId,selected.data!))
     if(!employee)notFound()
+    employeeContext={id:employee.id,firstName:employee.firstName??"",lastName:employee.lastName??""}
   }
-  return <Documents key={selected.data??"all"} employeeId={selected.data} manage configure={actor.capabilities.includes("CONFIGURE")} canImport={actor.capabilities.includes("IMPORT")} canPublish={actor.capabilities.includes("PUBLISH")} mailEnabled={process.env.HR_DOCUMENT_MAIL_ENABLED==="true"}/>
+  const session=await auth()
+  const canReturnToEmployee=["ADMIN","SUPER_ADMIN"].includes(session?.user?.role??"")
+  return <Documents key={selected.data??"all"} employeeId={selected.data} employeeContext={employeeContext} canReturnToEmployee={canReturnToEmployee} manage configure={actor.capabilities.includes("CONFIGURE")} canImport={actor.capabilities.includes("IMPORT")} canPublish={actor.capabilities.includes("PUBLISH")} mailEnabled={process.env.HR_DOCUMENT_MAIL_ENABLED==="true"}/>
 }

@@ -12,21 +12,26 @@ async function call(url:string,init?:RequestInit){
   if(!response.ok)throw new Error(data.error??"Opération indisponible.")
   return data
 }
-export function Documents({manage=false,configure=false,canImport=false,canPublish=false,mailEnabled=false,employeeId}:{manage?:boolean;configure?:boolean;canImport?:boolean;canPublish?:boolean;mailEnabled?:boolean;employeeId?:string}){
+export function Documents({manage=false,configure=false,canImport=false,canPublish=false,mailEnabled=false,employeeId,employeeContext,canReturnToEmployee=false}:{manage?:boolean;configure?:boolean;canImport?:boolean;canPublish?:boolean;mailEnabled?:boolean;employeeId?:string;employeeContext?:Employee;canReturnToEmployee?:boolean}){
   const [docs,setDocs]=useState<Doc[]>([]),[employees,setEmployees]=useState<Employee[]>([])
   const [error,setError]=useState(""),[message,setMessage]=useState(""),[loading,setLoading]=useState(true)
   const [cursor,setCursor]=useState<string|null>(null),[busy,setBusy]=useState(false)
   const [year,setYear]=useState(""),[kind,setKind]=useState("")
   const [importOpen,setImportOpen]=useState(false)
+  const loadVersion=useRef(0)
   const load=useCallback(async(append=false,next?:string)=>{
-    setLoading(true)
+    const version=++loadVersion.current
+    setLoading(true);setError("")
     try{
       const data=await call(`/api/hr-documents?manage=${manage}${employeeId?`&employeeId=${encodeURIComponent(employeeId)}`:""}${next?`&cursor=${encodeURIComponent(next)}`:""}`)
-      setDocs(old=>append?[...old,...data.documents]:data.documents);setCursor(data.nextCursor)
-      if(manage){const list=await call("/api/hr-documents/employees");setEmployees(employeeId?list.employees.filter((e:Employee)=>e.id===employeeId):list.employees)}
-    }catch(e){setError(e instanceof Error?e.message:"Service indisponible.")}finally{setLoading(false)}
-  },[manage,employeeId])
-  useEffect(()=>{void load()},[load])
+      let people:Employee[]=[]
+      if(manage&&employeeContext)people=[employeeContext]
+      else if(manage){const list=await call("/api/hr-documents/employees");people=employeeId?list.employees.filter((e:Employee)=>e.id===employeeId):list.employees}
+      if(version!==loadVersion.current)return
+      setDocs(old=>append?[...old,...data.documents]:data.documents);setCursor(data.nextCursor);setEmployees(people)
+    }catch(e){if(version===loadVersion.current){setDocs([]);setEmployees([]);setCursor(null);setError(e instanceof Error?e.message:"Service indisponible.")}}finally{if(version===loadVersion.current)setLoading(false)}
+  },[manage,employeeId,employeeContext])
+  useEffect(()=>{void load();return()=>{loadVersion.current++}},[load])
   async function action(fn:()=>Promise<unknown>,success:string){
     setBusy(true);setError("");setMessage("")
     try{
@@ -37,12 +42,12 @@ export function Documents({manage=false,configure=false,canImport=false,canPubli
     }catch(e){setError(e instanceof Error?e.message:"Opération indisponible.")}finally{setBusy(false)}
   }
   const shown=docs.filter(d=>(!year||d.period.startsWith(year))&&(!kind||d.category===kind))
-  const selectedEmployee=employeeId?employees.find(e=>e.id===employeeId):undefined
+  const selectedEmployee=employeeId?(employeeContext??employees.find(e=>e.id===employeeId)):undefined
   return <section className="mx-auto max-w-5xl space-y-5">
     {manage&&<nav aria-label="Parcours RH" className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">{[["/employes","Personnel"],["/absences","Absences"],["/pointages","Pointages"],["/notes-de-frais","Notes de frais"],["/rh/documents","Documents RH"]].map(([href,label])=><Link key={href} href={href} aria-current={href==="/rh/documents"?"page":undefined} className={`rounded-lg px-3 py-2 text-sm ${href==="/rh/documents"?"bg-blue-50 font-semibold text-blue-900":"text-slate-600 hover:bg-slate-50"}`}>{label}</Link>)}</nav>}
     <header className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-semibold text-slate-900">{manage?(employeeId?`Documents RH — ${selectedEmployee?`${selectedEmployee.firstName} ${selectedEmployee.lastName}`:"salarié sélectionné"}`:"Documents RH"):"Mes documents"}</h1>
       <p className="mt-2 text-sm text-slate-600">{manage?"Les informations du salarié proviennent de sa fiche. Vérifiez le PDF avant chaque publication.":"Vos documents personnels, classés par période. Aucun document d’un autre salarié n’est accessible."}</p></div>{manage&&canImport&&<button type="button" className="rounded-lg bg-blue-800 px-4 py-2 text-sm text-white" onClick={()=>setImportOpen(v=>!v)}>{importOpen?"Fermer le dépôt":"Ajouter des documents"}</button>}</header>
-    {manage&&employeeId&&<div className="flex flex-wrap gap-4 text-sm text-blue-900"><Link className="underline" href={`/employes/${encodeURIComponent(employeeId)}`}>Retour à la fiche employé</Link><Link className="underline" href="/rh/documents">Tous les documents RH</Link></div>}
+    {manage&&employeeId&&<div className="flex flex-wrap gap-4 text-sm text-blue-900">{canReturnToEmployee&&<Link className="underline" href={`/employes/${encodeURIComponent(employeeId)}`}>Retour à la fiche employé</Link>}<Link className="underline" href="/rh/documents">Tous les documents RH</Link></div>}
     <p className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-950">Copies documentaires privées. Le circuit officiel de remise des bulletins reste inchangé jusqu’à qualification du service.</p>
     {error&&<p role="alert" className="rounded-lg bg-red-50 p-3 text-red-800">{error} <button type="button" className="underline" onClick={()=>void load()}>Actualiser</button></p>}
     {message&&<p role="status" className="rounded-lg bg-green-50 p-3 text-green-900">{message}</p>}
