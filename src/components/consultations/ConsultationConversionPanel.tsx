@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { convertImportDraftAction } from "@/lib/actions/acquisition-conversion.actions"
+import { formatConversionSuccessMessage } from "@/lib/acquisition/conversion/conversion-success-message"
 
 export type ConversionClientOption = {
   id: string
@@ -91,11 +92,7 @@ export function ConsultationConversionPanel({
         if (result.outcome === "STATE_CHANGED") router.refresh()
         return
       }
-      toast.success(
-        result.outcome === "ALREADY_CONVERTED"
-          ? "Chantier déjà créé"
-          : "Chantier créé avec succès"
-      )
+      toast.success(formatConversionSuccessMessage(result))
       router.refresh()
     })
   }

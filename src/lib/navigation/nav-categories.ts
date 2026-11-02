@@ -28,7 +28,7 @@ export const NAV_CATEGORY_DEFINITIONS: readonly NavCategoryDefinition[] = [
   { id: "planning", label: "Planning", icon: CalendarDays, hrefs: ["/planning", "/planning/moi", "/planning/calendrier", "/planning/gantt", "/planning/personnel"] },
   {
     id: "rh", label: "Équipes & RH", icon: Users,
-    hrefs: ["/employes", "/equipes", "/planning/equipe", "/absences", "/mes-absences", "/pointages", "/pointage", "/notes-de-frais", "/mes-notes-de-frais"],
+    hrefs: ["/mes-documents", "/rh/documents", "/employes", "/equipes", "/planning/equipe", "/absences", "/mes-absences", "/pointages", "/pointage", "/notes-de-frais", "/mes-notes-de-frais"],
   },
   { id: "commercial", label: "Commercial", icon: Handshake, hrefs: ["/clients", "/consultations", "/devis", "/articles"] },
   { id: "finance", label: "Finance", icon: Calculator, hrefs: ["/factures", "/comptabilite", "/factures-fournisseurs"] },

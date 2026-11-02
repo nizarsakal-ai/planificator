@@ -226,3 +226,21 @@ describe("galerie : pagination réelle au-delà de 50, filtre chantier et état"
     assert.equal(await codeOf(listReviewPhotos(sa, { worksiteId: null, filter: null, cursor: "%%%", limit: null }, deps)), "400:INVALID_PAYLOAD")
   })
 })
+
+// Vérifie la requête de l’adaptateur de production, pas seulement le double en mémoire.
+describe("filtre serveur des cartes supprimées", () => {
+  it("filtre les suppressions avant pagination et conserve les intentions à reprendre", async () => {
+    const { prismaReviewDb } = await import("@/lib/worksite-photos/photo.prisma-adapter")
+    type Db = Parameters<typeof prismaReviewDb>[0]
+    let args: unknown
+    const db = prismaReviewDb({ worksiteTruckPhoto: { findMany: async (query: unknown) => { args = query; return [] } } } as unknown as Db)
+    await db.findReviewPhotos({ companyId: "tenant-test", filter: "ALL", worksiteId: "chantier-test", cursor: null, take: 25 })
+    assert.deepEqual((args as { where: unknown }).where, { AND: [
+      { companyId: "tenant-test" }, { worksiteId: "chantier-test" }, { status: { notIn: ["REJECTED", "DELETED"] } },
+    ] })
+    await db.findReviewPhotos({ companyId: "tenant-test", filter: "REMOVED", cursor: null, take: 25 })
+    assert.deepEqual((args as { where: unknown }).where, { AND: [
+      { companyId: "tenant-test" }, { status: { in: ["REJECTED", "DELETED"] } },
+    ] })
+  })
+})

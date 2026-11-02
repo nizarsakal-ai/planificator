@@ -353,6 +353,7 @@ model Company {
   updatedAt DateTime @updatedAt
 
   // Relations
+  hrDocumentStore         HrDocumentStore?
   users                   User[]
   employees               Employee[]
   teams                   Team[]
@@ -899,6 +900,7 @@ model Employee {
   drivenTrucks        Truck[]              @relation("TruckChauffeur")
   truckAssignments    TruckAssignment[]    @relation("TruckAssignmentChauffeur")
   mileageTrips        MileageTrip[]        @relation("MileageDriver")
+  hrDocuments         HrDocument[]
   assignedTasks       Task[]               @relation("TaskAssignee")
 
   @@unique([id, companyId])
@@ -3386,4 +3388,99 @@ model WorksitePhotoRecipient {
   @@unique([worksiteId, emailKey])
   @@index([companyId, worksiteId, position])
   @@map("worksite_photo_recipients")
+}
+
+// PLV2-DOC-RH-001 — additive, inactive until an independently authorized rollout.
+model HrDocumentStore {
+  companyId String @id
+  rootId String @unique
+  connectionGeneration String
+  accountEmail String
+  company Company @relation(fields:[companyId],references:[id],onDelete:Restrict)
+  events HrDocumentStoreEvent[]
+  @@map("hr_document_stores")
+}
+model HrDocument {
+  id String @id
+  companyId String
+  employeeId String
+  category String
+  period String
+  title String
+  status String
+  version Int @default(1)
+  sha256 String
+  size Int
+  driveFileId String @unique
+  rootId String
+  uploadedById String
+  uploadKey String
+  uploadIntent String
+  reviewedById String?
+  createdAt DateTime @default(now())
+  publishedAt DateTime?
+  employee Employee @relation(fields:[employeeId,companyId],references:[id,companyId],onDelete:Restrict)
+  events HrDocumentEvent[]
+  receipts HrDocumentReceipt[]
+  notices HrDocumentNotice[]
+  @@unique([id,companyId])
+  @@unique([companyId,uploadedById,uploadKey])
+  @@unique([companyId,employeeId,category,period,sha256])
+  @@index([companyId,status,id])
+  @@index([companyId,employeeId,status,id])
+  @@map("hr_documents")
+}
+model HrDocumentEvent {
+  driveFileId String?
+  sha256 String?
+  id String @id
+  companyId String
+  documentId String
+  actorId String
+  action String
+  version Int
+  createdAt DateTime @default(now())
+  document HrDocument @relation(fields:[documentId,companyId],references:[id,companyId],onDelete:Restrict)
+  @@unique([documentId,version])
+  @@index([companyId,documentId])
+  @@map("hr_document_events")
+}
+model HrDocumentReceipt {
+  id String @id
+  companyId String
+  actorId String
+  key String
+  intent String
+  documentId String
+  version Int
+  createdAt DateTime @default(now())
+  document HrDocument @relation(fields:[documentId,companyId],references:[id,companyId],onDelete:Restrict)
+  @@unique([companyId,actorId,key])
+  @@map("hr_document_receipts")
+}
+model HrDocumentNotice {
+  id String @id
+  companyId String
+  documentId String
+  publishedVersion Int
+  userId String
+  status String @default("PENDING")
+  attemptAt DateTime?
+  sentAt DateTime?
+  @@unique([documentId,publishedVersion])
+  document HrDocument @relation(fields:[documentId,companyId],references:[id,companyId],onDelete:Restrict)
+  @@index([companyId,status])
+  @@map("hr_document_notices")
+}
+
+model HrDocumentStoreEvent {
+  id String @id
+  companyId String
+  actorId String
+  action String
+  generation String
+  createdAt DateTime @default(now())
+  store HrDocumentStore @relation(fields:[companyId],references:[companyId],onDelete:Restrict)
+  @@index([companyId,createdAt])
+  @@map("hr_document_store_events")
 }

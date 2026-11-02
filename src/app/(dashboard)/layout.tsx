@@ -1,3 +1,4 @@
+import { resolveHrDocumentNavigation } from "@/lib/hr-documents/navigation"
 import { resolveSupplierIntakeAccess } from "@/lib/supplier-intake/access"
 import { CompanyBrand } from "@/components/company/CompanyBrand"
 import { prisma } from "@/lib/prisma"
@@ -43,7 +44,8 @@ export default async function DashboardLayout({
     where: { id: companyId }, select: { name: true, logoUrl: true },
   }) : null
   const companyLogo = logoForPdf(company?.logoUrl)
-  const user = { ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, worksitePhotosNavVisible, companyLogo, companyName: company?.name }
+  const hrNavigation = await resolveHrDocumentNavigation()
+  const user = { ...hrNavigation, ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, worksitePhotosNavVisible, companyLogo, companyName: company?.name }
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">

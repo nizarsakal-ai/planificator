@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false
+  },
+  "include": [
+    "next-env.d.ts",
+    "src/lib/hr-documents/**/*.ts",
+    "src/app/api/hr-documents/**/*.ts",
+    "src/app/(dashboard)/mes-documents/**/*.tsx",
+    "src/app/(dashboard)/rh/documents/**/*.tsx",
+    "src/components/hr-documents/**/*.tsx",
+    "src/components/layout/Sidebar.tsx",
+    "src/components/layout/MobileNav.tsx",
+    "src/components/layout/Navbar.tsx",
+    "src/app/(dashboard)/layout.tsx",
+    "src/lib/navigation/nav-config.ts",
+    "src/lib/navigation/nav-categories.ts",
+    "src/types/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "tests"
+  ]
+}

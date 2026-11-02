@@ -232,6 +232,8 @@ export async function toggleEmployeActive(employeeId: string, active: boolean) {
 export async function deleteEmploye(employeeId: string) {
   return deleteEmployeImpl(employeeId, {
     requireSession: requireAdmin,
+    hasProtectedHrDocuments: async ({employeeId:id,companyId}) => process.env.HR_DOCUMENTS_ENABLED === "true" &&
+      await prisma.hrDocument.count({where:{employeeId:id,companyId}}) > 0,
     findEmployee: (where) =>
       prisma.employee.findFirst({
         where,

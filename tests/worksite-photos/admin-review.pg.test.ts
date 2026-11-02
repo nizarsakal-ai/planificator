@@ -218,7 +218,11 @@ describe("contrôle Super Admin × adaptateur Prisma × PostgreSQL jetable", () 
   it("galerie : plus de 50 photos ⇒ pages de 24 sans doublon ni trou, ordre décroissant ; filtre chantier ; isolation", async () => {
     for (let i = 0; i < 58; i++) await publish(ids.a, i % 2 === 0 ? ids.w1 : ids.w2, ids.tA, ids.adminA)
     await publish(ids.b, ids.wB, ids.tB, ids.saB)
-    const total = await prisma.worksiteTruckPhoto.count({ where: { companyId: ids.a } })
+    // ALL is the current gallery: removed photos remain in the audit history, not in its pages.
+    const total = await prisma.worksiteTruckPhoto.count({ where: { companyId: ids.a, status: { notIn: ["REJECTED", "DELETED"] } } })
+    const removed = await prisma.worksiteTruckPhoto.findMany({ where: { companyId: ids.a, status: { in: ["REJECTED", "DELETED"] } }, select: { id: true } })
+    assert.ok(removed.length > 0, "les scénarios précédents ont conservé des photos retirées")
+    const removedIds = new Set(removed.map((photo) => photo.id))
     const seen: string[] = []
     const stamps: number[] = []
     let cursor: string | null = null
@@ -233,6 +237,10 @@ describe("contrôle Super Admin × adaptateur Prisma × PostgreSQL jetable", () 
     } while (cursor)
     assert.equal(seen.length, total)
     assert.equal(new Set(seen).size, total)
+    assert.ok(seen.every((id) => !removedIds.has(id)), "aucune photo retirée dans la galerie courante")
+    assert.equal(await prisma.worksiteTruckPhoto.count({ where: { companyId: ids.a } }), total + removed.length, "les preuves retirées restent en base")
+    const history = await listReviewPhotos(saA, { worksiteId: null, filter: "REMOVED", cursor: null, limit: "100" }, deps())
+    assert.deepEqual(new Set(history.photos.map((photo) => photo.id)), removedIds, "les photos retirées restent consultables dans leur filtre dédié")
     assert.ok(pages >= 3)
     assert.ok(stamps.every((t, i) => i === 0 || stamps[i - 1] >= t), "ordre décroissant")
     assert.ok(seen.every((id) => !id.includes("rvb")) && !(await prisma.worksiteTruckPhoto.findMany({ where: { companyId: ids.b }, select: { id: true } })).some((p) => seen.includes(p.id)), "aucune photo d'une autre entreprise")

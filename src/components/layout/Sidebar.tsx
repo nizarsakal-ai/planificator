@@ -11,7 +11,7 @@ import { PlanificatorLogo } from "@/components/brand/PlanificatorLogo"
 import {
   getNavItems,
   getActiveNavHref,
-  withAccountingNavItem,
+  withHrDocumentNavItems, withAccountingNavItem,
   withBillingNavItems, withSupplierIntakeNavItem, withWorksitePhotosNavItem,
   ROLE_LABELS,
 } from "@/lib/navigation/nav-config"
@@ -32,6 +32,8 @@ interface SidebarUser {
   accountingNavVisible?: boolean
   /** Lot C : lien « Devis » (drapeau BILLING_COMPLETE_ENABLED) ; affichage seulement. */
   billingNavVisible?: boolean
+  hrDocumentsNavVisible?: boolean
+  hrDocumentsManageNavVisible?: boolean
   supplierIntakeNavVisible?: boolean
   /** Photos d'engins (SPEC-WORKSITE-PHOTOS-001) : drapeau serveur + rôle interne ; affichage seulement. */
   worksitePhotosNavVisible?: boolean
@@ -41,7 +43,7 @@ interface SidebarUser {
 
 export function Sidebar({ user }: { user: SidebarUser }) {
   const pathname = usePathname()
-  const navItems = withWorksitePhotosNavItem(withSupplierIntakeNavItem(withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true), user.supplierIntakeNavVisible === true), user.worksitePhotosNavVisible === true)
+  const navItems = withHrDocumentNavItems(withWorksitePhotosNavItem(withSupplierIntakeNavItem(withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true), user.supplierIntakeNavVisible === true), user.worksitePhotosNavVisible === true), user.hrDocumentsNavVisible === true, user.hrDocumentsManageNavVisible === true)
   const activeHref = getActiveNavHref(navItems, pathname)
   // Regroupement par catégories APRÈS la composition des drapeaux : aucune entrée ajoutée, perdue ou dupliquée.
   const grouped = groupNavItems(navItems)

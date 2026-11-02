@@ -7,7 +7,7 @@ import { Menu, X, LogOut } from "lucide-react"
 import { cn, getInitials } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { PlanificatorLogo } from "@/components/brand/PlanificatorLogo"
-import { getActiveNavHref, getNavItems, withAccountingNavItem, withBillingNavItems, withSupplierIntakeNavItem, withWorksitePhotosNavItem, ROLE_LABELS } from "@/lib/navigation/nav-config"
+import { getActiveNavHref, getNavItems, withHrDocumentNavItems, withAccountingNavItem, withBillingNavItems, withSupplierIntakeNavItem, withWorksitePhotosNavItem, ROLE_LABELS } from "@/lib/navigation/nav-config"
 import { getActiveNavCategoryId, groupNavItems } from "@/lib/navigation/nav-categories"
 import { NavCategories, NavItemLink } from "@/components/layout/NavCategories"
 import type { Role } from "@prisma/client"
@@ -22,6 +22,8 @@ interface MobileNavUser {
   accountingNavVisible?: boolean
   /** Lot C : lien « Devis » (drapeau BILLING_COMPLETE_ENABLED) ; affichage seulement. */
   billingNavVisible?: boolean
+  hrDocumentsNavVisible?: boolean
+  hrDocumentsManageNavVisible?: boolean
   supplierIntakeNavVisible?: boolean
   worksitePhotosNavVisible?: boolean
 }
@@ -41,7 +43,7 @@ export function focusableIn(root: HTMLElement): HTMLElement[] {
 export function MobileNav({ user }: { user: MobileNavUser }) {
   const [open, setOpen] = useState(false)
   const pathname = usePathname()
-  const navItems = withWorksitePhotosNavItem(withSupplierIntakeNavItem(withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true), user.supplierIntakeNavVisible === true), user.worksitePhotosNavVisible === true)
+  const navItems = withHrDocumentNavItems(withWorksitePhotosNavItem(withSupplierIntakeNavItem(withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true), user.supplierIntakeNavVisible === true), user.worksitePhotosNavVisible === true), user.hrDocumentsNavVisible === true, user.hrDocumentsManageNavVisible === true)
   const activeHref = getActiveNavHref(navItems, pathname)
   // Mêmes catégories que la Sidebar, regroupées APRÈS la composition des drapeaux.
   const grouped = groupNavItems(navItems)

@@ -15,7 +15,9 @@ const withPWA = withPWAInit({
     // (aucun cache partagé ni hors ligne pour des pièces privées).
     runtimeCaching: [{
       urlPattern: ({ url, sameOrigin }) => sameOrigin && (
-        url.pathname === "/vehicules" || url.pathname.startsWith("/vehicules/")
+        url.pathname === "/mes-documents" || url.pathname === "/rh/documents"
+        || url.pathname === "/api/hr-documents" || url.pathname.startsWith("/api/hr-documents/")
+        || url.pathname === "/vehicules" || url.pathname.startsWith("/vehicules/")
         || url.pathname === "/api/trucks" || url.pathname.startsWith("/api/trucks/")
         || url.pathname === "/api/vehicle-documents" || url.pathname.startsWith("/api/vehicle-documents/")
         // Lot C : pièces de facturation et comptabilité (PDF, exports CSV/FEC, pages privées) — jamais de cache SW.

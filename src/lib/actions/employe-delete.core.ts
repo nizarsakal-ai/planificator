@@ -19,6 +19,8 @@ export type DeleteEmployeDeps = {
   }) => Promise<{ id: string; userId: string } | null>
   /** Vrai si l'employé (du tenant) est chauffeur d'une période d'historique ou d'un camion. */
   hasVehicleHistory: (args: { employeeId: string; companyId: string }) => Promise<boolean>
+  /** Optional module guard; existing callers retain their behaviour when it is absent. */
+  hasProtectedHrDocuments?: (args: { employeeId: string; companyId: string }) => Promise<boolean>
   /** Affectations de planning + fiche employé, dans UNE transaction (tout ou rien). */
   deleteEmployeeRecords: (employeeId: string) => Promise<unknown>
   deleteUser: (userId: string) => Promise<unknown>
@@ -55,6 +57,8 @@ export async function deleteEmployeImpl(
 
     const employee = await deps.findEmployee({ id: employeeId, companyId })
     if (!employee) return { error: "Employé introuvable" }
+    const protectedDocuments = {error:"Cet employé possède des documents RH conservés. Archivez sa fiche plutôt que de la supprimer.",code:"EMPLOYEE_HAS_HR_DOCUMENTS"}
+    if(await deps.hasProtectedHrDocuments?.({employeeId:employee.id,companyId}))return protectedDocuments
 
     const refused = {
       error: EMPLOYEE_HAS_VEHICLE_HISTORY_MESSAGE,
@@ -66,6 +70,7 @@ export async function deleteEmployeImpl(
     try {
       await deps.deleteEmployeeRecords(employee.id)
     } catch (err) {
+      if(err&&typeof err==="object"&&"code" in err&&err.code==="P2003"&&await deps.hasProtectedHrDocuments?.({employeeId:employee.id,companyId}))return protectedDocuments
       if (
         isVehicleHistoryForeignKeyViolation(err) &&
         (await deps.hasVehicleHistory({ employeeId: employee.id, companyId }))

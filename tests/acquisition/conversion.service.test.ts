@@ -88,6 +88,8 @@ type FakeDb = {
   team: { create: () => Promise<void> | void }
   assignment: { create: () => Promise<void> | void }
   $transaction: <T>(fn: (tx: FakeDb) => Promise<T>) => Promise<T>
+  $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown[]>
+  readonly events: string[]
 }
 
 function createFakeDb(seed: {
@@ -133,6 +135,7 @@ function createFakeDb(seed: {
   }> = []
   let teams = 0
   let assignments = 0
+  const events: string[] = []
   let lastWorksiteCreateData: Record<string, unknown> | null = null
   const forceClaimFail = seed.forceClaimFail ?? false
 
@@ -145,6 +148,13 @@ function createFakeDb(seed: {
     },
     get documents() {
       return documents
+    },
+    get events() {
+      return events
+    },
+    async $queryRaw(_strings: TemplateStringsArray, ...values: unknown[]) {
+      events.push(`lock:${values.join("|")}`)
+      return []
     },
     get teams() {
       return teams
@@ -246,6 +256,7 @@ function createFakeDb(seed: {
       async findMany(args: {
         where: { companyId: string; acquisitionMessageId: string }
       }) {
+        events.push("read-attachments")
         return attachments.filter(
           (a) =>
             a.companyId === args.where.companyId &&
@@ -391,6 +402,48 @@ describe("ImportDraftConversionService", () => {
     assert.equal(db.teams + db.assignments, 0)
   })
 
+  it("verrou du brouillon pris AVANT la lecture des pièces jointes (protocole markStored)", async () => {
+    const db = createFakeDb({
+      draft: baseDraft(),
+      clients: [{ id: "c1", companyId: "co1" }],
+      attachments: [
+        {
+          id: "a1",
+          companyId: "co1",
+          acquisitionMessageId: "msg1",
+          filename: "plan.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 10,
+          category: "PLAN",
+          status: "STORED",
+          storagePublicId: "pid/1",
+        },
+      ],
+    })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
+    const r = await svc.convertImportDraft(admin, {
+      draftId: "d1",
+      expectedVersion: 2,
+      clientMode: "EXISTING",
+      existingClientId: "c1",
+    })
+    assert.equal(r.ok, true)
+    assert.deepEqual(db.events, ["lock:d1|co1", "read-attachments"])
+  })
+
+  it("aucun verrou pris si la conversion est refusée avant la transaction (état invalide)", async () => {
+    const db = createFakeDb({ draft: baseDraft({ status: "REJECTED" }) })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
+    const r = await svc.convertImportDraft(admin, {
+      draftId: "d1",
+      expectedVersion: 2,
+      clientMode: "NEW",
+      newClient: { name: "X", email: null, phone: null, address: null },
+    })
+    assert.equal(r.ok, false)
+    assert.deepEqual(db.events, [])
+  })
+
   it("NEW crée client", async () => {
     const db = createFakeDb({ draft: baseDraft() })
     const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
@@ -461,6 +514,53 @@ describe("ImportDraftConversionService", () => {
     })
     assert.equal(r.ok, true)
     if (r.ok) assert.equal(r.outcome, "ALREADY_CONVERTED")
+  })
+
+  it("conversion concurrente : brouillon lu CONVERTED après attente du verrou → ALREADY_CONVERTED, jamais INVALID_STATE", async () => {
+    const db = createFakeDb({
+      draft: baseDraft(),
+      clients: [{ id: "c1", companyId: "co1" }],
+    })
+    db.worksites.push({
+      id: "ws-1",
+      clientId: "c1",
+      companyId: "co1",
+      startDate: null,
+      endDate: null,
+      status: "PLANNED",
+    })
+    const worksitesBefore = db.worksites.length
+    // 1er findFirst (hors transaction) : APPROVED. Dans la transaction, APRÈS le verrou, la
+    // conversion rivale a committé : le brouillon est lu CONVERTED (visibilité READ COMMITTED).
+    const originalFindFirst = db.worksiteImportDraft.findFirst.bind(db.worksiteImportDraft)
+    let calls = 0
+    ;(db.worksiteImportDraft as { findFirst: unknown }).findFirst = async (args: never) => {
+      calls++
+      const row = (await originalFindFirst(args)) as Record<string, unknown>
+      if (calls === 1) return row
+      return {
+        ...row,
+        status: "CONVERTED",
+        version: 3,
+        createdWorksiteId: "ws-1",
+        createdWorksite: { id: "ws-1", clientId: "c1" },
+      }
+    }
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
+    const r = await svc.convertImportDraft(admin, {
+      draftId: "d1",
+      expectedVersion: 2,
+      clientMode: "EXISTING",
+      existingClientId: "c1",
+    })
+    assert.equal(r.ok, true)
+    if (r.ok) {
+      assert.equal(r.outcome, "ALREADY_CONVERTED")
+      assert.equal(r.worksiteId, "ws-1")
+    }
+    assert.ok(db.events.includes("lock:d1|co1"))
+    assert.equal(db.worksites.length, worksitesBefore, "aucun chantier créé par la conversion perdante")
+    assert.ok(!db.events.includes("read-attachments"), "aucune lecture de pièces jointes après détection CONVERTED")
   })
 
   it("claim final count=0 → rollback Client/Worksite/Documents + STATE_CHANGED", async () => {

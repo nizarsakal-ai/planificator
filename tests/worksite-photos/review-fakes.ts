@@ -85,6 +85,7 @@ export function fakeDb(store: Store, hooks: { beforeTx?: (n: number) => void } =
       return [...store.photos.values()]
         .filter((p) => p.companyId === q.companyId && (!q.worksiteId || p.worksiteId === q.worksiteId))
         .filter((p) => q.filter !== "TO_REVIEW" || (p.status === "PENDING" && !p.approvedAt && !p.rejectRequestedAt))
+        .filter((p) => q.filter !== "ALL" || (p.status !== "REJECTED" && p.status !== "DELETED"))
         .filter((p) => q.filter !== "REMOVED" || p.status === "REJECTED" || p.status === "DELETED")
         .sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime() || (a.id < b.id ? 1 : -1))
         .filter((p) => !q.cursor || p.uploadedAt < q.cursor.uploadedAt || (p.uploadedAt.getTime() === q.cursor.uploadedAt.getTime() && p.id < q.cursor.id))
