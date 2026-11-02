@@ -1,5 +1,6 @@
 "use client"
 import { useCallback, useEffect, useRef, useState } from "react"
+import Link from "next/link"
 
 type Employee={id:string;firstName:string;lastName:string}
 type Doc={id:string;employeeId:string;title:string;period:string;category:string;status:string;version:number;size:number;canResume?:boolean}
@@ -11,19 +12,20 @@ async function call(url:string,init?:RequestInit){
   if(!response.ok)throw new Error(data.error??"Opération indisponible.")
   return data
 }
-export function Documents({manage=false,configure=false,canImport=false,canPublish=false,mailEnabled=false}:{manage?:boolean;configure?:boolean;canImport?:boolean;canPublish?:boolean;mailEnabled?:boolean}){
+export function Documents({manage=false,configure=false,canImport=false,canPublish=false,mailEnabled=false,employeeId}:{manage?:boolean;configure?:boolean;canImport?:boolean;canPublish?:boolean;mailEnabled?:boolean;employeeId?:string}){
   const [docs,setDocs]=useState<Doc[]>([]),[employees,setEmployees]=useState<Employee[]>([])
   const [error,setError]=useState(""),[message,setMessage]=useState(""),[loading,setLoading]=useState(true)
   const [cursor,setCursor]=useState<string|null>(null),[busy,setBusy]=useState(false)
   const [year,setYear]=useState(""),[kind,setKind]=useState("")
+  const [importOpen,setImportOpen]=useState(false)
   const load=useCallback(async(append=false,next?:string)=>{
     setLoading(true)
     try{
-      const data=await call(`/api/hr-documents?manage=${manage}${next?`&cursor=${encodeURIComponent(next)}`:""}`)
+      const data=await call(`/api/hr-documents?manage=${manage}${employeeId?`&employeeId=${encodeURIComponent(employeeId)}`:""}${next?`&cursor=${encodeURIComponent(next)}`:""}`)
       setDocs(old=>append?[...old,...data.documents]:data.documents);setCursor(data.nextCursor)
-      if(manage){const list=await call("/api/hr-documents/employees");setEmployees(list.employees)}
+      if(manage){const list=await call("/api/hr-documents/employees");setEmployees(employeeId?list.employees.filter((e:Employee)=>e.id===employeeId):list.employees)}
     }catch(e){setError(e instanceof Error?e.message:"Service indisponible.")}finally{setLoading(false)}
-  },[manage,canImport])
+  },[manage,employeeId])
   useEffect(()=>{void load()},[load])
   async function action(fn:()=>Promise<unknown>,success:string){
     setBusy(true);setError("");setMessage("")
@@ -35,14 +37,17 @@ export function Documents({manage=false,configure=false,canImport=false,canPubli
     }catch(e){setError(e instanceof Error?e.message:"Opération indisponible.")}finally{setBusy(false)}
   }
   const shown=docs.filter(d=>(!year||d.period.startsWith(year))&&(!kind||d.category===kind))
+  const selectedEmployee=employeeId?employees.find(e=>e.id===employeeId):undefined
   return <section className="mx-auto max-w-5xl space-y-5">
-    <header><h1 className="text-2xl font-semibold text-slate-900">{manage?"Documents RH — dépôt et validation":"Mes documents"}</h1>
-      <p className="mt-2 text-sm text-slate-600">{manage?"Vérifiez le salarié, la période et le PDF avant chaque publication.":"Vos documents personnels, classés par période. Aucun document d’un autre salarié n’est accessible."}</p></header>
+    {manage&&<nav aria-label="Parcours RH" className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">{[["/employes","Personnel"],["/absences","Absences"],["/pointages","Pointages"],["/notes-de-frais","Notes de frais"],["/rh/documents","Documents RH"]].map(([href,label])=><Link key={href} href={href} aria-current={href==="/rh/documents"?"page":undefined} className={`rounded-lg px-3 py-2 text-sm ${href==="/rh/documents"?"bg-blue-50 font-semibold text-blue-900":"text-slate-600 hover:bg-slate-50"}`}>{label}</Link>)}</nav>}
+    <header className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-semibold text-slate-900">{manage?(employeeId?`Documents RH — ${selectedEmployee?`${selectedEmployee.firstName} ${selectedEmployee.lastName}`:"salarié sélectionné"}`:"Documents RH"):"Mes documents"}</h1>
+      <p className="mt-2 text-sm text-slate-600">{manage?"Les informations du salarié proviennent de sa fiche. Vérifiez le PDF avant chaque publication.":"Vos documents personnels, classés par période. Aucun document d’un autre salarié n’est accessible."}</p></div>{manage&&canImport&&<button type="button" className="rounded-lg bg-blue-800 px-4 py-2 text-sm text-white" onClick={()=>setImportOpen(v=>!v)}>{importOpen?"Fermer le dépôt":"Ajouter des documents"}</button>}</header>
+    {manage&&employeeId&&<div className="flex flex-wrap gap-4 text-sm text-blue-900"><Link className="underline" href={`/employes/${encodeURIComponent(employeeId)}`}>Retour à la fiche employé</Link><Link className="underline" href="/rh/documents">Tous les documents RH</Link></div>}
     <p className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-950">Copies documentaires privées. Le circuit officiel de remise des bulletins reste inchangé jusqu’à qualification du service.</p>
     {error&&<p role="alert" className="rounded-lg bg-red-50 p-3 text-red-800">{error} <button type="button" className="underline" onClick={()=>void load()}>Actualiser</button></p>}
     {message&&<p role="status" className="rounded-lg bg-green-50 p-3 text-green-900">{message}</p>}
-    {manage&&configure&&<div className="rounded-xl border bg-white p-4"><h2 className="font-semibold">Stockage privé dédié</h2><p className="my-2 text-sm text-slate-600">L’initialisation crée uniquement la racine RH privée dans le compte explicitement configuré. Elle ne déplace aucun document et ne change aucun partage existant.</p><div className="flex flex-wrap gap-3"><button disabled={busy} type="button" className="rounded-lg bg-slate-800 px-4 py-2 text-white disabled:opacity-50" onClick={()=>void action(()=>call("/api/hr-documents/storage",{method:"POST"}),"Racine privée vérifiée.")}>Initialiser ou vérifier le stockage RH</button><button disabled={busy} type="button" className="rounded-lg border px-4 py-2 text-sm" onClick={()=>void action(()=>call("/api/hr-documents/storage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"REASSOCIATE"})}),"Racine réassociée après contrôle du même compte et des droits privés.")}>Réassocier après reconnexion du même compte</button></div></div>}
-    {manage&&canImport&&<ImportPanel employees={employees} busy={busy} run={action}/>}
+    {manage&&configure&&<details className="rounded-xl border bg-white p-4"><summary className="cursor-pointer text-sm font-medium text-slate-600">Stockage privé dédié</summary><p className="my-2 text-sm text-slate-600">L’initialisation crée uniquement la racine RH privée dans le compte explicitement configuré. Elle ne déplace aucun document et ne change aucun partage existant.</p><div className="flex flex-wrap gap-3"><button disabled={busy} type="button" className="rounded-lg bg-slate-800 px-4 py-2 text-white disabled:opacity-50" onClick={()=>void action(()=>call("/api/hr-documents/storage",{method:"POST"}),"Racine privée vérifiée.")}>Initialiser ou vérifier le stockage RH</button><button disabled={busy} type="button" className="rounded-lg border px-4 py-2 text-sm" onClick={()=>void action(()=>call("/api/hr-documents/storage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"REASSOCIATE"})}),"Racine réassociée après contrôle du même compte et des droits privés.")}>Réassocier après reconnexion du même compte</button></div></details>}
+    {manage&&canImport&&importOpen&&<ImportPanel employees={employees} employeeId={employeeId} busy={busy} run={action}/>}
     <div className="rounded-xl border bg-white p-4">
       <div className="flex flex-wrap items-end gap-3"><label className="min-w-32 text-sm">Année chargée<input className={control} inputMode="numeric" maxLength={4} placeholder="Toutes" value={year} onChange={e=>setYear(e.target.value.replace(/\D/g,""))}/></label>
         <label className="min-w-48 text-sm">Catégorie<select className={control} value={kind} onChange={e=>setKind(e.target.value)}><option value="">Toutes</option>{Object.entries(categories).map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label>
@@ -93,7 +98,7 @@ function RecoveryForm({doc,action,busy,run}:{doc:Doc;action:"RESUME"|"RESTORE";b
     void run(()=>call(`/api/hr-documents/${doc.id}/recover`,{method:"POST",body:form}),"PDF original vérifié. Revue et publication restent nécessaires.")
   }}><label className="min-w-0 text-sm">{action==="RESUME"?"Reprendre avec exactement le PDF réservé":"Restaurer le PDF original, sans changer son destinataire"}<input className="mt-2 block max-w-full" type="file" name="file" accept="application/pdf,.pdf" required disabled={busy}/></label><button disabled={busy} className="rounded-lg border px-3 py-2 text-sm">{action==="RESUME"?"Reprendre ce dépôt":"Restaurer une copie privée"}</button></form>
 }
-function ImportPanel({employees,busy,run}:{employees:Employee[];busy:boolean;run:Runner}){
+function ImportPanel({employees,employeeId,busy,run}:{employees:Employee[];employeeId?:string;busy:boolean;run:Runner}){
   const [files,setFiles]=useState<{file:File;key:string}[]>([])
   return <div className="rounded-xl border bg-white p-4"><h2 className="font-semibold">Dépôt PDF — unitaire ou lot</h2>
     <p className="my-2 text-sm text-slate-600">10 fichiers au maximum par sélection, 10 Mo par PDF. Chaque affectation est vérifiée séparément. Aucun classement automatique ni publication par l’IA.</p>
@@ -101,6 +106,6 @@ function ImportPanel({employees,busy,run}:{employees:Employee[];busy:boolean;run
     <div className="space-y-4">{files.map(({file,key})=><form key={key} className="mt-4 grid gap-3 rounded-lg border p-3 sm:grid-cols-2" onSubmit={e=>{
       e.preventDefault();const f=new FormData(e.currentTarget);f.set("key",key);f.set("file",file)
       void run(()=>call("/api/hr-documents",{method:"POST",body:f}),"PDF déposé en préparation. Vérification et publication restent nécessaires.")
-    }}><p className="break-all text-sm font-medium sm:col-span-2">{file.name}</p><MetadataFields employees={employees}/><button disabled={busy} className="rounded-lg bg-blue-800 px-3 py-2 text-sm text-white disabled:opacity-50">Déposer ce PDF privé</button></form>)}</div>
+    }}><p className="break-all text-sm font-medium sm:col-span-2">{file.name}</p><MetadataFields employees={employees} defaults={employeeId?{employeeId}:undefined}/><button disabled={busy} className="rounded-lg bg-blue-800 px-3 py-2 text-sm text-white disabled:opacity-50">Déposer ce PDF privé</button></form>)}</div>
   </div>
 }

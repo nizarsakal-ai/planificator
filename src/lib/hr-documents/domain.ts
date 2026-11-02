@@ -5,6 +5,7 @@ export const MAX_PDF_BYTES = 10 * 1024 * 1024
 export const CAPABILITIES = ["IMPORT", "PUBLISH", "READ", "CONFIGURE"] as const
 export type Capability = typeof CAPABILITIES[number]
 const id = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/)
+export const employeeSelectionSchema = id.optional()
 export const reviewSchema = z.object({ employeeId: id, category: z.enum(["PAYSLIP", "CONTRACT", "AMENDMENT", "OTHER"]),
   period: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/), title: z.string().trim().min(1).max(120),
   key: z.string().uuid(), expectedVersion: z.number().int().min(1).max(2147483647).optional(),

@@ -232,4 +232,28 @@ describe("HR documents × disposable PostgreSQL, Google and email simulated",()=
       assert.equal((await db.hrDocumentNotice.findUniqueOrThrow({where:{id:notices[1].id}})).status,"SENT")
     }
   })
+  it("employee filter is tenant-bound and preserved across every database page",async()=>{
+    const f=await fixture(),prefix=`filtered-${run}-${++seq}-`
+    const rows=Array.from({length:61},(_,i)=>({id:prefix+String(i).padStart(4,"0"),companyId:f.companyId,employeeId:i%2===0?f.employeeId:f.otherEmployeeId,category:"OTHER",period:"2026-11",title:"Synthetic filter test",status:"READY",sha256:`synthetic-${i}`,size:1,driveFileId:randomUUID(),rootId:"synthetic-root",uploadedById:f.operator.userId,uploadKey:randomUUID(),uploadIntent:"synthetic-intent"}))
+    await db.hrDocument.createMany({data:rows})
+    const first=await f.service.list(f.operator,true,undefined,f.employeeId)
+    assert.equal(first.length,26);assert.ok(first.every(d=>d.employeeId===f.employeeId))
+    const second=await f.service.list(f.operator,true,first[24].id,f.employeeId)
+    const seen=[...first.slice(0,25),...second].map(d=>d.id)
+    assert.equal(second.length,6);assert.equal(new Set(seen).size,31)
+    assert.deepEqual(seen,rows.filter(d=>d.employeeId===f.employeeId).map(d=>d.id))
+    const alien=await fixture()
+    await assert.rejects(f.service.list(f.operator,true,undefined,alien.employeeId),/NOT_FOUND/)
+    await assert.rejects(f.service.list({...f.operator,companyId:alien.companyId},true,undefined,f.employeeId),/FORBIDDEN/)
+    await assert.rejects(f.service.list(f.owner,false,undefined,f.otherEmployeeId),/FORBIDDEN/)
+    await assert.rejects(f.service.list(f.owner,true,undefined,f.employeeId),/FORBIDDEN/)
+    await db.employee.update({where:{id:f.employeeId},data:{active:false}})
+    await assert.rejects(f.service.list(f.operator,true,undefined,f.employeeId),/NOT_FOUND/)
+  })
+  it("an import still rejects a modified foreign employee target regardless of the selected view",async()=>{
+    const f=await fixture(),alien=await fixture();await f.service.configure(f.operator)
+    await assert.rejects(f.service.import(f.operator,{...f.input(),employeeId:alien.employeeId},pdf("foreign-selected-target")),/NOT_FOUND/)
+    assert.equal(await db.hrDocument.count({where:{companyId:f.companyId}}),0)
+  })
+
 })

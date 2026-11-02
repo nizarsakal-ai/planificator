@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { assertContent, canRead, digest, HrError, requireCapability, reviewSchema, type Actor, type Identity } from "./domain"
+import { assertContent, canRead, digest, employeeSelectionSchema, HrError, requireCapability, reviewSchema, type Actor, type Identity } from "./domain"
 import { verifiedDownload, type PrivateDrive } from "./drive"
 
 export type DocumentRecord = { id:string; companyId:string; employeeId:string; category:string; period:string; title:string;
@@ -31,7 +31,7 @@ export interface Tx {
   notice(companyId:string,documentId:string):Promise<Notice|null>
   noticeById(companyId:string,id:string,version:number):Promise<Notice|null>
   saveNotice(notice:Notice,expectedStatus:string):Promise<void>
-  list(actor:Actor,manage:boolean,cursor:string|undefined):Promise<DocumentRecord[]>
+  list(actor:Actor,manage:boolean,cursor:string|undefined,employeeId?:string):Promise<DocumentRecord[]>
   employees(companyId:string):Promise<{id:string;firstName:string;lastName:string}[]>
 }
 export interface Repository { run<T>(identity:Identity,fn:(tx:Tx,actor:Actor)=>Promise<T>):Promise<T> }
@@ -82,10 +82,15 @@ export class HrDocumentsService {
       await tx.saveStorage({...storage,connectionGeneration:connection.generation},a.userId)
     })
   }
-  async list(identity:Identity,manage=false,cursor?:string) {
+  async list(identity:Identity,manage=false,cursor?:string,employeeId?:string) {
+    const selected=employeeSelectionSchema.parse(employeeId)
     return this.repo.run(identity,async(tx,a)=>{
       if(manage)requireCapability(a,"READ")
-      const docs=await tx.list(a,manage,cursor)
+      if(selected){
+        if(!manage)throw new HrError("FORBIDDEN",403)
+        if(!await tx.employee(a.companyId,selected))throw new HrError("NOT_FOUND",404)
+      }
+      const docs=await tx.list(a,manage,cursor,selected)
       return docs.map(doc=>({...project(doc),canResume:manage&&doc.uploadedById===a.userId}))
     })
   }

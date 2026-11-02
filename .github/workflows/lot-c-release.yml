@@ -64,6 +64,18 @@ jobs:
           for suite in test:accounting test:accounting:c5 test:billing test:billing:c1 test:billing:c2 test:billing:c3 test:billing:c4 test:billing:fix test:navigation; do
             npm run -s "$suite" | tee "ci-evidence/${suite//:/_}.log"
           done
+      - name: RH access gates and employee-scoped PostgreSQL
+        env:
+          NODE_ENV: test
+          HR_DOCUMENTS_ENABLED: 'false'
+          HR_DOCUMENT_EMPLOYEE_PORTAL_ENABLED: 'false'
+          HR_DOCUMENT_MAIL_ENABLED: 'false'
+        run: |
+          set -o pipefail
+          npm run -s test:hr-documents | tee ci-evidence/rh-access.log
+          printf 'CREATE DATABASE "planificator_hr_docs_test";' | npx --no-install prisma db execute --url "$TEST_PG_ADMIN_URL" --stdin
+          DATABASE_URL=postgresql://postgres@127.0.0.1:5432/planificator_hr_docs_test npx --no-install prisma migrate deploy > ci-evidence/rh-migrations.log
+          HR_DOCUMENT_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:5432/planificator_hr_docs_test npm run -s test:hr-documents:pg | tee ci-evidence/rh-employee-pg.log
       - name: PostgreSQL corrective and concurrency tests
         env:
           NODE_ENV: test
