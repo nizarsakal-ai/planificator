@@ -1,16 +1,15 @@
 "use client"
 
-import { useCallback, useEffect, useId, useState, useSyncExternalStore } from "react"
-import { Monitor, Moon, Sun } from "lucide-react"
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
+import { Moon, Sun } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
-  APPEARANCE_EVENT, APPEARANCE_LABELS, APPEARANCE_PREFERENCES, DEFAULT_APPEARANCE,
+  APPEARANCE_EVENT, DEFAULT_APPEARANCE,
   appearanceStorageKey, parseAppearance, resolveTheme,
   type AppearancePreference,
 } from "@/lib/appearance/appearance"
 
 const DARK_QUERY = "(prefers-color-scheme: dark)"
-const ICONS = { light: Sun, dark: Moon, system: Monitor } as const
 
 function readPreference(key: string | null): AppearancePreference {
   if (!key) return DEFAULT_APPEARANCE
@@ -55,58 +54,60 @@ export function useAppearance(userId: string) {
   return { preference, setPreference }
 }
 
+/** Réglage sombre de l'appareil, suivi en direct (rendu serveur : clair). */
+function useSystemDark() {
+  const subscribe = useCallback((onChange: () => void) => {
+    const media = window.matchMedia(DARK_QUERY)
+    media.addEventListener("change", onChange)
+    return () => media.removeEventListener("change", onChange)
+  }, [])
+  return useSyncExternalStore(subscribe, () => window.matchMedia(DARK_QUERY).matches, () => false)
+}
+
 /**
- * Sélecteur « Apparence » (pied de la Sidebar et du menu mobile) : contrôle segmenté à curseur glissant, fait d'un
- * groupe de boutons radio natifs (flèches du clavier, un seul arrêt de tabulation), libellés Clair / Sombre / Système.
- * Affichage seulement.
+ * Bouton bascule « Mode sombre » (pied de la Sidebar et du menu mobile) : `role="switch"` natif (Entrée / Espace),
+ * état annoncé par `aria-checked`. Tant que l'utilisateur n'a rien choisi, il reflète le réglage de l'appareil
+ * (préférence « Système ») ; le basculer enregistre un choix explicite clair ou sombre. Affichage seulement.
  */
 export function AppearanceSwitcher({ userId, touch = false }: { userId: string; touch?: boolean }) {
   const { preference, setPreference } = useAppearance(userId)
+  const dark = resolveTheme(preference, useSystemDark()) === "dark"
+  // Glissement seulement après un clic : pas de déplacement visible au chargement.
   const [animate, setAnimate] = useState(false)
-  const baseId = useId()
-  const labelId = `${baseId}-label`
+  const Icon = dark ? Moon : Sun
 
   return (
-    <div>
-      <span id={labelId} className="sr-only">Apparence</span>
-      <div role="radiogroup" aria-labelledby={labelId} className="relative grid grid-cols-3 rounded-[14px] bg-slate-900/[0.05] p-1">
+    <button
+      type="button"
+      role="switch"
+      aria-checked={dark}
+      onClick={() => { setAnimate(true); setPreference(dark ? "light" : "dark") }}
+      className={cn(
+        "group flex w-full items-center gap-2.5 rounded-xl px-1.5 text-[13.5px] font-medium tracking-[-0.005em] text-slate-600 outline-none",
+        "transition-colors duration-200 motion-reduce:transition-none hover:bg-[#0f3460]/[0.06] hover:text-[#0f3460]",
+        "focus-visible:ring-2 focus-visible:ring-blue-500/60 dark:hover:bg-white/5 dark:hover:text-slate-900",
+        touch ? "h-11" : "h-9",
+      )}
+    >
+      <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center" aria-hidden="true">
+        <Icon className="h-4 w-4 text-slate-400 transition-colors group-hover:text-slate-600 motion-reduce:transition-none" />
+      </span>
+      <span className="flex-1 text-left">Mode sombre</span>
+      <span
+        className={cn(
+          "relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors duration-200 motion-reduce:transition-none",
+          dark ? "bg-[#0f3460] dark:bg-blue-500" : "bg-[#0f3460]/15",
+        )}
+        aria-hidden="true"
+      >
         <span
           className={cn(
-            "pointer-events-none absolute bottom-1 left-1 top-1 w-[calc((100%-0.5rem)/3)] rounded-[10px] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.12)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.5)]",
-            // Glissement seulement après un choix de l'utilisateur : pas de déplacement visible au chargement.
-            animate && "transition-transform duration-300 ease-out motion-reduce:transition-none",
+            "absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-[#fff] shadow-[0_1px_2px_rgba(15,52,96,0.25),0_4px_8px_-2px_rgba(15,52,96,0.35)]",
+            dark && "translate-x-5",
+            animate && "transition-transform duration-200 ease-out motion-reduce:transition-none",
           )}
-          style={{ transform: `translateX(${APPEARANCE_PREFERENCES.indexOf(preference) * 100}%)` }}
-          aria-hidden="true"
         />
-        {APPEARANCE_PREFERENCES.map((option) => {
-          const Icon = ICONS[option]
-          const checked = preference === option
-          return (
-            <label
-              key={option}
-              className={cn(
-                "relative inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-[10px] text-[12px] transition-colors motion-reduce:transition-none",
-                "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-500/60",
-                touch ? "h-11" : "h-[30px]",
-                checked ? "font-semibold text-slate-900" : "font-medium text-slate-600 hover:text-slate-900",
-              )}
-            >
-              <input
-                type="radio"
-                name={`${baseId}-appearance`}
-                value={option}
-                checked={checked}
-                onChange={() => { setAnimate(true); setPreference(option) }}
-                aria-label={APPEARANCE_LABELS[option]}
-                className="absolute inset-0 m-0 cursor-pointer appearance-none rounded-[10px] opacity-0"
-              />
-              <Icon className={cn("h-3.5 w-3.5", checked && "text-blue-600 dark:text-blue-300")} aria-hidden="true" />
-              <span aria-hidden="true">{APPEARANCE_LABELS[option]}</span>
-            </label>
-          )
-        })}
-      </div>
-    </div>
+      </span>
+    </button>
   )
 }

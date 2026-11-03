@@ -61,6 +61,30 @@ describe("Sidebar", () => {
   })
 })
 
+describe("Curseur bleu glissant entre les liens", () => {
+  it("rendu serveur : curseur décoratif masqué, lien actif peint lui-même le relief bleu, un seul lien actif", () => {
+    pathname = "/planning"
+    const html = render(Sidebar, user("ADMIN"))
+    const sliders = [...html.matchAll(/<span aria-hidden="true" data-nav-slider=""[^>]*>/g)].map((m) => m[0])
+    assert.equal(sliders.length, 1, "un curseur par menu")
+    assert.match(sliders[0], /opacity-0/, "invisible tant qu'il n'est pas mesuré")
+    assert.match(sliders[0], /motion-reduce:transition-none|class="[^"]*pointer-events-none/)
+    const active = [...html.matchAll(/<a [^>]*>/g)].map((m) => m[0]).filter((t) => t.includes('aria-current="page"'))
+    assert.equal(active.length, 1)
+    assert.match(active[0], /data-nav-href="\/planning"/)
+    assert.match(active[0], /from-\[#1b4a85\]/, "fond bleu foncé sans attendre le curseur")
+    assert.match(active[0], /text-white/)
+  })
+  it("liens des catégories repérables par le curseur ; « Mon profil » (pied) garde sa pastille", () => {
+    pathname = "/profil"
+    const html = render(Sidebar, user("ADMIN"))
+    assert.ok((html.match(/data-nav-href="/g) ?? []).length > 5)
+    const profil = /<a [^>]*href="\/profil"[^>]*>/.exec(html)![0]
+    assert.equal(profil.includes("data-nav-href"), false)
+    assert.match(profil, /aria-current="page"/)
+  })
+})
+
 describe("MobileNav", () => {
   it("EMPLOYEE : mêmes catégories, Photos engins présent si le serveur le rend visible ; tiroir fermé inert et aria-hidden", () => {
     pathname = "/chantiers/42"
@@ -82,42 +106,25 @@ describe("MobileNav", () => {
   })
 })
 
-describe("Pied premium : identité, Déconnexion et Apparence", () => {
-  /** Groupes radio « Apparence » : [nom de groupe, valeurs, libellés accessibles, valeur cochée]. */
-  function appearanceGroups(html: string) {
-    return [...html.matchAll(/<div role="radiogroup" aria-labelledby="([^"]+)"[^>]*>(.*?)<\/div>/g)].map((m) => {
-      const inputs = [...m[2].matchAll(/<input [^>]*>/g)].map((i) => i[0])
-      return {
-        labelledBy: m[1],
-        values: inputs.map((i) => /value="([^"]+)"/.exec(i)![1]),
-        labels: inputs.map((i) => /aria-label="([^"]+)"/.exec(i)![1]),
-        names: new Set(inputs.map((i) => /name="([^"]+)"/.exec(i)![1])),
-        checked: inputs.filter((i) => /checked=""/.test(i)).map((i) => /value="([^"]+)"/.exec(i)![1]),
-      }
-    })
-  }
-  it("Sidebar et MobileNav : un groupe radio natif Clair / Sombre / Système, étiqueté « Apparence », « Système » coché au rendu serveur", () => {
+describe("Pied premium : identité, Déconnexion et mode sombre", () => {
+  /** Boutons bascule « Mode sombre » : balise d'ouverture de chaque bouton role="switch". */
+  const appearanceSwitches = (html: string) => [...html.matchAll(/<button type="button" role="switch"[^>]*>(.*?)<\/button>/g)].map((m) => ({ tag: m[0], inner: m[1] }))
+  it("Sidebar et MobileNav : un bouton bascule natif « Mode sombre », décoché au rendu serveur (suit l'appareil)", () => {
     pathname = "/planning"
     for (const shell of [Sidebar, MobileNav]) {
       const html = render(shell, user("ADMIN"))
-      const groups = appearanceGroups(html)
-      assert.equal(groups.length, 1)
-      const [group] = groups
-      assert.deepEqual(group.values, ["light", "dark", "system"])
-      assert.deepEqual(group.labels, ["Clair", "Sombre", "Système"])
-      assert.equal(group.names.size, 1, "un seul nom de groupe (flèches du clavier)")
-      assert.deepEqual(group.checked, ["system"])
-      assert.match(html, new RegExp(`<span id="${group.labelledBy}"[^>]*>Apparence</span>`))
+      const switches = appearanceSwitches(html)
+      assert.equal(switches.length, 1)
+      assert.match(switches[0].tag, /aria-checked="false"/)
+      assert.match(switches[0].inner, />Mode sombre<\/span>/, "nom accessible visible")
+      assert.equal(/role="radiogroup"/.test(html), false, "plus de sélecteur à trois choix")
       assert.match(html, /<button type="button" aria-label="Déconnexion"/)
       assert.match(html, /Utilisateur Test/)
     }
   })
-  it("Sidebar + MobileNav sur la même page : groupes radio distincts (pas d'interférence entre instances)", () => {
+  it("Sidebar + MobileNav sur la même page : un bouton bascule chacun", () => {
     const both = renderToStaticMarkup(createElement("div", null, createElement(Sidebar, { user: user("ADMIN") }), createElement(MobileNav, { user: user("ADMIN") })))
-    const groups = appearanceGroups(both)
-    assert.equal(groups.length, 2)
-    assert.notEqual([...groups[0].names][0], [...groups[1].names][0])
-    assert.notEqual(groups[0].labelledBy, groups[1].labelledBy)
+    assert.equal(appearanceSwitches(both).length, 2)
   })
   it("« Documents RH » n'apparaît que si le serveur le rend visible (opérateurs), « Mes documents » de même", () => {
     pathname = "/dashboard"

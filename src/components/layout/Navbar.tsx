@@ -22,7 +22,7 @@ interface NavbarUser {
 
 export function Navbar({ user }: { user: NavbarUser }) {
   return (
-    <header className="h-14 bg-white border-b border-slate-200 px-4 md:px-6 flex items-center justify-between shrink-0">
+    <header data-app-header="" className="h-14 bg-[#fbf7ef] border-b border-[#ebe2d1] px-4 md:px-6 flex items-center justify-between shrink-0">
       {/* Hamburger (mobile) */}
       <MobileNav user={user} />
 

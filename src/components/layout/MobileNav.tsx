@@ -30,7 +30,7 @@ interface MobileNavUser {
 /**
  * Éléments focalisables RÉELLEMENT rendus du tiroir : exclus sous un ancêtre `[hidden]` (catégorie repliée) ou `[inert]`,
  * et sans rectangle rendu. Tiroir masqué par le CSS (passage en ≥ md pendant qu'il est ouvert) ⇒ [] : le piège ne bloque
- * alors jamais Tab. Un groupe de boutons radio (Apparence) n'offre qu'un arrêt de tabulation : le bouton coché, sinon
+ * alors jamais Tab. Un groupe de boutons radio n'offre qu'un arrêt de tabulation : le bouton coché, sinon
  * le premier du groupe, comme le navigateur.
  */
 export function focusableIn(root: HTMLElement): HTMLElement[] {
@@ -106,7 +106,7 @@ export function MobileNav({ user }: { user: MobileNavUser }) {
       {/* Fermé : hors de l'ordre de tabulation et des technologies d'assistance (inert + aria-hidden). */}
       <div
         className={cn(
-          "fixed bottom-2 left-2 top-2 z-50 flex w-[19rem] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-[28px] border border-white/90 bg-white/[0.94] shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_24px_60px_-20px_rgba(15,23,42,0.45)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-50/90 transition-transform duration-300 ease-out motion-reduce:transition-none md:hidden",
+          "fixed bottom-2 left-2 top-2 z-50 flex w-[19rem] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-[28px] border border-[#0f3460]/10 bg-[#fffaf0]/[0.96] shadow-[0_28px_60px_-20px_rgba(15,52,96,0.45)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-50/90 transition-transform duration-300 ease-out motion-reduce:transition-none md:hidden",
           open ? "translate-x-0" : "-translate-x-[calc(100%+1rem)]"
         )}
         data-appearance-scope=""

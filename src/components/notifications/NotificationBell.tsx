@@ -70,7 +70,7 @@ export function NotificationBell() {
   return (
     <DropdownMenu open={open} onOpenChange={handleOpen}>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative h-8 w-8">
+        <Button variant="ghost" size="icon" className="relative h-9 w-9 border border-[#0f3460]/15 bg-white text-[#0f3460] shadow-[0_2px_4px_rgba(15,52,96,0.12),0_10px_20px_-10px_rgba(15,52,96,0.55)] hover:bg-[#0f3460]/[0.04] hover:text-[#0f3460] hover:shadow-[0_3px_6px_rgba(15,52,96,0.16),0_14px_26px_-10px_rgba(15,52,96,0.65)]">
           <Bell className="h-4 w-4" />
           {unread > 0 && (
             <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center font-bold">

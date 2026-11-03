@@ -28,16 +28,16 @@ export function NavFooter({
         <NavItemLink key={item.href} item={item} active={item.href === activeHref} onNavigate={onNavigate} touch={touch} />
       ))}
       <AppearanceSwitcher userId={user.id} touch={touch} />
-      <div className="flex items-center gap-2.5 rounded-[18px] border border-white/90 bg-white/75 p-2.5 dark:border-white/10 dark:bg-white/5">
+      <div className="flex items-center gap-2.5 rounded-[18px] border border-[#0f3460]/10 bg-white/80 p-2.5 shadow-[0_2px_4px_rgba(15,52,96,0.1),0_12px_26px_-12px_rgba(15,52,96,0.5)] dark:border-white/10 dark:bg-white/5 dark:shadow-none">
         <Avatar className="h-[34px] w-[34px] shrink-0">
           <AvatarImage src={user.image ?? undefined} />
-          <AvatarFallback className="bg-gradient-to-br from-[#2f62f0] to-[#1d4ed8] text-xs font-semibold text-white">
+          <AvatarFallback className="bg-gradient-to-br from-[#1b4a85] to-[#0f3460] text-xs font-semibold text-white">
             {getInitials(user.name ?? user.email ?? "?")}
           </AvatarFallback>
         </Avatar>
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-semibold text-slate-900">{user.name ?? user.email}</p>
-          <p className="truncate text-[11.5px] text-slate-500">{ROLE_LABELS[user.role]}</p>
+          <p className="truncate text-[11.5px] text-slate-600">{ROLE_LABELS[user.role]}</p>
         </div>
         <button
           type="button"
@@ -46,7 +46,7 @@ export function NavFooter({
           title="Déconnexion"
           className={cn(
             "inline-flex shrink-0 items-center justify-center rounded-[10px] text-slate-500 outline-none transition-colors",
-            "hover:bg-slate-900/[0.05] hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-blue-500/60 motion-reduce:transition-none",
+            "hover:bg-[#efe7d8] hover:text-slate-900 dark:hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/60 motion-reduce:transition-none",
             touch ? "h-11 w-11" : "h-8 w-8",
           )}
         >

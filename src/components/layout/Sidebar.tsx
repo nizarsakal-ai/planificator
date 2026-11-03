@@ -47,7 +47,7 @@ export function Sidebar({ user }: { user: SidebarUser }) {
   return (
     // data-appearance-scope : surface qualifiée pour le thème sombre (Apparence).
     <aside data-appearance-scope="" className="hidden md:flex w-[17.5rem] shrink-0 h-screen py-3.5 pl-3.5">
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/90 bg-white/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_24px_60px_-30px_rgba(30,64,175,0.35)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-50/80 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_24px_60px_-30px_rgba(0,0,0,0.7)]">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-[#0f3460]/10 bg-[#fffaf0]/75 shadow-[0_8px_18px_-8px_rgba(15,52,96,0.3),0_40px_80px_-28px_rgba(15,52,96,0.65)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-50/80 dark:shadow-[0_24px_60px_-30px_rgba(0,0,0,0.7)]">
         <div className="flex h-[72px] shrink-0 items-center px-5">
           <PlanificatorLogo subtitle="Planning d'équipes" />
         </div>
