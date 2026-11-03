@@ -257,3 +257,36 @@ describe("HR documents × disposable PostgreSQL, Google and email simulated",()=
   })
 
 })
+
+describe("PLV2-DOC-RH-002 — fiches à compléter × PostgreSQL jetable",()=>{
+  const flags=["HR_DOCUMENT_EMPLOYEE_DRAFTS_ENABLED","HR_DOCUMENT_EXTENDED_CATEGORIES_ENABLED"] as const
+  const keep=Object.fromEntries(flags.map(f=>[f,process.env[f]]))
+  after(()=>{for(const f of flags){if(keep[f]===undefined)delete process.env[f];else process.env[f]=keep[f]}})
+  const withDrafts=(f:Awaited<ReturnType<typeof fixture>>)=>new HrDocumentsService(f.repo,f.connect,undefined,undefined,null,async()=>"synthetic-unusable-hash")
+  it("fiche inactive, compte inactif à adresse .invalid, aucune invitation ; dépôt et revue oui, publication non",async()=>{
+    process.env.HR_DOCUMENT_EMPLOYEE_DRAFTS_ENABLED="true";process.env.HR_DOCUMENT_EXTENDED_CATEGORIES_ENABLED="true"
+    const f=await fixture(),service=withDrafts(f),key=randomUUID()
+    const draft=await service.createDraft(f.operator,{firstName:"Anna",lastName:"Eriksson",birthDate:"1974-08-12",sex:"F",nationality:"UTO",identityExpiry:"2032-04-15",documentNumberEnd:"02C3",key})
+    assert.equal((await service.createDraft(f.operator,{firstName:"Anna",lastName:"Eriksson",key})).id,draft.id,"idempotent par clé")
+    const employee=await db.employee.findUniqueOrThrow({where:{id:draft.id},include:{user:true,hrDraft:true}})
+    assert.equal(employee.active,false);assert.equal(employee.user.active,false);assert.match(employee.user.email,/@fiche-a-completer\.invalid$/)
+    assert.equal(employee.hrDraft!.documentNumberEnd,"02C3");assert.equal(employee.hrDraft!.status,"OPEN")
+    assert.equal(await db.invitation.count({where:{email:employee.user.email}}),0)
+    assert.ok((await service.employees(f.operator)).some(e=>e.id===draft.id&&e.draft))
+    await service.configure(f.operator)
+    const doc=await service.import(f.operator,{employeeId:draft.id,category:"ID_CARD",period:"2032-04",title:"Pièce synthétique",key:randomUUID()},pdf("draft"))
+    const reviewed=await service.review(f.operator,doc.id,{employeeId:draft.id,category:"ID_CARD",period:"2032-04",title:"Pièce synthétique",key:randomUUID(),expectedVersion:doc.version})
+    await assert.rejects(service.publish(f.operator,doc.id,reviewed.version,randomUUID()),/DRAFT_EMPLOYEE/)
+  })
+  it("isolation : une autre société ne voit ni ne rattache la fiche ; drapeau coupé, la fiche disparaît du module",async()=>{
+    process.env.HR_DOCUMENT_EMPLOYEE_DRAFTS_ENABLED="true";process.env.HR_DOCUMENT_EXTENDED_CATEGORIES_ENABLED="true"
+    const a=await fixture(),b=await fixture()
+    const draft=await withDrafts(a).createDraft(a.operator,{firstName:"Jean",lastName:"Testeur",key:randomUUID()})
+    assert.equal((await withDrafts(b).employees(b.operator)).some(e=>e.id===draft.id),false)
+    await b.service.configure(b.operator)
+    await assert.rejects(withDrafts(b).import(b.operator,{employeeId:draft.id,category:"ID_CARD",period:"2030-01",title:"x",key:randomUUID()},pdf("cross")),/NOT_FOUND/)
+    delete process.env.HR_DOCUMENT_EMPLOYEE_DRAFTS_ENABLED
+    assert.equal((await withDrafts(a).employees(a.operator)).some(e=>e.id===draft.id),false)
+    await assert.rejects(withDrafts(a).createDraft(a.operator,{firstName:"Jean",lastName:"Testeur",key:randomUUID()}),/DISABLED/)
+  })
+})

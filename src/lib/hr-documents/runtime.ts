@@ -4,7 +4,10 @@ import { serverlessDatasources } from "@/lib/database-url"
 import { getValidDriveAccessToken, type DriveConnectionDb } from "@/lib/worksite-photos/drive/drive-connection.client"
 import { capabilitiesFor, digest, HrError, requireCapability, type Identity,type Capability } from "./domain"
 import { GooglePrivateDrive } from "./drive"
+import bcrypt from "bcryptjs"
+import { extractPdfTextLayer } from "@/lib/acquisition/extraction/pdf-text-extract"
 import { PrismaHrRepository } from "./repository"
+import { externalRecognizer } from "./recognition/external"
 import { HrDocumentsService } from "./service"
 
 export function hrDocumentsEnabled(env:NodeJS.ProcessEnv=process.env){return env.HR_DOCUMENTS_ENABLED==="true"}
@@ -50,5 +53,9 @@ export function hrService(){
     }}
     const token=await getValidDriveAccessToken(companyId,{db:adapter})
     return {drive:new GooglePrivateDrive(token,expected.toLowerCase()),generation,accountEmail:expected.toLowerCase()}
-  })
+  },undefined,
+  // PLV2-DOC-RH-002 : texte local seulement (couche texte PDF) ; les images n'ont pas d'OCR local dans ce lot.
+  async(bytes,kind)=>kind==="pdf"?(await extractPdfTextLayer(bytes,{maxChars:20_000,timeoutMs:4_000})).text:"",
+  externalRecognizer(),
+  (secret)=>bcrypt.hash(secret,12))
 }
