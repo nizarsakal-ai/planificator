@@ -46,7 +46,13 @@ export async function handleAcquisitionOrchestratorCron(
   try {
     const result = await (deps.run ? deps.run({ runId }) : defaultRun(runId))
     return NextResponse.json(result)
-  } catch {
+  } catch (error) {
+    // Nom et code seulement : le message d'une erreur Prisma peut contenir des valeurs de requête.
+    console.error("[acquisition-orchestrator] ORCHESTRATOR_FAILED", {
+      runId,
+      name: error instanceof Error ? error.name : typeof error,
+      code: (error as { code?: unknown } | null)?.code,
+    })
     return NextResponse.json(
       {
         error: "Acquisition orchestrator cron failed",

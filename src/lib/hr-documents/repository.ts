@@ -34,8 +34,8 @@ class PrismaHrTx implements Tx {
   }
   async employee(companyId:string,id:string) {
     await this.db.$queryRaw`SELECT id FROM employees WHERE id=${id} AND "companyId"=${companyId} FOR SHARE`
-    const employee=await this.db.employee.findFirst({where:{id,companyId,active:true,user:{active:true},company:{active:true}},select:{id:true,userId:true,user:{select:{email:true}}}})
-    return employee?{id:employee.id,userId:employee.userId,email:employee.user.email}:null
+    const employee=await this.db.employee.findFirst({where:{id,companyId,active:true,user:{active:true},company:{active:true}},select:{id:true,userId:true,firstName:true,lastName:true,user:{select:{email:true}}}})
+    return employee?{id:employee.id,userId:employee.userId,email:employee.user.email,firstName:employee.firstName,lastName:employee.lastName}:null
   }
   storage(companyId:string){return this.db.hrDocumentStore.findUnique({where:{companyId}})}
   async connection(companyId:string){
@@ -72,8 +72,8 @@ class PrismaHrTx implements Tx {
     const result=await this.db.hrDocumentNotice.updateMany({where:{id,companyId:value.companyId,publishedVersion:value.publishedVersion,status:expectedStatus},data})
     if(result.count!==1)throw new HrError("CONFLICT",409)
   }
-  list(actor:Actor,manage:boolean,cursor?:string){
-    const where:Prisma.HrDocumentWhereInput={companyId:actor.companyId,...(manage?{}:{employeeId:actor.employeeId??"__NO_EMPLOYEE__",status:"PUBLISHED"}),...(cursor?{id:{gt:cursor}}:{})}
+  list(actor:Actor,manage:boolean,cursor?:string,employeeId?:string){
+    const where:Prisma.HrDocumentWhereInput={companyId:actor.companyId,...(manage?(employeeId?{employeeId}:{}):{employeeId:actor.employeeId??"__NO_EMPLOYEE__",status:"PUBLISHED"}),...(cursor?{id:{gt:cursor}}:{})}
     return this.db.hrDocument.findMany({where,orderBy:{id:"asc"},take:26})
   }
   employees(companyId:string){return this.db.employee.findMany({where:{companyId,active:true,user:{active:true}},select:{id:true,firstName:true,lastName:true},orderBy:[{lastName:"asc"},{id:"asc"}],take:500})}

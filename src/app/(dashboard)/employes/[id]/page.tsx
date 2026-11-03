@@ -11,6 +11,7 @@ import { getInitials } from "@/lib/utils"
 import { AvatarUpload } from "@/components/employes/AvatarUpload"
 import { EmployeActions } from "@/components/employes/EmployeActions"
 import { EmployeeProfileTabs } from "@/components/employes/EmployeeProfileTabs"
+import { resolveHrDocumentNavigation } from "@/lib/hr-documents/navigation"
 
 export const metadata: Metadata = { title: "Profil employé" }
 
@@ -86,6 +87,7 @@ export default async function EmployeDetailPage({
   })
 
   if (!employee) notFound()
+  const rhNavigation=await resolveHrDocumentNavigation()
 
   const fullName      = `${employee.firstName} ${employee.lastName}`
   const team          = employee.teamMemberships[0]?.team
@@ -183,6 +185,7 @@ export default async function EmployeDetailPage({
 
       <EmployeeProfileTabs
         employeeId={employee.id}
+        hrDocumentsHref={employee.active&&rhNavigation.hrDocumentsManageNavVisible?`/rh/documents?employeeId=${encodeURIComponent(employee.id)}`:undefined}
         defaultValues={{
           firstName: employee.firstName,
           lastName:  employee.lastName,

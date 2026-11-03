@@ -8,7 +8,8 @@ export async function GET(request:Request){return hrHttp(async()=>{
   const identity=await hrIdentity();const url=new URL(request.url)
   const cursor=url.searchParams.get("cursor")??undefined
   if(cursor&&!/^[a-zA-Z0-9_-]{1,128}$/.test(cursor))throw new HrError("INVALID_INPUT")
-  const docs=await hrService().list(identity,url.searchParams.get("manage")==="true",cursor)
+  if(url.searchParams.getAll("employeeId").length>1)throw new HrError("INVALID_INPUT")
+  const docs=await hrService().list(identity,url.searchParams.get("manage")==="true",cursor,url.searchParams.get("employeeId")??undefined)
   return hrJson({documents:docs.slice(0,25),nextCursor:docs.length>25?docs[24].id:null})
 })}
 export async function POST(request:Request){return hrHttp(async()=>{

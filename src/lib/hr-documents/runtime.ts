@@ -1,20 +1,24 @@
 import { PrismaClient } from "@prisma/client"
 import { auth } from "@/auth"
+import { serverlessDatasources } from "@/lib/database-url"
 import { getValidDriveAccessToken, type DriveConnectionDb } from "@/lib/worksite-photos/drive/drive-connection.client"
-import { digest, HrError, requireCapability, type Identity,type Capability } from "./domain"
+import { capabilitiesFor, digest, HrError, requireCapability, type Identity,type Capability } from "./domain"
 import { GooglePrivateDrive } from "./drive"
 import { PrismaHrRepository } from "./repository"
 import { HrDocumentsService } from "./service"
 
 export function hrDocumentsEnabled(env:NodeJS.ProcessEnv=process.env){return env.HR_DOCUMENTS_ENABLED==="true"}
+export function hrEmployeePortalEnabled(env:NodeJS.ProcessEnv=process.env){return env.HR_DOCUMENT_EMPLOYEE_PORTAL_ENABLED==="true"}
 // A separate singleton explicitly disables SQL logging (the legacy development client logs query parameters).
 const holder=globalThis as unknown as {hrDocumentsDb?:PrismaClient}
-export function hrDb(){return holder.hrDocumentsDb??=(new PrismaClient({log:[]}))}
+export function hrDb(){return holder.hrDocumentsDb??=(new PrismaClient({...serverlessDatasources(),log:[]}))}
 export async function hrIdentity():Promise<Identity>{
   if(!hrDocumentsEnabled())throw new HrError("DISABLED",404)
   const user=(await auth())?.user
   if(!user?.id||!user.companyId)throw new HrError("FORBIDDEN",403)
-  return {userId:user.id,companyId:user.companyId}
+  const identity={userId:user.id,companyId:user.companyId}
+  if(!hrEmployeePortalEnabled()&&!capabilitiesFor(process.env.HR_DOCUMENT_OPERATORS,identity).length)throw new HrError("DISABLED",404)
+  return identity
 }
 export async function hrOperator(identity:Identity,capability:Capability){
   return new PrismaHrRepository(hrDb()).run(identity,async(_,actor)=>{

@@ -23,6 +23,8 @@
     "test:vehicules": "node --import tsx --test tests/vehicules/trucks-api.test.ts tests/vehicules/v1a-schema-migration.test.ts tests/vehicules/v1b-db-schema-migration.test.ts tests/vehicules/v1b-db-errors-script.test.ts tests/vehicules/v1c-schema-migration.test.ts tests/vehicules/vehicules-view.test.ts tests/vehicules/vehicules-render.test.tsx && npm run test:vehicules:v2 && npm run test:vehicules:v3",
     "test:equipes": "DATABASE_URL=${DATABASE_URL:-postgresql://test:test@localhost:5432/test} RESEND_API_KEY=re_test_dummy node --import tsx --test tests/equipes/equipes-view.test.ts tests/equipes/equipes-render.test.tsx tests/equipes/equipes-panel.test.tsx",
     "test:tasks": "node --import tsx --test tests/tasks/task-schema.test.ts tests/tasks/task-create-core.test.ts tests/tasks/task-prisma-adapter.test.ts tests/tasks/task-schema-migration.test.ts tests/tasks/task-dashboard.test.ts tests/tasks/task-form-submit.test.ts tests/tasks/task-form-render.test.tsx",
+    "test:database": "node --import tsx --test tests/database/database-url.test.ts",
+    "test:database:pg": "node --import tsx --test --test-concurrency=1 tests/database/idle-connections.pg.test.ts",
     "test:agent-gateway": "node --import tsx --test tests/agent-gateway/flags.test.ts tests/agent-gateway/scopes.test.ts tests/agent-gateway/secrets.test.ts tests/agent-gateway/migration-sql.test.ts",
     "test:billing": "node --import tsx --test tests/billing/invoice-lifecycle.test.ts",
     "test:billing:pg": "node --import tsx --test --test-concurrency=1 tests/billing/pg/lot-b-prisma-commit.pg.test.ts",
@@ -72,7 +74,7 @@
     "test:vehicules:v3:pglite": "node --import tsx --test tests/vehicules/v3/v3-migration.pglite.test.ts",
     "test:vehicules:v3:integration": "node --import tsx --test tests/vehicules/v3/integration.pg.test.ts",
     "test:vehicules:v3:pg": "node --import tsx --test --test-concurrency=1 tests/vehicules/document-fixes.pg.test.ts tests/vehicules/expense-costs.pg.test.ts tests/vehicules/expense-trip-costs.pg.test.ts tests/vehicules/import-service.pg.test.ts tests/vehicules/v3/tour.pg.test.ts tests/vehicules/v3/integration.pg.test.ts tests/vehicules/cartography-cache.pg.test.ts tests/vehicules/routing-cache.pg.test.ts tests/vehicules/maintenance-corrections.pg.test.ts",
-    "test:hr-documents": "node --import tsx --experimental-test-module-mocks --test tests/hr-documents/boundaries.test.ts tests/hr-documents/routes.test.ts tests/hr-documents/employee-preservation.test.ts",
+    "test:hr-documents": "node --import tsx --experimental-test-module-mocks --test tests/hr-documents/boundaries.test.ts tests/hr-documents/routes.test.ts tests/hr-documents/employee-preservation.test.ts tests/hr-documents/rollout.test.ts tests/hr-documents/employee-context.render.test.tsx",
     "test:hr-documents:pg": "node --import tsx --test tests/hr-documents/hr-documents.pg.test.ts",
     "typecheck:hr-documents": "tsc --project tsconfig.hr-documents.json --noEmit"
   },
