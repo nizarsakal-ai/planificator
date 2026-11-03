@@ -22,7 +22,8 @@ before(async () => {
   ;({ MobileNav } = (await import("@/components/layout/MobileNav")) as unknown as { MobileNav: Shell })
 })
 
-const user = (role: Role, flags: Partial<Record<"accountingNavVisible" | "billingNavVisible" | "supplierIntakeNavVisible" | "worksitePhotosNavVisible", boolean>> = {}) =>
+type NavFlag = "accountingNavVisible" | "billingNavVisible" | "supplierIntakeNavVisible" | "worksitePhotosNavVisible" | "hrDocumentsNavVisible" | "hrDocumentsManageNavVisible"
+const user = (role: Role, flags: Partial<Record<NavFlag, boolean>> = {}) =>
   ({ id: "u1", name: "Utilisateur Test", email: "test@example.test", image: null, role, companyId: "c1", ...flags })
 const render = (shell: Shell, u: Record<string, unknown>) => renderToStaticMarkup(createElement(shell, { user: u }))
 /** Href des liens marqués aria-current="page" (indépendant de l'ordre des attributs). */
@@ -78,5 +79,55 @@ describe("MobileNav", () => {
     const both = renderToStaticMarkup(createElement("div", null, createElement(Sidebar, { user: user("ADMIN") }), createElement(MobileNav, { user: user("ADMIN") })))
     const all = ids(both)
     assert.equal(new Set(all).size, all.length)
+  })
+})
+
+describe("Pied premium : identité, Déconnexion et Apparence", () => {
+  /** Groupes radio « Apparence » : [nom de groupe, valeurs, libellés accessibles, valeur cochée]. */
+  function appearanceGroups(html: string) {
+    return [...html.matchAll(/<div role="radiogroup" aria-labelledby="([^"]+)"[^>]*>(.*?)<\/div>/g)].map((m) => {
+      const inputs = [...m[2].matchAll(/<input [^>]*>/g)].map((i) => i[0])
+      return {
+        labelledBy: m[1],
+        values: inputs.map((i) => /value="([^"]+)"/.exec(i)![1]),
+        labels: inputs.map((i) => /aria-label="([^"]+)"/.exec(i)![1]),
+        names: new Set(inputs.map((i) => /name="([^"]+)"/.exec(i)![1])),
+        checked: inputs.filter((i) => /checked=""/.test(i)).map((i) => /value="([^"]+)"/.exec(i)![1]),
+      }
+    })
+  }
+  it("Sidebar et MobileNav : un groupe radio natif Clair / Sombre / Système, étiqueté « Apparence », « Système » coché au rendu serveur", () => {
+    pathname = "/planning"
+    for (const shell of [Sidebar, MobileNav]) {
+      const html = render(shell, user("ADMIN"))
+      const groups = appearanceGroups(html)
+      assert.equal(groups.length, 1)
+      const [group] = groups
+      assert.deepEqual(group.values, ["light", "dark", "system"])
+      assert.deepEqual(group.labels, ["Clair", "Sombre", "Système"])
+      assert.equal(group.names.size, 1, "un seul nom de groupe (flèches du clavier)")
+      assert.deepEqual(group.checked, ["system"])
+      assert.match(html, new RegExp(`<span id="${group.labelledBy}"[^>]*>Apparence</span>`))
+      assert.match(html, /<button type="button" aria-label="Déconnexion"/)
+      assert.match(html, /Utilisateur Test/)
+    }
+  })
+  it("Sidebar + MobileNav sur la même page : groupes radio distincts (pas d'interférence entre instances)", () => {
+    const both = renderToStaticMarkup(createElement("div", null, createElement(Sidebar, { user: user("ADMIN") }), createElement(MobileNav, { user: user("ADMIN") })))
+    const groups = appearanceGroups(both)
+    assert.equal(groups.length, 2)
+    assert.notEqual([...groups[0].names][0], [...groups[1].names][0])
+    assert.notEqual(groups[0].labelledBy, groups[1].labelledBy)
+  })
+  it("« Documents RH » n'apparaît que si le serveur le rend visible (opérateurs), « Mes documents » de même", () => {
+    pathname = "/dashboard"
+    const without = render(Sidebar, user("ADMIN"))
+    assert.equal(without.includes('href="/rh/documents"'), false)
+    assert.equal(without.includes('href="/mes-documents"'), false)
+    const own = render(Sidebar, user("EMPLOYEE", { hrDocumentsNavVisible: true }))
+    assert.match(own, /href="\/mes-documents"/)
+    assert.equal(own.includes('href="/rh/documents"'), false)
+    const manage = render(MobileNav, user("ADMIN", { hrDocumentsManageNavVisible: true }))
+    assert.match(manage, /href="\/rh\/documents"/)
   })
 })

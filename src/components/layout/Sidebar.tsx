@@ -1,22 +1,16 @@
 "use client"
 
 import { usePathname } from "next/navigation"
-import { signOut } from "next-auth/react"
-import { LogOut } from "lucide-react"
-import { getInitials } from "@/lib/utils"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
 import { PlanificatorLogo } from "@/components/brand/PlanificatorLogo"
 import {
   getNavItems,
   getActiveNavHref,
   withHrDocumentNavItems, withAccountingNavItem,
   withBillingNavItems, withSupplierIntakeNavItem, withWorksitePhotosNavItem,
-  ROLE_LABELS,
 } from "@/lib/navigation/nav-config"
 import { getActiveNavCategoryId, groupNavItems } from "@/lib/navigation/nav-categories"
-import { NavCategories, NavItemLink } from "@/components/layout/NavCategories"
+import { NavCategories } from "@/components/layout/NavCategories"
+import { NavFooter } from "@/components/layout/NavFooter"
 import type { Role } from "@prisma/client"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -41,6 +35,7 @@ interface SidebarUser {
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
+/** Barre latérale « premium » : carte flottante (thème clair ou sombre selon Apparence), catégories, pied commun. */
 export function Sidebar({ user }: { user: SidebarUser }) {
   const pathname = usePathname()
   const navItems = withHrDocumentNavItems(withWorksitePhotosNavItem(withSupplierIntakeNavItem(withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true), user.supplierIntakeNavVisible === true), user.worksitePhotosNavVisible === true), user.hrDocumentsNavVisible === true, user.hrDocumentsManageNavVisible === true)
@@ -50,46 +45,19 @@ export function Sidebar({ user }: { user: SidebarUser }) {
   const activeCategoryId = getActiveNavCategoryId(grouped, activeHref)
 
   return (
-    <aside className="hidden md:flex w-64 shrink-0 bg-[#0f3460] flex-col h-screen">
-      {/* Logo */}
-      <div className="px-5 py-5 border-b border-white/10">
-        <PlanificatorLogo subtitle="Planning d'équipes" />
-      </div>
-
-      {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Menu principal">
-        <NavCategories categories={grouped.categories} activeHref={activeHref} activeCategoryId={activeCategoryId} navigationKey={pathname} />
-      </nav>
-
-      {/* Footer utilisateur */}
-      <div className="border-t border-white/10 p-4">
-        <div className="flex items-center gap-3 mb-3">
-          <Avatar className="h-8 w-8 shrink-0">
-            <AvatarImage src={user.image ?? undefined} />
-            <AvatarFallback className="bg-white/20 text-white text-xs font-medium">
-              {getInitials(user.name ?? user.email ?? "?")}
-            </AvatarFallback>
-          </Avatar>
-          <div className="min-w-0 flex-1">
-            <p className="text-white text-xs font-medium truncate">
-              {user.name ?? user.email}
-            </p>
-            <p className="text-slate-400 text-[11px] truncate">
-              {ROLE_LABELS[user.role]}
-            </p>
-          </div>
+    // data-appearance-scope : surface qualifiée pour le thème sombre (Apparence).
+    <aside data-appearance-scope="" className="hidden md:flex w-[17.25rem] shrink-0 h-screen py-3 pl-3">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_12px_32px_-12px_rgba(16,24,40,0.14)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.3),0_16px_40px_-16px_rgba(0,0,0,0.6)]">
+        <div className="flex h-16 shrink-0 items-center px-4">
+          <PlanificatorLogo subtitle="Planning d'équipes" />
         </div>
-        {/* « Mon profil » (pied) : même lien, même libellé qu'avant, hors catégories. */}
-        {grouped.footer.map((item) => (
-          <NavItemLink key={item.href} item={item} active={item.href === activeHref} />
-        ))}
-        <button
-          onClick={() => signOut({ callbackUrl: "/login" })}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-slate-300 hover:bg-white/10 hover:text-white text-sm transition-colors"
-        >
-          <LogOut className="h-4 w-4" />
-          Déconnexion
-        </button>
+
+        <nav className="flex-1 overflow-y-auto px-2.5 pb-3 pt-1" aria-label="Menu principal">
+          <NavCategories categories={grouped.categories} activeHref={activeHref} activeCategoryId={activeCategoryId} navigationKey={pathname} />
+        </nav>
+
+        {/* Pied : « Mon profil » (même lien, même libellé), identité + Déconnexion, Apparence. */}
+        <NavFooter user={user} items={grouped.footer} activeHref={activeHref} />
       </div>
     </aside>
   )

@@ -1,7 +1,9 @@
 import type { Config } from "tailwindcss"
 
 const config: Config = {
-  darkMode: ["class"],
+  // Apparence : le thème sombre ne s'applique qu'aux surfaces qualifiées marquées `data-appearance-scope`
+  // (barre latérale, menu mobile) quand <html data-appearance="dark">. Le contenu des pages reste clair (lot 2).
+  darkMode: ["variant", "&:is([data-appearance=\"dark\"] [data-appearance-scope], [data-appearance=\"dark\"] [data-appearance-scope] *)"],
   content: [
     "./pages/**/*.{ts,tsx}",
     "./components/**/*.{ts,tsx}",
@@ -49,6 +51,21 @@ const config: Config = {
         popover: {
           DEFAULT: "hsl(var(--popover))",
           foreground: "hsl(var(--popover-foreground))",
+        },
+        // Apparence : l'échelle slate passe par des variables (globals.css) pour que les couleurs existantes
+        // s'inversent en thème sombre sans réécrire les pages. Valeurs claires = palette Tailwind d'origine.
+        slate: {
+          50: "rgb(var(--slate-50) / <alpha-value>)",
+          100: "rgb(var(--slate-100) / <alpha-value>)",
+          200: "rgb(var(--slate-200) / <alpha-value>)",
+          300: "rgb(var(--slate-300) / <alpha-value>)",
+          400: "rgb(var(--slate-400) / <alpha-value>)",
+          500: "rgb(var(--slate-500) / <alpha-value>)",
+          600: "rgb(var(--slate-600) / <alpha-value>)",
+          700: "rgb(var(--slate-700) / <alpha-value>)",
+          800: "rgb(var(--slate-800) / <alpha-value>)",
+          900: "rgb(var(--slate-900) / <alpha-value>)",
+          950: "rgb(var(--slate-950) / <alpha-value>)",
         },
         // Couleurs Planificator
         brand: {

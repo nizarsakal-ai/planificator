@@ -24,6 +24,21 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 222.2 84% 4.9%;
     --radius: 0.5rem;
+
+    /* Échelle slate (canaux RGB) : palette Tailwind d'origine en clair. */
+    --slate-50: 248 250 252;
+    --slate-100: 241 245 249;
+    --slate-200: 226 232 240;
+    --slate-300: 203 213 225;
+    --slate-400: 148 163 184;
+    --slate-500: 100 116 139;
+    --slate-600: 71 85 105;
+    --slate-700: 51 65 85;
+    --slate-800: 30 41 59;
+    --slate-900: 15 23 42;
+    --slate-950: 2 6 23;
+    /* Surface des cartes (bg-white) */
+    --surface: 255 255 255;
   }
 
   .dark {
@@ -47,6 +62,36 @@
     --input: 217.2 32.6% 17.5%;
     --ring: 212.7 26.8% 83.9%;
   }
+
+  /*
+   * Apparence « Sombre » : limitée aux surfaces qualifiées (barre latérale, menu mobile) marquées
+   * `data-appearance-scope`. Le contenu des pages reste clair : ses pastilles bg-*-50 et couleurs fixes n'ont pas
+   * encore été inspectées en sombre (lot 2). Bleu nuit Planificator ; l'échelle slate s'inverse dans la zone.
+   */
+  [data-appearance="dark"] [data-appearance-scope] {
+    color-scheme: dark;
+    --slate-50: 11 15 28;
+    --slate-100: 27 34 52;
+    --slate-200: 40 48 68;
+    --slate-300: 58 67 89;
+    --slate-400: 112 122 145;
+    --slate-500: 149 158 178;
+    --slate-600: 176 184 200;
+    --slate-700: 201 207 220;
+    --slate-800: 226 230 238;
+    --slate-900: 241 243 247;
+    --slate-950: 250 251 252;
+    --surface: 19 26 46;
+  }
+}
+
+[data-appearance="dark"] [data-appearance-scope] .bg-white,
+[data-appearance="dark"] [data-appearance-scope].bg-white { background-color: rgb(var(--surface)); }
+
+/* Connexion : flottement décoratif des personnages (appliqué seulement si motion-safe). */
+@keyframes login-crew-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
 }
 
 @layer base {

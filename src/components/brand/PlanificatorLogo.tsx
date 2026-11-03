@@ -40,14 +40,14 @@ export function PlanificatorMark({ className, title }: { className?: string; tit
   )
 }
 
-/** Logo complet (marque + nom) pour fonds sombres (sidebar). */
+/** Logo complet (marque + nom) de la sidebar ; couleurs de texte adaptées au thème clair ou sombre (Apparence). */
 export function PlanificatorLogo({ subtitle }: { subtitle?: string }) {
   return (
     <div className="flex items-center gap-3">
       <PlanificatorMark />
       <div className="min-w-0">
-        <p className="text-white font-bold text-sm leading-tight tracking-tight">Planificator</p>
-        {subtitle && <p className="text-slate-400 text-[11px] truncate">{subtitle}</p>}
+        <p className="text-slate-900 font-bold text-[15px] leading-tight tracking-tight">Planificator</p>
+        {subtitle && <p className="text-slate-500 text-[11.5px] truncate">{subtitle}</p>}
       </div>
     </div>
   )

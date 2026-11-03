@@ -2,14 +2,13 @@
 
 import { useEffect, useRef, useState } from "react"
 import { usePathname } from "next/navigation"
-import { signOut } from "next-auth/react"
-import { Menu, X, LogOut } from "lucide-react"
-import { cn, getInitials } from "@/lib/utils"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Menu, X } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { PlanificatorLogo } from "@/components/brand/PlanificatorLogo"
-import { getActiveNavHref, getNavItems, withHrDocumentNavItems, withAccountingNavItem, withBillingNavItems, withSupplierIntakeNavItem, withWorksitePhotosNavItem, ROLE_LABELS } from "@/lib/navigation/nav-config"
+import { getActiveNavHref, getNavItems, withHrDocumentNavItems, withAccountingNavItem, withBillingNavItems, withSupplierIntakeNavItem, withWorksitePhotosNavItem } from "@/lib/navigation/nav-config"
 import { getActiveNavCategoryId, groupNavItems } from "@/lib/navigation/nav-categories"
-import { NavCategories, NavItemLink } from "@/components/layout/NavCategories"
+import { NavCategories } from "@/components/layout/NavCategories"
+import { NavFooter } from "@/components/layout/NavFooter"
 import type { Role } from "@prisma/client"
 
 interface MobileNavUser {
@@ -31,13 +30,21 @@ interface MobileNavUser {
 /**
  * Éléments focalisables RÉELLEMENT rendus du tiroir : exclus sous un ancêtre `[hidden]` (catégorie repliée) ou `[inert]`,
  * et sans rectangle rendu. Tiroir masqué par le CSS (passage en ≥ md pendant qu'il est ouvert) ⇒ [] : le piège ne bloque
- * alors jamais Tab.
+ * alors jamais Tab. Un groupe de boutons radio (Apparence) n'offre qu'un arrêt de tabulation : le bouton coché, sinon
+ * le premier du groupe, comme le navigateur.
  */
 export function focusableIn(root: HTMLElement): HTMLElement[] {
   if (root.getClientRects().length === 0 || root.closest("[inert]")) return []
   const selector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-  return Array.from(root.querySelectorAll<HTMLElement>(selector))
+  const visible = Array.from(root.querySelectorAll<HTMLElement>(selector))
     .filter((el) => !el.closest("[hidden], [inert]") && el.getClientRects().length > 0)
+  const radioStop = new Map<string, HTMLInputElement>()
+  for (const el of visible) {
+    if (!(el instanceof HTMLInputElement) || el.type !== "radio" || !el.name) continue
+    const current = radioStop.get(el.name)
+    if (!current || (el.checked && !current.checked)) radioStop.set(el.name, el)
+  }
+  return visible.filter((el) => !(el instanceof HTMLInputElement && el.type === "radio" && el.name) || radioStop.get(el.name) === el)
 }
 
 export function MobileNav({ user }: { user: MobileNavUser }) {
@@ -80,28 +87,29 @@ export function MobileNav({ user }: { user: MobileNavUser }) {
       <button
         ref={openButtonRef}
         onClick={() => setOpen(true)}
-        className="md:hidden p-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
+        className="md:hidden inline-flex h-11 w-11 items-center justify-center rounded-xl text-slate-600 outline-none hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-blue-500/60 transition-colors motion-reduce:transition-none"
         aria-label="Ouvrir le menu"
         aria-expanded={open}
       >
-        <Menu className="h-5 w-5" />
+        <Menu className="h-5 w-5" aria-hidden="true" />
       </button>
 
       {/* Overlay */}
       {open && (
         <div
-          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          className="fixed inset-0 z-40 bg-slate-950/45 backdrop-blur-[2px] md:hidden dark:bg-black/60"
           onClick={closeAndRestoreFocus}
         />
       )}
 
-      {/* Drawer */}
+      {/* Drawer : carte flottante, mêmes catégories et même pied que la Sidebar ; cibles tactiles de 44 px. */}
       {/* Fermé : hors de l'ordre de tabulation et des technologies d'assistance (inert + aria-hidden). */}
       <div
         className={cn(
-          "fixed inset-y-0 left-0 z-50 w-72 bg-[#0f3460] flex flex-col transition-transform duration-300 md:hidden",
-          open ? "translate-x-0" : "-translate-x-full"
+          "fixed bottom-2 left-2 top-2 z-50 flex w-[19rem] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_24px_60px_-20px_rgba(15,23,42,0.45)] transition-transform duration-300 ease-out motion-reduce:transition-none md:hidden",
+          open ? "translate-x-0" : "-translate-x-[calc(100%+1rem)]"
         )}
+        data-appearance-scope=""
         role="dialog"
         aria-modal={open ? true : undefined}
         aria-label="Menu de navigation"
@@ -110,49 +118,26 @@ export function MobileNav({ user }: { user: MobileNavUser }) {
         ref={drawerRef}
       >
         {/* Header */}
-        <div className="px-5 py-5 border-b border-white/10 flex items-center justify-between">
-          <PlanificatorLogo />
+        <div className="flex h-16 shrink-0 items-center justify-between gap-2 pl-4 pr-2">
+          <PlanificatorLogo subtitle="Planning d'équipes" />
           <button
             ref={closeButtonRef}
             onClick={closeAndRestoreFocus}
-            className="text-slate-400 hover:text-white p-1 transition-colors"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-slate-500 outline-none transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-blue-500/60 motion-reduce:transition-none"
             aria-label="Fermer le menu"
           >
-            <X className="h-5 w-5" />
+            <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Menu principal">
+        <nav className="flex-1 overflow-y-auto px-2.5 pb-3 pt-1" aria-label="Menu principal">
           {/* Un clic sur un lien ferme le menu (comportement existant conservé) ; replier une catégorie ne le ferme pas. */}
-          <NavCategories categories={grouped.categories} activeHref={activeHref} activeCategoryId={activeCategoryId} navigationKey={pathname} onNavigate={close} />
+          <NavCategories categories={grouped.categories} activeHref={activeHref} activeCategoryId={activeCategoryId} navigationKey={pathname} onNavigate={close} touch />
         </nav>
 
-        {/* Footer */}
-        <div className="border-t border-white/10 p-4">
-          <div className="flex items-center gap-3 mb-3">
-            <Avatar className="h-8 w-8 shrink-0">
-              <AvatarImage src={user.image ?? undefined} />
-              <AvatarFallback className="bg-white/20 text-white text-xs font-medium">
-                {getInitials(user.name ?? user.email ?? "?")}
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0 flex-1">
-              <p className="text-white text-xs font-medium truncate">{user.name ?? user.email}</p>
-              <p className="text-slate-400 text-[11px]">{ROLE_LABELS[user.role]}</p>
-            </div>
-          </div>
-          {grouped.footer.map((item) => (
-            <NavItemLink key={item.href} item={item} active={item.href === activeHref} onNavigate={close} />
-          ))}
-          <button
-            onClick={() => signOut({ callbackUrl: "/login" })}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-slate-300 hover:bg-white/10 hover:text-white text-sm transition-colors"
-          >
-            <LogOut className="h-4 w-4" />
-            Déconnexion
-          </button>
-        </div>
+        {/* Pied : « Mon profil » (même lien), identité + Déconnexion, Apparence. */}
+        <NavFooter user={user} items={grouped.footer} activeHref={activeHref} onNavigate={close} touch />
       </div>
     </>
   )

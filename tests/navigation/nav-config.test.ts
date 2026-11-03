@@ -248,8 +248,8 @@ describe("nav-config — source unique Sidebar / MobileNav", () => {
       assert.match(src, /from "@\/lib\/navigation\/nav-config"/)
       assert.match(src, /getNavItems\(user\.role\)/)
       assert.match(src, /const activeHref = getActiveNavHref\(navItems, pathname\)/)
-      assert.match(src, /item\.href === activeHref/)
-      assert.match(src, /ROLE_LABELS\[user\.role\]/)
+      // Pied commun (identité, « Mon profil », Apparence) : même lien actif calculé par le shell.
+      assert.match(src, /<NavFooter user=\{user\} items=\{grouped\.footer\} activeHref=\{activeHref\}/)
       assert.doesNotMatch(src, /function getNavItems/)
       assert.doesNotMatch(src, /startsWith\(/)
       assert.doesNotMatch(src, /href:\s*"\//, "aucune entrée de menu ne doit être définie localement")
@@ -257,9 +257,18 @@ describe("nav-config — source unique Sidebar / MobileNav", () => {
     })
   }
 
+  it("le pied commun (NavFooter) applique la même règle d'activation et les libellés de rôle centraux", () => {
+    const src = read("src/components/layout/NavFooter.tsx")
+    assert.match(src, /from "@\/lib\/navigation\/nav-config"/)
+    assert.match(src, /item\.href === activeHref/)
+    assert.match(src, /ROLE_LABELS\[user\.role\]/)
+    assert.doesNotMatch(src, /href:\s*"\//, "aucune entrée de menu ne doit être définie localement")
+    assert.doesNotMatch(src, /const roleLabel/)
+  })
+
   it("le logo Planificator (PR #64) est conservé dans les deux composants", () => {
     assert.match(read("src/components/layout/Sidebar.tsx"), /<PlanificatorLogo subtitle="Planning d'équipes" \/>/)
-    assert.match(read("src/components/layout/MobileNav.tsx"), /<PlanificatorLogo \/>/)
+    assert.match(read("src/components/layout/MobileNav.tsx"), /<PlanificatorLogo subtitle="Planning d'équipes" \/>/)
   })
 })
 
