@@ -95,6 +95,12 @@ describe("classement et rapprochement", () => {
     assert.equal(id.canCreateDraft, true); assert.equal(id.identity!.firstNames!.value, "Anna Maria")
     assert.equal(recognize({ text: "BULLETIN DE PAIE", fileName: "MARC INCONNU.pdf", employees: EMPLOYEES, now: NOW }).canCreateDraft, false)
   })
+  it("photo ou scan sans texte : signalé comme tel, nom et prénom marqués « nom du fichier »", () => {
+    // Cas de la recette réelle : PDF d'un scan iPhone, une seule image, aucune couche texte.
+    const p = recognize({ text: "", fileName: "CNI LUCAS EXEMPLE.pdf", employees: EMPLOYEES, now: NOW })
+    assert.equal(p.textFound, false); assert.equal(p.identity!.lastName!.source, "FILENAME"); assert.equal(p.identity!.birthDate, null)
+    assert.equal(recognize({ text: TD3, fileName: "x.pdf", employees: [], now: NOW }).textFound, true)
+  })
   it("document illisible ou inconnu : « à reconnaître », sans erreur", () => {
     const p = recognize({ text: "", fileName: "IMG_2041.pdf", employees: EMPLOYEES, now: NOW })
     assert.equal(p.category, null); assert.equal(p.proposedEmployeeId, null); assert.equal(p.canCreateDraft, false)

@@ -32,6 +32,8 @@ export type Proposal = {
   canCreateDraft: boolean
   identity: IdentityProposal | null
   sources: Source[]
+  /** Faux pour une photo ou un scan sans couche texte : rien n'a pu être lu dans le document lui-même. */
+  textFound: boolean
 }
 
 export function normalize(raw: string) {
@@ -197,6 +199,6 @@ export function recognize(input: { text: string; fileName: string; employees: Em
     title: title(category?.value ?? null, period?.value ?? null, named ? `${named.lastName} ${named.firstName}` : personLabel),
     candidates, proposedEmployeeId,
     canCreateDraft: isIdentity && !!identity?.lastName && !!identity?.firstNames && strong.length === 0,
-    identity, sources: [...sources],
+    identity, sources: [...sources], textFound: !!text.trim(),
   }
 }

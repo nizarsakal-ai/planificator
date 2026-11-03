@@ -122,7 +122,8 @@ function RecoveryForm({doc,action,busy,run}:{doc:Doc;action:"RESUME"|"RESTORE";b
 }
 type Proposal={category:{value:string;confidence:number;source:string}|null;period:{value:string;confidence:number;source:string}|null;title:string|null
   candidates:{employeeId:string;level:"STRONG"|"PARTIAL";draft:boolean}[];proposedEmployeeId:string|null;canCreateDraft:boolean;sha256:string;kind:string
-  identity:{lastName:{value:string}|null;firstNames:{value:string}|null;birthDate:{value:string}|null;sex:{value:"M"|"F"}|null;nationality:{value:string}|null;expiryDate:{value:string}|null;documentNumberEnd:string|null;mrzChecksValid:boolean|null}|null}
+  identity:{lastName:{value:string;source:string}|null;firstNames:{value:string;source:string}|null;birthDate:{value:string}|null;sex:{value:"M"|"F"}|null;nationality:{value:string}|null;expiryDate:{value:string}|null;documentNumberEnd:string|null;mrzChecksValid:boolean|null}|null
+  textFound:boolean}
 type ImportProps={employees:Employee[];employeeId?:string;busy:boolean;run:Runner;categories:Category[];recognition:boolean;images:boolean;drafts:boolean;onDraft:(e:Employee)=>void}
 function ImportPanel(props:ImportProps){
   const {busy,images,recognition}=props
@@ -137,6 +138,8 @@ function ImportPanel(props:ImportProps){
 function ImportItem({file,fileKey,employees,employeeId,busy,run,categories,recognition,drafts,onDraft}:ImportProps&{file:File;fileKey:string}){
   const [state,setState]=useState<{status:"idle"|"loading"|"done"|"error";proposal?:Proposal}>(recognition?{status:"loading"}:{status:"idle"})
   const [selected,setSelected]=useState<string|undefined>(employeeId)
+  // Fin de validité saisie dans la fiche : reprise comme période du document si aucune n'a été proposée.
+  const [periodFromDraft,setPeriodFromDraft]=useState<string|undefined>()
   useEffect(()=>{
     if(!recognition)return
     let live=true;const form=new FormData();form.set("file",file)
@@ -148,21 +151,22 @@ function ImportItem({file,fileKey,employees,employeeId,busy,run,categories,recog
   const proposedEmployee=selected??p?.proposedEmployeeId??undefined
   // Salarié proposé : sûr seulement s'il vient d'une bande MRZ aux chiffres de contrôle justes.
   const employeeHint=p?.proposedEmployeeId&&!employeeId?{confidence:p.identity?.mrzChecksValid?0.95:0.6,source:p.identity?.mrzChecksValid?"MRZ":"FILENAME"}:null
-  const defaults:Partial<Doc>={employeeId:proposedEmployee,category:p?.category?.value,period:p?.period?.value,title:p?.title??undefined}
+  const defaults:Partial<Doc>={employeeId:proposedEmployee,category:p?.category?.value,period:p?.period?.value??periodFromDraft,title:p?.title??undefined}
   return <div className="mt-4 rounded-lg border p-3">
     <p className="break-all text-sm font-medium">{file.name}</p>
     {state.status==="loading"&&<p role="status" className="mt-2 text-sm text-slate-600">Lecture du document en cours…</p>}
     {state.status==="error"&&<p className="mt-2 text-sm text-amber-800">Le document n’a pas pu être lu automatiquement : renseignez les champs à la main.</p>}
+    {p&&!p.textFound&&<p className="mt-2 rounded-md bg-amber-50 p-2 text-sm text-amber-900">Ce fichier ne contient pas de texte lisible (photo ou scan) : rien n’a pu être lu dans le document lui-même. Seul son nom a servi à la proposition.</p>}
     {p&&!p.category&&<p className="mt-2 text-sm text-amber-800">Type non reconnu : choisissez la catégorie à la main.</p>}
     {p&&strong.length>1&&<p className="mt-2 text-sm font-medium text-amber-800">Plusieurs salariés portent ce nom : choisissez explicitement le bon salarié.</p>}
     {p&&!strong.length&&p.candidates.length>0&&<p className="mt-2 text-sm text-amber-800">Nom de famille seulement reconnu : vérifiez le salarié.</p>}
-    {state.status!=="loading"&&<form key={`${state.status}:${selected??""}:${employees.length}`} className="mt-3 grid gap-3 sm:grid-cols-2" onSubmit={e=>{
+    {state.status!=="loading"&&<form key={`${state.status}:${selected??""}:${employees.length}:${periodFromDraft??""}`} className="mt-3 grid gap-3 sm:grid-cols-2" onSubmit={e=>{
       e.preventDefault();const f=new FormData(e.currentTarget);f.delete("checked");f.set("key",fileKey);f.set("file",file)
       void run(()=>call("/api/hr-documents",{method:"POST",body:f}),"Document déposé en préparation. Vérification et publication restent nécessaires.")
     }}><MetadataFields employees={employees} categories={categories} defaults={defaults} hints={p?{employee:employeeHint,category:p.category,period:p.period}:undefined}/>
       {p&&<label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" name="checked" required className="mt-1"/>J’ai vérifié la proposition (type, salarié, période) sur le document.</label>}
       <button disabled={busy} className="rounded-lg bg-blue-800 px-3 py-2 text-sm text-white disabled:opacity-50">Déposer ce document privé</button></form>}
-    {p?.canCreateDraft&&drafts&&!selected&&<DraftPanel file={file} proposal={p} categories={categories} busy={busy} run={run} onCreated={e=>{onDraft(e);setSelected(e.id)}}/>}
+    {p?.canCreateDraft&&drafts&&!selected&&<DraftPanel file={file} proposal={p} categories={categories} busy={busy} run={run} onCreated={(e,expiry)=>{onDraft(e);setSelected(e.id);if(expiry)setPeriodFromDraft(expiry.slice(0,7))}}/>}
   </div>
 }
 /** Zone photo standard d'une carte ou d'une page de passeport : proposition à confirmer, sans détection de visage. */
@@ -176,7 +180,7 @@ async function cropIdPhoto(file:File):Promise<Blob|null>{
     return await new Promise(resolve=>canvas.toBlob(b=>resolve(b),"image/jpeg",0.9))
   }catch{return null}
 }
-function DraftPanel({file,proposal,categories,busy,run,onCreated}:{file:File;proposal:Proposal;categories:Category[];busy:boolean;run:Runner;onCreated:(e:Employee)=>void}){
+function DraftPanel({file,proposal,categories,busy,run,onCreated}:{file:File;proposal:Proposal;categories:Category[];busy:boolean;run:Runner;onCreated:(e:Employee,expiry?:string)=>void}){
   const id=proposal.identity!
   const [photo,setPhoto]=useState<{blob:Blob;url:string}|null>(null)
   const photoAllowed=categories.some(c=>c.code==="ID_PHOTO")
@@ -185,7 +189,10 @@ function DraftPanel({file,proposal,categories,busy,run,onCreated}:{file:File;pro
     let url="";void cropIdPhoto(file).then(blob=>{if(blob){url=URL.createObjectURL(blob);setPhoto({blob,url})}})
     return()=>{if(url)URL.revokeObjectURL(url)}
   },[file,photoAllowed])
-  const lowConfidence=id.mrzChecksValid!==true
+  const fromFileName=id.lastName?.source==="FILENAME"
+  const notice=id.mrzChecksValid===true?"Informations lues dans la bande MRZ (chiffres de contrôle justes) : comparez-les quand même avec la pièce."
+    :fromFileName?"Rien n’a été lu dans la pièce : le nom et le prénom viennent seulement du nom du fichier (ordre à vérifier). Complétez les autres champs en regardant la pièce."
+    :"Informations lues sans contrôle MRZ complet : comparez chaque champ avec la pièce."
   return <form className="mt-4 grid gap-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3 sm:grid-cols-2" onSubmit={e=>{
     e.preventDefault();const f=new FormData(e.currentTarget)
     const value=(k:string)=>{const v=String(f.get(k)??"").trim();return v||undefined}
@@ -199,11 +206,11 @@ function DraftPanel({file,proposal,categories,busy,run,onCreated}:{file:File;pro
         pf.set("title",`Photo d’identité — ${created.lastName} ${created.firstName}`.slice(0,120));pf.set("key",crypto.randomUUID());pf.set("file",new File([photo.blob],"photo.jpg",{type:"image/jpeg"}))
         await call("/api/hr-documents",{method:"POST",body:pf})
       }
-      onCreated(created);return created
+      onCreated(created,body.identityExpiry);return created
     },"Fiche à compléter créée (inactive, sans invitation). Déposez maintenant la pièce pour ce salarié.")
   }}>
     <p className="text-sm font-semibold text-amber-950 sm:col-span-2">Personne absente de la société — créer une fiche à compléter</p>
-    <p className="text-xs text-amber-900 sm:col-span-2">{lowConfidence?"Informations lues sans contrôle MRZ complet : comparez chaque champ avec la pièce.":"Informations lues dans la bande MRZ (chiffres de contrôle justes) : comparez-les quand même avec la pièce."} La fiche reste inactive et aucune invitation n’est envoyée.</p>
+    <p className="text-xs text-amber-900 sm:col-span-2">{notice} La fiche reste inactive et aucune invitation n’est envoyée.</p>
     <label className="text-sm">Nom<input required name="lastName" maxLength={80} className={control} defaultValue={id.lastName?.value}/></label>
     <label className="text-sm">Prénoms<input required name="firstName" maxLength={80} className={control} defaultValue={id.firstNames?.value}/></label>
     <label className="text-sm">Date de naissance<input type="date" name="birthDate" className={control} defaultValue={id.birthDate?.value}/></label>
