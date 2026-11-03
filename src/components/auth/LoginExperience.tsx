@@ -1,92 +1,75 @@
-"use client"
-
-import { useState } from "react"
 import Link from "next/link"
 import { Instrument_Serif } from "next/font/google"
 import { PlanificatorMark } from "@/components/brand/PlanificatorLogo"
-import { LoginCrew } from "@/components/auth/LoginCrew"
-import { LoginForm, type LoginField } from "@/components/auth/LoginForm"
+import { LoginForm } from "@/components/auth/LoginForm"
 
-const serif = Instrument_Serif({ subsets: ["latin"], weight: "400", style: "italic", display: "swap" })
+const serif = Instrument_Serif({ subsets: ["latin"], weight: "400", style: ["normal", "italic"], display: "swap" })
+
+// Grille décorative 7 × 6 (une semaine par ligne) : cases mises en avant et leur intensité.
+const HIGHLIGHTS: Record<number, string> = {
+  3: "bg-blue-400/30", 9: "bg-blue-400/20", 10: "bg-blue-400/25", 16: "bg-blue-400/20",
+  24: "bg-blue-400/30", 25: "bg-blue-400/20", 26: "bg-blue-400/25", 31: "bg-blue-400/20", 38: "bg-blue-400/25",
+}
 
 /**
- * Page de connexion « deux tons » : moitié claire (marque + illustration décorative), moitié bleu nuit Planificator
- * (formulaire dans une carte en arche). Seul l'habillage change : formulaire, liens et routes identiques.
- * La moitié claire suit Apparence (`data-appearance-scope`) ; la moitié bleu nuit est identique dans les deux thèmes.
+ * Page de connexion « bleu nuit éditorial » : titre éditorial et grille de semaine décorative sur bleu nuit
+ * Planificator, formulaire dans une carte claire. Seul l'habillage change : formulaire, liens et routes identiques.
+ * La carte suit Apparence (`data-appearance-scope`) ; le fond bleu nuit est identique dans les deux thèmes.
  */
 export function LoginExperience() {
-  const [focusedField, setFocusedField] = useState<LoginField | null>(null)
-  const [passwordVisible, setPasswordVisible] = useState(false)
-
   return (
     // Pleine page : annule le cadrage centré du layout d'authentification (p-4).
-    <div className="-m-4 flex min-h-[100dvh] flex-1 flex-col self-stretch md:flex-row">
-      <section
-        data-appearance-scope=""
-        className="relative flex flex-col overflow-hidden bg-white px-5 pb-2 pt-5 sm:px-10 sm:pb-4 sm:pt-6 md:w-[52%] md:px-12 md:pb-10 md:pt-9 lg:px-16"
-      >
-        <div
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(rgb(var(--slate-300)/0.55)_1px,transparent_1px)] [background-size:22px_22px] [mask-image:linear-gradient(to_bottom,black,transparent_85%)]"
-          aria-hidden="true"
-        />
-        <div className="relative flex items-center gap-2.5">
+    <div className="relative -m-4 flex min-h-[100dvh] flex-1 flex-col self-stretch overflow-hidden bg-[linear-gradient(160deg,#0f3460_0%,#0a2447_70%)] md:flex-row">
+      <div
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(50%_50%_at_15%_10%,rgba(96,165,250,0.25),transparent_70%)]"
+        aria-hidden="true"
+      />
+
+      <section className="relative flex flex-col px-5 pb-6 pt-5 text-white sm:px-10 sm:pt-8 md:flex-1 md:px-14 md:py-10">
+        <div className="flex items-center gap-2.5">
           <PlanificatorMark className="h-8 w-8" />
-          <span className="text-[15px] font-bold tracking-tight text-slate-900">Planificator</span>
+          <span className="text-[15px] font-bold tracking-tight">Planificator</span>
         </div>
 
-        <div className="relative mt-5 sm:mt-8 md:mt-auto">
-          <p className="hidden text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 sm:block">Planning d&apos;équipes</p>
-          <p className="text-[32px] font-extrabold sm:mt-3 leading-[0.95] tracking-[-0.04em] text-slate-900 sm:text-5xl lg:text-[64px]">
-            Bonjour,
-            <span className={`${serif.className} mt-1 block text-[36px] font-normal tracking-[-0.01em] text-blue-600 sm:text-[52px] lg:text-[70px] dark:text-blue-300`}>
-              ravi de vous revoir.
-            </span>
+        <div className="mt-6 md:my-auto md:pt-10">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-300">Chantiers &amp; équipes</p>
+          <p className={`${serif.className} mt-3 max-w-[36rem] text-[40px] leading-[0.98] sm:text-[52px] lg:text-[66px]`}>
+            Chaque équipe, <em className="text-blue-300">au bon endroit,</em> au bon moment.
           </p>
-          <p className="mt-4 hidden max-w-[26rem] text-[14.5px] leading-relaxed text-slate-600 sm:block">
-            L&apos;équipe de chantier vous suit des yeux… et promet de ne pas regarder votre mot de passe.
-          </p>
+          <div className="mt-11 hidden grid-cols-[repeat(7,46px)] auto-rows-[34px] gap-1.5 md:grid" aria-hidden="true">
+            {Array.from({ length: 42 }, (_, i) => (
+              <span key={i} className={`rounded-[10px] border border-white/[0.08] ${HIGHLIGHTS[i] ?? ""}`} />
+            ))}
+          </div>
         </div>
-
-        <LoginCrew
-          focusedField={focusedField}
-          passwordVisible={passwordVisible}
-          className="relative mx-auto mt-3 max-w-[220px] sm:mt-6 sm:max-w-[300px] md:hidden"
-          layout="stacked"
-        />
-        <LoginCrew
-          focusedField={focusedField}
-          passwordVisible={passwordVisible}
-          className="relative mt-10 hidden max-w-[540px] md:mb-auto md:block"
-          layout="side"
-        />
       </section>
 
-      <section className="relative flex flex-1 items-start justify-center overflow-hidden bg-[#0f3460] px-4 py-6 sm:items-center sm:px-8 sm:py-10">
-        <div
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(90%_60%_at_85%_110%,rgba(59,108,246,0.45),transparent_60%),radial-gradient(60%_45%_at_0%_-10%,rgba(34,184,230,0.18),transparent_60%)]"
-          aria-hidden="true"
-        />
-        <div className="relative w-full max-w-[400px] rounded-b-[28px] rounded-t-[170px] border border-white/[0.12] bg-white/[0.045] px-5 pb-6 pt-11 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-md sm:rounded-t-[200px] sm:px-8 sm:pt-16">
-          <div className="mb-6 text-center sm:mb-7">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-200/80">Espace équipe</p>
-            <h1 className="mt-2 text-[28px] font-bold tracking-[-0.03em] text-white">Connexion</h1>
-            <p className="mt-1.5 text-sm text-white/70">Entrez vos identifiants pour accéder à votre espace.</p>
-          </div>
+      <section
+        data-appearance-scope=""
+        className="relative mx-3 mb-3 flex flex-col justify-center rounded-[24px] bg-white px-5 py-7 shadow-[0_40px_80px_-30px_rgba(0,0,0,0.6)] sm:mx-8 sm:px-10 md:m-[18px] md:w-[460px] md:shrink-0 md:rounded-[28px] md:px-12 lg:w-[500px] lg:px-14"
+      >
+        <h1 className={`${serif.className} text-[38px] leading-none text-slate-900 sm:text-[44px]`}>Connexion</h1>
+        <p className="mb-7 mt-2.5 text-[14.5px] text-slate-600">Retrouvez vos chantiers et vos équipes.</p>
 
-          <LoginForm onFieldFocus={setFocusedField} onPasswordVisibilityChange={setPasswordVisible} />
-
-          <div className="mt-6 flex flex-col items-center gap-2 text-[13px] text-white/70">
-            <Link href="/mot-de-passe-oublie" className="rounded font-medium text-sky-200 underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-sky-300/70">
+        <LoginForm
+          passwordAside={
+            <Link href="/mot-de-passe-oublie" className="rounded text-[13px] font-semibold text-blue-700 underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-blue-300">
               Mot de passe oublié ?
             </Link>
-            <p>
-              Nouvelle entreprise ?{" "}
-              <Link href="/inscription" className="rounded font-semibold text-white underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-sky-300/70">
-                Créer mon entreprise
-              </Link>
-            </p>
-          </div>
+          }
+        />
+
+        <div className="my-6 flex items-center gap-3 text-xs text-slate-500">
+          <span className="h-px flex-1 bg-slate-200" />
+          Nouvelle entreprise ?
+          <span className="h-px flex-1 bg-slate-200" />
         </div>
+        <Link
+          href="/inscription"
+          className="flex h-12 items-center justify-center rounded-[14px] border border-slate-200 text-sm font-semibold text-slate-900 outline-none transition-colors hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none"
+        >
+          Créer mon entreprise
+        </Link>
       </section>
     </div>
   )

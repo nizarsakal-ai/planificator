@@ -48,7 +48,7 @@ export default async function DashboardLayout({
   const user = { ...hrNavigation, ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, worksitePhotosNavVisible, companyLogo, companyName: company?.name }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50">
+    <div className="flex h-screen overflow-hidden bg-[#f3f6fc] bg-[radial-gradient(42%_55%_at_8%_4%,#d9e4ff_0,transparent_70%),radial-gradient(40%_50%_at_96%_96%,#e4dcff_0,transparent_70%),radial-gradient(30%_40%_at_70%_10%,#dff6ff_0,transparent_70%)]">
       <Sidebar user={user} />
       <div className="flex flex-col flex-1 overflow-hidden">
         <Navbar user={user} />

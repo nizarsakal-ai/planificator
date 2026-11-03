@@ -1,7 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useId, useSyncExternalStore } from "react"
-import { Monitor, Moon, Sun, SunMoon } from "lucide-react"
+import { useCallback, useEffect, useId, useState, useSyncExternalStore } from "react"
+import { Monitor, Moon, Sun } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
   APPEARANCE_EVENT, APPEARANCE_LABELS, APPEARANCE_PREFERENCES, DEFAULT_APPEARANCE,
@@ -56,33 +56,40 @@ export function useAppearance(userId: string) {
 }
 
 /**
- * Sélecteur « Apparence » (pied de la Sidebar et du menu mobile) : groupe de boutons radio natifs (flèches du clavier,
- * un seul arrêt de tabulation), libellés accessibles Clair / Sombre / Système. Affichage seulement.
+ * Sélecteur « Apparence » (pied de la Sidebar et du menu mobile) : contrôle segmenté à curseur glissant, fait d'un
+ * groupe de boutons radio natifs (flèches du clavier, un seul arrêt de tabulation), libellés Clair / Sombre / Système.
+ * Affichage seulement.
  */
 export function AppearanceSwitcher({ userId, touch = false }: { userId: string; touch?: boolean }) {
   const { preference, setPreference } = useAppearance(userId)
+  const [animate, setAnimate] = useState(false)
   const baseId = useId()
   const labelId = `${baseId}-label`
 
   return (
-    <div className="flex items-center gap-2.5 rounded-xl border border-slate-200/80 py-1 pl-3 pr-1">
-      <SunMoon className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
-      <span id={labelId} className="flex-1 text-[13px] font-medium text-slate-600">Apparence</span>
-      <div role="radiogroup" aria-labelledby={labelId} className="inline-flex gap-0.5 rounded-full bg-slate-100 p-0.5">
+    <div>
+      <span id={labelId} className="sr-only">Apparence</span>
+      <div role="radiogroup" aria-labelledby={labelId} className="relative grid grid-cols-3 rounded-[14px] bg-slate-900/[0.05] p-1">
+        <span
+          className={cn(
+            "pointer-events-none absolute bottom-1 left-1 top-1 w-[calc((100%-0.5rem)/3)] rounded-[10px] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.12)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.5)]",
+            // Glissement seulement après un choix de l'utilisateur : pas de déplacement visible au chargement.
+            animate && "transition-transform duration-300 ease-out motion-reduce:transition-none",
+          )}
+          style={{ transform: `translateX(${APPEARANCE_PREFERENCES.indexOf(preference) * 100}%)` }}
+          aria-hidden="true"
+        />
         {APPEARANCE_PREFERENCES.map((option) => {
           const Icon = ICONS[option]
           const checked = preference === option
           return (
             <label
               key={option}
-              title={APPEARANCE_LABELS[option]}
               className={cn(
-                "relative inline-flex cursor-pointer items-center justify-center rounded-full transition-colors motion-reduce:transition-none",
+                "relative inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-[10px] text-[12px] transition-colors motion-reduce:transition-none",
                 "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-500/60",
-                touch ? "h-11 w-11" : "h-7 w-7",
-                checked
-                  ? "bg-white text-blue-600 shadow-[0_1px_2px_rgba(16,24,40,0.10),0_0_0_1px_rgba(16,24,40,0.05)] dark:text-blue-300"
-                  : "text-slate-500 hover:text-slate-700",
+                touch ? "h-11" : "h-[30px]",
+                checked ? "font-semibold text-slate-900" : "font-medium text-slate-600 hover:text-slate-900",
               )}
             >
               <input
@@ -90,11 +97,12 @@ export function AppearanceSwitcher({ userId, touch = false }: { userId: string; 
                 name={`${baseId}-appearance`}
                 value={option}
                 checked={checked}
-                onChange={() => setPreference(option)}
+                onChange={() => { setAnimate(true); setPreference(option) }}
                 aria-label={APPEARANCE_LABELS[option]}
-                className="absolute inset-0 m-0 cursor-pointer appearance-none rounded-full opacity-0"
+                className="absolute inset-0 m-0 cursor-pointer appearance-none rounded-[10px] opacity-0"
               />
-              <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+              <Icon className={cn("h-3.5 w-3.5", checked && "text-blue-600 dark:text-blue-300")} aria-hidden="true" />
+              <span aria-hidden="true">{APPEARANCE_LABELS[option]}</span>
             </label>
           )
         })}

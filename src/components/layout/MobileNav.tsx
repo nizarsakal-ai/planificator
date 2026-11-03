@@ -106,7 +106,7 @@ export function MobileNav({ user }: { user: MobileNavUser }) {
       {/* Fermé : hors de l'ordre de tabulation et des technologies d'assistance (inert + aria-hidden). */}
       <div
         className={cn(
-          "fixed bottom-2 left-2 top-2 z-50 flex w-[19rem] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_24px_60px_-20px_rgba(15,23,42,0.45)] transition-transform duration-300 ease-out motion-reduce:transition-none md:hidden",
+          "fixed bottom-2 left-2 top-2 z-50 flex w-[19rem] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-[28px] border border-white/90 bg-white/[0.94] shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_24px_60px_-20px_rgba(15,23,42,0.45)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-50/90 transition-transform duration-300 ease-out motion-reduce:transition-none md:hidden",
           open ? "translate-x-0" : "-translate-x-[calc(100%+1rem)]"
         )}
         data-appearance-scope=""
@@ -131,7 +131,7 @@ export function MobileNav({ user }: { user: MobileNavUser }) {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto px-2.5 pb-3 pt-1" aria-label="Menu principal">
+        <nav className="flex-1 overflow-y-auto px-3 pb-3" aria-label="Menu principal">
           {/* Un clic sur un lien ferme le menu (comportement existant conservé) ; replier une catégorie ne le ferme pas. */}
           <NavCategories categories={grouped.categories} activeHref={activeHref} activeCategoryId={activeCategoryId} navigationKey={pathname} onNavigate={close} touch />
         </nav>

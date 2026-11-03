@@ -88,12 +88,6 @@
 [data-appearance="dark"] [data-appearance-scope] .bg-white,
 [data-appearance="dark"] [data-appearance-scope].bg-white { background-color: rgb(var(--surface)); }
 
-/* Connexion : flottement décoratif des personnages (appliqué seulement si motion-safe). */
-@keyframes login-crew-bob {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
-}
-
 @layer base {
   * {
     @apply border-border;
