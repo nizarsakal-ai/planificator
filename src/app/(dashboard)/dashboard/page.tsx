@@ -263,7 +263,7 @@ async function AdminDashboard({ companyId }: { companyId: string }) {
           <h2 className="text-sm font-semibold text-slate-700">Ce mois-ci</h2>
           <a
             href={`/api/pdf/mensuel?month=${currentMonth}&year=${currentYear}`}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[#0f3460]/30 bg-[#0f3460]/5 px-3 py-1.5 text-xs font-semibold text-[#0f3460] hover:bg-[#0f3460]/10 transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-[#0f3460]/15 bg-white px-3.5 py-2 text-xs font-semibold text-[#0f3460] shadow-[0_2px_4px_rgba(15,52,96,0.12),0_10px_20px_-10px_rgba(15,52,96,0.55)] outline-none transition-[background-color,box-shadow] hover:bg-[#0f3460]/[0.04] hover:shadow-[0_3px_6px_rgba(15,52,96,0.16),0_14px_26px_-10px_rgba(15,52,96,0.65)] focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none"
           >
             <Download className="h-3.5 w-3.5" />
             Export PDF mensuel

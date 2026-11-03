@@ -4,6 +4,7 @@ import { SessionProvider } from "next-auth/react"
 import { Toaster } from "sonner"
 import { auth } from "@/auth"
 import { ServiceWorkerUpdater } from "@/components/ServiceWorkerUpdater"
+import { appearanceBootScript } from "@/lib/appearance/appearance"
 import "./globals.css"
 import "leaflet/dist/leaflet.css"
 
@@ -50,8 +51,11 @@ export default async function RootLayout({
   const session = await auth()
 
   return (
-    <html lang="fr">
+    // suppressHydrationWarning : le script d'apparence pose `data-appearance` avant l'hydratation.
+    <html lang="fr" suppressHydrationWarning>
       <head>
+        {/* Apparence : applique le thème mémorisé (par utilisateur, sur cet appareil) avant le premier rendu. */}
+        <script dangerouslySetInnerHTML={{ __html: appearanceBootScript(session?.user?.id) }} />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />

@@ -48,11 +48,11 @@ export default async function DashboardLayout({
   const user = { ...hrNavigation, ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, worksitePhotosNavVisible, companyLogo, companyName: company?.name }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50">
+    <div data-app-backdrop="" className="flex h-screen overflow-hidden bg-[#f6f1e7] bg-[radial-gradient(45%_55%_at_4%_0%,rgba(120,160,255,0.65)_0,transparent_70%),radial-gradient(40%_45%_at_100%_100%,rgba(70,120,250,0.45)_0,transparent_70%),radial-gradient(28%_34%_at_100%_8%,rgba(140,175,255,0.4)_0,transparent_70%),radial-gradient(30%_36%_at_55%_45%,rgba(255,250,240,0.85)_0,transparent_70%)]">
       <Sidebar user={user} />
       <div className="flex flex-col flex-1 overflow-hidden">
         <Navbar user={user} />
-        <main className="flex-1 overflow-y-auto p-4 md:p-6">
+        <main data-app-shell="" className="flex-1 overflow-y-auto p-4 md:p-6">
           {company && <CompanyBrand name={company.name} logo={companyLogo} />}
           {children}
         </main>

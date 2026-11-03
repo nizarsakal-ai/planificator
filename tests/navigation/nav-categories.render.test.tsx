@@ -22,7 +22,8 @@ before(async () => {
   ;({ MobileNav } = (await import("@/components/layout/MobileNav")) as unknown as { MobileNav: Shell })
 })
 
-const user = (role: Role, flags: Partial<Record<"accountingNavVisible" | "billingNavVisible" | "supplierIntakeNavVisible" | "worksitePhotosNavVisible", boolean>> = {}) =>
+type NavFlag = "accountingNavVisible" | "billingNavVisible" | "supplierIntakeNavVisible" | "worksitePhotosNavVisible" | "hrDocumentsNavVisible" | "hrDocumentsManageNavVisible"
+const user = (role: Role, flags: Partial<Record<NavFlag, boolean>> = {}) =>
   ({ id: "u1", name: "Utilisateur Test", email: "test@example.test", image: null, role, companyId: "c1", ...flags })
 const render = (shell: Shell, u: Record<string, unknown>) => renderToStaticMarkup(createElement(shell, { user: u }))
 /** Href des liens marqués aria-current="page" (indépendant de l'ordre des attributs). */
@@ -60,6 +61,30 @@ describe("Sidebar", () => {
   })
 })
 
+describe("Curseur bleu glissant entre les liens", () => {
+  it("rendu serveur : curseur décoratif masqué, lien actif peint lui-même le relief bleu, un seul lien actif", () => {
+    pathname = "/planning"
+    const html = render(Sidebar, user("ADMIN"))
+    const sliders = [...html.matchAll(/<span aria-hidden="true" data-nav-slider=""[^>]*>/g)].map((m) => m[0])
+    assert.equal(sliders.length, 1, "un curseur par menu")
+    assert.match(sliders[0], /opacity-0/, "invisible tant qu'il n'est pas mesuré")
+    assert.match(sliders[0], /motion-reduce:transition-none|class="[^"]*pointer-events-none/)
+    const active = [...html.matchAll(/<a [^>]*>/g)].map((m) => m[0]).filter((t) => t.includes('aria-current="page"'))
+    assert.equal(active.length, 1)
+    assert.match(active[0], /data-nav-href="\/planning"/)
+    assert.match(active[0], /from-\[#1b4a85\]/, "fond bleu foncé sans attendre le curseur")
+    assert.match(active[0], /text-white/)
+  })
+  it("liens des catégories repérables par le curseur ; « Mon profil » (pied) garde sa pastille", () => {
+    pathname = "/profil"
+    const html = render(Sidebar, user("ADMIN"))
+    assert.ok((html.match(/data-nav-href="/g) ?? []).length > 5)
+    const profil = /<a [^>]*href="\/profil"[^>]*>/.exec(html)![0]
+    assert.equal(profil.includes("data-nav-href"), false)
+    assert.match(profil, /aria-current="page"/)
+  })
+})
+
 describe("MobileNav", () => {
   it("EMPLOYEE : mêmes catégories, Photos engins présent si le serveur le rend visible ; tiroir fermé inert et aria-hidden", () => {
     pathname = "/chantiers/42"
@@ -78,5 +103,38 @@ describe("MobileNav", () => {
     const both = renderToStaticMarkup(createElement("div", null, createElement(Sidebar, { user: user("ADMIN") }), createElement(MobileNav, { user: user("ADMIN") })))
     const all = ids(both)
     assert.equal(new Set(all).size, all.length)
+  })
+})
+
+describe("Pied premium : identité, Déconnexion et mode sombre", () => {
+  /** Boutons bascule « Mode sombre » : balise d'ouverture de chaque bouton role="switch". */
+  const appearanceSwitches = (html: string) => [...html.matchAll(/<button type="button" role="switch"[^>]*>(.*?)<\/button>/g)].map((m) => ({ tag: m[0], inner: m[1] }))
+  it("Sidebar et MobileNav : un bouton bascule natif « Mode sombre », décoché au rendu serveur (suit l'appareil)", () => {
+    pathname = "/planning"
+    for (const shell of [Sidebar, MobileNav]) {
+      const html = render(shell, user("ADMIN"))
+      const switches = appearanceSwitches(html)
+      assert.equal(switches.length, 1)
+      assert.match(switches[0].tag, /aria-checked="false"/)
+      assert.match(switches[0].inner, />Mode sombre<\/span>/, "nom accessible visible")
+      assert.equal(/role="radiogroup"/.test(html), false, "plus de sélecteur à trois choix")
+      assert.match(html, /<button type="button" aria-label="Déconnexion"/)
+      assert.match(html, /Utilisateur Test/)
+    }
+  })
+  it("Sidebar + MobileNav sur la même page : un bouton bascule chacun", () => {
+    const both = renderToStaticMarkup(createElement("div", null, createElement(Sidebar, { user: user("ADMIN") }), createElement(MobileNav, { user: user("ADMIN") })))
+    assert.equal(appearanceSwitches(both).length, 2)
+  })
+  it("« Documents RH » n'apparaît que si le serveur le rend visible (opérateurs), « Mes documents » de même", () => {
+    pathname = "/dashboard"
+    const without = render(Sidebar, user("ADMIN"))
+    assert.equal(without.includes('href="/rh/documents"'), false)
+    assert.equal(without.includes('href="/mes-documents"'), false)
+    const own = render(Sidebar, user("EMPLOYEE", { hrDocumentsNavVisible: true }))
+    assert.match(own, /href="\/mes-documents"/)
+    assert.equal(own.includes('href="/rh/documents"'), false)
+    const manage = render(MobileNav, user("ADMIN", { hrDocumentsManageNavVisible: true }))
+    assert.match(manage, /href="\/rh\/documents"/)
   })
 })

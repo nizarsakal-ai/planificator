@@ -10,7 +10,7 @@
     --card-foreground: 222.2 84% 4.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
+    --primary: 213 73% 22%; /* bleu Planificator #0f3460 */
     --primary-foreground: 210 40% 98%;
     --secondary: 210 40% 96.1%;
     --secondary-foreground: 222.2 47.4% 11.2%;
@@ -20,10 +20,25 @@
     --accent-foreground: 222.2 47.4% 11.2%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
+    --border: 219 70% 91%; /* teinté bleu (≈ blue-100) */
+    --input: 219 60% 88%;
+    --ring: 221 83% 53%;
+    --radius: 0.75rem;
+
+    /* Échelle slate (canaux RGB) : palette Tailwind d'origine en clair. */
+    --slate-50: 248 250 252;
+    --slate-100: 241 245 249;
+    --slate-200: 226 232 240;
+    --slate-300: 203 213 225;
+    --slate-400: 148 163 184;
+    --slate-500: 100 116 139;
+    --slate-600: 71 85 105;
+    --slate-700: 51 65 85;
+    --slate-800: 30 41 59;
+    --slate-900: 15 23 42;
+    --slate-950: 2 6 23;
+    /* Surface des cartes (bg-white) */
+    --surface: 255 255 255;
   }
 
   .dark {
@@ -47,7 +62,211 @@
     --input: 217.2 32.6% 17.5%;
     --ring: 212.7 26.8% 83.9%;
   }
+
+  /*
+   * Apparence « Sombre » : limitée aux surfaces qualifiées (barre latérale, menu mobile) marquées
+   * `data-appearance-scope`. Le contenu des pages reste clair : ses pastilles bg-*-50 et couleurs fixes n'ont pas
+   * encore été inspectées en sombre (lot 2). Bleu nuit Planificator ; l'échelle slate s'inverse dans la zone.
+   */
+  [data-appearance="dark"] [data-appearance-scope] {
+    color-scheme: dark;
+    --slate-50: 11 15 28;
+    --slate-100: 27 34 52;
+    --slate-200: 40 48 68;
+    --slate-300: 58 67 89;
+    --slate-400: 112 122 145;
+    --slate-500: 149 158 178;
+    --slate-600: 176 184 200;
+    --slate-700: 201 207 220;
+    --slate-800: 226 230 238;
+    --slate-900: 241 243 247;
+    --slate-950: 250 251 252;
+    --surface: 19 26 46;
+  }
 }
+
+/*
+ * Apparence « Sombre », pages de l'application : assombries, pas inversées. Le fond, les cartes, l'en-tête et les
+ * pastilles claires (bg-*-50 / bg-*-100) baissent de ton ; le texte reste foncé (l'échelle slate et les textes
+ * colorés de ton moyen foncent pour garder ≥ 4,5:1), donc les pastilles et les couleurs fixes restent lisibles sans être réécrites. Ne vise que les pages qui ont le contenu de
+ * l'application (`data-app-shell`) : connexion et portail client ne changent pas. La barre latérale et le tiroir
+ * mobile gardent leur vrai thème sombre (`data-appearance-scope`, règles plus haut, plus précises).
+ */
+:root[data-appearance="dark"]:has([data-app-shell]) {
+  --background: 40 5% 83%;
+  --card: 40 5% 83%;
+  --popover: 40 5% 83%;
+  --muted-foreground: 215 22% 30%;
+  --slate-50: 214 216 222;
+  --slate-100: 204 208 216;
+  --slate-200: 184 191 202;
+  --slate-300: 156 166 182;
+  --slate-400: 68 82 104;
+  --slate-500: 56 69 90;
+  --slate-600: 45 57 76;
+  --slate-700: 38 50 68;
+}
+:root[data-appearance="dark"] [data-app-backdrop] {
+  background-color: #bcbab4;
+  background-image:
+    radial-gradient(45% 55% at 4% 0%, rgba(15, 52, 96, 0.32) 0, transparent 70%),
+    radial-gradient(40% 45% at 100% 100%, rgba(15, 52, 96, 0.28) 0, transparent 70%),
+    radial-gradient(30% 36% at 55% 45%, rgba(214, 211, 204, 0.55) 0, transparent 70%);
+}
+:root[data-appearance="dark"] [data-app-header] {
+  background-color: #cdcbc5;
+  border-color: #b5b2ab;
+}
+:root[data-appearance="dark"] :is([data-app-shell], [data-app-header], [role="dialog"]:not([data-appearance-scope])) .bg-white:not([data-appearance-scope] *),
+:root[data-appearance="dark"] [role="dialog"]:not([data-appearance-scope]).bg-white {
+  background-color: #d9d7d2;
+}
+/* Textes très pâles (slate-200 / 300 : états vides, « Sans équipe ») : gris atténué lisible ; les bordures du même
+ * ton ne changent pas. */
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) :is(.text-slate-200, .text-slate-300) { color: rgb(var(--slate-400)); }
+/* Textes colorés de ton moyen (500 → 700, 600 → 800, 700 → 900) : lisibles sur le fond et les pastilles assombris. */
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-red-500 { color: #b91c1c; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-red-600 { color: #991b1b; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-red-700 { color: #7f1d1d; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-orange-500 { color: #c2410c; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-orange-600 { color: #9a3412; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-orange-700 { color: #7c2d12; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-amber-500 { color: #b45309; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-amber-600 { color: #92400e; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-amber-700 { color: #78350f; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-yellow-500 { color: #a16207; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-yellow-600 { color: #854d0e; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-yellow-700 { color: #713f12; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-lime-500 { color: #4d7c0f; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-lime-600 { color: #3f6212; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-lime-700 { color: #365314; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-green-500 { color: #15803d; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-green-600 { color: #166534; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-green-700 { color: #14532d; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-emerald-500 { color: #047857; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-emerald-600 { color: #065f46; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-emerald-700 { color: #064e3b; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-teal-500 { color: #0f766e; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-teal-600 { color: #115e59; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-teal-700 { color: #134e4a; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-cyan-500 { color: #0e7490; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-cyan-600 { color: #155e75; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-cyan-700 { color: #164e63; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-sky-500 { color: #0369a1; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-sky-600 { color: #075985; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-sky-700 { color: #0c4a6e; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-blue-500 { color: #1d4ed8; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-blue-600 { color: #1e40af; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-blue-700 { color: #1e3a8a; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-indigo-500 { color: #4338ca; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-indigo-600 { color: #3730a3; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-indigo-700 { color: #312e81; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-violet-500 { color: #6d28d9; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-violet-600 { color: #5b21b6; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-violet-700 { color: #4c1d95; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-purple-500 { color: #7e22ce; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-purple-600 { color: #6b21a8; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-purple-700 { color: #581c87; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-fuchsia-500 { color: #a21caf; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-fuchsia-600 { color: #86198f; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-fuchsia-700 { color: #701a75; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-pink-500 { color: #be185d; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-pink-600 { color: #9d174d; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-pink-700 { color: #831843; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-rose-500 { color: #be123c; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-rose-600 { color: #9f1239; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-rose-700 { color: #881337; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-gray-500 { color: #374151; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-gray-600 { color: #1f2937; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-gray-700 { color: #111827; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-zinc-500 { color: #3f3f46; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-zinc-600 { color: #27272a; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-zinc-700 { color: #18181b; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-neutral-500 { color: #404040; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-neutral-600 { color: #262626; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-neutral-700 { color: #171717; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-stone-500 { color: #44403c; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-stone-600 { color: #292524; }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .text-stone-700 { color: #1c1917; }
+/* Pastilles claires, assombries comme le reste de la page. */
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-red-50 { background-color: rgb(213 203 203); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-red-100 { background-color: rgb(213 190 190); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-orange-50 { background-color: rgb(214 207 199); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-orange-100 { background-color: rgb(214 199 179); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-amber-50 { background-color: rgb(214 211 197); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-amber-100 { background-color: rgb(213 204 167); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-yellow-50 { background-color: rgb(213 212 195); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-yellow-100 { background-color: rgb(213 209 164); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-lime-50 { background-color: rgb(207 213 194); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-lime-100 { background-color: rgb(198 212 171); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-green-50 { background-color: rgb(202 213 205); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-green-100 { background-color: rgb(185 212 194); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-emerald-50 { background-color: rgb(198 213 206); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-emerald-100 { background-color: rgb(176 210 192); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-teal-50 { background-color: rgb(202 213 210); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-teal-100 { background-color: rgb(171 211 202); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-cyan-50 { background-color: rgb(198 213 214); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-cyan-100 { background-color: rgb(174 210 213); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-sky-50 { background-color: rgb(202 209 214); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-sky-100 { background-color: rgb(188 203 213); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-blue-50 { background-color: rgb(201 207 214); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-blue-100 { background-color: rgb(184 197 213); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-indigo-50 { background-color: rgb(200 203 214); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-indigo-100 { background-color: rgb(188 194 214); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-violet-50 { background-color: rgb(206 204 214); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-violet-100 { background-color: rgb(199 196 213); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-purple-50 { background-color: rgb(210 206 214); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-purple-100 { background-color: rgb(204 195 214); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-fuchsia-50 { background-color: rgb(213 205 214); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-fuchsia-100 { background-color: rgb(210 195 214); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-pink-50 { background-color: rgb(213 203 208); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-pink-100 { background-color: rgb(212 194 204); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-rose-50 { background-color: rgb(214 202 203); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-rose-100 { background-color: rgb(214 192 193); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-gray-50 { background-color: rgb(209 210 211); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-gray-100 { background-color: rgb(204 205 207); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-zinc-50 { background-color: rgb(210 210 210); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-zinc-100 { background-color: rgb(205 205 206); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-neutral-50 { background-color: rgb(210 210 210); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-neutral-100 { background-color: rgb(206 206 206); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-stone-50 { background-color: rgb(210 210 209); }
+:root[data-appearance="dark"] :is([data-app-shell], [role="dialog"]:not([data-appearance-scope])) .bg-stone-100 { background-color: rgb(206 206 205); }
+
+/*
+ * Relief des boutons pleins écrits à la main dans les pages (lien ou bouton à fond coloré et texte blanc : « Rapport
+ * de paie mensuel », « Présence 30 jours »…) : ombre bleu foncé, plus marquée au survol. Spécificité nulle : une
+ * ombre déclarée par la page l'emporte ; pastilles, avatars et badges (ni lien ni bouton) ne sont pas concernés.
+ */
+:where([data-app-shell]) :where(a, button):where([class*="bg-"]):where(.text-white) {
+  box-shadow: 0 2px 4px rgba(15, 52, 96, 0.2), 0 10px 20px -10px rgba(15, 52, 96, 0.7);
+}
+:where([data-app-shell]) :where(a, button):where([class*="bg-"]):where(.text-white):where(:hover) {
+  box-shadow: 0 3px 6px rgba(15, 52, 96, 0.24), 0 14px 26px -10px rgba(15, 52, 96, 0.8);
+}
+
+/*
+ * Onglets segmentés écrits à la main (rail gris `bg-slate-100 p-1` + onglet actif `bg-white shadow-sm` : Vue journée /
+ * Disponibilités, Semaine / Mois…) : rail teinté bleu foncé, onglet actif surélevé par une ombre bleu foncé. Sélecteurs
+ * précis (pas `:where`) pour passer devant `bg-slate-100` et `shadow-sm` de la page.
+ */
+[data-app-shell] .bg-slate-100.p-1:has(> .bg-white.shadow-sm) {
+  background-color: rgba(15, 52, 96, 0.07);
+}
+[data-app-shell] .bg-slate-100.p-1 > .bg-white.shadow-sm {
+  box-shadow: 0 1px 2px rgba(15, 52, 96, 0.15), 0 8px 16px -6px rgba(15, 52, 96, 0.55);
+}
+
+/*
+ * Ombre bleue des cartes écrites à la main dans les pages (blanc + bordure + coins arrondis), limité au contenu de
+ * l'application (`data-app-shell`). Spécificité nulle (`:where`) : une ombre déclarée par la page (shadow-sm,
+ * shadow-none…) l'emporte toujours. Les composants partagés (Card, Button, Dialog…) portent leur propre ombre.
+ */
+:where([data-app-shell]) :where(.bg-white.border.rounded-lg, .bg-white.border.rounded-xl, .bg-white.border.rounded-2xl) {
+  box-shadow: 0 1px 2px rgba(29, 78, 216, 0.08), 0 12px 28px -18px rgba(29, 78, 216, 0.42);
+}
+
+[data-appearance="dark"] [data-appearance-scope] .bg-white,
+[data-appearance="dark"] [data-appearance-scope].bg-white { background-color: rgb(var(--surface)); }
 
 @layer base {
   * {
