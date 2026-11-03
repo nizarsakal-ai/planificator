@@ -4,7 +4,10 @@ import { serverlessDatasources } from "@/lib/database-url"
 import { getValidDriveAccessToken, type DriveConnectionDb } from "@/lib/worksite-photos/drive/drive-connection.client"
 import { capabilitiesFor, digest, HrError, requireCapability, type Identity,type Capability } from "./domain"
 import { GooglePrivateDrive } from "./drive"
+import bcrypt from "bcryptjs"
 import { PrismaHrRepository } from "./repository"
+import { externalRecognizer } from "./recognition/external"
+import { readDocument } from "./recognition/ocr"
 import { HrDocumentsService } from "./service"
 
 export function hrDocumentsEnabled(env:NodeJS.ProcessEnv=process.env){return env.HR_DOCUMENTS_ENABLED==="true"}
@@ -50,5 +53,9 @@ export function hrService(){
     }}
     const token=await getValidDriveAccessToken(companyId,{db:adapter})
     return {drive:new GooglePrivateDrive(token,expected.toLowerCase()),generation,accountEmail:expected.toLowerCase()}
-  })
+  },undefined,
+  // PLV2-DOC-RH-002 : lecture locale seulement (couche texte PDF, sinon OCR Tesseract local) ; rien ne sort du serveur.
+  (bytes,kind)=>readDocument(bytes,kind),
+  externalRecognizer(),
+  (secret)=>bcrypt.hash(secret,12))
 }

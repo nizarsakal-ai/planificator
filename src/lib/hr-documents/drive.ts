@@ -1,11 +1,11 @@
 import { FetchDriveApiClient, type DriveApiClient } from "@/lib/worksite-photos/drive/drive-api.client"
-import { assertContent, HrError, MAX_PDF_BYTES } from "./domain"
+import { assertContent, HrError, KIND_EXTENSION, KIND_MIME, MAX_PDF_BYTES, type DocumentKind } from "./domain"
 
 export interface PrivateDrive {
   allocate(): Promise<string>
   checkPrivate(fileId: string, parentId?: string): Promise<void>
   createRoot(id: string): Promise<void>
-  put(id: string, rootId: string, bytes: Uint8Array): Promise<void>
+  put(id: string, rootId: string, bytes: Uint8Array, kind?: DocumentKind): Promise<void>
   read(id: string): Promise<Uint8Array>
 }
 export async function boundedBytes(stream: ReadableStream<Uint8Array>, limit = MAX_PDF_BYTES): Promise<Uint8Array> {
@@ -54,9 +54,9 @@ export class GooglePrivateDrive implements PrivateDrive {
     catch(e) { if (!(e instanceof Error && "code" in e && e.code==="DRIVE_ID_EXISTS")) throw e }
     await this.checkPrivate(id)
   }
-  async put(id:string,rootId:string,bytes:Uint8Array) {
+  async put(id:string,rootId:string,bytes:Uint8Array,kind:DocumentKind="pdf") {
     await this.checkPrivate(rootId)
-    try { await this.api.createFile(this.token,{id,name:`${id}.pdf`,parentId:rootId,mimeType:"application/pdf",bytes,appProperties:{module:"hr-documents"}}) }
+    try { await this.api.createFile(this.token,{id,name:`${id}.${KIND_EXTENSION[kind]}`,parentId:rootId,mimeType:KIND_MIME[kind],bytes,appProperties:{module:"hr-documents"}}) }
     catch(e) { if (!(e instanceof Error && "code" in e && e.code==="DRIVE_ID_EXISTS")) throw e }
     await this.checkPrivate(id,rootId)
   }

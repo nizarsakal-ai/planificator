@@ -17,11 +17,13 @@ before(async()=>{
   const notify=await import("../../src/app/api/hr-documents/[id]/notify/route")
   const edit=await import("../../src/app/api/hr-documents/[id]/edit/route")
   const recover=await import("../../src/app/api/hr-documents/[id]/recover/route")
+  const recognize=await import("../../src/app/api/hr-documents/recognize/route")
   routes.push({name:"list",handler:list.GET,method:"GET"},{name:"import",handler:list.POST,method:"POST"},
     {name:"employees",handler:employees.GET,method:"GET"},{name:"storage",handler:storage.POST,method:"POST"},
     {name:"download",handler:download.GET,method:"GET"},{name:"publish",handler:publish.POST,method:"POST"},
     {name:"review",handler:review.POST,method:"POST"},{name:"notify",handler:notify.POST,method:"POST"},
-    {name:"edit",handler:edit.POST,method:"POST"},{name:"recover",handler:recover.POST,method:"POST"})
+    {name:"edit",handler:edit.POST,method:"POST"},{name:"recover",handler:recover.POST,method:"POST"},
+    {name:"recognize",handler:recognize.POST,method:"POST"},{name:"employee-draft",handler:employees.POST,method:"POST"})
 })
 after(()=>{if(saved===undefined)delete process.env.HR_DOCUMENTS_ENABLED;else process.env.HR_DOCUMENTS_ENABLED=saved;if(savedPortal===undefined)delete process.env.HR_DOCUMENT_EMPLOYEE_PORTAL_ENABLED;else process.env.HR_DOCUMENT_EMPLOYEE_PORTAL_ENABLED=savedPortal})
 describe("actual RH HTTP route guards",()=>{

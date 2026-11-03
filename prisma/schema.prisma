@@ -901,6 +901,8 @@ model Employee {
   truckAssignments    TruckAssignment[]    @relation("TruckAssignmentChauffeur")
   mileageTrips        MileageTrip[]        @relation("MileageDriver")
   hrDocuments         HrDocument[]
+  /// PLV2-DOC-RH-002 : relation inverse seulement, aucune colonne ajoutée à employees.
+  hrDraft             HrEmployeeDraft?
   assignedTasks       Task[]               @relation("TaskAssignee")
 
   @@unique([id, companyId])
@@ -3483,4 +3485,28 @@ model HrDocumentStoreEvent {
   store HrDocumentStore @relation(fields:[companyId],references:[companyId],onDelete:Restrict)
   @@index([companyId,createdAt])
   @@map("hr_document_store_events")
+}
+
+/// PLV2-DOC-RH-002 — fiche à compléter créée depuis une pièce d'identité, après validation d'un opérateur RH.
+/// Table séparée : employees et users gardent leur forme. Le numéro de pièce n'est jamais conservé en entier.
+model HrEmployeeDraft {
+  id                String    @id
+  companyId         String
+  employeeId        String    @unique
+  createdById       String
+  createKey         String
+  birthDate         DateTime? @db.Date
+  sex               String?
+  nationality       String?
+  identityExpiry    DateTime? @db.Date
+  documentNumberEnd String?
+  sourceSha256      String?
+  status            String    @default("OPEN")
+  createdAt         DateTime  @default(now())
+  employee          Employee  @relation(fields: [employeeId, companyId], references: [id, companyId], onDelete: Restrict)
+
+  @@unique([employeeId, companyId])
+  @@unique([companyId, createdById, createKey])
+  @@index([companyId, status])
+  @@map("hr_employee_drafts")
 }

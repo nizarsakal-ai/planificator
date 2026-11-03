@@ -1,18 +1,21 @@
 "use client"
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
+import { availableCategories, categoryLabel, type CategoryDefinition } from "@/lib/hr-documents/catalog"
 
-type Employee={id:string;firstName:string;lastName:string}
+type Employee={id:string;firstName:string;lastName:string;draft?:boolean}
+type Category=Pick<CategoryDefinition,"code"|"label"|"family">
 type Doc={id:string;employeeId:string;title:string;period:string;category:string;status:string;version:number;size:number;canResume?:boolean}
 const labels:Record<string,string>={UPLOADING:"Dépôt à reprendre",READY:"À vérifier",REVIEWED:"Vérifié, à publier",PUBLISHED:"Publié",BLOCKED:"Remise suspendue"}
-const categories:Record<string,string>={PAYSLIP:"Bulletin de paie",CONTRACT:"Contrat",AMENDMENT:"Avenant",OTHER:"Autre document RH"}
+// Codes historiques par défaut ; la page passe le catalogue autorisé par les drapeaux (PLV2-DOC-RH-002).
+const LEGACY:Category[]=availableCategories({} as NodeJS.ProcessEnv).map(({code,label,family})=>({code,label,family}))
 const control="w-full rounded-lg border border-slate-300 bg-white p-2 text-sm"
 async function call(url:string,init?:RequestInit){
   const response=await fetch(url,{...init,cache:"no-store"});const data=await response.json()
   if(!response.ok)throw new Error(data.error??"Opération indisponible.")
   return data
 }
-export function Documents({manage=false,configure=false,canImport=false,canPublish=false,mailEnabled=false,employeeId,employeeContext,canReturnToEmployee=false}:{manage?:boolean;configure?:boolean;canImport?:boolean;canPublish?:boolean;mailEnabled?:boolean;employeeId?:string;employeeContext?:Employee;canReturnToEmployee?:boolean}){
+export function Documents({manage=false,configure=false,canImport=false,canPublish=false,mailEnabled=false,employeeId,employeeContext,canReturnToEmployee=false,categories=LEGACY,recognition=false,images=false,drafts=false}:{manage?:boolean;configure?:boolean;canImport?:boolean;canPublish?:boolean;mailEnabled?:boolean;employeeId?:string;employeeContext?:Employee;canReturnToEmployee?:boolean;categories?:Category[];recognition?:boolean;images?:boolean;drafts?:boolean}){
   const [docs,setDocs]=useState<Doc[]>([]),[employees,setEmployees]=useState<Employee[]>([])
   const [error,setError]=useState(""),[message,setMessage]=useState(""),[loading,setLoading]=useState(true)
   const [cursor,setCursor]=useState<string|null>(null),[busy,setBusy]=useState(false)
@@ -52,22 +55,22 @@ export function Documents({manage=false,configure=false,canImport=false,canPubli
     {error&&<p role="alert" className="rounded-lg bg-red-50 p-3 text-red-800">{error} <button type="button" className="underline" onClick={()=>void load()}>Actualiser</button></p>}
     {message&&<p role="status" className="rounded-lg bg-green-50 p-3 text-green-900">{message}</p>}
     {manage&&configure&&<details className="rounded-xl border bg-white p-4"><summary className="cursor-pointer text-sm font-medium text-slate-600">Stockage privé dédié</summary><p className="my-2 text-sm text-slate-600">L’initialisation crée uniquement la racine RH privée dans le compte explicitement configuré. Elle ne déplace aucun document et ne change aucun partage existant.</p><div className="flex flex-wrap gap-3"><button disabled={busy} type="button" className="rounded-lg bg-slate-800 px-4 py-2 text-white disabled:opacity-50" onClick={()=>void action(()=>call("/api/hr-documents/storage",{method:"POST"}),"Racine privée vérifiée.")}>Initialiser ou vérifier le stockage RH</button><button disabled={busy} type="button" className="rounded-lg border px-4 py-2 text-sm" onClick={()=>void action(()=>call("/api/hr-documents/storage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"REASSOCIATE"})}),"Racine réassociée après contrôle du même compte et des droits privés.")}>Réassocier après reconnexion du même compte</button></div></details>}
-    {manage&&canImport&&importOpen&&<ImportPanel employees={employees} employeeId={employeeId} busy={busy} run={action}/>}
+    {manage&&canImport&&importOpen&&<ImportPanel employees={employees} employeeId={employeeId} busy={busy} run={action} categories={categories} recognition={recognition} images={images} drafts={drafts} onDraft={e=>setEmployees(list=>[...list,e])}/>}
     <div className="rounded-xl border bg-white p-4">
       <div className="flex flex-wrap items-end gap-3"><label className="min-w-32 text-sm">Année chargée<input className={control} inputMode="numeric" maxLength={4} placeholder="Toutes" value={year} onChange={e=>setYear(e.target.value.replace(/\D/g,""))}/></label>
-        <label className="min-w-48 text-sm">Catégorie<select className={control} value={kind} onChange={e=>setKind(e.target.value)}><option value="">Toutes</option>{Object.entries(categories).map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label>
+        <label className="min-w-48 text-sm">Catégorie<select className={control} value={kind} onChange={e=>setKind(e.target.value)}><option value="">Toutes</option>{categories.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}</select></label>
         <button type="button" className="rounded-lg border px-3 py-2 text-sm" disabled={loading} onClick={()=>void load()}>Actualiser la liste</button></div>
       <p className="my-3 text-xs text-slate-500">Filtres appliqués uniquement aux pages déjà chargées. Utilisez « Charger la suite » pour parcourir les autres documents.</p>
       {loading&&<p role="status">Chargement…</p>}
       {!loading&&!shown.length&&<p className="py-6 text-slate-600">Aucun document dans cette sélection.</p>}
       <ul className="space-y-4">{shown.map(doc=><li key={doc.id} className="rounded-xl border border-slate-200 p-4">
-        <div className="flex flex-wrap justify-between gap-2"><div className="min-w-0"><h2 className="break-words font-semibold">{doc.title}</h2><p className="text-sm text-slate-600">{categories[doc.category]} · {doc.period} · {Math.ceil(doc.size/1024)} Ko</p>{manage&&<p className="text-sm font-medium text-blue-950">Destinataire : {employees.find(e=>e.id===doc.employeeId)?.lastName??"identifiant interne"} {employees.find(e=>e.id===doc.employeeId)?.firstName??doc.employeeId}</p>}</div><span className="h-fit rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-900">{labels[doc.status]}</span></div>
+        <div className="flex flex-wrap justify-between gap-2"><div className="min-w-0"><h2 className="break-words font-semibold">{doc.title}</h2><p className="text-sm text-slate-600">{categoryLabel(doc.category)} · {doc.period} · {Math.ceil(doc.size/1024)} Ko</p>{manage&&<p className="text-sm font-medium text-blue-950">Destinataire : {employees.find(e=>e.id===doc.employeeId)?.lastName??"identifiant interne"} {employees.find(e=>e.id===doc.employeeId)?.firstName??doc.employeeId}</p>}</div><span className="h-fit rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-900">{labels[doc.status]}</span></div>
         <div className="mt-3 flex flex-wrap gap-3">{["READY","REVIEWED","PUBLISHED"].includes(doc.status)&&<a className="rounded-lg border border-blue-200 px-3 py-2 text-sm text-blue-900" href={`/api/hr-documents/${doc.id}/download`}>Télécharger le PDF{manage?" à vérifier":""}</a>}
           {manage&&canPublish&&doc.status==="REVIEWED"&&<PublishButton key={`${doc.id}:${doc.version}`} doc={doc} busy={busy} run={action}/>}
           {manage&&canImport&&doc.status==="REVIEWED"&&<button disabled={busy} type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={()=>void action(()=>call(`/api/hr-documents/${doc.id}/edit`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({expectedVersion:doc.version,key:crypto.randomUUID()})}),"La validation a été retirée. Corrigez puis vérifiez à nouveau.")}>Corriger l’affectation avant publication</button>}
           {manage&&canPublish&&mailEnabled&&doc.status==="PUBLISHED"&&<button type="button" disabled={busy} className="rounded-lg border px-3 py-2 text-sm" onClick={()=>void action(()=>call(`/api/hr-documents/${doc.id}/notify`,{method:"POST"}),"Notification traitée. Aucun renvoi si elle était déjà envoyée.")}>Notifier la disponibilité par email</button>}
         </div>
-        {manage&&canImport&&doc.status==="READY"&&<ReviewForm key={`${doc.id}:${doc.version}`} doc={doc} employees={employees} busy={busy} run={action}/>}
+        {manage&&canImport&&doc.status==="READY"&&<ReviewForm key={`${doc.id}:${doc.version}`} doc={doc} employees={employees} categories={categories} busy={busy} run={action}/>}
         {doc.status==="UPLOADING"&&manage&&canImport&&doc.canResume&&<RecoveryForm key={`${doc.id}:${doc.version}`} doc={doc} action="RESUME" busy={busy} run={action}/>}
         {doc.status==="BLOCKED"&&<div className="mt-2 space-y-3"><p className="text-sm text-red-800">L’intégrité ou les accès Drive doivent être revérifiés par une personne RH habilitée.</p>{manage&&canImport&&<><button disabled={busy} type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={()=>void action(()=>call(`/api/hr-documents/${doc.id}/recover`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"REVERIFY",expectedVersion:doc.version})}),"Intégrité et droits revérifiés. Revue et publication à refaire.")}>Revérifier après réparation des accès</button><RecoveryForm key={`${doc.id}:${doc.version}`} doc={doc} action="RESTORE" busy={busy} run={action}/></>}</div>}
       </li>)}</ul>
@@ -80,21 +83,37 @@ function PublishButton({doc,busy,run}:{doc:Doc;busy:boolean;run:Runner}){
   const key=useRef<string|undefined>(undefined)
   return <button type="button" disabled={busy} className="rounded-lg bg-blue-800 px-3 py-2 text-sm text-white disabled:opacity-50" onClick={()=>{key.current??=crypto.randomUUID();void run(()=>call(`/api/hr-documents/${doc.id}/publish`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({expectedVersion:doc.version,key:key.current})}),"Document publié dans l’espace du salarié. La notification reste suivie séparément.")}}>Publier la version vérifiée</button>
 }
-function ReviewForm({doc,employees,busy,run}:{doc:Doc;employees:Employee[];busy:boolean;run:Runner}){
+function ReviewForm({doc,employees,categories,busy,run}:{doc:Doc;employees:Employee[];categories:Category[];busy:boolean;run:Runner}){
   return <form className="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-2" onSubmit={e=>{
     e.preventDefault();const f=new FormData(e.currentTarget)
     const data={employeeId:f.get("employeeId"),category:f.get("category"),period:f.get("period"),title:f.get("title"),key:crypto.randomUUID(),expectedVersion:doc.version}
     void run(()=>call(`/api/hr-documents/${doc.id}/review`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)}),"Affectation et version vérifiées. Publication séparée requise.")
   }}>
-    <MetadataFields employees={employees} defaults={doc}/>
+    <MetadataFields employees={employees} categories={categories} defaults={doc}/>
     <label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" required className="mt-1"/>J’ai vérifié le contenu du PDF, le salarié, la période et la catégorie de cette version.</label>
     <button disabled={busy} className="rounded-lg border border-blue-300 px-4 py-2 text-sm text-blue-900 disabled:opacity-50">Valider cette affectation</button>
   </form>
 }
-function MetadataFields({employees,defaults}:{employees:Employee[];defaults?:Partial<Doc>}){
-  return <><label className="text-sm">Salarié<select required name="employeeId" className={control} defaultValue={defaults?.employeeId??""}><option value="" disabled>Choisir explicitement</option>{employees.map(e=><option key={e.id} value={e.id}>{e.lastName} {e.firstName}</option>)}</select></label>
-    <label className="text-sm">Catégorie<select required name="category" className={control} defaultValue={defaults?.category??"PAYSLIP"}>{Object.entries(categories).map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label>
-    <label className="text-sm">Période<input required type="month" name="period" className={control} defaultValue={defaults?.period}/></label>
+type Hint={confidence:number;source:string}
+function hintText(h?:Hint|null){
+  if(!h)return null
+  // Le nom du fichier n'est jamais présenté comme une lecture de la pièce.
+  if(h.source==="FILENAME")return "Suggéré d’après le nom du fichier seulement (non lu sur la pièce) — à vérifier."
+  const from={MRZ:"la bande MRZ",TEXT:"le texte de la pièce",EXTERNAL:"une lecture externe"}[h.source]??"le document"
+  return h.confidence>=0.7?`Lu dans ${from}.`:`Lu dans ${from} — à vérifier.`
+}
+function HintLine({hint}:{hint?:Hint|null}){
+  const text=hintText(hint);if(!text)return null
+  return <span className={`mt-1 block text-xs ${hint!.confidence>=0.7?"text-slate-600":"font-medium text-amber-800"}`}>{text}</span>
+}
+function MetadataFields({employees,categories,defaults,hints}:{employees:Employee[];categories:Category[];defaults?:Partial<Doc>;hints?:{employee?:Hint|null;category?:Hint|null;period?:Hint|null}}){
+  const legacyOnly=categories.every(c=>["PAYSLIP","CONTRACT","AMENDMENT","OTHER"].includes(c.code))
+  // Options vides sélectionnables (pas `disabled`) : si la valeur proposée est absente, le navigateur retombe sur
+  // « Choisir explicitement » (refusé par `required`) et jamais sur le premier salarié ou la première catégorie.
+  const employee=employees.some(e=>e.id===defaults?.employeeId)?defaults!.employeeId!:""
+  return <><label className="text-sm">Salarié<select required name="employeeId" className={control} defaultValue={employee}><option value="">Choisir explicitement</option>{employees.map(e=><option key={e.id} value={e.id}>{e.lastName} {e.firstName}{e.draft?" (fiche à compléter)":""}</option>)}</select><HintLine hint={hints?.employee}/></label>
+    <label className="text-sm">Catégorie<select required name="category" className={control} defaultValue={defaults?.category??(legacyOnly?"PAYSLIP":"")}>{!legacyOnly&&<option value="">À reconnaître — choisir</option>}{categories.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}</select><HintLine hint={hints?.category}/></label>
+    <label className="text-sm">Période<input required type="month" name="period" className={control} defaultValue={defaults?.period}/><HintLine hint={hints?.period}/></label>
     <label className="text-sm">Titre privé<input required maxLength={120} name="title" className={control} defaultValue={defaults?.title}/></label></>
 }
 function RecoveryForm({doc,action,busy,run}:{doc:Doc;action:"RESUME"|"RESTORE";busy:boolean;run:Runner}){
@@ -103,14 +122,131 @@ function RecoveryForm({doc,action,busy,run}:{doc:Doc;action:"RESUME"|"RESTORE";b
     void run(()=>call(`/api/hr-documents/${doc.id}/recover`,{method:"POST",body:form}),"PDF original vérifié. Revue et publication restent nécessaires.")
   }}><label className="min-w-0 text-sm">{action==="RESUME"?"Reprendre avec exactement le PDF réservé":"Restaurer le PDF original, sans changer son destinataire"}<input className="mt-2 block max-w-full" type="file" name="file" accept="application/pdf,.pdf" required disabled={busy}/></label><button disabled={busy} className="rounded-lg border px-3 py-2 text-sm">{action==="RESUME"?"Reprendre ce dépôt":"Restaurer une copie privée"}</button></form>
 }
-function ImportPanel({employees,employeeId,busy,run}:{employees:Employee[];employeeId?:string;busy:boolean;run:Runner}){
+type Read<T=string>={value:T;confidence:number;source:string}|null
+type IdentityKey="lastName"|"firstNames"|"birthDate"|"sex"|"nationality"|"expiryDate"
+type Proposal={category:Read;period:Read;title:string|null;sources:string[]
+  candidates:{employeeId:string;level:"STRONG"|"PARTIAL";draft:boolean}[];proposedEmployeeId:string|null;personSource:string|null;canCreateDraft:boolean;sha256:string;kind:string
+  identity:{lastName:Read;firstNames:Read;birthDate:Read;sex:Read<"M"|"F">;nationality:Read;expiryDate:Read;documentNumberEnd:string|null;mrzChecksValid:boolean|null;missing:Partial<Record<IdentityKey,string>>}|null
+  textFound:boolean;reading:{status:string;reason:string|null;durationMs:number;rotation:number|null}}
+const MISSING:Record<string,string>={NO_TEXT:"rien n’a été lu dans la pièce",ENGINE_MISSING:"moteur OCR local absent",TECHNICAL_FAILURE:"échec technique de la lecture",
+  UNREADABLE:"pièce illisible après OCR",NOT_FOUND:"absent du texte lu",NOT_IN_FORMAT:"absent de ce modèle de pièce",UNCERTAIN:"lu, mais trop incertain pour être proposé"}
+const FAILURE:Record<string,string>={TIMEOUT:"lecture trop longue, interrompue",IMAGE_NOT_DECODABLE:"format d’image non décodable ici (HEIC : envoyez plutôt un JPG)",
+  PAGE_RENDER_UNAVAILABLE:"page PDF sans texte ni image, rendu impossible ici",PDF_UNREADABLE:"PDF illisible",OCR_ERROR:"erreur du moteur OCR"}
+/** Ce qui a réellement été lu : couche texte, OCR local, ou pourquoi rien ne l'a été (jamais « illisible » sans OCR). */
+function ReadingNotice({p}:{p:Proposal}){
+  const r=p.reading,seconds=(r.durationMs/1000).toFixed(1).replace(".",",")
+  const fileOnly=p.sources?.length===1&&p.sources[0]==="FILENAME"?" Les seules suggestions viennent du nom du fichier.":""
+  if(r.status==="TEXT_LAYER")return null
+  if(r.status==="OCR")return <p className="mt-2 rounded-md bg-slate-50 p-2 text-sm text-slate-700">Lu par l’OCR local de Planificator (aucun envoi externe) en {seconds} s{r.rotation?`, image redressée de ${r.rotation}°`:""}. La lecture n’est jamais garantie : comparez chaque champ avec la pièce.</p>
+  const text=r.status==="ENGINE_MISSING"?"Le moteur OCR local n’est pas disponible sur ce serveur : rien n’a été lu dans le document."
+    :r.status==="TECHNICAL_FAILURE"?`Échec technique de la lecture (${FAILURE[r.reason??""]??"motif inconnu"}) : rien n’a été lu. Ce n’est pas un constat d’illisibilité.`
+    :"OCR local tenté : le contenu est illisible (photo floue, reflet ou trop petite). Reprenez une photo nette ou saisissez les champs."
+  return <p className="mt-2 rounded-md bg-amber-50 p-2 text-sm text-amber-900">{text}{fileOnly}</p>
+}
+function FieldNote({id,k}:{id:NonNullable<Proposal["identity"]>;k:IdentityKey}){
+  const f=id[k]
+  if(f)return <HintLine hint={f}/>
+  const why=id.missing[k]
+  return why?<span className="mt-1 block text-xs text-slate-600">Non lu : {MISSING[why]??why}.</span>:null
+}
+type ImportProps={employees:Employee[];employeeId?:string;busy:boolean;run:Runner;categories:Category[];recognition:boolean;images:boolean;drafts:boolean;onDraft:(e:Employee)=>void}
+function ImportPanel(props:ImportProps){
+  const {busy,images,recognition}=props
   const [files,setFiles]=useState<{file:File;key:string}[]>([])
-  return <div className="rounded-xl border bg-white p-4"><h2 className="font-semibold">Dépôt PDF — unitaire ou lot</h2>
-    <p className="my-2 text-sm text-slate-600">10 fichiers au maximum par sélection, 10 Mo par PDF. Chaque affectation est vérifiée séparément. Aucun classement automatique ni publication par l’IA.</p>
-    <label className="block text-sm">Choisir les PDF<input type="file" accept="application/pdf,.pdf" multiple disabled={busy} className="mt-2 block max-w-full text-sm" onChange={e=>setFiles(Array.from(e.target.files??[]).slice(0,10).map(file=>({file,key:crypto.randomUUID()})))}/></label>
-    <div className="space-y-4">{files.map(({file,key})=><form key={key} className="mt-4 grid gap-3 rounded-lg border p-3 sm:grid-cols-2" onSubmit={e=>{
-      e.preventDefault();const f=new FormData(e.currentTarget);f.set("key",key);f.set("file",file)
-      void run(()=>call("/api/hr-documents",{method:"POST",body:f}),"PDF déposé en préparation. Vérification et publication restent nécessaires.")
-    }}><p className="break-all text-sm font-medium sm:col-span-2">{file.name}</p><MetadataFields employees={employees} defaults={employeeId?{employeeId}:undefined}/><button disabled={busy} className="rounded-lg bg-blue-800 px-3 py-2 text-sm text-white disabled:opacity-50">Déposer ce PDF privé</button></form>)}</div>
+  const accept=images?"application/pdf,.pdf,image/jpeg,.jpg,.jpeg,image/png,.png,image/heic,.heic":"application/pdf,.pdf"
+  return <div className="rounded-xl border bg-white p-4"><h2 className="font-semibold">{images?"Dépôt de documents — unitaire ou lot":"Dépôt PDF — unitaire ou lot"}</h2>
+    <p className="my-2 text-sm text-slate-600">10 fichiers au maximum par sélection, 10 Mo par {images?"fichier (PDF, JPG, PNG ou HEIC)":"PDF"}. Chaque affectation est vérifiée séparément. {recognition?"Planificator propose le type, le salarié et la période : rien n’est déposé ni créé sans votre validation, et rien n’est publié automatiquement.":"Aucun classement automatique ni publication par l’IA."}</p>
+    <label className="block text-sm">{images?"Choisir les documents":"Choisir les PDF"}<input type="file" accept={accept} multiple disabled={busy} className="mt-2 block max-w-full text-sm" onChange={e=>setFiles(Array.from(e.target.files??[]).slice(0,10).map(file=>({file,key:crypto.randomUUID()})))}/></label>
+    <div className="space-y-4">{files.map(({file,key})=><ImportItem key={key} file={file} fileKey={key} {...props}/>)}</div>
   </div>
+}
+function ImportItem({file,fileKey,employees,employeeId,busy,run,categories,recognition,drafts,onDraft}:ImportProps&{file:File;fileKey:string}){
+  const [state,setState]=useState<{status:"idle"|"loading"|"done"|"error";proposal?:Proposal}>(recognition?{status:"loading"}:{status:"idle"})
+  const [selected,setSelected]=useState<string|undefined>(employeeId)
+  // Fin de validité saisie dans la fiche : reprise comme période du document si aucune n'a été proposée.
+  const [periodFromDraft,setPeriodFromDraft]=useState<string|undefined>()
+  useEffect(()=>{
+    if(!recognition)return
+    let live=true;const form=new FormData();form.set("file",file)
+    call("/api/hr-documents/recognize",{method:"POST",body:form}).then(d=>{if(live)setState({status:"done",proposal:d.proposal as Proposal})}).catch(()=>{if(live)setState({status:"error"})})
+    return()=>{live=false}
+  },[file,recognition])
+  const p=state.proposal
+  const strong=p?.candidates.filter(c=>c.level==="STRONG")??[]
+  const proposedEmployee=selected??p?.proposedEmployeeId??undefined
+  // Salarié proposé : la confiance est celle du nom lu ; venu du seul nom du fichier, il reste « à vérifier ».
+  const employeeHint=p?.proposedEmployeeId&&!employeeId&&p.personSource
+    ?{confidence:p.personSource==="FILENAME"?0.5:p.identity?.lastName?.confidence??0.5,source:p.personSource}:null
+  const defaults:Partial<Doc>={employeeId:proposedEmployee,category:p?.category?.value,period:p?.period?.value??periodFromDraft,title:p?.title??undefined}
+  return <div className="mt-4 rounded-lg border p-3">
+    <p className="break-all text-sm font-medium">{file.name}</p>
+    {state.status==="loading"&&<p role="status" className="mt-2 text-sm text-slate-600">Lecture du document en cours…</p>}
+    {state.status==="error"&&<p className="mt-2 text-sm text-amber-800">Le document n’a pas pu être lu automatiquement : renseignez les champs à la main.</p>}
+    {p&&<ReadingNotice p={p}/>}
+    {p&&!p.category&&<p className="mt-2 text-sm text-amber-800">Type non reconnu : choisissez la catégorie à la main.</p>}
+    {p&&strong.length>1&&<p className="mt-2 text-sm font-medium text-amber-800">Plusieurs salariés portent ce nom : choisissez explicitement le bon salarié.</p>}
+    {p&&!strong.length&&p.candidates.length>0&&<p className="mt-2 text-sm text-amber-800">Nom de famille seulement reconnu : vérifiez le salarié.</p>}
+    {state.status!=="loading"&&<form key={`${state.status}:${selected??""}:${employees.length}:${periodFromDraft??""}`} className="mt-3 grid gap-3 sm:grid-cols-2" onSubmit={e=>{
+      e.preventDefault();const f=new FormData(e.currentTarget);f.delete("checked");f.set("key",fileKey);f.set("file",file)
+      void run(()=>call("/api/hr-documents",{method:"POST",body:f}),"Document déposé en préparation. Vérification et publication restent nécessaires.")
+    }}><MetadataFields employees={employees} categories={categories} defaults={defaults} hints={p?{employee:employeeHint,category:p.category,period:p.period}:undefined}/>
+      {p&&<label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" name="checked" required className="mt-1"/>J’ai vérifié la proposition (type, salarié, période) sur le document.</label>}
+      <button disabled={busy} className="rounded-lg bg-blue-800 px-3 py-2 text-sm text-white disabled:opacity-50">Déposer ce document privé</button></form>}
+    {p?.canCreateDraft&&drafts&&!selected&&<DraftPanel file={file} proposal={p} categories={categories} busy={busy} run={run} onCreated={(e,expiry)=>{onDraft(e);setSelected(e.id);if(expiry)setPeriodFromDraft(expiry.slice(0,7))}}/>}
+  </div>
+}
+/** Zone photo standard d'une carte ou d'une page de passeport : proposition à confirmer, sans détection de visage. */
+async function cropIdPhoto(file:File):Promise<Blob|null>{
+  if(!["image/jpeg","image/png"].includes(file.type))return null
+  try{
+    const bitmap=await createImageBitmap(file)
+    const sx=Math.round(bitmap.width*0.03),sy=Math.round(bitmap.height*0.18),sw=Math.round(bitmap.width*0.3),sh=Math.round(bitmap.height*0.64)
+    const canvas=document.createElement("canvas");canvas.width=sw;canvas.height=sh
+    canvas.getContext("2d")!.drawImage(bitmap,sx,sy,sw,sh,0,0,sw,sh);bitmap.close()
+    return await new Promise(resolve=>canvas.toBlob(b=>resolve(b),"image/jpeg",0.9))
+  }catch{return null}
+}
+function DraftPanel({file,proposal,categories,busy,run,onCreated}:{file:File;proposal:Proposal;categories:Category[];busy:boolean;run:Runner;onCreated:(e:Employee,expiry?:string)=>void}){
+  const id=proposal.identity!
+  const [photo,setPhoto]=useState<{blob:Blob;url:string}|null>(null)
+  const photoAllowed=categories.some(c=>c.code==="ID_PHOTO")
+  useEffect(()=>{
+    if(!photoAllowed)return
+    let url="";void cropIdPhoto(file).then(blob=>{if(blob){url=URL.createObjectURL(blob);setPhoto({blob,url})}})
+    return()=>{if(url)URL.revokeObjectURL(url)}
+  },[file,photoAllowed])
+  const read=(["lastName","firstNames","birthDate","sex","nationality","expiryDate"] as const).filter(k=>id[k]).length
+  const notice=!read?"Rien n’a été lu dans la pièce : saisissez chaque champ en regardant la pièce (le nom du fichier n’est pas utilisé)."
+    :id.mrzChecksValid===true?"Bande MRZ lue, chiffres de contrôle justes ; les noms n’y sont pas contrôlés : comparez chaque champ avec la pièce."
+    :"Informations lues sans contrôle MRZ complet : comparez chaque champ avec la pièce. Les champs vides indiquent pourquoi."
+  return <form className="mt-4 grid gap-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3 sm:grid-cols-2" onSubmit={e=>{
+    e.preventDefault();const f=new FormData(e.currentTarget)
+    const value=(k:string)=>{const v=String(f.get(k)??"").trim();return v||undefined}
+    const body={firstName:value("firstName"),lastName:value("lastName"),birthDate:value("birthDate"),sex:value("sex"),nationality:value("nationality")?.toUpperCase(),
+      identityExpiry:value("identityExpiry"),documentNumberEnd:id.documentNumberEnd??undefined,sourceSha256:proposal.sha256,key:crypto.randomUUID()}
+    const usePhoto=f.get("usePhoto")==="on"&&photo
+    void run(async()=>{
+      const created=(await call("/api/hr-documents/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).employee as Employee
+      if(usePhoto){
+        const pf=new FormData();pf.set("employeeId",created.id);pf.set("category","ID_PHOTO");pf.set("period",proposal.period?.value??new Date().toISOString().slice(0,7))
+        pf.set("title",`Photo d’identité — ${created.lastName} ${created.firstName}`.slice(0,120));pf.set("key",crypto.randomUUID());pf.set("file",new File([photo.blob],"photo.jpg",{type:"image/jpeg"}))
+        await call("/api/hr-documents",{method:"POST",body:pf})
+      }
+      onCreated(created,body.identityExpiry);return created
+    },"Fiche à compléter créée (inactive, sans invitation). Déposez maintenant la pièce pour ce salarié.")
+  }}>
+    <p className="text-sm font-semibold text-amber-950 sm:col-span-2">Personne absente de la société — créer une fiche à compléter</p>
+    <p className="text-xs text-amber-900 sm:col-span-2">{notice} La fiche reste inactive et aucune invitation n’est envoyée.</p>
+    <label className="text-sm">Nom<input required name="lastName" maxLength={80} className={control} defaultValue={id.lastName?.value}/><FieldNote id={id} k="lastName"/></label>
+    <label className="text-sm">Prénoms<input required name="firstName" maxLength={80} className={control} defaultValue={id.firstNames?.value}/><FieldNote id={id} k="firstNames"/></label>
+    <label className="text-sm">Date de naissance<input type="date" name="birthDate" className={control} defaultValue={id.birthDate?.value}/><FieldNote id={id} k="birthDate"/></label>
+    <label className="text-sm">Sexe<select name="sex" className={control} defaultValue={id.sex?.value??""}><option value="">Non renseigné</option><option value="F">F</option><option value="M">M</option></select><FieldNote id={id} k="sex"/></label>
+    <label className="text-sm">Nationalité (3 lettres)<input name="nationality" maxLength={3} pattern="[A-Za-z]{3}" className={control} defaultValue={id.nationality?.value}/><FieldNote id={id} k="nationality"/></label>
+    <label className="text-sm">Fin de validité de la pièce<input type="date" name="identityExpiry" className={control} defaultValue={id.expiryDate?.value}/><FieldNote id={id} k="expiryDate"/></label>
+    {id.documentNumberEnd&&<p className="text-xs text-slate-600 sm:col-span-2">Numéro de pièce : seuls les 4 derniers caractères sont conservés (…{id.documentNumberEnd}).</p>}
+    {photo&&<div className="flex items-center gap-3 sm:col-span-2"><img src={photo.url} alt="Photo proposée, extraite de la zone photo de la pièce" className="h-24 w-20 rounded-md border object-cover"/>
+      <label className="flex items-start gap-2 text-sm"><input type="checkbox" name="usePhoto" className="mt-1"/>Utiliser cette photo (proposition à confirmer : zone photo standard de la pièce, sans reconnaissance du visage).</label></div>}
+    <label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" required className="mt-1"/>J’ai comparé ces informations avec la pièce d’identité.</label>
+    <button disabled={busy} className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-950 disabled:opacity-50">Créer la fiche à compléter</button>
+  </form>
 }
