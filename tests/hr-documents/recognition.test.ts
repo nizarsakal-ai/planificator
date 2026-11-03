@@ -5,8 +5,8 @@
 import { afterEach, describe, it } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync, readdirSync } from "node:fs"
-import { checkDigit, parseMrz } from "../../src/lib/hr-documents/recognition/mrz"
-import { fileNameTokens, matchPeople, recognize } from "../../src/lib/hr-documents/recognition/engine"
+import { checkDigit, parseMrz, shape } from "../../src/lib/hr-documents/recognition/mrz"
+import { fileNameTokens, matchPeople, readLabels, recognize } from "../../src/lib/hr-documents/recognition/engine"
 import { externalRecognizer } from "../../src/lib/hr-documents/recognition/external"
 import { detectKind, draftSchema, HrError, reviewSchema, validateDocument } from "../../src/lib/hr-documents/domain"
 import { availableCategories, isAcceptedCategory } from "../../src/lib/hr-documents/catalog"
@@ -95,11 +95,20 @@ describe("classement et rapprochement", () => {
     assert.equal(id.canCreateDraft, true); assert.equal(id.identity!.firstNames!.value, "Anna Maria")
     assert.equal(recognize({ text: "BULLETIN DE PAIE", fileName: "MARC INCONNU.pdf", employees: EMPLOYEES, now: NOW }).canCreateDraft, false)
   })
-  it("photo ou scan sans texte : signalé comme tel, nom et prénom marqués « nom du fichier »", () => {
-    // Cas de la recette réelle : PDF d'un scan iPhone, une seule image, aucune couche texte.
-    const p = recognize({ text: "", fileName: "CNI LUCAS EXEMPLE.pdf", employees: EMPLOYEES, now: NOW })
-    assert.equal(p.textFound, false); assert.equal(p.identity!.lastName!.source, "FILENAME"); assert.equal(p.identity!.birthDate, null)
+  it("photo ou scan sans texte : le nom du fichier ne remplit JAMAIS l'identité ; chaque champ vide porte son motif", () => {
+    // Cas de la recette réelle : rien n'a été lu dans la pièce elle-même.
+    const reading = { status: "UNREADABLE" as const, reason: null, durationMs: 900, pages: 1, rotation: 0, confidence: 12, mrzFound: false }
+    const p = recognize({ text: "", fileName: "CNI LUCAS EXEMPLE.pdf", employees: EMPLOYEES, now: NOW, reading })
+    assert.equal(p.textFound, false); assert.equal(p.identity!.lastName, null); assert.equal(p.identity!.firstNames, null)
+    assert.equal(p.identity!.missing.lastName, "UNREADABLE"); assert.equal(p.identity!.missing.birthDate, "UNREADABLE")
+    assert.equal(p.category!.source, "FILENAME"); assert.equal(p.canCreateDraft, true)
+    for (const status of ["ENGINE_MISSING", "TECHNICAL_FAILURE"] as const)
+      assert.equal(recognize({ text: "", fileName: "CNI X Y.pdf", employees: [], now: NOW, reading: { ...reading, status } }).identity!.missing.firstNames, status)
     assert.equal(recognize({ text: TD3, fileName: "x.pdf", employees: [], now: NOW }).textFound, true)
+  })
+  it("salarié existant suggéré par le nom du fichier : marqué comme tel, jamais comme lu", () => {
+    const p = recognize({ text: "", fileName: "CNI JEAN TESTEUR.pdf", employees: EMPLOYEES, now: NOW })
+    assert.equal(p.proposedEmployeeId, "e1"); assert.equal(p.personSource, "FILENAME"); assert.equal(p.identity!.lastName, null)
   })
   it("document illisible ou inconnu : « à reconnaître », sans erreur", () => {
     const p = recognize({ text: "", fileName: "IMG_2041.pdf", employees: EMPLOYEES, now: NOW })
@@ -114,6 +123,50 @@ describe("classement et rapprochement", () => {
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(16), Buffer.from("IEND", "latin1"), Buffer.alloc(4)])
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(16), Buffer.from([0xff, 0xd9])])
 const HEIC = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypheic", "latin1"), Buffer.alloc(16)])
+describe("lecture OCR : MRZ abîmée, libellés imprimés, provenance par champ", () => {
+  it("MRZ lue par OCR : O/0, I/1, B/8 remis à leur place selon la zone, « < » lus K ou L restaurés", () => {
+    const damaged = "P<UTOERIKSSON<<ANNA<MARIA<K<<<<<<<<<<<<LLLLL\nL898902C36UTO74O8122F12O4159ZE184226B<<<<<1O"
+    const m = parseMrz(damaged, NOW)!
+    assert.equal(m.checksValid, true); assert.equal(m.birthDate, "1974-08-12"); assert.equal(m.givenNames, "ANNA MARIA")
+    assert.equal(shape("74O8I2", "dddddd"), "740812"); assert.equal(shape("ER1KSSON", "aaaaaaaa"), "ERIKSSON")
+  })
+  it("chiffres de contrôle faux : la date n'est pas présentée comme sûre et le numéro n'est pas repris", () => {
+    const bad = TD3.replace("7408122F", "7408132F")
+    const p = recognize({ text: bad, fileName: "x.pdf", employees: [], now: NOW })
+    assert.equal(p.identity!.mrzChecksValid, false); assert.ok(p.identity!.birthDate!.confidence < 0.7)
+    const n = recognize({ text: TD3.replace("L898902C36", "L898902C37"), fileName: "x.pdf", employees: [], now: NOW })
+    assert.equal(n.identity!.documentNumberEnd, null)
+  })
+  it("plusieurs lectures d'une même bande : la version aux contrôles justes l'emporte", () => {
+    const wrong = TD3.replace("7408122F", "7408132F")
+    assert.equal(parseMrz(`${wrong}\n\n${TD3}`, NOW)!.checksValid, true)
+  })
+  it("une ligne lue deux fois ne sert jamais de ligne des noms", () => {
+    const l1 = "I<UTOD231458907<<<<<<<<<<<<<<<", l2 = "7408122F1204159UTO<<<<<<<<<<<6"
+    assert.equal(parseMrz(`${l1}\n${l2}\n${l1}`, NOW), null)
+  })
+  it("noms jamais protégés par un chiffre de contrôle : sûrs seulement si le libellé imprimé concorde", () => {
+    const alone = recognize({ text: TD1, fileName: "x.pdf", employees: [], now: NOW }).identity!
+    assert.equal(alone.lastName!.source, "MRZ"); assert.ok(alone.lastName!.confidence < 0.7); assert.ok(alone.birthDate!.confidence >= 0.9)
+    const both = recognize({ text: `NOM / SURNAME\nERIKSSON\nPRÉNOMS / GIVEN NAMES\nAnna, Maria\n${TD1}`, fileName: "x.pdf", employees: [], now: NOW }).identity!
+    assert.equal(both.lastName!.confidence, 0.95); assert.equal(both.firstNames!.value, "Anna Maria")
+  })
+  it("prénom réduit à une lettre isolée : laissé vide, motif « incertain »", () => {
+    const td1 = "I<UTOD231458907<<<<<<<<<<<<<<<\n7408122F1204159UTO<<<<<<<<<<<6\nERIKSSON<ANNA<MARIA<<A<<<<<<<<"
+    const id = recognize({ text: td1, fileName: "x.pdf", employees: [], now: NOW }).identity!
+    assert.equal(id.firstNames, null); assert.equal(id.missing.firstNames, "UNCERTAIN")
+  })
+  it("libellés imprimés d'une carte (colonnes) : nom, prénoms, sexe, nationalité, dates", () => {
+    const text = ["CARTE NATIONALE D'IDENTITÉ / IDENTITY CARD", "NOM / Surname", "MARTINEZ", "Prénoms / Given names", "Claire, Anne",
+      "Sexe / Sex   Nationalité / Nationality   Date de naiss. / Date of birth", "F   FRA   13 07 1990",
+      "Date d'expiration / Expiry date", "02 03 2031"].join("\n")
+    const l = readLabels(text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[’',]/g, " "))
+    assert.deepEqual(l, { lastName: "MARTINEZ", firstNames: "CLAIRE ANNE", birthDate: "1990-07-13", expiryDate: "2031-03-02", sex: "F", nationality: "FRA" })
+    const p = recognize({ text, fileName: "IMG_2041.jpg", employees: [], now: NOW })
+    assert.equal(p.category!.value, "ID_CARD"); assert.equal(p.identity!.birthDate!.source, "TEXT"); assert.equal(p.canCreateDraft, true)
+  })
+})
+
 describe("formats réels", () => {
   it("type lu dans les octets ; fichier tronqué, renommé ou texte refusé", () => {
     assert.equal(detectKind(buildMinimalTextPdf("x")), "pdf"); assert.equal(detectKind(PNG), "png"); assert.equal(detectKind(JPEG), "jpeg"); assert.equal(detectKind(HEIC), "heic")

@@ -97,8 +97,10 @@ function ReviewForm({doc,employees,categories,busy,run}:{doc:Doc;employees:Emplo
 type Hint={confidence:number;source:string}
 function hintText(h?:Hint|null){
   if(!h)return null
-  const from={MRZ:"bande MRZ",TEXT:"texte du document",FILENAME:"nom du fichier",EXTERNAL:"lecture externe"}[h.source]??"document"
-  return h.confidence>=0.7?`Proposé d’après ${from}.`:`Proposé d’après ${from} — à vérifier.`
+  // Le nom du fichier n'est jamais présenté comme une lecture de la pièce.
+  if(h.source==="FILENAME")return "Suggéré d’après le nom du fichier seulement (non lu sur la pièce) — à vérifier."
+  const from={MRZ:"la bande MRZ",TEXT:"le texte de la pièce",EXTERNAL:"une lecture externe"}[h.source]??"le document"
+  return h.confidence>=0.7?`Lu dans ${from}.`:`Lu dans ${from} — à vérifier.`
 }
 function HintLine({hint}:{hint?:Hint|null}){
   const text=hintText(hint);if(!text)return null
@@ -120,10 +122,33 @@ function RecoveryForm({doc,action,busy,run}:{doc:Doc;action:"RESUME"|"RESTORE";b
     void run(()=>call(`/api/hr-documents/${doc.id}/recover`,{method:"POST",body:form}),"PDF original vérifié. Revue et publication restent nécessaires.")
   }}><label className="min-w-0 text-sm">{action==="RESUME"?"Reprendre avec exactement le PDF réservé":"Restaurer le PDF original, sans changer son destinataire"}<input className="mt-2 block max-w-full" type="file" name="file" accept="application/pdf,.pdf" required disabled={busy}/></label><button disabled={busy} className="rounded-lg border px-3 py-2 text-sm">{action==="RESUME"?"Reprendre ce dépôt":"Restaurer une copie privée"}</button></form>
 }
-type Proposal={category:{value:string;confidence:number;source:string}|null;period:{value:string;confidence:number;source:string}|null;title:string|null
-  candidates:{employeeId:string;level:"STRONG"|"PARTIAL";draft:boolean}[];proposedEmployeeId:string|null;canCreateDraft:boolean;sha256:string;kind:string
-  identity:{lastName:{value:string;source:string}|null;firstNames:{value:string;source:string}|null;birthDate:{value:string}|null;sex:{value:"M"|"F"}|null;nationality:{value:string}|null;expiryDate:{value:string}|null;documentNumberEnd:string|null;mrzChecksValid:boolean|null}|null
-  textFound:boolean}
+type Read<T=string>={value:T;confidence:number;source:string}|null
+type IdentityKey="lastName"|"firstNames"|"birthDate"|"sex"|"nationality"|"expiryDate"
+type Proposal={category:Read;period:Read;title:string|null;sources:string[]
+  candidates:{employeeId:string;level:"STRONG"|"PARTIAL";draft:boolean}[];proposedEmployeeId:string|null;personSource:string|null;canCreateDraft:boolean;sha256:string;kind:string
+  identity:{lastName:Read;firstNames:Read;birthDate:Read;sex:Read<"M"|"F">;nationality:Read;expiryDate:Read;documentNumberEnd:string|null;mrzChecksValid:boolean|null;missing:Partial<Record<IdentityKey,string>>}|null
+  textFound:boolean;reading:{status:string;reason:string|null;durationMs:number;rotation:number|null}}
+const MISSING:Record<string,string>={NO_TEXT:"rien n’a été lu dans la pièce",ENGINE_MISSING:"moteur OCR local absent",TECHNICAL_FAILURE:"échec technique de la lecture",
+  UNREADABLE:"pièce illisible après OCR",NOT_FOUND:"absent du texte lu",NOT_IN_FORMAT:"absent de ce modèle de pièce",UNCERTAIN:"lu, mais trop incertain pour être proposé"}
+const FAILURE:Record<string,string>={TIMEOUT:"lecture trop longue, interrompue",IMAGE_NOT_DECODABLE:"format d’image non décodable ici (HEIC : envoyez plutôt un JPG)",
+  PAGE_RENDER_UNAVAILABLE:"page PDF sans texte ni image, rendu impossible ici",PDF_UNREADABLE:"PDF illisible",OCR_ERROR:"erreur du moteur OCR"}
+/** Ce qui a réellement été lu : couche texte, OCR local, ou pourquoi rien ne l'a été (jamais « illisible » sans OCR). */
+function ReadingNotice({p}:{p:Proposal}){
+  const r=p.reading,seconds=(r.durationMs/1000).toFixed(1).replace(".",",")
+  const fileOnly=p.sources?.length===1&&p.sources[0]==="FILENAME"?" Les seules suggestions viennent du nom du fichier.":""
+  if(r.status==="TEXT_LAYER")return null
+  if(r.status==="OCR")return <p className="mt-2 rounded-md bg-slate-50 p-2 text-sm text-slate-700">Lu par l’OCR local de Planificator (aucun envoi externe) en {seconds} s{r.rotation?`, image redressée de ${r.rotation}°`:""}. La lecture n’est jamais garantie : comparez chaque champ avec la pièce.</p>
+  const text=r.status==="ENGINE_MISSING"?"Le moteur OCR local n’est pas disponible sur ce serveur : rien n’a été lu dans le document."
+    :r.status==="TECHNICAL_FAILURE"?`Échec technique de la lecture (${FAILURE[r.reason??""]??"motif inconnu"}) : rien n’a été lu. Ce n’est pas un constat d’illisibilité.`
+    :"OCR local tenté : le contenu est illisible (photo floue, reflet ou trop petite). Reprenez une photo nette ou saisissez les champs."
+  return <p className="mt-2 rounded-md bg-amber-50 p-2 text-sm text-amber-900">{text}{fileOnly}</p>
+}
+function FieldNote({id,k}:{id:NonNullable<Proposal["identity"]>;k:IdentityKey}){
+  const f=id[k]
+  if(f)return <HintLine hint={f}/>
+  const why=id.missing[k]
+  return why?<span className="mt-1 block text-xs text-slate-600">Non lu : {MISSING[why]??why}.</span>:null
+}
 type ImportProps={employees:Employee[];employeeId?:string;busy:boolean;run:Runner;categories:Category[];recognition:boolean;images:boolean;drafts:boolean;onDraft:(e:Employee)=>void}
 function ImportPanel(props:ImportProps){
   const {busy,images,recognition}=props
@@ -149,14 +174,15 @@ function ImportItem({file,fileKey,employees,employeeId,busy,run,categories,recog
   const p=state.proposal
   const strong=p?.candidates.filter(c=>c.level==="STRONG")??[]
   const proposedEmployee=selected??p?.proposedEmployeeId??undefined
-  // Salarié proposé : sûr seulement s'il vient d'une bande MRZ aux chiffres de contrôle justes.
-  const employeeHint=p?.proposedEmployeeId&&!employeeId?{confidence:p.identity?.mrzChecksValid?0.95:0.6,source:p.identity?.mrzChecksValid?"MRZ":"FILENAME"}:null
+  // Salarié proposé : la confiance est celle du nom lu ; venu du seul nom du fichier, il reste « à vérifier ».
+  const employeeHint=p?.proposedEmployeeId&&!employeeId&&p.personSource
+    ?{confidence:p.personSource==="FILENAME"?0.5:p.identity?.lastName?.confidence??0.5,source:p.personSource}:null
   const defaults:Partial<Doc>={employeeId:proposedEmployee,category:p?.category?.value,period:p?.period?.value??periodFromDraft,title:p?.title??undefined}
   return <div className="mt-4 rounded-lg border p-3">
     <p className="break-all text-sm font-medium">{file.name}</p>
     {state.status==="loading"&&<p role="status" className="mt-2 text-sm text-slate-600">Lecture du document en cours…</p>}
     {state.status==="error"&&<p className="mt-2 text-sm text-amber-800">Le document n’a pas pu être lu automatiquement : renseignez les champs à la main.</p>}
-    {p&&!p.textFound&&<p className="mt-2 rounded-md bg-amber-50 p-2 text-sm text-amber-900">Ce fichier ne contient pas de texte lisible (photo ou scan) : rien n’a pu être lu dans le document lui-même. Seul son nom a servi à la proposition.</p>}
+    {p&&<ReadingNotice p={p}/>}
     {p&&!p.category&&<p className="mt-2 text-sm text-amber-800">Type non reconnu : choisissez la catégorie à la main.</p>}
     {p&&strong.length>1&&<p className="mt-2 text-sm font-medium text-amber-800">Plusieurs salariés portent ce nom : choisissez explicitement le bon salarié.</p>}
     {p&&!strong.length&&p.candidates.length>0&&<p className="mt-2 text-sm text-amber-800">Nom de famille seulement reconnu : vérifiez le salarié.</p>}
@@ -189,10 +215,10 @@ function DraftPanel({file,proposal,categories,busy,run,onCreated}:{file:File;pro
     let url="";void cropIdPhoto(file).then(blob=>{if(blob){url=URL.createObjectURL(blob);setPhoto({blob,url})}})
     return()=>{if(url)URL.revokeObjectURL(url)}
   },[file,photoAllowed])
-  const fromFileName=id.lastName?.source==="FILENAME"
-  const notice=id.mrzChecksValid===true?"Informations lues dans la bande MRZ (chiffres de contrôle justes) : comparez-les quand même avec la pièce."
-    :fromFileName?"Rien n’a été lu dans la pièce : le nom et le prénom viennent seulement du nom du fichier (ordre à vérifier). Complétez les autres champs en regardant la pièce."
-    :"Informations lues sans contrôle MRZ complet : comparez chaque champ avec la pièce."
+  const read=(["lastName","firstNames","birthDate","sex","nationality","expiryDate"] as const).filter(k=>id[k]).length
+  const notice=!read?"Rien n’a été lu dans la pièce : saisissez chaque champ en regardant la pièce (le nom du fichier n’est pas utilisé)."
+    :id.mrzChecksValid===true?"Bande MRZ lue, chiffres de contrôle justes ; les noms n’y sont pas contrôlés : comparez chaque champ avec la pièce."
+    :"Informations lues sans contrôle MRZ complet : comparez chaque champ avec la pièce. Les champs vides indiquent pourquoi."
   return <form className="mt-4 grid gap-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3 sm:grid-cols-2" onSubmit={e=>{
     e.preventDefault();const f=new FormData(e.currentTarget)
     const value=(k:string)=>{const v=String(f.get(k)??"").trim();return v||undefined}
@@ -211,12 +237,12 @@ function DraftPanel({file,proposal,categories,busy,run,onCreated}:{file:File;pro
   }}>
     <p className="text-sm font-semibold text-amber-950 sm:col-span-2">Personne absente de la société — créer une fiche à compléter</p>
     <p className="text-xs text-amber-900 sm:col-span-2">{notice} La fiche reste inactive et aucune invitation n’est envoyée.</p>
-    <label className="text-sm">Nom<input required name="lastName" maxLength={80} className={control} defaultValue={id.lastName?.value}/></label>
-    <label className="text-sm">Prénoms<input required name="firstName" maxLength={80} className={control} defaultValue={id.firstNames?.value}/></label>
-    <label className="text-sm">Date de naissance<input type="date" name="birthDate" className={control} defaultValue={id.birthDate?.value}/></label>
-    <label className="text-sm">Sexe<select name="sex" className={control} defaultValue={id.sex?.value??""}><option value="">Non renseigné</option><option value="F">F</option><option value="M">M</option></select></label>
-    <label className="text-sm">Nationalité (3 lettres)<input name="nationality" maxLength={3} pattern="[A-Za-z]{3}" className={control} defaultValue={id.nationality?.value}/></label>
-    <label className="text-sm">Fin de validité de la pièce<input type="date" name="identityExpiry" className={control} defaultValue={id.expiryDate?.value}/></label>
+    <label className="text-sm">Nom<input required name="lastName" maxLength={80} className={control} defaultValue={id.lastName?.value}/><FieldNote id={id} k="lastName"/></label>
+    <label className="text-sm">Prénoms<input required name="firstName" maxLength={80} className={control} defaultValue={id.firstNames?.value}/><FieldNote id={id} k="firstNames"/></label>
+    <label className="text-sm">Date de naissance<input type="date" name="birthDate" className={control} defaultValue={id.birthDate?.value}/><FieldNote id={id} k="birthDate"/></label>
+    <label className="text-sm">Sexe<select name="sex" className={control} defaultValue={id.sex?.value??""}><option value="">Non renseigné</option><option value="F">F</option><option value="M">M</option></select><FieldNote id={id} k="sex"/></label>
+    <label className="text-sm">Nationalité (3 lettres)<input name="nationality" maxLength={3} pattern="[A-Za-z]{3}" className={control} defaultValue={id.nationality?.value}/><FieldNote id={id} k="nationality"/></label>
+    <label className="text-sm">Fin de validité de la pièce<input type="date" name="identityExpiry" className={control} defaultValue={id.expiryDate?.value}/><FieldNote id={id} k="expiryDate"/></label>
     {id.documentNumberEnd&&<p className="text-xs text-slate-600 sm:col-span-2">Numéro de pièce : seuls les 4 derniers caractères sont conservés (…{id.documentNumberEnd}).</p>}
     {photo&&<div className="flex items-center gap-3 sm:col-span-2"><img src={photo.url} alt="Photo proposée, extraite de la zone photo de la pièce" className="h-24 w-20 rounded-md border object-cover"/>
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" name="usePhoto" className="mt-1"/>Utiliser cette photo (proposition à confirmer : zone photo standard de la pièce, sans reconnaissance du visage).</label></div>}

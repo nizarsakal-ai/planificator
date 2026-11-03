@@ -45,7 +45,11 @@ const withPWA = withPWAInit({
 })
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["@react-pdf/renderer", "unpdf", "exceljs"],
+  serverExternalPackages: ["@react-pdf/renderer", "unpdf", "exceljs", "tesseract.js", "@tesseract.js-data/fra", "@tesseract.js-data/eng"],
+  // PLV2-DOC-RH-002 : modèles OCR lus par chemin au moment de l'appel, invisibles du traçage automatique.
+  outputFileTracingIncludes: {
+    "/api/hr-documents/recognize": ["./node_modules/@tesseract.js-data/fra/4.0.0_best_int/**", "./node_modules/@tesseract.js-data/eng/4.0.0_best_int/**"],
+  },
   experimental: {
     serverActions: {
       bodySizeLimit: "20mb",

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { assertContent, canRead, detectKind, digest, draftSchema, employeeDraftsEnabled, employeeSelectionSchema, HrError, KIND_EXTENSION, recognitionEnabled, requireCapability, reviewSchema, validateDocument, type Actor, type DocumentKind, type DraftInput, type Identity } from "./domain"
 import { verifiedDownload, type PrivateDrive } from "./drive"
 import { recognize, type EmployeeRef, type Proposal } from "./recognition/engine"
+import type { Reading } from "./recognition/ocr"
 import type { ExternalRecognition } from "./recognition/external"
 
 export type DocumentRecord = { id:string; companyId:string; employeeId:string; category:string; period:string; title:string;
@@ -38,7 +39,8 @@ export interface Tx {
   draftByKey(companyId:string,createdById:string,key:string):Promise<EmployeeRef|null>
   createDraft(companyId:string,createdById:string,input:Omit<DraftInput,"key">&{key:string},passwordHash:string):Promise<EmployeeRef>
 }
-export type TextExtractor=(bytes:Uint8Array,kind:DocumentKind)=>Promise<string>
+/** Lecture locale : texte brut (couche texte) ou lecture complète avec son statut (OCR, moteur absent, échec, illisible). */
+export type TextExtractor=(bytes:Uint8Array,kind:DocumentKind)=>Promise<string|Reading>
 export interface Repository { run<T>(identity:Identity,fn:(tx:Tx,actor:Actor)=>Promise<T>):Promise<T> }
 export type DriveBinding = {drive:PrivateDrive;generation:string;accountEmail:string}
 export type DriveFactory = (companyId:string)=>Promise<DriveBinding>
@@ -50,16 +52,19 @@ export class HrDocumentsService {
     private readonly hashPassword:(secret:string)=>Promise<string>=async()=>{throw new HrError("DISABLED",404)}) {}
   /**
    * PLV2-DOC-RH-002 — proposition de classement, sans écriture : rien n'est conservé, publié ni rattaché ici.
-   * Texte local d'abord (couche texte PDF + MRZ + nom du fichier) ; secours externe seulement s'il est branché et activé.
+   * Lecture locale d'abord (couche texte PDF, sinon OCR local) ; secours externe seulement s'il est branché et activé.
    */
   async recognize(identity:Identity,bytes:Uint8Array,fileName:string):Promise<Proposal&{sha256:string;kind:DocumentKind}> {
     if(!recognitionEnabled())throw new HrError("DISABLED",404)
     const {hash,kind}=validateDocument(bytes)
     const employees=await this.repo.run(identity,async(tx,a)=>{requireCapability(a,"IMPORT");requireCapability(a,"READ");return tx.employees(a.companyId)})
-    let text=await this.extract(bytes,kind).catch(()=>"")
+    const started=Date.now()
+    const read=await this.extract(bytes,kind).catch(():Reading=>({text:"",status:"TECHNICAL_FAILURE",reason:"OCR_ERROR",durationMs:Date.now()-started,pages:1,rotation:null,confidence:null,mrzFound:false}))
+    let {text,...reading}:Reading=typeof read==="string"
+      ?{text:read,status:read.trim()?"TEXT_LAYER":"UNREADABLE",reason:null,durationMs:Date.now()-started,pages:1,rotation:null,confidence:null,mrzFound:false}:read
     let external=false
     if(!text.trim()&&this.external){const result=await this.external({bytes,kind}).catch(()=>null);if(result?.text){text=result.text;external=true}}
-    const proposal=recognize({text,fileName:fileName.slice(0,255),employees,now:this.clock()})
+    const proposal=recognize({text,fileName:fileName.slice(0,255),employees,now:this.clock(),reading})
     return {...proposal,sources:external?[...proposal.sources,"EXTERNAL"]:proposal.sources,sha256:hash,kind}
   }
   /** Fiche à compléter : inactive, compte sans mot de passe utilisable, aucune invitation envoyée. */
