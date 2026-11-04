@@ -41,6 +41,7 @@ describe("kilométrage prévu — présentation", () => {
     assert.equal(shiftMonth("2026-01", -1), "2025-12")
     assert.equal(monthLabel("2026-11"), "novembre 2026")
     assert.doesNotMatch(plannedMileageErrorMessage("SQL secret"), /SQL|secret/)
+    assert.match(plannedMileageErrorMessage("DEPOT_NOT_CONFIGURED"), /Point de départ non configuré/)
   })
 
   it("ne rend rien de nouveau dans la carte tant que le drapeau est éteint", () => {

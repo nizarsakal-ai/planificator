@@ -181,6 +181,19 @@ describe("kilométrage prévu — rapport et route", () => {
     assert.equal(touched, false)
   })
 
+  it("refuse une société sans point de départ connu au lieu de partir de Montreuil", async () => {
+    const enabled = { PLANIFICATOR_VEHICLE_PLANNED_MILEAGE_ENABLED: "true" }
+    let opened = false
+    const db = { $transaction: async () => { opened = true; return [] } } as unknown as PrismaClient
+    const noisac = { auth: async () => ({ user: { id: "u", role: "ADMIN", companyId: "cmpqqqyfy0001f5x2blt5qjkh" } }), db, env: enabled }
+    await rejectsCode(readPlannedMileage("truck-1", null, noisac), "DEPOT_NOT_CONFIGURED", 422)
+    assert.equal(opened, false)
+    const galya = { ...noisac, auth: async () => ({ user: { id: "u", role: "ADMIN", companyId: "cmvl0yv6q000ye4yjxs2mggy8" } }) }
+    const report = await readPlannedMileage("truck-1", "2026-11", galya)
+    assert.equal(opened, true)
+    assert.deepEqual([report.depot, report.lines.length, report.totalKm], ["Siège · Montreuil centre", 0, 0])
+  })
+
   it("exige une session autorisée drapeau allumé", async () => {
     const deps = { auth: async () => ({ user: { id: "u", role: "EMPLOYEE", companyId: "galya" } }), db: {} as PrismaClient, env: { PLANIFICATOR_VEHICLE_PLANNED_MILEAGE_ENABLED: "true" } }
     await rejectsCode(readPlannedMileage("truck-1", null, deps), "FORBIDDEN", 403)

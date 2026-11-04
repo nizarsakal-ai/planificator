@@ -12,6 +12,12 @@ export const PLANNED_MILEAGE_MARGIN_KM = 200
 export const CROW_FLIGHT_DETOUR_FACTOR = 1.3
 /** Point de départ demandé par Nizar : siège, Montreuil centre (centroïde IGN de la commune 93048). */
 export const PLANNED_MILEAGE_DEPOT = { label: "Siège · Montreuil centre", latitude: 48.863728, longitude: 2.449364 } as const
+/** Seule société dont le point de départ est connu : GALYA EVENTS. Les autres sont refusées, jamais estimées depuis Montreuil. */
+export const PLANNED_MILEAGE_DEPOT_COMPANY_IDS: readonly string[] = ["cmvl0yv6q000ye4yjxs2mggy8"]
+
+export function hasPlannedMileageDepot(companyId: string): boolean {
+  return PLANNED_MILEAGE_DEPOT_COMPANY_IDS.includes(companyId)
+}
 
 export function isPlannedMileageEnabled(env: Record<string, string | undefined> = process.env): boolean {
   return env[PLANNED_MILEAGE_FLAG]?.trim() === "true"

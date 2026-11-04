@@ -11,7 +11,7 @@ import { authorizeVehicleLocked } from "./vehicle-authority"
 import { normalizeMileageFailure } from "./mileage-service"
 import { reserveImportProvider } from "./import-provider-quota"
 import {
-  CROW_FLIGHT_DETOUR_FACTOR, PLANNED_MILEAGE_DEPOT, PLANNED_MILEAGE_MARGIN_KM, crowFlightKm, isPlannedMileageEnabled,
+  CROW_FLIGHT_DETOUR_FACTOR, PLANNED_MILEAGE_DEPOT, PLANNED_MILEAGE_MARGIN_KM, crowFlightKm, hasPlannedMileageDepot, isPlannedMileageEnabled,
   parsePlannedMonth, plannedTripKm, resolvePlannedWorksites,
   type DistanceSource, type PlannedPeriod, type PlannedWorksite, type PlannedWorksiteDays, type Point, type TruckTeamPeriod,
 } from "./planned-mileage-domain"
@@ -158,6 +158,7 @@ export async function loadPlannedWorksites(tx: PlanningReader, scope: { truckId:
 export async function readPlannedMileage(truckId: string, rawMonth: string | null, deps: PlannedMileageDeps, resolverFor = cachedDistanceResolver): Promise<PlannedMileageReport> {
   if (!isPlannedMileageEnabled(deps.env)) throw new MileageDomainError("FEATURE_DISABLED", 404)
   const session = requireMileageSession(await deps.auth())
+  if (!hasPlannedMileageDepot(session.companyId)) throw new MileageDomainError("DEPOT_NOT_CONFIGURED", 422)
   const period = parsePlannedMonth(rawMonth, deps.now?.() ?? new Date())
   let groups: PlannedWorksiteDays[]
   try {

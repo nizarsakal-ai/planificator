@@ -19,6 +19,7 @@ export function plannedMileageErrorMessage(code?: string): string {
     UNAUTHENTICATED: "Votre session a expiré. Reconnectez-vous.",
     TRUCK_NOT_FOUND: "Ce véhicule n’est plus accessible dans votre entreprise.",
     INVALID_MONTH: "Mois invalide.",
+    DEPOT_NOT_CONFIGURED: "Point de départ non configuré pour cette société : kilométrage prévu indisponible.",
   }
   return messages[code ?? ""] ?? "Impossible de calculer le kilométrage prévu. Réessayez dans un instant."
 }
