@@ -10,6 +10,8 @@ import {
   CATEGORY_FIELDS, VEHICLE_DOCUMENT_CATEGORY_LABELS, documentAlerts, documentUiError, groupDocumentsByCategory,
   type DocumentView, type DocumentVersionView, type DocumentsSnapshot,
 } from "./vehicle-document-ui"
+import { applyRecognition, createLatestOnly, recognitionChecks, resetUntouched, recognitionError, recognitionFieldLabel, recognitionSummary, type FilledFields, type RecognizableKey } from "./vehicle-document-recognition-ui"
+import type { RecognitionProposal } from "@/lib/vehicules/v3/document-recognition-domain"
 
 const FIELD = "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
 
@@ -18,8 +20,10 @@ type Dialog = { mode: "add"; category: VehicleDocumentCategoryCode } | { mode: "
 interface FormState { title: string; issuedOn: string; validFrom: string; validUntil: string; issuerName: string; referenceNumber: string; observations: string; mileage: string; maintenanceEntryId: string }
 const EMPTY_FORM: FormState = { title: "", issuedOn: "", validFrom: "", validUntil: "", issuerName: "", referenceNumber: "", observations: "", mileage: "", maintenanceEntryId: "" }
 
+type Recognition = { state: "idle" } | { state: "reading" } | { state: "done"; proposal: RecognitionProposal; filled: FilledFields } | { state: "error"; message: string }
+
 /** Onglet Documents de la fiche camion : lecture à la demande, commandes idempotentes, aucune URL de fichier persistée côté client. */
-export function VehicleDocumentsTab({ truckId, canManage }: { truckId: string; canManage: boolean }) {
+export function VehicleDocumentsTab({ truckId, canManage, recognitionEnabled = false }: { truckId: string; canManage: boolean; recognitionEnabled?: boolean }) {
   const id = useId()
   const [data, setData] = useState<DocumentsSnapshot | null>(null)
   const [loading, setLoading] = useState(false)
@@ -35,6 +39,14 @@ export function VehicleDocumentsTab({ truckId, canManage }: { truckId: string; c
   const [maintenance,setMaintenance]=useState<{id:string;kind:string;occurredAt:string;mileage:number}[]>([]),[maintenanceError,setMaintenanceError]=useState(""),[maintenanceLoading,setMaintenanceLoading]=useState(false)
   const [thresholdsInput, setThresholdsInput] = useState("")
   const pending = useRef<{ fingerprint: string; key: string } | null>(null)
+  // Lecture automatique : chaque lecture porte un numéro ; une réponse dont le numéro n'est plus le courant (fichier
+  // changé, formulaire fermé ou rouvert) est ignorée. Les champs modifiés à la main ne sont jamais réécrits.
+  const [recognition, setRecognition] = useState<Recognition>({ state: "idle" })
+  const latest = useRef(createLatestOnly()).current
+  const touched = useRef<Set<string>>(new Set())
+  const formRef = useRef(form)
+  const initialForm = useRef<FormState>(EMPTY_FORM)
+  formRef.current = form
   const base = `/api/trucks/${encodeURIComponent(truckId)}/documents`
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
@@ -62,6 +74,41 @@ export function VehicleDocumentsTab({ truckId, canManage }: { truckId: string; c
   const needsMaintenance=dialog?.mode==="add"?dialog.category==="REPAIR_MAINTENANCE":(dialog?.mode==="replace"||dialog?.mode==="edit")&&dialog.document.category==="REPAIR_MAINTENANCE"
   useEffect(()=>{if(!needsMaintenance)return;const controller=new AbortController();setMaintenanceError("");setMaintenanceLoading(true);setMaintenance([]);void fetch(`/api/trucks/${encodeURIComponent(truckId)}/maintenance`,{cache:"no-store",signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error();const body=await response.json();if(!controller.signal.aborted)setMaintenance(body.history)}).catch(()=>{if(!controller.signal.aborted)setMaintenanceError("Les interventions de ce véhicule sont indisponibles. Un lien déjà enregistré sera conservé.")}).finally(()=>{if(!controller.signal.aborted)setMaintenanceLoading(false)});return()=>controller.abort()},[truckId,needsMaintenance])
 
+  const cancelRecognition = useCallback(() => latest.cancel(), [latest])
+  useEffect(() => { touched.current = new Set(); setRecognition({ state: "idle" }); return cancelRecognition }, [dialog, cancelRecognition])
+
+  const dialogCategory = dialog?.mode === "add" ? dialog.category : dialog ? dialog.document.category : null
+  const recognize = async (selected: File | null) => {
+    cancelRecognition()
+    setRecognition({ state: "idle" })
+    setForm((current) => resetUntouched(current, touched.current, initialForm.current))
+    if (!recognitionEnabled || !selected || !dialogCategory || selected.size > 4 * 1024 * 1024) return
+    const { token, signal } = latest.start(), category = dialogCategory
+    setRecognition({ state: "reading" })
+    try {
+      const body = new FormData()
+      body.set("payload", JSON.stringify({ category })); body.set("file", selected, selected.name)
+      const response = await fetch(`${base}/recognize`, { method: "POST", body, signal })
+      const result = await response.json().catch(() => ({}))
+      if (!latest.isCurrent(token)) return
+      if (!response.ok) { setRecognition({ state: "error", message: recognitionError(result.code) }); return }
+      const proposal = result as RecognitionProposal
+      // Mise à jour fonctionnelle : une frappe arrivée pendant la lecture est conservée ; les marques « lu » sont
+      // calculées sur le dernier rendu, à titre indicatif.
+      setForm((current) => applyRecognition(current, touched.current, proposal, category).form)
+      setRecognition({ state: "done", proposal, filled: applyRecognition(formRef.current, touched.current, proposal, category).filled })
+    } catch { if (latest.isCurrent(token)) setRecognition({ state: "error", message: recognitionError() }) }
+  }
+  /** Saisie de l'opérateur : le champ ne sera plus jamais rempli par la lecture et perd sa marque « lu ». */
+  const edit = (key: RecognizableKey, value: string) => {
+    touched.current.add(key)
+    setForm((current) => ({ ...current, [key]: value }))
+    setRecognition((current) => { if (current.state !== "done" || !current.filled[key]) return current; const filled = { ...current.filled }; delete filled[key]; return { ...current, filled } })
+  }
+  const filledFields: FilledFields = recognition.state === "done" ? recognition.filled : {}
+  const mark = (key: RecognizableKey) => { const label = recognitionFieldLabel(filledFields[key]); return label ? <span className={filledFields[key] === "READ" ? "ml-1 font-normal text-emerald-700" : "ml-1 font-normal text-amber-700"}>· {label}</span> : null }
+  const markedField = (key: RecognizableKey) => filledFields[key] === "TO_CHECK" ? FIELD.replace("border-slate-200", "border-amber-400") : FIELD
+
   const command = async (path: string, init: RequestInit, success: string) => {
     setBusy(true); setError(""); setNotice("")
     try {
@@ -76,11 +123,13 @@ export function VehicleDocumentsTab({ truckId, canManage }: { truckId: string; c
     finally { setBusy(false) }
   }
 
-  const openAdd = (category: VehicleDocumentCategoryCode) => { setDialog({ mode: "add", category }); setForm({ ...EMPTY_FORM, title: VEHICLE_DOCUMENT_CATEGORY_LABELS[category] }); setFile(null); setError("") }
+  const openAdd = (category: VehicleDocumentCategoryCode) => { const initial = { ...EMPTY_FORM, title: VEHICLE_DOCUMENT_CATEGORY_LABELS[category] }; initialForm.current = initial; setDialog({ mode: "add", category }); setForm(initial); setFile(null); setError("") }
   const openReplace = (document: DocumentView, mode: "replace" | "edit" = "replace") => {
     const v = document.currentVersion
     setDialog({ mode, document })
-    setForm({ title: document.title, issuedOn: v?.issuedOn ?? "", validFrom: v?.validFrom ?? "", validUntil: v?.validUntil ?? "", issuerName: v?.issuerName ?? "", referenceNumber: v?.referenceNumber ?? "", observations: v?.observations ?? "", mileage: v?.mileage?.toString() ?? "", maintenanceEntryId: v?.maintenanceEntryId ?? "" })
+    const initial = { title: document.title, issuedOn: v?.issuedOn ?? "", validFrom: v?.validFrom ?? "", validUntil: v?.validUntil ?? "", issuerName: v?.issuerName ?? "", referenceNumber: v?.referenceNumber ?? "", observations: v?.observations ?? "", mileage: v?.mileage?.toString() ?? "", maintenanceEntryId: v?.maintenanceEntryId ?? "" }
+    initialForm.current = initial
+    setForm(initial)
     setFile(null); setError("")
   }
 
@@ -186,17 +235,24 @@ export function VehicleDocumentsTab({ truckId, canManage }: { truckId: string; c
         </div>
         {error && <p role="alert" className="rounded bg-red-50 p-2 text-sm text-red-700">{error}</p>}
         <div><label htmlFor={`${id}-title`} className="mb-1 block text-xs font-medium text-slate-600">Intitulé</label><input id={`${id}-title`} className={FIELD} required maxLength={200} value={form.title} disabled={busy} onChange={(e) => setForm({ ...form, title: e.target.value })} /></div>
-        <div><label htmlFor={`${id}-file`} className="mb-1 block text-xs font-medium text-slate-600">Fichier {dialog.mode === "edit" ? "facultatif — fichier actuel conservé" : "(PDF, JPEG ou PNG, 4 Mio maximum)"}</label><input id={`${id}-file`} className={FIELD} type="file" required={dialog.mode !== "edit"} accept="application/pdf,image/jpeg,image/png" disabled={busy} onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></div>
+        <div><label htmlFor={`${id}-file`} className="mb-1 block text-xs font-medium text-slate-600">Fichier {dialog.mode === "edit" ? "facultatif — fichier actuel conservé" : "(PDF, JPEG ou PNG, 4 Mio maximum)"}</label><input id={`${id}-file`} className={FIELD} type="file" required={dialog.mode !== "edit"} accept="application/pdf,image/jpeg,image/png" disabled={busy} onChange={(e) => { const selected = e.target.files?.[0] ?? null; setFile(selected); void recognize(selected) }} />
+          {recognition.state === "reading" && <p role="status" className="mt-1 text-xs text-slate-500">Lecture du document en cours… Vous pouvez saisir les champs en attendant : vos saisies seront conservées.</p>}
+          {recognition.state === "error" && <p role="status" className="mt-1 text-xs text-amber-700">{recognition.message}</p>}
+          {recognition.state === "done" && (() => { const summary = recognitionSummary(recognition.proposal, Object.keys(recognition.filled).length); return <div role="status" className="mt-1 space-y-0.5 text-xs">
+            <p className={summary.tone === "info" ? "rounded bg-blue-50 p-2 text-blue-800" : "rounded bg-amber-50 p-2 text-amber-800"}>{summary.text}</p>
+            {recognitionChecks(recognition.proposal).map((check) => <p key={check.text} className={check.tone === "ok" ? "text-emerald-700" : "text-amber-700"}>{check.text}</p>)}
+          </div> })()}
+        </div>
         <div className="grid grid-cols-2 gap-3">
-          <div><label htmlFor={`${id}-issued`} className="mb-1 block text-xs font-medium text-slate-600">{fields.issuedOn}</label><input id={`${id}-issued`} className={FIELD} type="date" value={form.issuedOn} disabled={busy} onChange={(e) => setForm({ ...form, issuedOn: e.target.value })} /></div>
-          {fields.validFrom && <div><label htmlFor={`${id}-from`} className="mb-1 block text-xs font-medium text-slate-600">{fields.validFrom}</label><input id={`${id}-from`} className={FIELD} type="date" value={form.validFrom} disabled={busy} onChange={(e) => setForm({ ...form, validFrom: e.target.value })} /></div>}
-          {fields.validUntil && <div><label htmlFor={`${id}-until`} className="mb-1 block text-xs font-medium text-slate-600">{fields.validUntil}</label><input id={`${id}-until`} className={FIELD} type="date" value={form.validUntil} disabled={busy} onChange={(e) => setForm({ ...form, validUntil: e.target.value })} /></div>}
-          {fields.issuerName && <div><label htmlFor={`${id}-issuer`} className="mb-1 block text-xs font-medium text-slate-600">{fields.issuerName}</label><input id={`${id}-issuer`} className={FIELD} maxLength={200} value={form.issuerName} disabled={busy} onChange={(e) => setForm({ ...form, issuerName: e.target.value })} /></div>}
-          {fields.referenceNumber && <div><label htmlFor={`${id}-ref`} className="mb-1 block text-xs font-medium text-slate-600">{fields.referenceNumber}</label><input id={`${id}-ref`} className={FIELD} maxLength={100} value={form.referenceNumber} disabled={busy} onChange={(e) => setForm({ ...form, referenceNumber: e.target.value })} /></div>}
-          {fields.mileage && <div><label htmlFor={`${id}-km`} className="mb-1 block text-xs font-medium text-slate-600">Kilométrage indiqué (facultatif)</label><input id={`${id}-km`} className={FIELD} type="number" inputMode="numeric" min={0} max={9999999} step={1} value={form.mileage} disabled={busy} onChange={(e) => setForm({ ...form, mileage: e.target.value })} /></div>}
+          <div><label htmlFor={`${id}-issued`} className="mb-1 block text-xs font-medium text-slate-600">{fields.issuedOn}{mark("issuedOn")}</label><input id={`${id}-issued`} className={markedField("issuedOn")} type="date" value={form.issuedOn} disabled={busy} onChange={(e) => edit("issuedOn", e.target.value)} /></div>
+          {fields.validFrom && <div><label htmlFor={`${id}-from`} className="mb-1 block text-xs font-medium text-slate-600">{fields.validFrom}{mark("validFrom")}</label><input id={`${id}-from`} className={markedField("validFrom")} type="date" value={form.validFrom} disabled={busy} onChange={(e) => edit("validFrom", e.target.value)} /></div>}
+          {fields.validUntil && <div><label htmlFor={`${id}-until`} className="mb-1 block text-xs font-medium text-slate-600">{fields.validUntil}{mark("validUntil")}</label><input id={`${id}-until`} className={markedField("validUntil")} type="date" value={form.validUntil} disabled={busy} onChange={(e) => edit("validUntil", e.target.value)} /></div>}
+          {fields.issuerName && <div><label htmlFor={`${id}-issuer`} className="mb-1 block text-xs font-medium text-slate-600">{fields.issuerName}{mark("issuerName")}</label><input id={`${id}-issuer`} className={markedField("issuerName")} maxLength={200} value={form.issuerName} disabled={busy} onChange={(e) => edit("issuerName", e.target.value)} /></div>}
+          {fields.referenceNumber && <div><label htmlFor={`${id}-ref`} className="mb-1 block text-xs font-medium text-slate-600">{fields.referenceNumber}{mark("referenceNumber")}</label><input id={`${id}-ref`} className={markedField("referenceNumber")} maxLength={100} value={form.referenceNumber} disabled={busy} onChange={(e) => edit("referenceNumber", e.target.value)} /></div>}
+          {fields.mileage && <div><label htmlFor={`${id}-km`} className="mb-1 block text-xs font-medium text-slate-600">Kilométrage indiqué (facultatif){mark("mileage")}</label><input id={`${id}-km`} className={markedField("mileage")} type="number" inputMode="numeric" min={0} max={9999999} step={1} value={form.mileage} disabled={busy} onChange={(e) => edit("mileage", e.target.value)} /></div>}
           {fields.maintenance && <div><label htmlFor={`${id}-maint`} className="mb-1 block text-xs font-medium text-slate-600">Intervention liée (facultatif)</label><select id={`${id}-maint`} className={FIELD} value={form.maintenanceEntryId} disabled={busy} onChange={(e)=>setForm({...form,maintenanceEntryId:e.target.value})}><option value="">Aucune intervention</option>{form.maintenanceEntryId&&!maintenance.some(entry=>entry.id===form.maintenanceEntryId)&&<option value={form.maintenanceEntryId}>Intervention déjà liée — historique conservé</option>}{maintenance.map(entry=><option key={entry.id} value={entry.id}>{entry.kind==="OIL_CHANGE"?"Vidange":"Entretien"} — {new Date(entry.occurredAt).toLocaleDateString("fr-FR",{timeZone:data?.timezone||"Europe/Paris"})} — {entry.mileage.toLocaleString("fr-FR")} km</option>)}</select>{maintenanceError&&<p role="status" className="text-xs text-amber-700">{maintenanceError}</p>}{maintenanceLoading&&<p role="status" className="text-xs text-slate-500">Chargement des interventions...</p>}{!maintenanceLoading&&!maintenanceError&&!maintenance.length&&<p className="text-xs text-slate-500">Aucune intervention disponible pour ce véhicule.</p>}</div>}
         </div>
-        <div><label htmlFor={`${id}-obs`} className="mb-1 block text-xs font-medium text-slate-600">Observations (facultatif)</label><textarea id={`${id}-obs`} className={FIELD} rows={2} maxLength={2000} value={form.observations} disabled={busy} onChange={(e) => setForm({ ...form, observations: e.target.value })} /></div>
+        <div><label htmlFor={`${id}-obs`} className="mb-1 block text-xs font-medium text-slate-600">Observations (facultatif){mark("observations")}</label><textarea id={`${id}-obs`} className={markedField("observations")} rows={2} maxLength={2000} value={form.observations} disabled={busy} onChange={(e) => edit("observations", e.target.value)} /></div>
         {fields.mileage && <p className="text-xs text-slate-500">Le kilométrage indiqué sur la pièce est conservé à titre d'information : le compteur du véhicule n'est jamais modifié.</p>}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setDialog(null)}>Annuler</Button>

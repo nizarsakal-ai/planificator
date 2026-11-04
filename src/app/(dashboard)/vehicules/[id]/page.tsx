@@ -3,6 +3,7 @@ import { notFound } from "next/navigation"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { isVehiclesV3Enabled } from "@/lib/vehicules/v3/v3-feature-flag"
+import { isVehicleDocumentRecognitionEnabled } from "@/lib/vehicules/v3/document-recognition-domain"
 import { VehicleSheet } from "@/components/vehicules/v3/VehicleSheet"
 import { requireMileageSession } from "@/lib/vehicules/mileage-access"
 import { authorizeVehicleLocked } from "@/lib/vehicules/vehicle-authority"
@@ -38,6 +39,7 @@ export default async function VehicleSheetPage({ params, searchParams }: { param
   const { onglet } = await searchParams
   return <VehicleSheet
     canManage={actor.role === "ADMIN" || actor.role === "SUPER_ADMIN"}
+    recognitionEnabled={isVehicleDocumentRecognitionEnabled()}
     initialTab={onglet ?? null}
     truck={{
       id: truck.id, matricule: truck.matricule, marque: truck.marque, modele: truck.modele, active: truck.active,

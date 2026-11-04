@@ -44,17 +44,23 @@ const withPWA = withPWAInit({
   },
 })
 
+const OCR_TRACE_INCLUDES = ["./node_modules/@tesseract.js-data/fra/4.0.0_best_int/**", "./node_modules/@tesseract.js-data/eng/4.0.0_best_int/**",
+  "./node_modules/tesseract.js-core/tesseract-core*.wasm"]
+const OCR_TRACE_EXCLUDES = ["./node_modules/@tesseract.js-data/*/4.0.0/**"]
+
 const nextConfig: NextConfig = {
   serverExternalPackages: ["@react-pdf/renderer", "unpdf", "exceljs", "tesseract.js", "@tesseract.js-data/fra", "@tesseract.js-data/eng"],
   // PLV2-DOC-RH-002 : moteur WASM et modèles OCR lus par chemin au moment de l'appel, invisibles du traçage automatique.
   // Toutes les variantes du cœur : sous Node, tesseract.js 7 choisit la variante selon le processeur (SIMD) et ne retient
   // pas la variante LSTM (il compare un booléen aux codes OEM) ; les modèles « 4.0.0 » non utilisés sont exclus.
+  // Même moteur pour la lecture des pièces véhicule (clé en motif : « [id] » serait lu comme une classe de caractères).
   outputFileTracingIncludes: {
-    "/api/hr-documents/recognize": ["./node_modules/@tesseract.js-data/fra/4.0.0_best_int/**", "./node_modules/@tesseract.js-data/eng/4.0.0_best_int/**",
-      "./node_modules/tesseract.js-core/tesseract-core*.wasm"],
+    "/api/hr-documents/recognize": OCR_TRACE_INCLUDES,
+    "/api/trucks/*/documents/recognize": OCR_TRACE_INCLUDES,
   },
   outputFileTracingExcludes: {
-    "/api/hr-documents/recognize": ["./node_modules/@tesseract.js-data/*/4.0.0/**"],
+    "/api/hr-documents/recognize": OCR_TRACE_EXCLUDES,
+    "/api/trucks/*/documents/recognize": OCR_TRACE_EXCLUDES,
   },
   experimental: {
     serverActions: {

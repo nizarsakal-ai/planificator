@@ -9,6 +9,7 @@ import {
   replaceVehicleDocument, updateVehicleDocumentMetadata, updateReminderSettings, uploadVehicleDocument, verifyVehicleDocumentVersion,
   type DocumentFileInput, type DocumentServiceDeps,
 } from "./document-service"
+import { assertRecognitionEnabled, recognizeVehicleDocument, type DocumentRecognitionDeps } from "./document-recognition-service"
 import { idempotencyKeyOf, readV3BodyBytes, v3Json, v3JsonBody, v3Route, V3_HEADERS } from "./v3-http"
 
 /** Marge d'en-têtes multipart au-delà de la taille maximale du fichier. */
@@ -47,6 +48,16 @@ export function handleDocumentUpload(request: Request, truckId: string, deps: Do
     const { body, file } = await readDocumentMultipart(request, deps.env)
     const result = await uploadVehicleDocument(truckId, body, file, idempotencyKeyOf(request), deps)
     return v3Json(result.receipt, { status: 201, headers: { "Idempotency-Replayed": String(result.replayed) } })
+  })
+}
+
+/** Lecture d'une pièce avant ajout : drapeau et droits avant le corps, aucune écriture, proposition seule. */
+export function handleDocumentRecognize(request: Request, truckId: string, deps: DocumentRecognitionDeps) {
+  return v3Route(request, async () => {
+    assertRecognitionEnabled(deps.env)
+    await authorizeDocumentWriteBeforeBody(truckId, null, deps)
+    const { body, file } = await readDocumentMultipart(request, deps.env)
+    return v3Json(await recognizeVehicleDocument(truckId, body, file, deps))
   })
 }
 
