@@ -6,6 +6,7 @@ import { VehiculesView } from "@/components/vehicules/VehiculesView"
 import { resolveVehiclesAccess, VEHICLE_HISTORY_LIMIT, limitHistory } from "@/lib/vehicules/vehicules-view"
 import { maintenanceSummary } from "@/lib/vehicules/maintenance-domain"
 import { isVehiclesV3Enabled } from "@/lib/vehicules/v3/v3-feature-flag"
+import { isPlannedMileageEnabled } from "@/lib/vehicules/planned-mileage-domain"
 
 export const metadata: Metadata = { title: "Véhicules" }
 
@@ -56,6 +57,7 @@ export default async function VehiculesPage() {
     <VehiculesView
       canManageV2={session?.user?.role === "ADMIN" || session?.user?.role === "SUPER_ADMIN"}
       v3Enabled={isVehiclesV3Enabled()}
+      plannedMileageEnabled={isPlannedMileageEnabled()}
       trucks={trucks.map((t) => {
         const { entries, truncated } = limitHistory(t.assignments)
         return {

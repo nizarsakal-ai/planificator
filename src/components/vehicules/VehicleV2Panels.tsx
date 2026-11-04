@@ -6,11 +6,12 @@ import { VehicleMileagePanel } from "./VehicleMileagePanel"
 import { VehicleMaintenancePanel, type MaintenanceSummary } from "./VehicleMaintenancePanel"
 
 /** Les journaux restent chargés à la demande, l'échéance du parc vient du serveur. */
-export function VehicleV2Panels({ truckId, matricule, active, canManage, currentMileage, maintenanceSummary }: {
+export function VehicleV2Panels({ truckId, matricule, active, canManage, plannedMileageEnabled = false, currentMileage, maintenanceSummary }: {
   truckId: string
   matricule: string
   active: boolean
   canManage: boolean
+  plannedMileageEnabled?: boolean
   currentMileage?: number | null
   maintenanceSummary?: MaintenanceSummary
 }) {
@@ -19,7 +20,7 @@ export function VehicleV2Panels({ truckId, matricule, active, canManage, current
   return (
     <div className="mt-4 space-y-3 border-t border-slate-100 pt-3">
       <VehicleMileagePanel truckId={truckId} matricule={matricule} active={active} canManage={canManage}
-        initialMileage={currentMileage} onMileageChanged={() => {
+        plannedMileageEnabled={plannedMileageEnabled} initialMileage={currentMileage} onMileageChanged={() => {
           setRefreshToken(value => value + 1)
           router.refresh()
         }} />

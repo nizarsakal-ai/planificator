@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 
 import { Gauge, RefreshCw } from "lucide-react"
 import { preventImplicitEnter, isExplicitSubmit } from "./explicit-submit"
 import { Button } from "@/components/ui/button"
+import { VehiclePlannedMileage } from "./VehiclePlannedMileage"
 
 export interface MileageHistoryEntry {
   id: string
@@ -75,11 +76,12 @@ const km = (value: number) => `${value.toLocaleString("fr-FR")} km`
 const date = (value: string) => new Date(value).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })
 const FIELD = "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
 
-export function VehicleMileagePanel({ truckId, matricule, active, canManage, initialMileage, onMileageChanged }: {
+export function VehicleMileagePanel({ truckId, matricule, active, canManage, plannedMileageEnabled = false, initialMileage, onMileageChanged }: {
   truckId: string
   matricule: string
   active: boolean
   canManage: boolean
+  plannedMileageEnabled?: boolean
   initialMileage?: number | null
   onMileageChanged?: () => void
 }) {
@@ -190,6 +192,7 @@ export function VehicleMileagePanel({ truckId, matricule, active, canManage, ini
         </div>
         <Button type="button" size="sm" variant="outline" disabled={loading || saving} onClick={() => void refresh()} aria-label={`Actualiser le kilométrage de ${matricule}`}><RefreshCw className="h-4 w-4" aria-hidden="true" /></Button>
       </div>
+      {plannedMileageEnabled && <VehiclePlannedMileage truckId={truckId} matricule={matricule} />}
       {loading && <p role="status" className="text-sm text-slate-500">Chargement du journal…</p>}
       {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
       {notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
