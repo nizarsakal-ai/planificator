@@ -76,6 +76,7 @@
     "test:vehicules:v3:pg": "node --import tsx --test --test-concurrency=1 tests/vehicules/document-fixes.pg.test.ts tests/vehicules/expense-costs.pg.test.ts tests/vehicules/expense-trip-costs.pg.test.ts tests/vehicules/import-service.pg.test.ts tests/vehicules/v3/tour.pg.test.ts tests/vehicules/v3/integration.pg.test.ts tests/vehicules/cartography-cache.pg.test.ts tests/vehicules/routing-cache.pg.test.ts tests/vehicules/maintenance-corrections.pg.test.ts",
     "test:hr-documents": "node --import tsx --experimental-test-module-mocks --test tests/hr-documents/boundaries.test.ts tests/hr-documents/routes.test.ts tests/hr-documents/employee-preservation.test.ts tests/hr-documents/rollout.test.ts tests/hr-documents/employee-context.render.test.tsx tests/hr-documents/recognition.test.ts tests/hr-documents/ocr.test.ts",
     "bench:hr-documents:ocr": "tsx tests/hr-documents/ocr/benchmark.ts",
+    "test:prospection": "DATABASE_URL=${DATABASE_URL:-postgresql://test:test@localhost:5432/test} node --import tsx --test tests/prospection/boamp-mapping.test.ts tests/prospection/scoring.test.ts tests/prospection/dedup.test.ts tests/prospection/sources.test.ts tests/prospection/watch-service.test.ts tests/prospection/wiring.test.ts tests/prospection/priority.test.ts tests/prospection/dashboard-block.test.ts",
     "test:hr-documents:pg": "node --import tsx --test tests/hr-documents/hr-documents.pg.test.ts",
     "typecheck:hr-documents": "tsc --project tsconfig.hr-documents.json --noEmit"
   },

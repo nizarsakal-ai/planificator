@@ -1,0 +1,102 @@
+[
+  {
+    "idweb": "26-100559",
+    "objet": "Le Centre Communal d'Action Sociale (CCAS) de la Ville d'Avion souhaite organiser, dans le cadre des festivités de Noël, plusieurs représentations de cirque sous chapiteau destinées notamment aux h...",
+    "dateparution": "2026-10-16",
+    "datelimitereponse": "2026-11-06T12:00:00+00:00",
+    "nomacheteur": "MAIRIE D'AVION",
+    "titulaire": null,
+    "code_departement": [
+      "62"
+    ],
+    "code_departement_prestation": null,
+    "nature": "APPEL_OFFRE",
+    "descripteur_libelle": [
+      "Spectacle",
+      "Tente",
+      "Evénementiel"
+    ],
+    "type_marche": [
+      "SERVICES"
+    ],
+    "annonce_lie": null,
+    "url_avis": "https://www.boamp.fr/pages/avis/?q=idweb:26-100559"
+  },
+  {
+    "idweb": "26-96170",
+    "objet": "Accord-cadre relatif à la fourniture de CTS (chapiteaux, tentes, structures) et podiums",
+    "dateparution": "2026-10-07",
+    "datelimitereponse": null,
+    "nomacheteur": "La Cité des Congrès de Nantes",
+    "titulaire": [
+      "PHIL EXPO",
+      "GL EVENT LIVE GRAND OUEST",
+      "SO BOYA"
+    ],
+    "code_departement": [
+      "44"
+    ],
+    "code_departement_prestation": null,
+    "nature": "ATTRIBUTION",
+    "descripteur_libelle": [
+      "Tente",
+      "Stand"
+    ],
+    "type_marche": [
+      "FOURNITURES"
+    ],
+    "annonce_lie": [
+      "26-44956"
+    ],
+    "url_avis": "https://www.boamp.fr/pages/avis/?q=idweb:26-96170"
+  },
+  {
+    "idweb": "26-44956",
+    "objet": "Accord-cadre relatif à la fourniture de CTS (chapiteaux, tentes, structures) et podiums",
+    "dateparution": "2026-05-06",
+    "datelimitereponse": "2026-06-15T14:00:00+00:00",
+    "nomacheteur": "La Cité des Congrès de Nantes",
+    "titulaire": null,
+    "code_departement": [
+      "44"
+    ],
+    "code_departement_prestation": null,
+    "nature": "APPEL_OFFRE",
+    "descripteur_libelle": [
+      "Tente",
+      "Stand"
+    ],
+    "type_marche": [
+      "FOURNITURES"
+    ],
+    "annonce_lie": null,
+    "url_avis": "https://www.boamp.fr/pages/avis/?q=idweb:26-44956"
+  },
+  {
+    "idweb": "26-99849",
+    "objet": "Conception, location, transport, montage et démontage de chapiteaux, tentes, structures\net équipements annexes pour les manifestations du Palais des Festivals et des Congrès de\nCannes",
+    "dateparution": "2026-10-16",
+    "datelimitereponse": null,
+    "nomacheteur": "Palais des Festivals et des Congrès de Cannes (06)",
+    "titulaire": [
+      "HALL EXPO",
+      "GL EVENTS AUDIOVISUAL AND POWER"
+    ],
+    "code_departement": [
+      "6"
+    ],
+    "code_departement_prestation": null,
+    "nature": "ATTRIBUTION",
+    "descripteur_libelle": [
+      "Location (matériels)",
+      "Prestations de services"
+    ],
+    "type_marche": [
+      "SERVICES"
+    ],
+    "annonce_lie": [
+      "25-108395"
+    ],
+    "url_avis": "https://www.boamp.fr/pages/avis/?q=idweb:26-99849"
+  }
+]
