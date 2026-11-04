@@ -21,6 +21,7 @@ export interface VehicleEmployeeOption {
 
 interface VehiculeCardProps {
   canManageV2?: boolean
+  plannedMileageEnabled?: boolean
   /** V3 : lien vers la fiche camion (documents) ; null tant que le prototype n'est pas activé. */
   sheetHref?: string | null
   truck: VehicleViewItem
@@ -45,7 +46,7 @@ const ICON_BTN =
 
 /** Carte véhicule compacte (mosaïque ou liste) : identité, statut, équipe, chauffeur, actions, historique. */
 export function VehiculeCard({
-  truck: t, teams, employees, layout, loading, historyOpen, onToggleHistory, onEdit, onArchive, onRestore, onAssign, canManageV2 = false, sheetHref = null,
+  truck: t, teams, employees, layout, loading, historyOpen, onToggleHistory, onEdit, onArchive, onRestore, onAssign, canManageV2 = false, plannedMileageEnabled = false, sheetHref = null,
 }: VehiculeCardProps) {
   const identity = formatVehicleIdentity(t.marque, t.modele)
   const teamArchived = t.team !== null && !teams.some((team) => team.id === t.team!.id)
@@ -104,7 +105,7 @@ export function VehiculeCard({
             </div>
           </div>
           {historyOpen && <VehicleHistory entries={t.history} truncated={t.historyTruncated} />}
-          <VehicleV2Panels truckId={t.id} matricule={t.matricule} active={t.active} canManage={canManageV2}
+          <VehicleV2Panels truckId={t.id} matricule={t.matricule} active={t.active} canManage={canManageV2} plannedMileageEnabled={plannedMileageEnabled}
             currentMileage={t.currentMileage} maintenanceSummary={t.maintenanceSummary} />
         </CardContent>
       </Card>
@@ -207,7 +208,7 @@ export function VehiculeCard({
         </div>
 
         {historyOpen && <VehicleHistory entries={t.history} truncated={t.historyTruncated} />}
-        <VehicleV2Panels truckId={t.id} matricule={t.matricule} active={t.active} canManage={canManageV2}
+        <VehicleV2Panels truckId={t.id} matricule={t.matricule} active={t.active} canManage={canManageV2} plannedMileageEnabled={plannedMileageEnabled}
           currentMileage={t.currentMileage} maintenanceSummary={t.maintenanceSummary} />
       </CardContent>
     </Card>
