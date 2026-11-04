@@ -7,11 +7,11 @@ export const dynamic = "force-dynamic"
 
 const headers = { "Cache-Control": "private, no-store", Vary: "Cookie", "X-Content-Type-Options": "nosniff" }
 
-// V3 — estimation carburant d'un trajet (?tripId=…&fuel=GAZOLE) : kilomètres, stations du trajet et prix publics. Lecture seule.
+// V3 — estimation carburant d'un trajet (?tripId=… ou ?stayId=…, &fuel=GAZOLE) : kilomètres, stations du trajet et prix publics. Lecture seule.
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }, deps: FuelEstimateDeps = { auth, db: prisma }) {
   try {
     const url = new URL(request.url)
-    const estimate = await readFuelEstimate((await context.params).id, { tripId: url.searchParams.get("tripId"), fuel: url.searchParams.get("fuel") }, deps)
+    const estimate = await readFuelEstimate((await context.params).id, { tripId: url.searchParams.get("tripId"), stayId: url.searchParams.get("stayId"), fuel: url.searchParams.get("fuel") }, deps)
     return Response.json(estimate, { headers })
   } catch (error) {
     const known = error instanceof MileageDomainError

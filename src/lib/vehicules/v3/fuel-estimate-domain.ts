@@ -15,7 +15,7 @@ export type FuelType = (typeof FUEL_TYPES)[number]
 export const FUEL_LABELS: Record<FuelType, string> = { GAZOLE: "Gazole", E10: "SP95-E10", SP95: "SP95", SP98: "SP98", E85: "E85 (superéthanol)", GPLC: "GPL" }
 
 export type Point = { latitude: number; longitude: number }
-export type KmSource = "ODOMETER" | "ROUTE_ROUND_TRIP"
+export type KmSource = "ODOMETER" | "ROUTE_ROUND_TRIP" | "STAY_ROUND_TRIP"
 export type RouteStatus = "ROUTE" | "NO_DEPOT" | "NO_WORKSITE" | "ADDRESS_NOT_FOUND" | "UNAVAILABLE"
 export type StationsStatus = "ROUTE_CORRIDOR" | "NEAR_WORKSITE" | "NEAR_DEPOT" | "NONE" | "UNAVAILABLE"
 
@@ -32,8 +32,31 @@ export interface FuelStation {
   open24h: boolean
 }
 
+/** Séjour d'une équipe sur un chantier : départ le premier jour planifié, retour le dernier (jours consécutifs). */
+export interface PlannedStay {
+  /** `chantier~équipe~premier jour` : identifiant stable recalculé côté serveur. */
+  id: string
+  worksiteId: string
+  worksiteName: string
+  hasAddress: boolean
+  teamId: string
+  teamName: string | null
+  leaderName: string | null
+  chauffeurName: string | null
+  /** Jour du départ (AAAA-MM-JJ). */
+  departure: string
+  /** Jour du retour (AAAA-MM-JJ). */
+  return: string
+  days: number
+}
+
+export interface PriceStats { count: number; min: number; median: number; max: number }
+
 export interface FuelEstimate {
+  /** Trajet relevé au compteur (`TRIP`) ou séjour planifié sur un chantier (`STAY`). */
+  source: "TRIP" | "STAY"
   tripId: string
+  stay: PlannedStay | null
   /** Jour du départ, dans le fuseau de l'entreprise (AAAA-MM-JJ). */
   tripDate: string
   tripClosed: boolean
@@ -46,6 +69,58 @@ export interface FuelEstimate {
   fuel: FuelType
   stations: FuelStation[]
   stationsStatus: StationsStatus
+  /** Prix sur l'ensemble des stations du couloir (les stations listées ne sont que les moins chères). */
+  priceStats: PriceStats | null
+}
+
+// ─── Séjours planifiés ───────────────────────────────────────────────────────
+
+export const STAY_ID = /^[A-Za-z0-9_-]{1,64}~[A-Za-z0-9_-]{1,64}~\d{4}-\d{2}-\d{2}$/
+
+export interface StayAssignment { date: string; teamId: string; worksite: { id: string; name: string; address: string | null } }
+export interface StayTruckPeriod { teamId: string | null; chauffeurId: string | null; from: string; to: string | null }
+
+const nextDay = (day: string) => new Date(Date.parse(`${day}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
+
+/**
+ * Séjours du camion : jours de planning dont l'équipe avait le camion ce jour-là, regroupés par chantier et équipe, puis
+ * découpés en suites de jours consécutifs. Chaque suite = un départ (premier jour) et un retour (dernier jour).
+ * Le chauffeur est celui de la période du camion qui couvre le jour du départ.
+ */
+export function resolveStays(assignments: readonly StayAssignment[], periods: readonly StayTruckPeriod[]): (Omit<PlannedStay, "teamName" | "leaderName" | "chauffeurName"> & { chauffeurId: string | null })[] {
+  const covering = (teamId: string, day: string) => periods.find((p) => p.teamId === teamId && p.from <= day && (p.to === null || p.to >= day))
+  const groups = new Map<string, { assignment: StayAssignment; days: Set<string> }>()
+  for (const a of assignments) {
+    if (!covering(a.teamId, a.date)) continue
+    const key = `${a.worksite.id}~${a.teamId}`
+    const group = groups.get(key) ?? { assignment: a, days: new Set<string>() }
+    group.days.add(a.date)
+    groups.set(key, group)
+  }
+  const stays: ReturnType<typeof resolveStays> = []
+  for (const { assignment, days } of groups.values()) {
+    const sorted = [...days].sort()
+    let start = 0
+    for (let i = 1; i <= sorted.length; i++) {
+      if (i < sorted.length && sorted[i] === nextDay(sorted[i - 1])) continue
+      const departure = sorted[start], back = sorted[i - 1]
+      stays.push({
+        id: `${assignment.worksite.id}~${assignment.teamId}~${departure}`, worksiteId: assignment.worksite.id, worksiteName: assignment.worksite.name,
+        hasAddress: !!assignment.worksite.address?.trim(), teamId: assignment.teamId, departure, return: back, days: i - start,
+        chauffeurId: covering(assignment.teamId, departure)?.chauffeurId ?? null,
+      })
+      start = i
+    }
+  }
+  return stays.sort((a, b) => b.departure.localeCompare(a.departure) || a.worksiteName.localeCompare(b.worksiteName, "fr"))
+}
+
+export function priceStats(stations: readonly { price: number }[]): PriceStats | null {
+  const prices = stations.map((s) => s.price).filter((p) => Number.isFinite(p)).sort((a, b) => a - b)
+  if (!prices.length) return null
+  const mid = prices.length / 2
+  const median = prices.length % 2 ? prices[Math.floor(mid)] : (prices[mid - 1] + prices[mid]) / 2
+  return { count: prices.length, min: prices[0], median: Math.round(median * 1000) / 1000, max: prices[prices.length - 1] }
 }
 
 // ─── Géométrie ───────────────────────────────────────────────────────────────
@@ -68,7 +143,7 @@ export function polylineKm(points: readonly Point[]): number {
  * Points régulièrement espacés le long du tracé (départ et arrivée compris), au plus `maxSamples`, et rayon de couloir
  * qui couvre l'espace entre deux points : chaque station du couloir est à moins de `radiusKm` d'un point.
  */
-export function samplePolyline(points: readonly Point[], maxSamples = 30): { samples: Point[]; radiusKm: number } {
+export function samplePolyline(points: readonly Point[], maxSamples = 160): { samples: Point[]; radiusKm: number } {
   if (!points.length) return { samples: [], radiusKm: 1 }
   const total = polylineKm(points)
   const spacing = Math.max(2, total / Math.max(1, maxSamples - 1))
@@ -137,8 +212,19 @@ export function decimalFr(value: number, digits: number): string {
 export const ESTIMATE_NOTE_PREFIX = "Estimation trajet :"
 
 /** Note ajoutée à la dépense : la provenance du calcul reste lisible dans le registre. */
-export function estimateNote(input: { km: number; kmSource: KmSource; consumption: number; station: FuelStation; fuel: FuelType }): string {
+const dayFr = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`
+
+/** Prix retenu : une station précise, ou la médiane des stations du couloir. */
+export type PriceChoice = { kind: "STATION"; station: FuelStation } | { kind: "MEDIAN"; stats: PriceStats; date: string }
+export const choicePrice = (choice: PriceChoice) => choice.kind === "STATION" ? choice.station.price : choice.stats.median
+
+/** Note ajoutée à la dépense : la provenance du calcul reste lisible dans le registre. */
+export function estimateNote(input: { km: number; kmSource: KmSource; extraKm?: number; consumption: number; price: PriceChoice; fuel: FuelType; stay?: PlannedStay | null }): string {
   const source = input.kmSource === "ODOMETER" ? "compteur" : "itinéraire aller-retour"
-  const priceDate = `${input.station.updatedAt.slice(8, 10)}/${input.station.updatedAt.slice(5, 7)}/${input.station.updatedAt.slice(0, 4)}`
-  return `${ESTIMATE_NOTE_PREFIX} ${input.km} km (${source}) × ${decimalFr(input.consumption, 1)} L/100 km × ${decimalFr(input.station.price, 3)} €/L ${FUEL_LABELS[input.fuel]} (${input.station.label}, ${input.station.city}, prix du ${priceDate}). À remplacer par le montant du ticket.`
+  const where = input.stay ? ` chantier ${input.stay.worksiteName} (départ ${dayFr(input.stay.departure)}, retour ${dayFr(input.stay.return)})` : ""
+  const extra = input.extraKm ? ` + ${input.extraKm} km sur place` : ""
+  const price = input.price.kind === "STATION"
+    ? `${decimalFr(input.price.station.price, 3)} €/L ${FUEL_LABELS[input.fuel]} (${input.price.station.label}, ${input.price.station.city}, prix du ${dayFr(input.price.station.updatedAt)})`
+    : `${decimalFr(input.price.stats.median, 3)} €/L ${FUEL_LABELS[input.fuel]} (prix médian de ${input.price.stats.count} stations du trajet au ${dayFr(input.price.date)})`
+  return `${ESTIMATE_NOTE_PREFIX}${where} ${input.km - (input.extraKm ?? 0)} km (${source})${extra} × ${decimalFr(input.consumption, 1)} L/100 km × ${price}. À remplacer par le montant du ticket.`
 }

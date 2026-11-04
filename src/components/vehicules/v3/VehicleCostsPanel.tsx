@@ -35,7 +35,8 @@ export function VehicleCostsPanel({ truckId, timeZone, fuelEstimateEnabled = fal
     const merged = mergeExpenseValues(current, proposed, touchedRef.current, explicit)
     for (const [name, value] of Object.entries(merged)) { const el = control(name); if (el) el.value = value ?? "" }
     if (explicit) for (const name of Object.keys(merged)) touchedRef.current.delete(name)
-    setEstimated(Object.keys(merged) as ExpenseFieldName[])
+    const names = Object.keys(merged) as ExpenseFieldName[]
+    setEstimated((list) => list.length === names.length && list.every((n, i) => n === names[i]) ? list : names)
   }, [])
   const base = `/api/trucks/${encodeURIComponent(truckId)}`
   const load = useCallback(async (signal?:AbortSignal) => {

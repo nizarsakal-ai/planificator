@@ -8,12 +8,12 @@ import { after, before, describe, it } from "node:test"
 import type { Prisma } from "@prisma/client"
 import { GET as estimateGet } from "@/app/api/trucks/[id]/fuel-estimate/route"
 import {
-  distanceToPolylineKm, estimateFuel, estimateNote, haversineKm, parseConsumption, polylineKm, rankStations, samplePolyline,
-  type FuelEstimate, type FuelStation, type Point,
+  distanceToPolylineKm, estimateFuel, estimateNote, haversineKm, parseConsumption, polylineKm, priceStats, rankStations, resolveStays, samplePolyline,
+  type FuelEstimate, type FuelStation, type PlannedStay, type Point,
 } from "@/lib/vehicules/v3/fuel-estimate-domain"
 import { ignRouteGeometry, stationsInCorridor } from "@/lib/vehicules/v3/fuel-estimate-providers"
 import type { FuelEstimateDeps } from "@/lib/vehicules/v3/fuel-estimate-service"
-import { mergeExpenseValues, priceWarnings, proposedExpenseValues, stationsLabel } from "@/components/vehicules/v3/vehicle-fuel-estimate-ui"
+import { defaultPriceKey, mergeExpenseValues, priceChoice, priceWarnings, proposedExpenseValues, stationsLabel, stayDetails, stayLabel } from "@/components/vehicules/v3/vehicle-fuel-estimate-ui"
 import type { MileageSession } from "@/lib/vehicules/mileage-access"
 import { ADMIN, LEADER, TRUCK, V3MemoryDb } from "./v3-test-db"
 
@@ -49,8 +49,24 @@ describe("couloir et calcul (pur)", () => {
   it("classement : moins chère d'abord, puis la plus proche ; note de provenance lisible", () => {
     const ranked = rankStations([station({ id: "1", price: 2.3 }), station({ id: "2", price: 2.25, offRouteKm: 0.9 }), station({ id: "3", price: 2.25, offRouteKm: 0.1 })])
     assert.deepEqual(ranked.map((s) => s.id), ["3", "2", "1"])
-    assert.equal(estimateNote({ km: 27, kmSource: "ODOMETER", consumption: 9.5, station: station(), fuel: "GAZOLE" }),
+    assert.equal(estimateNote({ km: 27, kmSource: "ODOMETER", consumption: 9.5, price: { kind: "STATION", station: station() }, fuel: "GAZOLE" }),
       "Estimation trajet : 27 km (compteur) × 9,5 L/100 km × 2,250 €/L Gazole (1 RUE FICTIVE, Exempleville, prix du 04/11/2026). À remplacer par le montant du ticket.")
+  })
+  it("séjours : jours consécutifs = un départ et un retour ; interruption = nouveau séjour ; équipe sans le camion ignorée ; chauffeur du jour du départ", () => {
+    const ws = { id: "ws-1", name: "Chantier fictif", address: "1 rue Fictive" }
+    const a = (date: string, teamId = "team-1", worksite = ws) => ({ date, teamId, worksite })
+    const periods = [{ teamId: "team-1", chauffeurId: "drv-1", from: "2026-11-01", to: "2026-11-05" }, { teamId: "team-1", chauffeurId: "drv-2", from: "2026-11-06", to: null }]
+    const stays = resolveStays([a("2026-11-04"), a("2026-11-06"), a("2026-11-05"), a("2026-11-10"), a("2026-11-04", "team-2")], periods)
+    assert.deepEqual(stays.map((s) => [s.id, s.departure, s.return, s.days, s.chauffeurId]), [
+      ["ws-1~team-1~2026-11-10", "2026-11-10", "2026-11-10", 1, "drv-2"],
+      ["ws-1~team-1~2026-11-04", "2026-11-04", "2026-11-06", 3, "drv-1"],
+    ])
+    assert.equal(resolveStays([a("2026-10-30")], periods).length, 0)
+  })
+  it("statistiques de prix : médiane paire et impaire, liste vide", () => {
+    assert.deepEqual(priceStats([{ price: 2.3 }, { price: 2.1 }, { price: 2.25 }]), { count: 3, min: 2.1, median: 2.25, max: 2.3 })
+    assert.equal(priceStats([{ price: 2.1 }, { price: 2.3 }])!.median, 2.2)
+    assert.equal(priceStats([]), null)
   })
 })
 
@@ -105,6 +121,10 @@ class FuelDb {
   quota: string[] = []
   quotaLimit = 60
   trips: Trip[] = []
+  periods = [{ truckId: "truck-g", companyId: "cmvl0yv6q000ye4yjxs2mggy8", teamId: "team-g", chauffeurId: "emp-driver", startedAt: at("2026-10-01T00:00:00Z"), endedAt: null as Date | null }]
+  assignments = ["2026-11-04", "2026-11-05", "2026-11-06"].map((d) => ({ date: at(`${d}T00:00:00Z`), teamId: "team-g", status: "PENDING", worksiteId: "ws-1", companyId: "cmvl0yv6q000ye4yjxs2mggy8" }))
+  teams = [{ id: "team-g", companyId: "cmvl0yv6q000ye4yjxs2mggy8", name: "BILEL A COMPO", leaderId: "emp-leader" }]
+  people = [{ id: "emp-leader", companyId: "cmvl0yv6q000ye4yjxs2mggy8", firstName: "Bilel", lastName: "Exemple" }, { id: "emp-driver", companyId: "cmvl0yv6q000ye4yjxs2mggy8", firstName: "Riadh", lastName: "Exemple" }]
   entries: Record<string, unknown>[] = []
   worksites = [{ id: "ws-1", companyId: GALYA, name: "Chantier fictif", address: "1 rue Fictive 75000 Paris", latitude: PARIS.latitude, longitude: PARIS.longitude },
     { id: "ws-2", companyId: GALYA, name: "Chantier sans coordonnées", address: "2 rue Fictive 75000 Paris", latitude: null, longitude: null }]
@@ -157,6 +177,15 @@ class FuelDb {
         } },
         mileageEntry: { findMany: async ({ where }: { where: Record<string, string> }) => this.entries.filter((e) => e.companyId === where.companyId && e.truckId === where.truckId) },
         worksite: { findFirst: async ({ where }: { where: Record<string, string> }) => this.worksites.find((w) => w.id === where.id && w.companyId === where.companyId) ?? null },
+        truckAssignment: {
+          findMany: async ({ where }: { where: Record<string, string> }) => this.periods.filter((p) => p.truckId === where.truckId && p.companyId === where.companyId),
+          count: async ({ where }: { where: Record<string, string> }) => this.periods.filter((p) => p.truckId === where.truckId && p.companyId === where.companyId).length,
+        },
+        assignment: { findMany: async ({ where }: { where: { teamId: { in: string[] }; date: { gte: Date; lte: Date }; team: { companyId: string }; worksite: { companyId: string; id?: string } } }) =>
+          this.assignments.filter((a) => where.teamId.in.includes(a.teamId) && a.date >= where.date.gte && a.date <= where.date.lte && a.companyId === where.worksite.companyId && (!where.worksite.id || a.worksiteId === where.worksite.id))
+            .map((a) => ({ date: a.date, teamId: a.teamId, worksite: (({ id, name, address }) => ({ id, name, address }))(this.worksites.find((w) => w.id === a.worksiteId)!) })) },
+        team: { findMany: async ({ where }: { where: { id: { in: string[] }; companyId: string } }) => this.teams.filter((t) => where.id.in.includes(t.id) && t.companyId === where.companyId) },
+        employee: { findMany: async ({ where }: { where: { id: { in: string[] }; companyId: string } }) => this.people.filter((e) => where.id.in.includes(e.id) && e.companyId === where.companyId) },
       }
       return callback(ext as unknown as Prisma.TransactionClient)
     }, options)
@@ -244,6 +273,43 @@ describe("service d'estimation : drapeau, droits, kilomètres, stations, cache, 
     const body = await (await estimateGet(request(TRUCK, { tripId: "trip-a" }), params(TRUCK), depsFor(db, ADMIN, net.fn))).json() as FuelEstimate
     assert.deepEqual([body.route.status, body.stationsStatus, body.km], ["NO_WORKSITE", "NONE", null]); assert.equal(net.calls.length, 0)
   })
+  it("séjours planifiés : chantier, départ, retour, équipe, chef et chauffeur extraits du planning", async () => {
+    const { GET: staysGet } = await import("@/app/api/trucks/[id]/fuel-estimate/stays/route")
+    const db = new FuelDb()
+    const response = await staysGet(request(GALYA_TRUCK, {}), params(GALYA_TRUCK), { ...depsFor(db), now: () => at("2026-11-04T10:00:00Z") })
+    assert.equal(response.status, 200)
+    const { stays } = await response.json() as { stays: PlannedStay[] }
+    assert.deepEqual(stays.map((s) => [s.id, s.worksiteName, s.departure, s.return, s.days, s.teamName, s.leaderName, s.chauffeurName]),
+      [["ws-1~team-g~2026-11-04", "Chantier fictif", "2026-11-04", "2026-11-06", 3, "BILEL A COMPO", "Bilel Exemple", "Riadh Exemple"]])
+    assert.deepEqual(businessWrites(db), [])
+  })
+  it("estimation d'un séjour : aller-retour siège → chantier, date de départ, pas de compteur ; identifiant forgé : 404", async () => {
+    const db = new FuelDb()
+    const body = await (await estimateGet(request(GALYA_TRUCK, { stayId: "ws-1~team-g~2026-11-04" }), params(GALYA_TRUCK), depsFor(db))).json() as FuelEstimate
+    assert.deepEqual([body.source, body.km, body.kmSource, body.tripDate, body.odometer, body.stay?.chauffeurName], ["STAY", 27, "STAY_ROUND_TRIP", "2026-11-04", null, "Riadh Exemple"])
+    assert.equal(body.priceStats?.count, 3)
+    for (const stayId of ["ws-1~team-g~2026-11-05", "ws-1~team-x~2026-11-04", "ws-2~team-g~2026-11-04"])
+      assert.equal((await estimateGet(request(GALYA_TRUCK, { stayId }), params(GALYA_TRUCK), depsFor(new FuelDb()))).status, 404)
+    assert.equal((await estimateGet(request(GALYA_TRUCK, { stayId: "ws-1~team-g~2026-11-04", tripId: "trip-closed" }), params(GALYA_TRUCK), depsFor(new FuelDb()))).status, 400)
+  })
+  it("long trajet (≈ 630 km) : couloir découpé en 4 requêtes de prix au plus, statistiques sur toutes les stations", async () => {
+    const MONTAUBAN = { latitude: 43.9912, longitude: 1.3325 }
+    let priceCalls = 0
+    const fn = (async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith("https://data.geopf.fr/navigation/itineraire")) return json({ distance: 633.7, distanceUnit: "kilometer", geometry: { type: "LineString", coordinates: line(MONTREUIL, MONTAUBAN, 600).map((p) => [p.longitude, p.latitude]) } })
+      const where = new URL(url).searchParams.get("where")!
+      const [lon, lat] = /POINT\(([-\d.]+) ([-\d.]+)\)/.exec(where)!.slice(1).map(Number)
+      priceCalls++
+      return json({ results: [priceRow(93100000 + priceCalls, 2.1 + priceCalls / 100, { latitude: lat, longitude: lon })] })
+    }) as typeof fetch
+    const db = new FuelDb()
+    db.worksites[0] = { ...db.worksites[0], latitude: MONTAUBAN.latitude, longitude: MONTAUBAN.longitude }
+    const body = await (await estimateGet(request(GALYA_TRUCK, { stayId: "ws-1~team-g~2026-11-04" }), params(GALYA_TRUCK), depsFor(db, GALYA_ADMIN, fn))).json() as FuelEstimate
+    assert.equal(body.km, 1267)
+    assert.equal(priceCalls, 4)
+    assert.deepEqual(body.priceStats, { count: 4, min: 2.11, median: 2.125, max: 2.14 })
+  })
   it("droits : chef d'équipe refusé, trajet d'une autre entreprise introuvable, paramètres invalides refusés", async () => {
     assert.equal((await estimateGet(request(TRUCK, { tripId: "trip-a" }), params(TRUCK), depsFor(new FuelDb(), LEADER))).status, 403)
     assert.equal((await estimateGet(request(TRUCK, { tripId: "trip-closed" }), params(TRUCK), depsFor(new FuelDb(), ADMIN))).status, 404)
@@ -255,20 +321,20 @@ describe("service d'estimation : drapeau, droits, kilomètres, stations, cache, 
 
 // ─── Formulaire ──────────────────────────────────────────────────────────────
 
-const estimate = (over: Partial<FuelEstimate> = {}): FuelEstimate => ({ tripId: "trip-closed", tripDate: "2026-11-03", tripClosed: true, worksiteName: "Chantier fictif", odometer: 120_027, km: 27, kmSource: "ODOMETER",
+const estimate = (over: Partial<FuelEstimate> = {}): FuelEstimate => ({ source: "TRIP", stay: null, priceStats: null, tripId: "trip-closed", tripDate: "2026-11-03", tripClosed: true, worksiteName: "Chantier fictif", odometer: 120_027, km: 27, kmSource: "ODOMETER",
   route: { status: "ROUTE", oneWayKm: 13.5 }, fuel: "GAZOLE", stations: [station()], stationsStatus: "ROUTE_CORRIDOR", ...over })
 
 describe("formulaire : préremplissage selon le trajet", () => {
   it("valeurs proposées : catégorie, date du trajet, compteur, station, litres, montant et note", () => {
-    assert.deepEqual(proposedExpenseValues(estimate(), station(), 9.5), {
+    assert.deepEqual(proposedExpenseValues(estimate(), { kind: "STATION", station: station() }, 9.5), {
       category: "FUEL", date: "2026-11-03", mileage: "120027", supplier: "1 RUE FICTIVE, Exempleville", amount: "5,77", litres: "2,565",
       notes: "Estimation trajet : 27 km (compteur) × 9,5 L/100 km × 2,250 €/L Gazole (1 RUE FICTIVE, Exempleville, prix du 04/11/2026). À remplacer par le montant du ticket.",
     })
-    assert.deepEqual(Object.keys(proposedExpenseValues(estimate(), station(), null)).sort(), ["category", "date", "mileage", "supplier"])
-    assert.equal(proposedExpenseValues(estimate({ km: null, kmSource: null }), station(), 9.5).amount, undefined)
+    assert.deepEqual(Object.keys(proposedExpenseValues(estimate(), { kind: "STATION", station: station() }, null)).sort(), ["category", "date", "mileage", "supplier"])
+    assert.equal(proposedExpenseValues(estimate({ km: null, kmSource: null }), { kind: "STATION", station: station() }, 9.5).amount, undefined)
   })
   it("automatique : jamais sur un champ saisi ; explicite : tout ; note d'estimation remplacée, notes de l'opérateur conservées", () => {
-    const proposed = proposedExpenseValues(estimate(), station(), 9.5)
+    const proposed = proposedExpenseValues(estimate(), { kind: "STATION", station: station() }, 9.5)
     const auto = mergeExpenseValues({ notes: "" }, proposed, new Set(["amount", "supplier"]), false)
     assert.equal(auto.amount, undefined); assert.equal(auto.supplier, undefined); assert.equal(auto.litres, "2,565")
     const explicit = mergeExpenseValues({ notes: "Payé en carte\nEstimation trajet : ancienne" }, proposed, new Set(["amount", "notes"]), true)
@@ -280,5 +346,17 @@ describe("formulaire : préremplissage selon le trajet", () => {
     assert.match(stationsLabel("UNAVAILABLE", 0), /indisponibles/)
     assert.deepEqual(priceWarnings(estimate({ tripDate: "2026-10-01" }), station({ updatedAt: "2026-10-20T00:00:00.000Z" }), "2026-11-04").length, 2)
     assert.deepEqual(priceWarnings(estimate(), station(), "2026-11-04"), [])
+    assert.match(priceWarnings(estimate({ tripDate: "2026-11-20" }), null, "2026-11-04")[0], /Départ à venir/)
+  })
+  it("séjour : prix médian par défaut, km sur place ajoutés, note avec chantier et dates, aucun fournisseur inventé", () => {
+    const stay: PlannedStay = { id: "ws-1~team-g~2026-11-04", worksiteId: "ws-1", worksiteName: "Chantier fictif Montauban", hasAddress: true, teamId: "team-g", teamName: "BILEL A COMPO",
+      leaderName: "Bilel Exemple", chauffeurName: "Riadh Exemple", departure: "2026-11-04", return: "2026-11-06", days: 3 }
+    const e = estimate({ source: "STAY", stay, km: 1267, kmSource: "STAY_ROUND_TRIP", odometer: null, tripDate: "2026-11-04", priceStats: { count: 123, min: 2.115, median: 2.25, max: 2.563 } })
+    assert.equal(defaultPriceKey(e), "MEDIAN")
+    const values = proposedExpenseValues(e, priceChoice(e, "MEDIAN", "2026-11-04"), 10, 40)
+    assert.deepEqual([values.date, values.amount, values.litres, values.supplier, values.mileage], ["2026-11-04", "294,08", "130,7", undefined, undefined])
+    assert.equal(values.notes, "Estimation trajet : chantier Chantier fictif Montauban (départ 04/11/2026, retour 06/11/2026) 1267 km (itinéraire aller-retour) + 40 km sur place × 10,0 L/100 km × 2,250 €/L Gazole (prix médian de 123 stations du trajet au 04/11/2026). À remplacer par le montant du ticket.")
+    assert.match(stayLabel(stay), /^Chantier fictif Montauban — départ 04\/11\/2026, retour 06\/11\/2026 \(3 jours\) — BILEL A COMPO$/)
+    assert.match(stayDetails(stay)[1], /chef d'équipe : Bilel Exemple · chauffeur : Riadh Exemple/)
   })
 })

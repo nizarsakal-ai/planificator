@@ -13,6 +13,42 @@ n'est lue ni modifiée.** Rôles : Claude implémente, Codex relit (mission dép
   dans le navigateur seulement).
 - Codex relit ; même branche que la lecture des pièces pour un seul push d'essai.
 
+## Complément du 4 nov. 2026 (soir) — chaque départ et chaque chantier
+
+Demande de Nizar : le trajet se déduit du chantier. L'adresse vient de la fiche du chantier, le départ est le premier
+jour planifié et le retour le dernier jour. Le chef d'équipe et le chauffeur sont identifiés, et le coût est calculé
+pour chaque départ et chaque chantier.
+
+- **Séjours planifiés** (`GET /api/trucks/[id]/fuel-estimate/stays`) :
+  - jours de planning (refus exclus) des équipes qui avaient le camion ce jour-là, sur 60 jours passés et 60 jours à venir ;
+  - regroupés par chantier et par équipe, puis découpés en suites de jours consécutifs : une suite = un départ et un retour ;
+  - nom d'équipe, chef d'équipe (`Team.leaderId`) et chauffeur de la période du camion au jour du départ
+    (`TruckAssignment.chauffeurId` ; à défaut de période, l'équipe et le chauffeur actuels du camion) ;
+  - l'identifiant `chantier~équipe~départ` est recalculé côté serveur : un identifiant forgé ou périmé renvoie 404.
+- **Estimation d'un séjour** (`?stayId=`) : aller siège → chantier le jour du départ, retour le jour de la fin
+  (2 × itinéraire). La date de la dépense est le jour du départ ; aucun compteur n'est proposé. Des « déplacements sur
+  place » facultatifs s'ajoutent aux kilomètres.
+- **Longs trajets** : couloir échantillonné jusqu'à 160 points, interrogé en 4 requêtes de prix au plus (40 cercles chacune).
+  - Prix retenu par défaut : la **médiane** de toutes les stations du couloir, plus représentative qu'une seule station.
+    Elle est affichée avec le minimum et le maximum, et l'opérateur peut aussi choisir une station.
+  - Le fournisseur n'est rempli que si une station est choisie.
+- **Exemple réel** : chantier Groupe Peyrot, Montauban (4 → 6 nov. 2026), IGN et data.economie interrogés avec des
+  coordonnées seules.
+  - Itinéraire : 633,7 km par trajet, soit 1 267 km aller-retour.
+  - Stations : 117 à 123 de gazole selon le rayon ; médiane 2,25 €/L, de 2,115 à 2,563 €/L.
+  - Coût : 285 € à 10 L/100 km, 342 € à 12 L/100 km, **péages non compris**.
+- **Défaut trouvé en recette et corrigé** : boucle de mises à jour (« Maximum update depth »), car le prix médian était
+  recréé à chaque rendu. Le choix de prix est désormais mémorisé et la liste des champs préremplis n'est mise à jour
+  qu'en cas de changement.
+- **Recette locale** : chantier fictif à Montauban, équipe « BILEL A COMPO », chef et chauffeur fictifs.
+  - Séjour proposé : « départ 04/11/2026, retour 06/11/2026 (3 jours) — BILEL A COMPO ».
+  - Équipe, chef et chauffeur affichés.
+  - 1 267 km, médiane de 117 stations, 270,82 € à 9,5 L/100 km.
+  - Note de provenance avec le chantier et les dates ; aucune erreur de boucle.
+- **Tests** : 22 / 22 (6 nouveaux) : séjours consécutifs ou interrompus, couverture du camion, chauffeur du jour du
+  départ, médiane, liste des séjours avec équipe, chef et chauffeur, estimation d'un séjour, identifiants forgés 404,
+  paramètres exclusifs 400, long trajet découpé en 4 requêtes.
+
 ## Drapeau
 
 ```
@@ -63,6 +99,12 @@ factice des tests imite la contrainte.
   une migration de la contrainte.
 - **Pas d'imputation automatique** de la dépense au trajet : l'action « Remplacer les imputations » existante reste à faire à la main.
 - Le préremplissage ne vide pas les champs si l'on revient à « Aucun trajet ».
-- Chargement initial de l'onglet parfois lent en développement (trajets affichés après plusieurs secondes) : constaté
-  sur le panneau existant, cause non analysée.
+- Péages non calculés : aucune source gratuite fiable n'est intégrée.
+- Un séjour compte un seul aller et un seul retour. Une équipe qui rentre chaque soir d'un chantier proche est donc
+  sous-estimée : on peut ajouter des « déplacements sur place ».
+- Les prix du couloir sont limités à 100 stations par requête (les moins chères d'abord) : sur un couloir très dense, la
+  médiane peut être légèrement basse.
+- Le chauffeur affiché est celui de la période du camion. S'il n'est pas renseigné, l'écran l'indique, sans supposition.
+- La lenteur de chargement observée pendant la recette venait du panneau de navigateur masqué (page en arrière-plan),
+  pas de l'application.
 - Revue Codex : mission déposée, résultat non reçu.
