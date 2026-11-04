@@ -23,6 +23,8 @@ import { formatDate } from "@/lib/utils"
 import { AssignmentsChart } from "@/components/dashboard/AssignmentsChart"
 import { WorksiteStatusChart } from "@/components/dashboard/WorksiteStatusChart"
 import { NouvelleTacheDialog } from "@/components/tasks/NouvelleTacheDialog"
+import { ProspectionBlock } from "@/components/dashboard/ProspectionBlock"
+import { isProspectionNavVisible, isProspectionWatchEnabled } from "@/lib/prospection/prospection-feature-flag"
 
 export const metadata: Metadata = { title: "Dashboard" }
 
@@ -60,7 +62,7 @@ function DashboardHero({
       <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/65">{dateLabel}</p>
-          <h1 className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xl font-bold tracking-tight md:text-[26px]">
+          <h1 className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xl font-bold tracking-tight [overflow-wrap:anywhere] md:text-[26px]">
             {greeting}, {firstName}
             <span className="rounded-full border border-white/25 bg-white/15 px-2.5 py-0.5 text-[11px] font-semibold tracking-normal">
               {roleLabel}
@@ -190,7 +192,8 @@ function AgendaRow({ date, title, children }: { date: Date; title: string; child
 
 // ─── Dashboard Super Admin ───────────────────────────────────────────────────
 
-async function SuperAdminDashboard({ hero }: { hero: HeroProps }) {
+/** `prospectionCompanyId` : société pour laquelle afficher la veille prospection (garde vérifiée par la page). */
+async function SuperAdminDashboard({ hero, prospectionCompanyId }: { hero: HeroProps; prospectionCompanyId: string | null }) {
   const [companiesCount, usersCount] = await Promise.all([
     prisma.company.count({ where: { active: true } }),
     prisma.user.count({ where: { active: true } }),
@@ -199,6 +202,7 @@ async function SuperAdminDashboard({ hero }: { hero: HeroProps }) {
   return (
     <div className="space-y-6">
       <DashboardHero {...hero} lead="Vue plateforme et pilotage de votre entreprise." />
+      {prospectionCompanyId && <ProspectionBlock companyId={prospectionCompanyId} />}
       <section>
         <SectionHeading title="Plateforme" />
         <div className="grid grid-cols-1 gap-3.5 md:grid-cols-[1fr_1fr_1.3fr]">
@@ -659,9 +663,11 @@ export default async function DashboardPage({
 
   // Contenu selon le rôle ; sans contenu propre au rôle, le bandeau d'accueil reste affiché seul.
   if (role === "SUPER_ADMIN") {
+    // Veille prospection : drapeau serveur + SUPER_ADMIN + société active (même garde que la page /opportunites).
+    const prospectionVisible = isProspectionNavVisible({ enabled: isProspectionWatchEnabled(), role, companyId })
     return (
       <div className="space-y-6">
-        <SuperAdminDashboard hero={hero} />
+        <SuperAdminDashboard hero={hero} prospectionCompanyId={prospectionVisible && companyId ? companyId : null} />
         {companyId && (
           <>
             <div className="flex items-center gap-3 pt-2">
