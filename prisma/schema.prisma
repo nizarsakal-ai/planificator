@@ -3540,6 +3540,8 @@ model ProspectOpportunity {
   awardedTo         String[]  @default([])
   descriptors       String[]  @default([])
   alsoSeenIn        String[]  @default([])
+  /// Ordre de priorité de Nizar : 1 mairies IDF, 2 montage-démontage IDF, 3 autres IDF, 4 départements voisins, 5 reste de la France.
+  priorityGroup     Int       @default(5)
   score             Int
   /// A_TRAITER | A_VERIFIER | MASQUE
   band              String
@@ -3558,6 +3560,7 @@ model ProspectOpportunity {
 
   @@unique([companyId, source, sourceId])
   @@index([companyId, kind, band, status])
+  @@index([companyId, kind, priorityGroup, score])
   @@index([companyId, deadlineAt])
   @@index([companyId, fingerprint])
   @@map("prospect_opportunities")

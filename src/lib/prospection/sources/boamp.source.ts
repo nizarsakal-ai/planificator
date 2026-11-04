@@ -26,7 +26,20 @@ export const BOAMP_SELECTED_FIELDS = [
 
 /** Descripteurs BOAMP et mots de l'objet qui délimitent la collecte (le score trie ensuite). */
 const BOAMP_DESCRIPTORS = ["Tente", "Stand", "Evénementiel"] as const
-const BOAMP_OBJECT_TERMS = ["chapiteau", "chapiteaux", "barnum", "podium", "gradins", "tribunes", "structures temporaires"] as const
+const BOAMP_OBJECT_TERMS = [
+  "chapiteau", "chapiteaux", "barnum", "podium", "gradins", "tribunes", "structures temporaires",
+  "stands", "matériel évènementiel", "matériel événementiel",
+] as const
+
+/**
+ * Île-de-France (priorité de Nizar) : collecte élargie aux avis de fêtes et de manifestations.
+ * Ceux qui ne portent aucun mot du métier restent masqués par le score.
+ */
+const IDF_DEPARTMENTS = ["75", "77", "78", "91", "92", "93", "94", "95"] as const
+const IDF_FESTIVE_TERMS = [
+  "fête", "fêtes", "festivités", "festival", "manifestation", "manifestations",
+  "évènementiel", "événementiel", "événements", "marché de noël",
+] as const
 
 const PAGE_SIZE = 100
 const DEFAULT_MAX_RECORDS = 500
@@ -48,9 +61,12 @@ export interface BoampRecord {
   url_avis?: unknown
 }
 
+const HTML_ENTITIES: Readonly<Record<string, string>> = { "&amp;": "&", "&quot;": '"', "&#039;": "'", "&#39;": "'", "&apos;": "'", "&lt;": "<", "&gt;": ">" }
+
+/** Certains acheteurs publient leur nom avec des entités HTML (« Mairie d&#039;Ivry ») : on les décode. */
 function asString(value: unknown): string | null {
   if (typeof value !== "string") return null
-  const trimmed = value.replace(/\s+/g, " ").trim()
+  const trimmed = value.replace(/&(amp|quot|#0?39|apos|lt|gt);/g, (entity) => HTML_ENTITIES[entity] ?? entity).replace(/\s+/g, " ").trim()
   return trimmed === "" ? null : trimmed
 }
 
@@ -110,13 +126,15 @@ function isoDay(date: Date): string {
   return date.toISOString().slice(0, 10)
 }
 
-/** Clause ODSQL : avis parus depuis `since`, ciblés par descripteur ou par mot de l'objet. */
+/** Clause ODSQL : avis parus depuis `since`, ciblés par descripteur ou mot du métier, ou fête et manifestation en Île-de-France. */
 export function buildBoampWhereClause(since: Date): string {
-  const filters = [
+  const trade = [
     ...BOAMP_DESCRIPTORS.map((descriptor) => `descripteur_libelle="${descriptor}"`),
     ...BOAMP_OBJECT_TERMS.map((term) => `search(objet,"${term}")`),
   ]
-  return `dateparution >= date'${isoDay(since)}' AND (${filters.join(" OR ")})`
+  const idf = IDF_DEPARTMENTS.map((code) => `code_departement="${code}"`).join(" OR ")
+  const festive = IDF_FESTIVE_TERMS.map((term) => `search(objet,"${term}")`).join(" OR ")
+  return `dateparution >= date'${isoDay(since)}' AND (${trade.join(" OR ")} OR ((${idf}) AND (${festive})))`
 }
 
 export function buildBoampRequestUrl(since: Date, offset: number): string {

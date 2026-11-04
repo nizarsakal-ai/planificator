@@ -55,8 +55,10 @@ describe("scoreCandidate — appels d'offres", () => {
     }
   })
 
-  it("simple fourniture : pas de points de prestation ; plusieurs familles du métier cumulées", () => {
-    const reasons = codes(tender({ title: "Fourniture de tentes, barnums et podiums" }))
+  it("simple fourniture : malus de prestation ; plusieurs familles du métier cumulées", () => {
+    const supply = scoreCandidate(tender({ title: "Fourniture de tentes, barnums et podiums" }), NOW)
+    const reasons = supply.reasons.map((reason) => reason.code)
+    assert.equal(supply.reasons.find((reason) => reason.code === "PRESTATION_FOURNITURE")?.points, -15)
     assert.ok(reasons.includes("PRESTATION_FOURNITURE"))
     assert.ok(reasons.includes("METIER_TENTE") && reasons.includes("METIER_BARNUM") && reasons.includes("METIER_PODIUM"))
   })
@@ -105,6 +107,26 @@ describe("scoreCandidate — appels d'offres", () => {
       "Location de praticables pour la fête de la musique",
     ]) {
       assert.notEqual(scoreCandidate(tender({ title }), NOW).band, "MASQUE", title)
+    }
+  })
+
+  it("matériel événementiel et stands (avis réels d'Île-de-France) : métier reconnu ; location mieux notée qu'achat", () => {
+    const bondy = scoreCandidate(tender({ title: "Location de matériel évènementiel et prestations associées", organization: "Mairie de Bondy" }), NOW)
+    assert.equal(bondy.band, "A_TRAITER")
+    assert.ok(bondy.reasons.some((reason) => reason.code === "METIER_MATERIEL_EVENEMENTIEL"))
+    const herblay = scoreCandidate(tender({ title: "Acquisition de matériel évènementiel, de sonorisation et d'éclairage", organization: "Mairie de Herblay" }), NOW)
+    assert.equal(herblay.band, "A_VERIFIER")
+    assert.ok(codes(tender({ title: "Conception, installation et démontage de stands ou d'espaces dédiés modulables" })).includes("METIER_STAND"))
+    assert.ok(!codes(tender({ title: "Rénovation du stand de tir municipal" })).includes("METIER_STAND"))
+  })
+
+  it("Île-de-France hors métier (traiteur, gardiennage, son seul) : reste masqué", () => {
+    for (const title of [
+      "Prestation de traiteur pour les manifestations et évènements organisés par les services de la ville",
+      "Services de sécurité pendant les événements de la Ville et de gardiennage",
+      "Prestations de location de sonorisation, d'éclairage et d'audiovisuel pour les manifestations",
+    ]) {
+      assert.equal(scoreCandidate(tender({ title, organization: "Mairie de Test", departmentCodes: ["93"] }), NOW).band, "MASQUE", title)
     }
   })
 

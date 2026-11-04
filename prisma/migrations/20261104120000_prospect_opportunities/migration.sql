@@ -23,6 +23,7 @@ CREATE TABLE "prospect_opportunities" (
     "awardedTo" TEXT[] DEFAULT ARRAY[]::TEXT[],
     "descriptors" TEXT[] DEFAULT ARRAY[]::TEXT[],
     "alsoSeenIn" TEXT[] DEFAULT ARRAY[]::TEXT[],
+    "priorityGroup" INTEGER NOT NULL DEFAULT 5,
     "score" INTEGER NOT NULL,
     "band" TEXT NOT NULL,
     "scoreReasons" JSONB NOT NULL,
@@ -40,6 +41,9 @@ CREATE TABLE "prospect_opportunities" (
 
 -- CreateIndex
 CREATE INDEX "prospect_opportunities_companyId_kind_band_status_idx" ON "prospect_opportunities"("companyId", "kind", "band", "status");
+
+-- CreateIndex
+CREATE INDEX "prospect_opportunities_companyId_kind_priorityGroup_score_idx" ON "prospect_opportunities"("companyId", "kind", "priorityGroup", "score");
 
 -- CreateIndex
 CREATE INDEX "prospect_opportunities_companyId_deadlineAt_idx" ON "prospect_opportunities"("companyId", "deadlineAt");

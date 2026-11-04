@@ -4,7 +4,7 @@ import { redirect } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { OpportunitiesBoard } from "@/components/prospection/OpportunitiesBoard"
 import { isProspectionNavVisible, isProspectionWatchEnabled } from "@/lib/prospection/prospection-feature-flag"
-import { countOpportunitiesByKind, listOpportunities } from "@/lib/prospection/prospection.repository"
+import { countOpportunitiesByKind, listOpportunities, listRecentlyClosedTenders } from "@/lib/prospection/prospection.repository"
 import { parseDepartmentCode, parseStatus, tabForSlug } from "@/lib/prospection/prospection-ui"
 
 export const metadata: Metadata = { title: "Opportunités" }
@@ -39,9 +39,11 @@ export default async function OpportunitesPage({
   const status = parseStatus(sp.statut)
   const includeHidden = sp.masques === "1"
 
-  const [items, counts] = await Promise.all([
-    listOpportunities({ companyId, kind: tab.kind, includeHidden, departmentCode, status, limit: LIST_LIMIT }),
-    countOpportunitiesByKind(companyId),
+  const now = new Date()
+  const [items, counts, recentlyClosed] = await Promise.all([
+    listOpportunities({ companyId, now, kind: tab.kind, includeHidden, departmentCode, status, limit: LIST_LIMIT }),
+    countOpportunitiesByKind(companyId, now),
+    tab.kind === "TENDER" ? listRecentlyClosedTenders(companyId, now) : Promise.resolve([]),
   ])
 
   return (
@@ -49,12 +51,13 @@ export default async function OpportunitesPage({
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Opportunités</h1>
         <p className="text-sm text-muted-foreground">
-          Veille quotidienne sur des sources publiques (BOAMP, liste des festivals). Chaque piste se qualifie à la main :
-          rien n&apos;est envoyé automatiquement.
+          Classées dans votre ordre : mairies d&apos;Île-de-France, montage-démontage en Île-de-France, autres pistes
+          franciliennes, départements voisins, puis le reste de la France. Le chiffre est le score de pertinence métier.
         </p>
       </div>
       <OpportunitiesBoard
         items={items}
+        recentlyClosed={recentlyClosed}
         counts={counts}
         tabSlug={tab.slug}
         filters={{ departmentCode, status, includeHidden }}

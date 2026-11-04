@@ -61,3 +61,16 @@ export function deadlineLabel(deadline: Date | null, now: Date): string | null {
   if (days === 1) return "Demain"
   return `Dans ${days} jours`
 }
+
+const IDF_CODES = ["75", "77", "78", "91", "92", "93", "94", "95"]
+
+/** « Île-de-France » quand ses 8 départements y figurent ; sinon 2 codes au plus, puis « +n ». */
+export function departmentsLabel(codes: readonly string[]): string {
+  if (IDF_CODES.every((code) => codes.includes(code))) return "Île-de-France"
+  return codes.length > 2 ? `${codes.slice(0, 2).join(", ")} +${codes.length - 2}` : codes.join(", ")
+}
+
+/** Titres publiés tout en majuscules : remis en minuscules (première lettre conservée). */
+export function sentenceCase(value: string): string {
+  return /[a-zà-ÿ]/.test(value) ? value : value.charAt(0) + value.slice(1).toLowerCase()
+}

@@ -7,11 +7,13 @@
  */
 import type { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
+import { isRecentlyClosedWorthRecontact, priorityRankFor } from "@/lib/prospection/priority"
 import type {
   ProspectBand,
   ProspectKind,
   ProspectSource,
   ProspectStatus,
+  ScoreReason,
   ScoredCandidate,
 } from "@/lib/prospection/prospection.types"
 
@@ -31,6 +33,7 @@ export interface ProspectionRepositoryPort {
 }
 
 function signature(row: {
+  priorityGroup: number
   title: string
   organization: string | null
   deadlineAt: Date | null
@@ -44,7 +47,7 @@ function signature(row: {
   alsoSeenIn: string[]
 }): string {
   return JSON.stringify([
-    row.title, row.organization, row.deadlineAt?.toISOString() ?? null, row.eventStartAt?.toISOString() ?? null,
+    row.priorityGroup, row.title, row.organization, row.deadlineAt?.toISOString() ?? null, row.eventStartAt?.toISOString() ?? null,
     row.eventPeriod, row.url, row.score, row.band, [...row.winners].sort(), [...row.departmentCodes].sort(), [...row.alsoSeenIn].sort(),
   ])
 }
@@ -65,6 +68,7 @@ function dataFor(candidate: ScoredCandidate, now: Date) {
     linkedSourceIds: candidate.linkedSourceIds,
     descriptors: candidate.descriptors,
     alsoSeenIn: candidate.alsoSeenIn,
+    priorityGroup: priorityRankFor(candidate),
     score: candidate.score,
     band: candidate.band,
     scoreReasons: candidate.reasons as unknown as Prisma.InputJsonValue,
@@ -89,7 +93,7 @@ export const prospectionRepository: ProspectionRepositoryPort = {
       const existing = await prisma.prospectOpportunity.findMany({
         where: { companyId, source, sourceId: { in: list.map((candidate) => candidate.sourceId) } },
         select: {
-          id: true, sourceId: true, title: true, organization: true, deadlineAt: true, eventStartAt: true, eventPeriod: true,
+          id: true, sourceId: true, priorityGroup: true, title: true, organization: true, deadlineAt: true, eventStartAt: true, eventPeriod: true,
           url: true, score: true, band: true, winners: true, departmentCodes: true, alsoSeenIn: true,
         },
       })
@@ -109,7 +113,7 @@ export const prospectionRepository: ProspectionRepositoryPort = {
       for (const candidate of list) {
         const row = existingBySourceId.get(candidate.sourceId)
         if (!row) continue
-        if (signature(row) === signature(candidate)) unchangedIds.push(row.id)
+        if (signature(row) === signature({ ...candidate, priorityGroup: priorityRankFor(candidate) })) unchangedIds.push(row.id)
         else toUpdate.push(candidate)
       }
 
@@ -152,6 +156,7 @@ export const prospectionRepository: ProspectionRepositoryPort = {
 
 export interface OpportunityListFilters {
   companyId: string
+  now: Date
   kind: ProspectKind
   includeHidden: boolean
   departmentCode: string | null
@@ -163,18 +168,23 @@ export type OpportunityListItem = Awaited<ReturnType<typeof listOpportunities>>[
 
 export async function listOpportunities(filters: OpportunityListFilters) {
   const visibleBands: ProspectBand[] = filters.includeHidden ? ["A_TRAITER", "A_VERIFIER", "MASQUE"] : ["A_TRAITER", "A_VERIFIER"]
-  const orderBy: Prisma.ProspectOpportunityOrderByWithRelationInput[] =
-    filters.kind === "TENDER"
-      ? [{ score: "desc" }, { deadlineAt: { sort: "asc", nulls: "last" } }]
+  // Ordre de priorité de Nizar d'abord (mairies IDF, montage IDF, autres IDF, voisins, reste), puis le score.
+  const orderBy: Prisma.ProspectOpportunityOrderByWithRelationInput[] = [
+    { priorityGroup: "asc" },
+    ...(filters.kind === "TENDER"
+      ? [{ score: "desc" as const }, { deadlineAt: { sort: "asc" as const, nulls: "last" as const } }]
       : filters.kind === "AWARD"
-        ? [{ publishedAt: { sort: "desc", nulls: "last" } }, { score: "desc" }]
-        : [{ score: "desc" }, { title: "asc" }]
+        ? [{ score: "desc" as const }, { publishedAt: { sort: "desc" as const, nulls: "last" as const } }]
+        : [{ score: "desc" as const }, { title: "asc" as const }]),
+  ]
 
   return prisma.prospectOpportunity.findMany({
     where: {
       companyId: filters.companyId,
       kind: filters.kind,
       band: { in: visibleBands },
+      // Un appel d'offres clos n'est plus une piste ouverte, même si son score a été calculé avant l'échéance.
+      ...(filters.kind === "TENDER" ? openTenderWhere(filters.now) : {}),
       ...(filters.departmentCode ? { departmentCodes: { has: filters.departmentCode } } : {}),
       ...(filters.status ? { status: filters.status } : {}),
     },
@@ -183,22 +193,49 @@ export async function listOpportunities(filters: OpportunityListFilters) {
     select: {
       id: true, source: true, sourceId: true, kind: true, title: true, organization: true, departmentCodes: true,
       locality: true, publishedAt: true, deadlineAt: true, eventStartAt: true, eventPeriod: true, url: true,
-      winners: true, awardedTo: true, descriptors: true, alsoSeenIn: true, score: true, band: true,
+      winners: true, awardedTo: true, descriptors: true, alsoSeenIn: true, priorityGroup: true, score: true, band: true,
       scoreReasons: true, status: true, statusUpdatedAt: true, firstSeenAt: true,
     },
   })
 }
 
-export async function countOpportunitiesByKind(companyId: string): Promise<Record<ProspectKind, number>> {
+function openTenderWhere(now: Date): Prisma.ProspectOpportunityWhereInput {
+  return { OR: [{ deadlineAt: null }, { deadlineAt: { gte: now } }] }
+}
+
+export async function countOpportunitiesByKind(companyId: string, now: Date): Promise<Record<ProspectKind, number>> {
   const rows = await prisma.prospectOpportunity.groupBy({
     by: ["kind"],
-    where: { companyId, band: { in: ["A_TRAITER", "A_VERIFIER"] }, status: { notIn: ["ECARTE", "PERDU"] } },
+    where: {
+      companyId,
+      band: { in: ["A_TRAITER", "A_VERIFIER"] },
+      status: { notIn: ["ECARTE", "PERDU"] },
+      OR: [{ kind: { not: "TENDER" } }, ...(openTenderWhere(now).OR ?? [])],
+    },
     _count: { _all: true },
   })
   const counts: Record<ProspectKind, number> = { TENDER: 0, AWARD: 0, EVENT: 0 }
   for (const row of rows) if (row.kind in counts) counts[row.kind as ProspectKind] = row._count._all
   return counts
 }
+
+const RECENTLY_CLOSED_SCAN_LIMIT = 50
+
+/** Marchés clos récemment des groupes 1 et 2 (mairies IDF, montage IDF) qui auraient été retenus. */
+export async function listRecentlyClosedTenders(companyId: string, now: Date) {
+  const since = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000)
+  const rows = await prisma.prospectOpportunity.findMany({
+    where: { companyId, kind: "TENDER", priorityGroup: { lte: 2 }, deadlineAt: { gte: since, lt: now }, status: { notIn: ["ECARTE"] } },
+    orderBy: [{ priorityGroup: "asc" }, { deadlineAt: "desc" }],
+    take: RECENTLY_CLOSED_SCAN_LIMIT,
+    select: { id: true, title: true, organization: true, url: true, deadlineAt: true, priorityGroup: true, band: true, scoreReasons: true },
+  })
+  return rows.filter((row) =>
+    isRecentlyClosedWorthRecontact({ ...row, kind: "TENDER", reasons: (Array.isArray(row.scoreReasons) ? row.scoreReasons : []) as unknown as ScoreReason[] }, now),
+  )
+}
+
+export type RecentlyClosedTender = Awaited<ReturnType<typeof listRecentlyClosedTenders>>[number]
 
 /** Suivi humain : seule action d'écriture de l'interface, filtrée par société. */
 export async function updateOpportunityStatus(input: {

@@ -26,6 +26,12 @@ const TRADE_FAMILIES: ReadonlyArray<{ code: string; label: string; pattern: RegE
   { code: "PODIUM", label: "podium, scène mobile ou praticables", pattern: /\bpodiums?\b|\bscenes? (mobiles?|demontables?|exterieures?)\b|\bpraticables?\b/ },
   { code: "GRADIN", label: "gradins ou tribunes", pattern: /\bgradins?\b|\btribunes?\b/ },
   { code: "CHALET", label: "chalets (marchés, fêtes)", pattern: /\bchalets?\b/ },
+  {
+    code: "MATERIEL_EVENEMENTIEL",
+    label: "matériel événementiel ou de manifestation",
+    pattern: /\bmateriels? (d )?(evenementiels?|de manifestations?|de festivites|festifs?|de fetes?)\b/,
+  },
+  { code: "STAND", label: "stands", pattern: /\bstands?\b(?! de tir)/ },
 ]
 
 const SETUP_PATTERN = /\b(montage|demontage|installation|pose|mise en place|assemblage)\b/
@@ -71,9 +77,13 @@ function finish(reasons: ScoreReason[], forcedHidden = false): ScoreResult {
 /** Sans mot du métier ni descripteur fort, le délai et le type d'avis ne suffisent pas : plafond sous « À vérifier ». */
 const NO_TRADE_SIGNAL_CAP = BAND_THRESHOLDS.toCheck - 5
 
+/** Un mot du métier ou un descripteur BOAMP fort figure parmi les raisons. */
+export function hasTradeSignal(reasons: readonly ScoreReason[]): boolean {
+  return reasons.some((reason) => reason.code.startsWith("METIER_") || reason.code === "DESCRIPTEUR_TENTE" || reason.code === "DESCRIPTEUR_STAND")
+}
+
 function capWithoutTradeSignal(reasons: ScoreReason[], trade: ScoreReason[]): ScoreReason[] {
-  const hasSignal = trade.some((reason) => reason.code.startsWith("METIER_") || reason.code === "DESCRIPTEUR_TENTE" || reason.code === "DESCRIPTEUR_STAND")
-  if (hasSignal) return reasons
+  if (hasTradeSignal(trade)) return reasons
   const total = reasons.reduce((sum, reason) => sum + reason.points, 0)
   if (total <= NO_TRADE_SIGNAL_CAP) return reasons
   return [...reasons, { code: "SANS_SIGNAL_METIER", label: "Aucun mot du métier : score plafonné", points: NO_TRADE_SIGNAL_CAP - total }]
@@ -101,7 +111,7 @@ function tradeReasons(candidate: ProspectCandidate, text: string): ScoreReason[]
 function serviceReason(text: string, max: number): ScoreReason | null {
   if (SETUP_PATTERN.test(text)) return { code: "PRESTATION_MONTAGE", label: "Montage, démontage ou installation demandés", points: max }
   if (RENTAL_PATTERN.test(text)) return { code: "PRESTATION_LOCATION", label: "Location (pose probable)", points: Math.round(max * 0.6) }
-  if (SUPPLY_PATTERN.test(text)) return { code: "PRESTATION_FOURNITURE", label: "Simple fourniture ou achat", points: 0 }
+  if (SUPPLY_PATTERN.test(text)) return { code: "PRESTATION_FOURNITURE", label: "Simple fourniture ou achat (pas de montage)", points: -Math.round(max * 0.75) }
   return null
 }
 

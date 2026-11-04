@@ -57,6 +57,11 @@ describe("mapBoampRecord", () => {
     assert.equal(odd.deadlineAt, null)
   })
 
+  it("entités HTML dans le nom de l'acheteur (avis réel « Mairie d&#039;ivry-sur-seine ») : décodées", () => {
+    const candidate = mapBoampRecord({ idweb: "26-3", objet: "Location de chapiteaux", nomacheteur: "Mairie d&#039;ivry-sur-seine &amp; CCAS" })
+    assert.equal(candidate?.organization, "Mairie d'ivry-sur-seine & CCAS")
+  })
+
   it("normalizeDepartmentCode : métropole, Corse, outre-mer ; le reste est écarté", () => {
     assert.equal(normalizeDepartmentCode("6"), "06")
     assert.equal(normalizeDepartmentCode("75"), "75")
