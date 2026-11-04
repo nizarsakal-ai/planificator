@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useReducer, useRef, useState } from "react"
 import { ChevronLeft, ChevronRight, Route } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { PlannedMileageReport, UnresolvedReason } from "@/lib/vehicules/planned-mileage-service"
@@ -31,6 +31,22 @@ export function shiftMonth(month: string, delta: number): string {
 
 export function monthLabel(month: string): string {
   return new Date(`${month}-15T12:00:00Z`).toLocaleDateString("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" })
+}
+
+export interface PlannedMileageState { request: number; loading: boolean; report: PlannedMileageReport | null; error: string }
+export type PlannedMileageAction =
+  | { type: "start"; request: number }
+  | { type: "success"; request: number; report: PlannedMileageReport }
+  | { type: "failure"; request: number; error: string }
+
+export const initialPlannedMileageState: PlannedMileageState = { request: 0, loading: false, report: null, error: "" }
+
+/** Chaque chargement (autre mois, autre camion) efface l'ancien rapport ; une réponse périmée est ignorée. */
+export function plannedMileageReducer(state: PlannedMileageState, action: PlannedMileageAction): PlannedMileageState {
+  if (action.type === "start") return { request: action.request, loading: true, report: null, error: "" }
+  if (action.request !== state.request) return state
+  if (action.type === "success") return { ...state, loading: false, report: action.report, error: "" }
+  return { ...state, loading: false, report: null, error: action.error }
 }
 
 /** Présentation seule : le rapport vient du serveur, rien n'est écrit dans le journal du compteur. */
@@ -66,22 +82,26 @@ export function PlannedMileageReportView({ report }: { report: PlannedMileageRep
 
 export function VehiclePlannedMileage({ truckId, matricule }: { truckId: string; matricule: string }) {
   const [month, setMonth] = useState<string | null>(null)
-  const [report, setReport] = useState<PlannedMileageReport | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
+  const [{ loading, report, error }, dispatch] = useReducer(plannedMileageReducer, initialPlannedMileageState)
+  const sequence = useRef(0)
+  // Le mois choisi appartient au camion affiché : un autre camion repart du mois en cours.
+  const [shownTruck, setShownTruck] = useState(truckId)
+  if (shownTruck !== truckId) { setShownTruck(truckId); setMonth(null) }
 
   useEffect(() => {
     const controller = new AbortController()
-    setLoading(true); setError("")
+    const current = ++sequence.current
+    dispatch({ type: "start", request: current })
     const query = month ? `?month=${encodeURIComponent(month)}` : ""
     fetch(`/api/trucks/${encodeURIComponent(truckId)}/planned-mileage${query}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         const body = await response.json()
         if (!response.ok) throw new Error(plannedMileageErrorMessage(body.code))
-        setReport(body)
+        dispatch({ type: "success", request: current, report: body })
       })
-      .catch((err) => { if (!controller.signal.aborted) setError(err instanceof Error ? err.message : plannedMileageErrorMessage()) })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
+      .catch((err) => {
+        if (!controller.signal.aborted) dispatch({ type: "failure", request: current, error: err instanceof Error ? err.message : plannedMileageErrorMessage() })
+      })
     return () => controller.abort()
   }, [truckId, month])
 

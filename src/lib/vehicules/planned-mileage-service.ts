@@ -13,7 +13,7 @@ import { reserveImportProvider } from "./import-provider-quota"
 import {
   CROW_FLIGHT_DETOUR_FACTOR, PLANNED_MILEAGE_DEPOT, PLANNED_MILEAGE_MARGIN_KM, crowFlightKm, isPlannedMileageEnabled,
   parsePlannedMonth, plannedTripKm, resolvePlannedWorksites,
-  type DistanceSource, type PlannedWorksite, type PlannedWorksiteDays, type Point,
+  type DistanceSource, type PlannedPeriod, type PlannedWorksite, type PlannedWorksiteDays, type Point, type TruckTeamPeriod,
 } from "./planned-mileage-domain"
 import { ignGeocode, ignRouteKm } from "./planned-mileage-ign"
 
@@ -124,6 +124,37 @@ export function cachedDistanceResolver(db: PrismaClient, companyId: string, fetc
   }
 }
 
+type PlanningReader = {
+  truckAssignment: Pick<Prisma.TransactionClient["truckAssignment"], "findMany" | "count">
+  assignment: Pick<Prisma.TransactionClient["assignment"], "findMany">
+}
+
+/**
+ * Périodes du camion qui chevauchent le mois à Paris, puis jours de planning de leurs équipes.
+ * L'équipe actuelle ne remplace l'historique que si le camion n'a aucune période enregistrée :
+ * un mois sans période (camion créé plus tard, ou sans équipe) reste vide.
+ */
+export async function loadPlannedWorksites(tx: PlanningReader, scope: { truckId: string; companyId: string }, period: PlannedPeriod, currentTeamId: string | null): Promise<PlannedWorksiteDays[]> {
+  let periods: TruckTeamPeriod[] = await tx.truckAssignment.findMany({
+    where: { ...scope, startedAt: { lt: period.parisEnd }, OR: [{ endedAt: null }, { endedAt: { gte: period.parisStart } }] },
+    select: { teamId: true, startedAt: true, endedAt: true },
+  })
+  if (!periods.length) {
+    if (!currentTeamId || await tx.truckAssignment.count({ where: scope }) > 0) return []
+    periods = [{ teamId: currentTeamId, startedAt: new Date(0), endedAt: null }]
+  }
+  const teamIds = [...new Set(periods.map((p) => p.teamId).filter((id): id is string => id !== null))]
+  if (!teamIds.length) return []
+  const assignments = await tx.assignment.findMany({
+    where: {
+      teamId: { in: teamIds }, date: { gte: period.start, lt: period.end }, status: { not: "REFUSED" },
+      team: { companyId: scope.companyId }, worksite: { companyId: scope.companyId },
+    },
+    select: { date: true, teamId: true, worksite: { select: { id: true, name: true, address: true, latitude: true, longitude: true } } },
+  })
+  return resolvePlannedWorksites(assignments, periods)
+}
+
 export async function readPlannedMileage(truckId: string, rawMonth: string | null, deps: PlannedMileageDeps, resolverFor = cachedDistanceResolver): Promise<PlannedMileageReport> {
   if (!isPlannedMileageEnabled(deps.env)) throw new MileageDomainError("FEATURE_DISABLED", 404)
   const session = requireMileageSession(await deps.auth())
@@ -132,25 +163,7 @@ export async function readPlannedMileage(truckId: string, rawMonth: string | nul
   try {
     groups = await deps.db.$transaction(async (tx) => {
       const { truck } = await authorizeVehicleLocked(tx, truckId, session, "READ")
-      const scope = { truckId, companyId: session.companyId }
-      // Marge d'un jour : une fin de période à 00 h 30 à Paris tombe encore la veille en UTC.
-      const dayBefore = new Date(period.start.getTime() - 86_400_000)
-      let periods = await tx.truckAssignment.findMany({
-        where: { ...scope, startedAt: { lt: period.end }, OR: [{ endedAt: null }, { endedAt: { gte: dayBefore } }] },
-        select: { teamId: true, startedAt: true, endedAt: true },
-      })
-      // Véhicule sans historique : l'équipe actuelle vaut pour tout le mois.
-      if (!periods.length && truck.teamId) periods = [{ teamId: truck.teamId, startedAt: new Date(0), endedAt: null }]
-      const teamIds = [...new Set(periods.map((p) => p.teamId).filter((id): id is string => id !== null))]
-      if (!teamIds.length) return []
-      const assignments = await tx.assignment.findMany({
-        where: {
-          teamId: { in: teamIds }, date: { gte: period.start, lt: period.end }, status: { not: "REFUSED" },
-          team: { companyId: session.companyId }, worksite: { companyId: session.companyId },
-        },
-        select: { date: true, teamId: true, worksite: { select: { id: true, name: true, address: true, latitude: true, longitude: true } } },
-      })
-      return resolvePlannedWorksites(assignments, periods)
+      return loadPlannedWorksites(tx, { truckId, companyId: session.companyId }, period, truck.teamId)
     }, transactionOptions)
   } catch (error) {
     return normalizeMileageFailure(error)

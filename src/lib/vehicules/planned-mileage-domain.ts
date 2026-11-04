@@ -17,16 +17,36 @@ export function isPlannedMileageEnabled(env: Record<string, string | undefined> 
   return env[PLANNED_MILEAGE_FLAG]?.trim() === "true"
 }
 
-export interface PlannedPeriod { month: string; start: Date; end: Date }
+/** `start`/`end` : minuit UTC des colonnes DATE ; `parisStart`/`parisEnd` : instants de minuit à Paris (horodatages). */
+export interface PlannedPeriod { month: string; start: Date; end: Date; parisStart: Date; parisEnd: Date }
 
-/** Mois civil « AAAA-MM » ; par défaut le mois en cours à Paris. Bornes UTC des colonnes DATE. */
+/** Mois civil « AAAA-MM » ; par défaut le mois en cours à Paris. */
 export function parsePlannedMonth(raw: string | null | undefined, now = new Date()): PlannedPeriod {
   const value = raw?.trim() || parisDay(now).slice(0, 7)
   const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(value)
   if (!match) throw new MileageDomainError("INVALID_MONTH", 400)
   const year = Number(match[1]), month = Number(match[2])
   if (year < 2000 || year > 2100) throw new MileageDomainError("INVALID_MONTH", 400)
-  return { month: value, start: new Date(Date.UTC(year, month - 1, 1)), end: new Date(Date.UTC(year, month, 1)) }
+  return {
+    month: value, start: new Date(Date.UTC(year, month - 1, 1)), end: new Date(Date.UTC(year, month, 1)),
+    parisStart: parisMidnight(year, month - 1, 1), parisEnd: parisMidnight(year, month, 1),
+  }
+}
+
+/** Écart Paris − UTC en minutes à un instant donné (heure d'hiver 60, d'été 120). */
+function parisOffsetMinutes(instant: Date): number {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Paris", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).formatToParts(instant).map((part) => [part.type, part.value]))
+  const asUtc = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second)
+  return Math.round((asUtc - instant.getTime()) / 60_000)
+}
+
+/** Instant UTC de minuit à Paris (mois 0-11, débordement accepté comme Date.UTC). */
+export function parisMidnight(year: number, monthIndex: number, day: number): Date {
+  const utcMidnight = Date.UTC(year, monthIndex, day)
+  const guess = utcMidnight - parisOffsetMinutes(new Date(utcMidnight)) * 60_000
+  return new Date(utcMidnight - parisOffsetMinutes(new Date(guess)) * 60_000)
 }
 
 /** Jour civil parisien « AAAA-MM-JJ » d'un instant. */

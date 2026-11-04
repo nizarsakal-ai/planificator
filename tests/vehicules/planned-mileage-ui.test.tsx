@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import React, { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { PlannedMileageReportView, monthLabel, plannedMileageErrorMessage, shiftMonth } from "@/components/vehicules/VehiclePlannedMileage"
+import { PlannedMileageReportView, initialPlannedMileageState, monthLabel, plannedMileageErrorMessage, plannedMileageReducer, shiftMonth } from "@/components/vehicules/VehiclePlannedMileage"
 import { VehicleMileagePanel } from "@/components/vehicules/VehicleMileagePanel"
 import type { PlannedMileageReport } from "@/lib/vehicules/planned-mileage-service"
 ;(globalThis as { React?: typeof React }).React = React
@@ -47,5 +47,29 @@ describe("kilométrage prévu — présentation", () => {
     const html = renderToStaticMarkup(createElement(VehicleMileagePanel, { truckId: "truck-1", matricule: "FL-129-AM", active: true, canManage: true, initialMileage: 278454 }))
     assert.doesNotMatch(html, /Trajets prévus/)
     assert.match(html, /Kilométrage et trajets/)
+  })
+})
+
+describe("kilométrage prévu — état de chargement", () => {
+  const loaded = plannedMileageReducer(plannedMileageReducer(initialPlannedMileageState, { type: "start", request: 1 }), { type: "success", request: 1, report })
+
+  it("efface les chiffres du mois précédent dès le chargement suivant et après un échec", () => {
+    assert.equal(loaded.report?.totalKm, 1359)
+    const loading = plannedMileageReducer(loaded, { type: "start", request: 2 })
+    assert.equal(loading.report, null)
+    assert.equal(loading.loading, true)
+    const failed = plannedMileageReducer(loading, { type: "failure", request: 2, error: "Impossible" })
+    assert.deepEqual(failed, { request: 2, loading: false, report: null, error: "Impossible" })
+  })
+
+  it("ignore une réponse arrivée après un changement de mois ou de camion", () => {
+    const otherTruck = plannedMileageReducer(loaded, { type: "start", request: 2 })
+    const stale = plannedMileageReducer(otherTruck, { type: "success", request: 1, report })
+    assert.equal(stale.report, null)
+    assert.equal(stale.loading, true)
+    assert.equal(plannedMileageReducer(otherTruck, { type: "failure", request: 1, error: "ancien" }).error, "")
+    const fresh = plannedMileageReducer(otherTruck, { type: "success", request: 2, report: { ...report, truckId: "truck-2", totalKm: 225 } })
+    assert.equal(fresh.report?.truckId, "truck-2")
+    assert.equal(fresh.report?.totalKm, 225)
   })
 })
