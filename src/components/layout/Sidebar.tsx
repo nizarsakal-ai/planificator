@@ -6,7 +6,7 @@ import {
   getNavItems,
   getActiveNavHref,
   withHrDocumentNavItems, withAccountingNavItem,
-  withBillingNavItems, withSupplierIntakeNavItem, withWorksitePhotosNavItem,
+  withBillingNavItems, withSupplierIntakeNavItem, withWorksitePhotosNavItem, withProspectionNavItem,
 } from "@/lib/navigation/nav-config"
 import { getActiveNavCategoryId, groupNavItems } from "@/lib/navigation/nav-categories"
 import { NavCategories } from "@/components/layout/NavCategories"
@@ -31,6 +31,7 @@ interface SidebarUser {
   supplierIntakeNavVisible?: boolean
   /** Photos d'engins (SPEC-WORKSITE-PHOTOS-001) : drapeau serveur + rôle interne ; affichage seulement. */
   worksitePhotosNavVisible?: boolean
+  prospectionNavVisible?: boolean
 }
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
@@ -38,7 +39,7 @@ interface SidebarUser {
 /** Barre latérale « verre givré » : carte flottante translucide (thème clair ou sombre selon Apparence), catégories, pied commun. */
 export function Sidebar({ user }: { user: SidebarUser }) {
   const pathname = usePathname()
-  const navItems = withHrDocumentNavItems(withWorksitePhotosNavItem(withSupplierIntakeNavItem(withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true), user.supplierIntakeNavVisible === true), user.worksitePhotosNavVisible === true), user.hrDocumentsNavVisible === true, user.hrDocumentsManageNavVisible === true)
+  const navItems = withProspectionNavItem(withHrDocumentNavItems(withWorksitePhotosNavItem(withSupplierIntakeNavItem(withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true), user.supplierIntakeNavVisible === true), user.worksitePhotosNavVisible === true), user.hrDocumentsNavVisible === true, user.hrDocumentsManageNavVisible === true), user.prospectionNavVisible === true)
   const activeHref = getActiveNavHref(navItems, pathname)
   // Regroupement par catégories APRÈS la composition des drapeaux : aucune entrée ajoutée, perdue ou dupliquée.
   const grouped = groupNavItems(navItems)

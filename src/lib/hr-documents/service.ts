@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto"
-import { assertContent, canRead, digest, employeeSelectionSchema, HrError, requireCapability, reviewSchema, type Actor, type Identity } from "./domain"
+import { assertContent, canRead, detectKind, digest, draftSchema, employeeDraftsEnabled, employeeSelectionSchema, HrError, KIND_EXTENSION, recognitionEnabled, requireCapability, reviewSchema, validateDocument, type Actor, type DocumentKind, type DraftInput, type Identity } from "./domain"
 import { verifiedDownload, type PrivateDrive } from "./drive"
+import { recognize, type EmployeeRef, type Proposal } from "./recognition/engine"
+import type { Reading } from "./recognition/ocr"
+import type { ExternalRecognition } from "./recognition/external"
 
 export type DocumentRecord = { id:string; companyId:string; employeeId:string; category:string; period:string; title:string;
   status:string; version:number; sha256:string; size:number; driveFileId:string; rootId:string; uploadedById:string;
@@ -14,7 +17,7 @@ export function project(doc:DocumentRecord):PublicDocument {
 }
 export interface Tx {
   actor(identity:Identity):Promise<Actor>
-  employee(companyId:string,id:string):Promise<{id:string;userId:string;email?:string;firstName?:string;lastName?:string}|null>
+  employee(companyId:string,id:string,opts?:{allowDraft?:boolean}):Promise<{id:string;userId:string;email?:string;firstName?:string;lastName?:string;draft?:boolean}|null>
   storage(companyId:string):Promise<Storage|null>
   connection(companyId:string):Promise<{generation:string;accountEmail:string}|null>
   store(value:Storage):Promise<void>
@@ -32,15 +35,51 @@ export interface Tx {
   noticeById(companyId:string,id:string,version:number):Promise<Notice|null>
   saveNotice(notice:Notice,expectedStatus:string):Promise<void>
   list(actor:Actor,manage:boolean,cursor:string|undefined,employeeId?:string):Promise<DocumentRecord[]>
-  employees(companyId:string):Promise<{id:string;firstName:string;lastName:string}[]>
+  employees(companyId:string):Promise<EmployeeRef[]>
+  draftByKey(companyId:string,createdById:string,key:string):Promise<EmployeeRef|null>
+  createDraft(companyId:string,createdById:string,input:Omit<DraftInput,"key">&{key:string},passwordHash:string):Promise<EmployeeRef>
 }
+/** Lecture locale : texte brut (couche texte) ou lecture complète avec son statut (OCR, moteur absent, échec, illisible). */
+export type TextExtractor=(bytes:Uint8Array,kind:DocumentKind)=>Promise<string|Reading>
 export interface Repository { run<T>(identity:Identity,fn:(tx:Tx,actor:Actor)=>Promise<T>):Promise<T> }
 export type DriveBinding = {drive:PrivateDrive;generation:string;accountEmail:string}
 export type DriveFactory = (companyId:string)=>Promise<DriveBinding>
 
 /** A single service controls both the operator and employee entry points. */
 export class HrDocumentsService {
-  constructor(private readonly repo:Repository,private readonly connect:DriveFactory,private readonly clock=()=>new Date()) {}
+  constructor(private readonly repo:Repository,private readonly connect:DriveFactory,private readonly clock=()=>new Date(),
+    private readonly extract:TextExtractor=async()=>"",private readonly external:ExternalRecognition|null=null,
+    private readonly hashPassword:(secret:string)=>Promise<string>=async()=>{throw new HrError("DISABLED",404)}) {}
+  /**
+   * PLV2-DOC-RH-002 — proposition de classement, sans écriture : rien n'est conservé, publié ni rattaché ici.
+   * Lecture locale d'abord (couche texte PDF, sinon OCR local) ; secours externe seulement s'il est branché et activé.
+   */
+  async recognize(identity:Identity,bytes:Uint8Array,fileName:string):Promise<Proposal&{sha256:string;kind:DocumentKind}> {
+    if(!recognitionEnabled())throw new HrError("DISABLED",404)
+    const {hash,kind}=validateDocument(bytes)
+    const employees=await this.repo.run(identity,async(tx,a)=>{requireCapability(a,"IMPORT");requireCapability(a,"READ");return tx.employees(a.companyId)})
+    const started=Date.now()
+    const read=await this.extract(bytes,kind).catch(():Reading=>({text:"",status:"TECHNICAL_FAILURE",reason:"OCR_ERROR",durationMs:Date.now()-started,pages:1,rotation:null,confidence:null,mrzFound:false}))
+    let {text,...reading}:Reading=typeof read==="string"
+      ?{text:read,status:read.trim()?"TEXT_LAYER":"UNREADABLE",reason:null,durationMs:Date.now()-started,pages:1,rotation:null,confidence:null,mrzFound:false}:read
+    let external=false
+    if(!text.trim()&&this.external){const result=await this.external({bytes,kind}).catch(()=>null);if(result?.text){text=result.text;external=true}}
+    const proposal=recognize({text,fileName:fileName.slice(0,255),employees,now:this.clock(),reading})
+    return {...proposal,sources:external?[...proposal.sources,"EXTERNAL"]:proposal.sources,sha256:hash,kind}
+  }
+  /** Fiche à compléter : inactive, compte sans mot de passe utilisable, aucune invitation envoyée. */
+  async createDraft(identity:Identity,raw:unknown):Promise<EmployeeRef> {
+    if(!employeeDraftsEnabled())throw new HrError("DISABLED",404)
+    const input=draftSchema.parse(raw)
+    // Secret aléatoire jamais transmis : le compte ne peut pas servir à se connecter (il est aussi inactif).
+    const passwordHash=await this.hashPassword(randomUUID()+randomUUID())
+    return this.repo.run(identity,async(tx,a)=>{
+      requireCapability(a,"IMPORT");requireCapability(a,"READ")
+      const previous=await tx.draftByKey(a.companyId,a.userId,input.key)
+      if(previous)return previous
+      return tx.createDraft(a.companyId,a.userId,input,passwordHash)
+    })
+  }
   private async binding(companyId:string,storage:Storage|null) {
     if (!storage) throw new HrError("STORAGE_NOT_READY",409)
     const binding=await this.connect(companyId)
@@ -99,12 +138,12 @@ export class HrDocumentsService {
   }
   async import(identity:Identity,raw:unknown,bytes:Uint8Array) {
     const input=reviewSchema.parse(raw); const hash=digest(bytes)
-    // Validate before reservation; file kind and maximum size are part of the contract.
-    const {validatePdf}=await import("./domain");validatePdf(bytes)
+    // Validate before reservation; real file kind (PDF, or images behind their flag) and maximum size are part of the contract.
+    const {validateDocument}=await import("./domain");const {kind}=validateDocument(bytes)
     const intent=digest(JSON.stringify([input.employeeId,input.category,input.period,input.title,hash,bytes.length]))
     const storage=await this.repo.run(identity,async(tx,a)=>{
       requireCapability(a,"IMPORT");requireCapability(a,"READ")
-      if(!await tx.employee(a.companyId,input.employeeId))throw new HrError("NOT_FOUND",404)
+      if(!await tx.employee(a.companyId,input.employeeId,{allowDraft:true}))throw new HrError("NOT_FOUND",404)
       return tx.storage(a.companyId)
     })
     const {drive}=await this.binding(identity.companyId,storage)
@@ -113,7 +152,7 @@ export class HrDocumentsService {
     const doc=await this.repo.run(identity,async(tx,a)=>{
       requireCapability(a,"IMPORT");requireCapability(a,"READ")
       await this.checkStorage(tx,a,storage!)
-      if(!await tx.employee(a.companyId,input.employeeId))throw new HrError("NOT_FOUND",404)
+      if(!await tx.employee(a.companyId,input.employeeId,{allowDraft:true}))throw new HrError("NOT_FOUND",404)
       const previous=await tx.upload(a.companyId,a.userId,input.key)
       if(previous){if(previous.uploadIntent!==intent)throw new HrError("RECEIPT_CONFLICT",409);return previous}
       if(await tx.duplicate(a.companyId,input.employeeId,input.category,input.period,hash))throw new HrError("DUPLICATE",409)
@@ -123,7 +162,7 @@ export class HrDocumentsService {
       await tx.insert(value);await tx.event(value,a.userId,"IMPORT_RESERVED");return value
     })
     if(doc.status!=="UPLOADING")return project(doc)
-    await drive.put(doc.driveFileId,doc.rootId,bytes)
+    await drive.put(doc.driveFileId,doc.rootId,bytes,kind)
     return this.finishImport(identity,doc,drive,storage!)
   }
   private async finishImport(identity:Identity,doc:DocumentRecord,drive:PrivateDrive,storage:Storage) {
@@ -134,7 +173,7 @@ export class HrDocumentsService {
       const current=await tx.find(a.companyId,doc.id);if(!current)throw new HrError("NOT_FOUND",404)
       if(current.status!=="UPLOADING")return project(current)
       if(current.version!==doc.version||current.uploadedById!==a.userId)throw new HrError("CONFLICT",409)
-      if(!await tx.employee(a.companyId,current.employeeId))throw new HrError("NOT_FOUND",404)
+      if(!await tx.employee(a.companyId,current.employeeId,{allowDraft:true}))throw new HrError("NOT_FOUND",404)
       const next={...current,status:"READY",version:current.version+1}
       await tx.save(next,current.version);await tx.event(next,a.userId,"IMPORTED");return project(next)
     })
@@ -149,7 +188,7 @@ export class HrDocumentsService {
       return {doc,storage:await tx.storage(a.companyId)}
     })
     const {drive}=await this.binding(identity.companyId,storage)
-    await drive.put(doc.driveFileId,doc.rootId,bytes)
+    await drive.put(doc.driveFileId,doc.rootId,bytes,validateDocument(bytes,true).kind)
     return this.finishImport(identity,doc,drive,storage!)
   }
   async reverify(identity:Identity,id:string,version:number,bytes?:Uint8Array) {
@@ -163,7 +202,7 @@ export class HrDocumentsService {
     })
     const {drive}=await this.binding(identity.companyId,storage)
     const fileId=bytes?await drive.allocate():doc.driveFileId
-    if(bytes)await drive.put(fileId,doc.rootId,bytes)
+    if(bytes)await drive.put(fileId,doc.rootId,bytes,validateDocument(bytes,true).kind)
     await verifiedDownload(drive,{...doc,driveFileId:fileId})
     return this.repo.run(identity,async(tx,a)=>{
       requireCapability(a,"IMPORT");requireCapability(a,"READ");await this.checkStorage(tx,a,storage!)
@@ -192,7 +231,7 @@ export class HrDocumentsService {
       if(receipt){if(receipt.intent!==intent)throw new HrError("RECEIPT_CONFLICT",409);return project(doc)}
       if(!["READY","REVIEWED"].includes(doc.status)||doc.version!==input.expectedVersion)throw new HrError("CONFLICT",409)
       if(doc.publishedAt&&(doc.employeeId!==input.employeeId||doc.category!==input.category||doc.period!==input.period||doc.title!==input.title))throw new HrError("CONFLICT",409)
-      if(!await tx.employee(a.companyId,input.employeeId))throw new HrError("NOT_FOUND",404)
+      if(!await tx.employee(a.companyId,input.employeeId,{allowDraft:true}))throw new HrError("NOT_FOUND",404)
       if(await tx.duplicate(a.companyId,input.employeeId,input.category,input.period,doc.sha256,id))throw new HrError("DUPLICATE",409)
       const next={...doc,employeeId:input.employeeId,category:input.category,period:input.period,title:input.title,
         status:"REVIEWED",reviewedById:a.userId,version:doc.version+1}
@@ -230,7 +269,8 @@ export class HrDocumentsService {
       if(receipt){if(receipt.intent!==intent)throw new HrError("RECEIPT_CONFLICT",409);return project(doc)}
       if(doc.status!=="REVIEWED"||doc.version!==version)throw new HrError("CONFLICT",409)
       if(await tx.duplicate(a.companyId,doc.employeeId,doc.category,doc.period,doc.sha256,id))throw new HrError("DUPLICATE",409)
-      const employee=await tx.employee(a.companyId,doc.employeeId);if(!employee)throw new HrError("NOT_FOUND",404)
+      const employee=await tx.employee(a.companyId,doc.employeeId)
+      if(!employee){if(await tx.employee(a.companyId,doc.employeeId,{allowDraft:true}))throw new HrError("DRAFT_EMPLOYEE",409);throw new HrError("NOT_FOUND",404)}
       const next={...doc,status:"PUBLISHED",version:version+1,publishedAt:this.clock()}
       await tx.save(next,version);await tx.event(next,a.userId,"PUBLISHED")
       await tx.recordReceipt(a.companyId,a.userId,key,intent,next);await tx.notify(next,employee.userId)
@@ -263,6 +303,7 @@ export class HrDocumentsService {
       const doc=await tx.find(a.companyId,id)
       if(!doc||!canRead(a,doc)||doc.version!==initial.doc.version)throw new HrError("NOT_FOUND",404)
     })
-    return {bytes,title:`document-${initial.doc.period}.pdf`}
+    const kind=detectKind(bytes)??"pdf"
+    return {bytes,kind,title:`document-${initial.doc.period}.${KIND_EXTENSION[kind]}`}
   }
 }

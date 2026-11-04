@@ -1,7 +1,7 @@
 import { assertMutationOrigin } from "@/lib/http/request-origin"
 import { hrIdentity,hrOperator, hrService } from "@/lib/hr-documents/runtime"
 import { boundedForm, hrHttp, hrJson } from "@/lib/hr-documents/http"
-import { HrError, MAX_PDF_BYTES } from "@/lib/hr-documents/domain"
+import { HrError, imagesEnabled, MAX_PDF_BYTES } from "@/lib/hr-documents/domain"
 export const runtime="nodejs"
 export const dynamic="force-dynamic"
 export async function GET(request:Request){return hrHttp(async()=>{
@@ -17,7 +17,7 @@ export async function POST(request:Request){return hrHttp(async()=>{
   const allowed=["employeeId","category","period","title","key","file"]
   for(const [key] of form)if(!allowed.includes(key)||form.getAll(key).length!==1)throw new HrError("INVALID_INPUT")
   const file=form.get("file")
-  if(!(file instanceof File)||file.size>MAX_PDF_BYTES)throw new HrError("INVALID_PDF")
+  if(!(file instanceof File)||file.size>MAX_PDF_BYTES)throw new HrError(imagesEnabled()?"INVALID_FILE":"INVALID_PDF")
   const input=Object.fromEntries(allowed.filter(k=>k!=="file").map(k=>[k,form.get(k)]))
   return hrJson({document:await hrService().import(identity,input,new Uint8Array(await file.arrayBuffer()))},201)
 })}

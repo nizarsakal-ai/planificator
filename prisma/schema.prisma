@@ -435,6 +435,9 @@ model Company {
   worksitePhotoEvents             WorksitePhotoEvent[]
   worksitePhotoDriveConnection    WorksitePhotoDriveConnection?
   worksitePhotoDriveFolders       WorksitePhotoDriveFolder[]
+
+  // Veille prospection (V1) — opportunités publiques (relation inverse, sans effet SQL).
+  prospectOpportunities           ProspectOpportunity[]
 }
 
 // Paramètres de l'entreprise — extensible sans toucher au schéma principal
@@ -901,6 +904,8 @@ model Employee {
   truckAssignments    TruckAssignment[]    @relation("TruckAssignmentChauffeur")
   mileageTrips        MileageTrip[]        @relation("MileageDriver")
   hrDocuments         HrDocument[]
+  /// PLV2-DOC-RH-002 : relation inverse seulement, aucune colonne ajoutée à employees.
+  hrDraft             HrEmployeeDraft?
   assignedTasks       Task[]               @relation("TaskAssignee")
 
   @@unique([id, companyId])
@@ -3483,4 +3488,80 @@ model HrDocumentStoreEvent {
   store HrDocumentStore @relation(fields:[companyId],references:[companyId],onDelete:Restrict)
   @@index([companyId,createdAt])
   @@map("hr_document_store_events")
+}
+
+/// PLV2-DOC-RH-002 — fiche à compléter créée depuis une pièce d'identité, après validation d'un opérateur RH.
+/// Table séparée : employees et users gardent leur forme. Le numéro de pièce n'est jamais conservé en entier.
+model HrEmployeeDraft {
+  id                String    @id
+  companyId         String
+  employeeId        String    @unique
+  createdById       String
+  createKey         String
+  birthDate         DateTime? @db.Date
+  sex               String?
+  nationality       String?
+  identityExpiry    DateTime? @db.Date
+  documentNumberEnd String?
+  sourceSha256      String?
+  status            String    @default("OPEN")
+  createdAt         DateTime  @default(now())
+  employee          Employee  @relation(fields: [employeeId, companyId], references: [id, companyId], onDelete: Restrict)
+
+  @@unique([employeeId, companyId])
+  @@unique([companyId, createdById, createKey])
+  @@index([companyId, status])
+  @@map("hr_employee_drafts")
+}
+
+/// Veille prospection (V1) — opportunité issue d'une source publique (BOAMP, liste des festivals, DATAtourisme).
+/// Données d'organisations uniquement : aucun nom de correspondant, e-mail ni adresse de particulier.
+/// La collecte met à jour les champs de la source et le score ; le statut est réservé au suivi humain.
+model ProspectOpportunity {
+  id                String    @id @default(cuid())
+  companyId         String
+  /// BOAMP | FESTIVALS_CULTURE | DATATOURISME
+  source            String
+  sourceId          String
+  /// TENDER | AWARD | EVENT
+  kind              String
+  title             String
+  organization      String?
+  departmentCodes   String[]  @default([])
+  locality          String?
+  publishedAt       DateTime?
+  deadlineAt        DateTime?
+  eventStartAt      DateTime?
+  eventPeriod       String?
+  url               String?
+  winners           String[]  @default([])
+  linkedSourceIds   String[]  @default([])
+  /// Titulaires connus d'une attribution liée à cet appel d'offres.
+  awardedTo         String[]  @default([])
+  descriptors       String[]  @default([])
+  alsoSeenIn        String[]  @default([])
+  /// Ordre de priorité de Nizar : 1 mairies IDF, 2 montage-démontage IDF, 3 autres IDF, 4 départements voisins, 5 reste de la France.
+  priorityGroup     Int       @default(5)
+  score             Int
+  /// A_TRAITER | A_VERIFIER | MASQUE
+  band              String
+  scoreReasons      Json
+  fingerprint       String
+  /// NOUVEAU | A_QUALIFIER | QUALIFIE | CONTACTE | GAGNE | PERDU | ECARTE — modifié uniquement par un humain.
+  status            String    @default("NOUVEAU")
+  statusUpdatedAt   DateTime?
+  statusUpdatedById String?
+  firstSeenAt       DateTime  @default(now())
+  lastSeenAt        DateTime  @default(now())
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, source, sourceId])
+  @@index([companyId, kind, band, status])
+  @@index([companyId, kind, priorityGroup, score])
+  @@index([companyId, deadlineAt])
+  @@index([companyId, fingerprint])
+  @@map("prospect_opportunities")
 }

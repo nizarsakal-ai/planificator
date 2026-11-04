@@ -3,7 +3,8 @@ import { notFound } from "next/navigation"
 import { Documents } from "@/components/hr-documents/Documents"
 import { hrDocumentsEnabled,hrIdentity,hrDb } from "@/lib/hr-documents/runtime"
 import { PrismaHrRepository } from "@/lib/hr-documents/repository"
-import { employeeSelectionSchema, HrError, type Identity } from "@/lib/hr-documents/domain"
+import { employeeDraftsEnabled, employeeSelectionSchema, HrError, imagesEnabled, recognitionEnabled, type Identity } from "@/lib/hr-documents/domain"
+import { availableCategories } from "@/lib/hr-documents/catalog"
 export const dynamic="force-dynamic"
 export default async function HrDocuments({searchParams}:{searchParams:Promise<{employeeId?:string|string[]}>}){
   if(!hrDocumentsEnabled())notFound()
@@ -24,5 +25,5 @@ export default async function HrDocuments({searchParams}:{searchParams:Promise<{
   }
   const session=await auth()
   const canReturnToEmployee=["ADMIN","SUPER_ADMIN"].includes(session?.user?.role??"")
-  return <Documents key={selected.data??"all"} employeeId={selected.data} employeeContext={employeeContext} canReturnToEmployee={canReturnToEmployee} manage configure={actor.capabilities.includes("CONFIGURE")} canImport={actor.capabilities.includes("IMPORT")} canPublish={actor.capabilities.includes("PUBLISH")} mailEnabled={process.env.HR_DOCUMENT_MAIL_ENABLED==="true"}/>
+  return <Documents key={selected.data??"all"} employeeId={selected.data} employeeContext={employeeContext} canReturnToEmployee={canReturnToEmployee} manage configure={actor.capabilities.includes("CONFIGURE")} canImport={actor.capabilities.includes("IMPORT")} canPublish={actor.capabilities.includes("PUBLISH")} mailEnabled={process.env.HR_DOCUMENT_MAIL_ENABLED==="true"} categories={availableCategories().map(({code,label,family})=>({code,label,family}))} recognition={recognitionEnabled()} images={imagesEnabled()} drafts={employeeDraftsEnabled()}/>
 }

@@ -12,6 +12,7 @@ import { isAccountingModuleEnabled } from "@/lib/accounting/accounting-feature-f
 import { isAccountingNavVisible } from "@/lib/accounting/access/accounting-access.core"
 import { isBillingCompleteEnabled } from "@/lib/billing/billing-feature-flag"
 import { isWorksitePhotosEnabled } from "@/lib/worksite-photos/feature-flag"
+import { isProspectionNavVisible, isProspectionWatchEnabled } from "@/lib/prospection/prospection-feature-flag"
 import type { Role } from "@prisma/client"
 
 export default async function DashboardLayout({
@@ -40,12 +41,14 @@ export default async function DashboardLayout({
   const supplierIntakeNavVisible = !!(await resolveSupplierIntakeAccess())
   // Photos d'engins (SPEC-WORKSITE-PHOTOS-001) : drapeau serveur + rôle interne + société ; affichage seulement.
   const worksitePhotosNavVisible = isWorksitePhotosEnabled() && ["EMPLOYEE", "TEAM_LEADER", "ADMIN", "SUPER_ADMIN"].includes(role) && !!companyId
+  // Opportunités (veille prospection V1) : drapeau serveur + SUPER_ADMIN + société ; affichage seulement.
+  const prospectionNavVisible = isProspectionNavVisible({ enabled: isProspectionWatchEnabled(), role, companyId })
   const company = companyId ? await prisma.company.findUnique({
     where: { id: companyId }, select: { name: true, logoUrl: true },
   }) : null
   const companyLogo = logoForPdf(company?.logoUrl)
   const hrNavigation = await resolveHrDocumentNavigation()
-  const user = { ...hrNavigation, ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, worksitePhotosNavVisible, companyLogo, companyName: company?.name }
+  const user = { ...hrNavigation, ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, worksitePhotosNavVisible, prospectionNavVisible, companyLogo, companyName: company?.name }
 
   return (
     <div data-app-backdrop="" className="flex h-screen overflow-hidden bg-[#f6f1e7] bg-[radial-gradient(45%_55%_at_4%_0%,rgba(120,160,255,0.65)_0,transparent_70%),radial-gradient(40%_45%_at_100%_100%,rgba(70,120,250,0.45)_0,transparent_70%),radial-gradient(28%_34%_at_100%_8%,rgba(140,175,255,0.4)_0,transparent_70%),radial-gradient(30%_36%_at_55%_45%,rgba(255,250,240,0.85)_0,transparent_70%)]">

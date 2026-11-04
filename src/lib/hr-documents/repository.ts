@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { Prisma, type PrismaClient } from "@prisma/client"
 import { resolveCompanyAccess } from "@/lib/company-access"
-import { capabilitiesFor, digest, HrError, type Actor, type Identity } from "./domain"
+import { capabilitiesFor, digest, employeeDraftsEnabled, HrError, type Actor, type DraftInput, type Identity } from "./domain"
 import type { DocumentRecord, Repository, Storage, Tx, Notice } from "./service"
 
 export class PrismaHrRepository implements Repository {
@@ -32,10 +32,14 @@ class PrismaHrTx implements Tx {
     if(profile&&!profile.active)throw new HrError("FORBIDDEN",403)
     return {...identity,employeeId:profile?.id??null,capabilities:capabilitiesFor(this.grants(),identity)}
   }
-  async employee(companyId:string,id:string) {
+  async employee(companyId:string,id:string,opts?:{allowDraft?:boolean}) {
     await this.db.$queryRaw`SELECT id FROM employees WHERE id=${id} AND "companyId"=${companyId} FOR SHARE`
     const employee=await this.db.employee.findFirst({where:{id,companyId,active:true,user:{active:true},company:{active:true}},select:{id:true,userId:true,firstName:true,lastName:true,user:{select:{email:true}}}})
-    return employee?{id:employee.id,userId:employee.userId,email:employee.user.email,firstName:employee.firstName,lastName:employee.lastName}:null
+    if(employee)return {id:employee.id,userId:employee.userId,email:employee.user.email,firstName:employee.firstName,lastName:employee.lastName}
+    // PLV2-DOC-RH-002 : fiche à compléter (inactive), seulement pour déposer et revoir, jamais pour publier.
+    if(!opts?.allowDraft||!employeeDraftsEnabled())return null
+    const draft=await this.db.employee.findFirst({where:{id,companyId,active:false,hrDraft:{is:{companyId,status:"OPEN"}},company:{active:true}},select:{id:true,userId:true,firstName:true,lastName:true}})
+    return draft?{id:draft.id,userId:draft.userId,firstName:draft.firstName,lastName:draft.lastName,draft:true}:null
   }
   storage(companyId:string){return this.db.hrDocumentStore.findUnique({where:{companyId}})}
   async connection(companyId:string){
@@ -76,5 +80,25 @@ class PrismaHrTx implements Tx {
     const where:Prisma.HrDocumentWhereInput={companyId:actor.companyId,...(manage?(employeeId?{employeeId}:{}):{employeeId:actor.employeeId??"__NO_EMPLOYEE__",status:"PUBLISHED"}),...(cursor?{id:{gt:cursor}}:{})}
     return this.db.hrDocument.findMany({where,orderBy:{id:"asc"},take:26})
   }
-  employees(companyId:string){return this.db.employee.findMany({where:{companyId,active:true,user:{active:true}},select:{id:true,firstName:true,lastName:true},orderBy:[{lastName:"asc"},{id:"asc"}],take:500})}
+  async employees(companyId:string){
+    const active=await this.db.employee.findMany({where:{companyId,active:true,user:{active:true}},select:{id:true,firstName:true,lastName:true},orderBy:[{lastName:"asc"},{id:"asc"}],take:500})
+    if(!employeeDraftsEnabled())return active
+    const drafts=await this.db.employee.findMany({where:{companyId,active:false,hrDraft:{is:{companyId,status:"OPEN"}}},select:{id:true,firstName:true,lastName:true},orderBy:[{lastName:"asc"},{id:"asc"}],take:200})
+    return [...active,...drafts.map(d=>({...d,draft:true}))]
+  }
+  async draftByKey(companyId:string,createdById:string,key:string){
+    const row=await this.db.hrEmployeeDraft.findUnique({where:{companyId_createdById_createKey:{companyId,createdById,createKey:key}},select:{employee:{select:{id:true,firstName:true,lastName:true}}}})
+    return row?{...row.employee,draft:true}:null
+  }
+  async createDraft(companyId:string,createdById:string,input:Omit<DraftInput,"key">&{key:string},passwordHash:string){
+    // Adresse réservée (.invalid) : aucune boîte réelle, aucune invitation ; à remplacer par l'e-mail du salarié avant activation.
+    const user=await this.db.user.create({data:{email:`rh-fiche-${randomUUID()}@fiche-a-completer.invalid`,password:passwordHash,
+      name:`${input.firstName} ${input.lastName}`,role:"EMPLOYEE",active:false,companyId},select:{id:true}})
+    const employee=await this.db.employee.create({data:{userId:user.id,companyId,role:"EMPLOYEE",active:false,firstName:input.firstName,lastName:input.lastName},select:{id:true,firstName:true,lastName:true}})
+    await this.db.hrEmployeeDraft.create({data:{id:randomUUID(),companyId,employeeId:employee.id,createdById,createKey:input.key,
+      birthDate:input.birthDate?new Date(`${input.birthDate}T00:00:00Z`):null,sex:input.sex??null,nationality:input.nationality??null,
+      identityExpiry:input.identityExpiry?new Date(`${input.identityExpiry}T00:00:00Z`):null,documentNumberEnd:input.documentNumberEnd??null,
+      sourceSha256:input.sourceSha256??null}})
+    return {...employee,draft:true}
+  }
 }

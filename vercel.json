@@ -26,6 +26,10 @@
     {
       "path": "/api/cron/billing-invoice-reminders",
       "schedule": "15 9 * * *"
+    },
+    {
+      "path": "/api/cron/prospection-veille",
+      "schedule": "0 6 * * *"
     }
   ]
 }

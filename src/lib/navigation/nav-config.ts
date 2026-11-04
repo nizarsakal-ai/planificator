@@ -33,6 +33,7 @@ import {
   Mail,
   Calculator,
   Camera,
+  Radar,
 } from "lucide-react"
 
 export interface NavItem {
@@ -224,5 +225,20 @@ export function withHrDocumentNavItems(items: readonly NavItem[], own: boolean, 
   const result = [...items]
   if (own === true && !result.some(i => i.href === "/mes-documents")) result.push({label:"Mes documents",href:"/mes-documents",icon:FileText})
   if (manage === true && !result.some(i => i.href === "/rh/documents")) result.push({label:"Documents RH",href:"/rh/documents",icon:FileText})
+  return result
+}
+
+/**
+ * Veille prospection (V1) — entrée « Opportunités » (drapeau serveur PROSPECTION_WATCH_ENABLED + SUPER_ADMIN + société,
+ * calculé côté serveur : voir `isProspectionNavVisible`). Insérée juste après « Consultations », sinon en fin de liste.
+ * Affichage seulement : la page `/opportunites` applique sa propre garde serveur.
+ */
+export const PROSPECTION_NAV_ITEM: NavItem = { label: "Opportunités", href: "/opportunites", icon: Radar }
+
+export function withProspectionNavItem(items: readonly NavItem[], visible: boolean): NavItem[] {
+  const result = [...items]
+  if (visible !== true || result.some((item) => item.href === PROSPECTION_NAV_ITEM.href)) return result
+  const anchor = result.findIndex((item) => item.href === "/consultations")
+  result.splice(anchor < 0 ? result.length : anchor + 1, 0, PROSPECTION_NAV_ITEM)
   return result
 }
