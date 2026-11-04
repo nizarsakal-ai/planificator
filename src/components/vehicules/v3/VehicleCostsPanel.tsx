@@ -3,11 +3,13 @@ import { isExplicitSubmit, preventImplicitEnter } from "@/components/vehicules/e
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { companyCivilTimeToIso } from "@/lib/vehicules/v3/tour-time"
 import type { VehicleCostsDto,TripCostsDto } from "@/lib/vehicules/v3/cost-service"
+import { VehicleFuelEstimate } from "./VehicleFuelEstimate"
+import { mergeExpenseValues, type ExpenseFieldName, type ExpenseFieldValues } from "./vehicle-fuel-estimate-ui"
 interface Expense { documentVersionId?:string|null; maintenanceEntryId?:string|null; id: string; category: string; occurredAt: string; amount: string; currency: string; litres: string | null; mileageObservation: number | null; supplier: string | null; reference: string | null; notes: string | null; status: string; revision: number; sourceExpenseReportId: string | null; sourceWarning: string | null; allocations:{id:string;mileageTripId:string|null;amount:string;label:string}[]; duplicateCandidates: { id: string; truckId: string;label:string }[] }
 const names: Record<string, string> = { FUEL: "Carburant", MAINTENANCE: "Entretien / réparation", INSURANCE: "Assurance", OTHER: "Autres", PENDING: "À valider", APPROVED: "Admise", REJECTED: "Refusée", CANCELLED: "Annulée" }
 const field = "block border rounded p-2 w-full text-black bg-white"
 const button = "border rounded px-3 py-2 disabled:opacity-50"
-export function VehicleCostsPanel({ truckId, timeZone }: { truckId: string; timeZone:string }) {
+export function VehicleCostsPanel({ truckId, timeZone, fuelEstimateEnabled = false }: { truckId: string; timeZone:string; fuelEstimateEnabled?: boolean }) {
   const companyDate=(value:string|Date)=>new Intl.DateTimeFormat("en-CA",{timeZone,year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(value))
   const today=companyDate(new Date()), first=today.slice(0,8)+"01"
   const normalizeDecimal=(value:FormDataEntryValue|null)=>String(value??"").trim().replace(",",".")
@@ -21,6 +23,20 @@ export function VehicleCostsPanel({ truckId, timeZone }: { truckId: string; time
   const [documents,setDocuments]=useState<{id:string;title:string;category:string;archivedAt?:string|null;currentVersion:{id:string;versionNumber:number}|null}[]>([]),[maintenance,setMaintenance]=useState<{id:string;kind:string;occurredAt:string;mileage:number}[]>([])
   const [documentError,setDocumentError]=useState(""),[maintenanceError,setMaintenanceError]=useState(""),[documentLoading,setDocumentLoading]=useState(true),[maintenanceLoading,setMaintenanceLoading]=useState(true)
   const requestRef = useRef<{ body: string; key: string } | null>(null)
+  // Estimation du trajet : les champs saisis à la main (événement « input ») ne sont jamais réécrits automatiquement.
+  const expenseFormRef = useRef<HTMLFormElement | null>(null), touchedRef = useRef<Set<string>>(new Set())
+  const [estimated, setEstimated] = useState<ExpenseFieldName[]>([])
+  useEffect(() => { touchedRef.current = new Set(); setEstimated([]) }, [edit])
+  const applyEstimate = useCallback((proposed: ExpenseFieldValues, explicit: boolean) => {
+    const form = expenseFormRef.current
+    if (!form) return
+    const control = (name: string) => form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null
+    const current: ExpenseFieldValues = { notes: control("notes")?.value ?? "" }
+    const merged = mergeExpenseValues(current, proposed, touchedRef.current, explicit)
+    for (const [name, value] of Object.entries(merged)) { const el = control(name); if (el) el.value = value ?? "" }
+    if (explicit) for (const name of Object.keys(merged)) touchedRef.current.delete(name)
+    setEstimated(Object.keys(merged) as ExpenseFieldName[])
+  }, [])
   const base = `/api/trucks/${encodeURIComponent(truckId)}`
   const load = useCallback(async (signal?:AbortSignal) => {
     setError("");setCosts(null)
@@ -79,7 +95,9 @@ export function VehicleCostsPanel({ truckId, timeZone }: { truckId: string; time
     </section>
     <section className="border rounded p-4 space-y-3"><h2 className="text-xl font-semibold">Coûts affectés à un trajet</h2><p>Uniquement les imputations explicites au trajet choisi, quelle que soit la date d’achat. Ces montants proviennent du registre et ne sont jamais ajoutés au total du véhicule. Le calcul ne mesure pas la consommation réelle.</p><label>Trajet récent<select className={field} value={costTripId} onChange={e=>{setCostTripId(e.target.value);setTripCosts(null)}}><option value="">Choisir un trajet</option>{tripCandidates.map(t=><option key={t.id} value={t.id}>{t.label}</option>)}</select></label><button className={button} disabled={busy||!costTripId} onClick={()=>void loadTripCosts()}>Afficher le coût affecté dans la devise {currency}</button>{tripCosts&&<><p>{tripCosts.label} — {tripCosts.actualKm??"distance indisponible"} {tripCosts.actualKm!==null&&"km réels"}</p><p>Coût affecté : {tripCosts.total} {tripCosts.currency}, dont carburant : {tripCosts.totals.FUEL} {tripCosts.currency}.</p><p>Coût affecté par km : {tripCosts.costPerKm??"Non calculable (trajet ouvert, distance inconnue ou zéro kilomètre)"} {tripCosts.costPerKm&&`${tripCosts.currency}/km`}. Carburant affecté par km : {tripCosts.fuelAllocatedCostPerKm??"Non calculable"}.</p><p>Indicateurs partiels : {tripCosts.admittedAllocations} imputation(s) admise(s), {tripCosts.excludedSource} source(s) à rapprocher, {tripCosts.excludedCurrency} imputation(s) dans une autre devise et {tripCosts.excludedPending} dépense(s) non admise(s) exclues.</p></>}</section>
     <section className="border rounded p-4"><h2 className="text-xl font-semibold">{edit ? "Modifier une dépense" : "Proposer une dépense"}</h2>
-      <form onKeyDown={preventImplicitEnter} key={edit?.id ?? "new"} onSubmit={submitExpense} className="grid md:grid-cols-2 gap-3">
+      <form ref={expenseFormRef} onInput={(e) => { const name = (e.target as HTMLInputElement).name; if (name) { touchedRef.current.add(name); setEstimated((list) => list.filter((n) => n !== name)) } }} onKeyDown={preventImplicitEnter} key={edit?.id ?? "new"} onSubmit={submitExpense} className="grid md:grid-cols-2 gap-3">
+        {fuelEstimateEnabled && !edit && <VehicleFuelEstimate truckId={truckId} today={today} trips={tripCandidates} onPropose={applyEstimate} />}
+        {fuelEstimateEnabled && !edit && estimated.length > 0 && <p role="status" className="md:col-span-2 text-sm text-amber-800">Champs préremplis par l'estimation, à vérifier : {estimated.map((n) => ({ category: "catégorie", date: "date", amount: "montant", litres: "litres", mileage: "compteur", supplier: "fournisseur", notes: "notes" })[n]).join(", ")}. Remplacez par les valeurs du ticket dès qu'il est disponible.</p>}
         <label>Catégorie<select name="category" className={field} defaultValue={edit?.category ?? "FUEL"}>{["FUEL", "MAINTENANCE", "INSURANCE", "OTHER"].map(k => <option key={k} value={k}>{names[k]}</option>)}</select></label>
         <label>Date d’achat ({timeZone})<input name="date" className={field} type="date" defaultValue={edit?companyDate(edit.occurredAt):today} required /></label>
         <label>Montant exact<input name="amount" className={field} inputMode="decimal" pattern="[0-9]+([.,][0-9]{1,2})?" defaultValue={edit?.amount} placeholder="Ex. 85,40" required /></label>
