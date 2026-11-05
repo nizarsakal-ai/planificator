@@ -70,7 +70,7 @@ export function ChantierEditForm({ worksiteId, defaultValues, clients, coordinat
       <Button
         variant="outline"
         size="sm"
-        onClick={() => setEditing(true)}
+        onClick={() => { setManualCoordinates(false); setEditing(true) }}
         className="h-7 text-xs gap-1.5 text-slate-500"
       >
         <Pencil className="h-3 w-3" />
@@ -123,12 +123,12 @@ export function ChantierEditForm({ worksiteId, defaultValues, clients, coordinat
         {manualCoordinates && (
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
-              <Label className="text-xs text-slate-600">Latitude (-90 à 90)</Label>
-              <Input name={LATITUDE_FIELD} inputMode="decimal" required defaultValue={coordinates.latitude ?? ""} placeholder="Ex. 48,8566" className="h-8 text-sm" />
+              <Label htmlFor={`worksite-${worksiteId}-latitude`} className="text-xs text-slate-600">Latitude (-90 à 90)</Label>
+              <Input id={`worksite-${worksiteId}-latitude`} name={LATITUDE_FIELD} inputMode="decimal" required defaultValue={coordinates.latitude ?? ""} placeholder="Ex. 48,8566" className="h-8 text-sm" />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs text-slate-600">Longitude (-180 à 180)</Label>
-              <Input name={LONGITUDE_FIELD} inputMode="decimal" required defaultValue={coordinates.longitude ?? ""} placeholder="Ex. 2,3522" className="h-8 text-sm" />
+              <Label htmlFor={`worksite-${worksiteId}-longitude`} className="text-xs text-slate-600">Longitude (-180 à 180)</Label>
+              <Input id={`worksite-${worksiteId}-longitude`} name={LONGITUDE_FIELD} inputMode="decimal" required defaultValue={coordinates.longitude ?? ""} placeholder="Ex. 2,3522" className="h-8 text-sm" />
             </div>
           </div>
         )}
