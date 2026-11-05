@@ -405,7 +405,8 @@ describe("formulaire : préremplissage selon le trajet", () => {
     assert.match(stationsLabel("UNAVAILABLE", 0), /indisponibles/)
     assert.deepEqual(priceWarnings(estimate({ tripDate: "2026-10-01" }), station({ updatedAt: "2026-10-20T00:00:00.000Z" }), "2026-11-04").length, 2)
     assert.deepEqual(priceWarnings(estimate(), station(), "2026-11-04"), [])
-    assert.match(priceWarnings(estimate({ tripDate: "2026-11-20" }), null, "2026-11-04")[0], /Départ à venir/)
+    // R13 : départ à venir = information neutre (departureInfo), plus un avertissement.
+    assert.deepEqual(priceWarnings(estimate({ tripDate: "2026-11-20" }), null, "2026-11-04"), [])
   })
   it("séjour : prix médian par défaut, km sur place ajoutés, note avec chantier et dates, aucun fournisseur inventé", () => {
     const stay = plannedStay({ worksiteName: "Chantier fictif Montauban" })
@@ -449,7 +450,8 @@ describe("R2 point 8 — séjours : convention d'intervalle, bornes canoniques (
     assert.deepEqual(stays.map((s) => [s.teamId, s.departure, s.return, s.handoverDays, s.estimable, s.blocked]).sort(),
       [["team-new", "2026-11-05", "2026-11-05", ["2026-11-04"], false, "HANDOVER"], ["team-old", "2026-11-04", "2026-11-04", ["2026-11-04"], false, "HANDOVER"]])
     assert.match(stayBlockedReason(planned(stays[0]))!, /réaffecté en cours de journée \(04\/11\/2026\) : aucune équipe n'est attribuée d'office.*seulement si vous confirmez.*l'historique d'affectation n'est pas modifié/)
-    assert.match(stayLabel(planned(stays[0])), /réaffectation à confirmer$/)
+    // R13 : la prévision reste possible en bordure ; libellé « affectation à vérifier ».
+    assert.match(stayLabel(planned(stays[0])), /affectation à vérifier$/)
   })
   it("R3 — bascule à 10 h le 01/11, séjour planifié du 03 au 05 : aucun jour concerné, estimable", () => {
     const switchAt = new Date(parisDayStart("2026-11-01") + 10 * 3_600_000)
@@ -1177,5 +1179,74 @@ describe("raison : distance nulle ou invalide", () => {
       assert.equal(estimateFuel({ km, consumptionLPer100Km: 8, pricePerLitre: 2.25 }), null)
       assert.equal(uncomputedReason(e, km, 8, choice), "Distance nulle ou invalide : litres et montant non estimés.")
     }
+  })
+})
+
+describe("R13 — lecture de prévision d'un séjour (API, lecture seule)", () => {
+  let saved: string | undefined
+  before(() => { saved = process.env.PLANIFICATOR_VEHICLES_V3_ENABLED; process.env.PLANIFICATOR_VEHICLES_V3_ENABLED = "true" })
+  after(() => { if (saved === undefined) delete process.env.PLANIFICATOR_VEHICLES_V3_ENABLED; else process.env.PLANIFICATOR_VEHICLES_V3_ENABLED = saved })
+  const NOW = () => at("2026-11-04T10:00:00Z")
+  const listFor = async (db: FuelDb) => {
+    const { GET: staysGet } = await import("@/app/api/trucks/[id]/fuel-estimate/stays/route")
+    return (await (await staysGet(request(GALYA_TRUCK, {}), params(GALYA_TRUCK), { ...depsFor(db), now: NOW })).json() as { stays: PlannedStay[] }).stays
+  }
+  const read = (db: FuelDb, query: Record<string, string>, session: MileageSession = GALYA_ADMIN, fetchFn = fakeFetch().fn) =>
+    estimateGet(request(GALYA_TRUCK, query), params(GALYA_TRUCK), { ...depsFor(db, session, fetchFn), now: NOW })
+  /** Camion passé à l'équipe le 05/11 à 10 h (une autre équipe le détenait à minuit) ; équipe planifiée du 05 au 08. */
+  const edgeHandover = () => {
+    const db = new FuelDb()
+    const cut = new Date(parisDayStart("2026-11-05") + 10 * 3_600_000)
+    db.teams.push({ id: "team-x", companyId: GALYA, name: "ÉQUIPE FICTIVE X", leaderId: "emp-leader" })
+    db.periods = [{ ...db.periods[0], teamId: "team-x", startedAt: at("2026-06-01T00:00:00Z"), endedAt: cut }, { ...db.periods[0], startedAt: cut, endedAt: null }]
+    db.assignments = range("2026-11-05", 4).map((d) => ({ date: at(`${d}T00:00:00Z`), teamId: "team-g", status: "PENDING", worksiteId: "ws-1", companyId: GALYA }))
+    return db
+  }
+
+  it("réaffectation la veille du départ : séjour 06–08 bloqué, lu en prévision sans déclaration, sans kilométrage ni attestation", async () => {
+    const db = edgeHandover()
+    const [stay] = await listFor(db)
+    assert.deepEqual([stay.departure, stay.return, stay.blocked, stay.handoverDays], ["2026-11-06", "2026-11-08", "HANDOVER", ["2026-11-05"]])
+    const declared = await read(db, { stayId: stay.id })
+    assert.deepEqual([declared.status, (await declared.json()).code], [409, "STAY_HANDOVER"])
+    const response = await read(db, { stayId: stay.id, forecast: "1", context: stay.context })
+    assert.equal(response.status, 200)
+    const body = await response.json() as FuelEstimate
+    assert.deepEqual([body.km, body.kmSource, body.depotConfirmed, body.travel?.handoverDeclared, body.travel?.mode], [null, null, false, [], null])
+    assert.ok(body.missing.includes("MODE") && body.missing.includes("DEPOT"))
+    assert.ok(body.route.oneWayKm !== null && body.stations.length > 0)
+    assert.deepEqual(body.stay, stay)
+    assert.deepEqual(businessWrites(db), [])
+  })
+  it("paramètres stricts : contexte exigé, aucune décision mêlée, séjour seulement, valeur exacte", async () => {
+    const db = edgeHandover()
+    const [stay] = await listFor(db)
+    const queries: Record<string, string>[] = [
+      { stayId: stay.id, forecast: "1" },
+      { stayId: stay.id, forecast: "1", context: stay.context, mode: "ONE_ROUND_TRIP" },
+      { stayId: stay.id, forecast: "1", context: stay.context, depot: "1" },
+      { stayId: stay.id, forecast: "1", context: stay.context, handover: "2026-11-05" },
+      { stayId: stay.id, forecast: "true", context: stay.context },
+      { tripId: "trip-open", forecast: "1", context: stay.context },
+    ]
+    for (const query of queries) assert.equal((await read(db, query)).status, 400, JSON.stringify(query))
+  })
+  it("contexte périmé refusé 409 ; session d'une autre société : refus, aucun itinéraire ni prix demandé", async () => {
+    const db = edgeHandover()
+    const [stay] = await listFor(db)
+    const stale = await read(db, { stayId: stay.id, forecast: "1", context: "v1-0123456789abcdef" })
+    assert.deepEqual([stale.status, (await stale.json()).code], [409, "STAY_CONTEXT_CHANGED"])
+    const provider = fakeFetch()
+    const foreign = await read(db, { stayId: stay.id, forecast: "1", context: stay.context }, ADMIN, provider.fn)
+    assert.ok(foreign.status >= 400 && foreign.status < 500, String(foreign.status))
+    assert.deepEqual(provider.calls, [])
+  })
+  it("séjour sans historique d'affectation : refusé aussi en prévision (409 STAY_NO_HISTORY)", async () => {
+    const db = new FuelDb()
+    db.periods = []
+    db.inner.state.trucks.find((t) => t.id === GALYA_TRUCK)!.teamId = "team-g"
+    const [stay] = await listFor(db)
+    const response = await read(db, { stayId: stay.id, forecast: "1", context: stay.context })
+    assert.deepEqual([response.status, (await response.json()).code], [409, "STAY_NO_HISTORY"])
   })
 })

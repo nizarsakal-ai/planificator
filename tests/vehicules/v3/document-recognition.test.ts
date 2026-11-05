@@ -103,7 +103,7 @@ describe("règles d'extraction par rubrique (textes synthétiques)", () => {
     const p = extractVehicleDocumentFields({ category: "REPAIR_MAINTENANCE", text: GARAGE_INVOICE, truck })
     assert.deepEqual(values(p), { issuedOn: "2026-03-03", issuerName: "GARAGE EXEMPLE AUTOMOBILES", referenceNumber: "F2026-0153", mileage: 120512 })
     assert.equal(p.fields.mileage!.confidence, "TO_CHECK")
-    assert.deepEqual(p.observations, ["Montant TTC lu : 180,00 €"])
+    assert.deepEqual(p.observations, ["Montant TTC lu : 180,00 (devise à vérifier)"])
   })
   it("ticket de carburant : enseigne, date à deux chiffres, ticket, kilométrage, montant et litres", () => {
     const p = extractVehicleDocumentFields({ category: "EXPENSE_RECEIPT", text: FUEL_TICKET, truck })
@@ -271,7 +271,7 @@ describe("formulaire : préremplissage sans écraser les saisies", () => {
   it("remplacement : les valeurs de la version précédente cèdent la place au nouveau fichier ; observations complétées", () => {
     const previous = { ...EMPTY, validFrom: "2025-01-01", validUntil: "2025-12-31", observations: "Franchise 300 €" }
     const { form } = applyRecognition(previous, new Set(), proposalFor("REPAIR_MAINTENANCE", GARAGE_INVOICE), "REPAIR_MAINTENANCE")
-    assert.equal(form.observations, "Franchise 300 €\nMontant TTC lu : 180,00 €")
+    assert.equal(form.observations, "Franchise 300 €\nMontant TTC lu : 180,00 (devise à vérifier)")
     assert.equal(form.mileage, "120512")
     const again = applyRecognition(form, new Set(), proposalFor("REPAIR_MAINTENANCE", GARAGE_INVOICE), "REPAIR_MAINTENANCE")
     assert.equal(again.form.observations, form.observations)
@@ -402,13 +402,13 @@ describe("R2 point 7 — montant TTC : jamais un HT ou une TVA de la ligne suiva
     ["TOTAL 100,00 HT", null],
     ["TOTAL (HT) 100,00", null],
     ["TOTAL HORS TAXES 100,00", null],
-    ["TOTAL\nHT 100,00\nTOTAL TTC 120,00", "Montant TTC lu : 120,00 €"],
-    ["TOTAL\nTTC 120,00", "Montant TTC lu : 120,00 €"],
-    ["TOTAL 120,00 TTC", "Montant TTC lu : 120,00 €"],
-    ["TOTAL TOUTES TAXES 120,00", "Montant TTC lu : 120,00 €"],
-    ["NET A PAYER\n120,00", "Montant TTC lu : 120,00 €"],
-    ["TOTAL 120,00", "Montant total lu (TTC non indiqué, à vérifier) : 120,00 €"],
-    ["Total HT 100,00\nTVA 20 % 20,00\nTotal TTC 120,00", "Montant TTC lu : 120,00 €"],
+    ["TOTAL\nHT 100,00\nTOTAL TTC 120,00", "Montant TTC lu : 120,00 (devise à vérifier)"],
+    ["TOTAL\nTTC 120,00", "Montant TTC lu : 120,00 (devise à vérifier)"],
+    ["TOTAL 120,00 TTC", "Montant TTC lu : 120,00 (devise à vérifier)"],
+    ["TOTAL TOUTES TAXES 120,00", "Montant TTC lu : 120,00 (devise à vérifier)"],
+    ["NET A PAYER\n120,00", "Montant TTC lu : 120,00 (devise à vérifier)"],
+    ["TOTAL 120,00", "Montant total lu (TTC non indiqué, à vérifier) : 120,00 (devise à vérifier)"],
+    ["Total HT 100,00\nTVA 20 % 20,00\nTotal TTC 120,00", "Montant TTC lu : 120,00 (devise à vérifier)"],
   ]
   for (const [text, expected] of cases) it(`${JSON.stringify(text)} → ${expected ?? "aucun montant"}`, () => assert.equal(observation(text), expected))
 })

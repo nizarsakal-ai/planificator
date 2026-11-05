@@ -21,10 +21,12 @@ export interface VehicleSheetProps {
   /** Lecture automatique des pièces au choix du fichier (drapeau serveur, désactivé par défaut). */
   recognitionEnabled?: boolean
   initialTab?: string | null
+  /** Société du camion, pour rattacher un ticket lu à la dépense préremplie (null : passage désactivé). */
+  expenseHandoff?: { companyId: string } | null
 }
 
 /** Fiche camion : identité et onglets. Le lot Documents est le premier onglet ; les suivants arrivent par lots. */
-export function VehicleSheet({ truck, canManage, recognitionEnabled = false, initialTab }: VehicleSheetProps) {
+export function VehicleSheet({ truck, canManage, recognitionEnabled = false, initialTab, expenseHandoff = null }: VehicleSheetProps) {
   const tab = resolveSheetTab(initialTab)
   return <div className="space-y-5">
     <Link href="/vehicules" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"><ArrowLeft className="h-4 w-4" aria-hidden="true" />Retour aux véhicules</Link>
@@ -41,6 +43,6 @@ export function VehicleSheet({ truck, canManage, recognitionEnabled = false, ini
       </CardContent>
     </Card>
     <VehicleWorkspaceNav truckId={truck.id} active="documents" canManage={canManage} />
-    {tab === "documents" && <VehicleDocumentsTab truckId={truck.id} canManage={canManage} recognitionEnabled={recognitionEnabled && canManage} />}
+    {tab === "documents" && <VehicleDocumentsTab truckId={truck.id} canManage={canManage} recognitionEnabled={recognitionEnabled && canManage} expenseHandoff={canManage ? expenseHandoff : null} />}
   </div>
 }

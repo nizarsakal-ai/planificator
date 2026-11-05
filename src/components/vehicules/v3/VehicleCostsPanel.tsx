@@ -4,12 +4,13 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { companyCivilTimeToIso } from "@/lib/vehicules/v3/tour-time"
 import type { VehicleCostsDto,TripCostsDto } from "@/lib/vehicules/v3/cost-service"
 import { VehicleFuelEstimate } from "./VehicleFuelEstimate"
+import { TICKET_FIELD_LABELS, applyTicketDraft, draftDocumentAllowed, takeTicketDraft, ticketDraftError, withdrawTicketFields, type TicketDraft, type TicketFieldName } from "./expense-ticket-handoff"
 import { applyEstimateToForm, currencyConflict, emptyEstimateState, liveProvenance, notesWithProvenance, readExpenseForm, type EstimateFormState, type ExpenseFieldName, type ExpenseProposal } from "./vehicle-fuel-estimate-ui"
 interface Expense { documentVersionId?:string|null; maintenanceEntryId?:string|null; id: string; category: string; occurredAt: string; amount: string; currency: string; litres: string | null; mileageObservation: number | null; supplier: string | null; reference: string | null; notes: string | null; status: string; revision: number; sourceExpenseReportId: string | null; sourceWarning: string | null; allocations:{id:string;mileageTripId:string|null;amount:string;label:string}[]; duplicateCandidates: { id: string; truckId: string;label:string }[] }
 const names: Record<string, string> = { FUEL: "Carburant", MAINTENANCE: "Entretien / réparation", INSURANCE: "Assurance", OTHER: "Autres", PENDING: "À valider", APPROVED: "Admise", REJECTED: "Refusée", CANCELLED: "Annulée" }
 const field = "block border rounded p-2 w-full text-black bg-white"
 const button = "border rounded px-3 py-2 disabled:opacity-50"
-export function VehicleCostsPanel({ truckId, timeZone, fuelEstimateEnabled = false }: { truckId: string; timeZone:string; fuelEstimateEnabled?: boolean }) {
+export function VehicleCostsPanel({ truckId, companyId = null, timeZone, fuelEstimateEnabled = false }: { truckId: string; companyId?: string | null; timeZone:string; fuelEstimateEnabled?: boolean }) {
   const companyDate=(value:string|Date)=>new Intl.DateTimeFormat("en-CA",{timeZone,year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(value))
   const today=companyDate(new Date()), first=today.slice(0,8)+"01"
   const normalizeDecimal=(value:FormDataEntryValue|null)=>String(value??"").trim().replace(",",".")
@@ -44,6 +45,17 @@ export function VehicleCostsPanel({ truckId, timeZone, fuelEstimateEnabled = fal
     setEstimated((list) => list.length === names.length && list.every((n, i) => n === names[i]) ? list : names)
     setWithheld(result.withheld.length > 0)
   }, [today])
+  // Ticket lu dans Documents (?ticket=identifiant opaque) : brouillon lu une seule fois, appliqué seulement après le
+  // chargement des justificatifs et si sa version exacte y est proposée ; sinon rien n'est prérempli.
+  const [pendingTicket, setPendingTicket] = useState<TicketDraft | null>(null), [ticket, setTicket] = useState<{ draft: TicketDraft; title: string; fields: TicketFieldName[]; kept: TicketFieldName[]; notices: string[] } | null>(null), [ticketError, setTicketError] = useState("")
+  useEffect(() => {
+    const url = new URL(window.location.href), id = url.searchParams.get("ticket")
+    if (!id) return
+    url.searchParams.delete("ticket"); window.history.replaceState(window.history.state, "", url.toString())
+    let taken: ReturnType<typeof takeTicketDraft>
+    try { taken = companyId ? takeTicketDraft(window.sessionStorage, { id, companyId, truckId, now: Date.now() }) : { ok: false, reason: "SCOPE" } } catch { taken = { ok: false, reason: "MISSING" } }
+    if (taken.ok) setPendingTicket(taken.draft); else setTicketError(ticketDraftError(taken.reason))
+  }, [companyId, truckId])
   const base = `/api/trucks/${encodeURIComponent(truckId)}`
   const load = useCallback(async (signal?:AbortSignal) => {
     setError("");setCosts(null)
@@ -57,6 +69,30 @@ export function VehicleCostsPanel({ truckId, timeZone, fuelEstimateEnabled = fal
   }, [base, from, to, currency,timeZone])
   useEffect(() => {const controller=new AbortController();void load(controller.signal).catch(e=>{if(!controller.signal.aborted)setError(e instanceof Error&&e.message.startsWith("Accès refusé")?e.message:"La période est invalide ou le chargement est interrompu. Vérifiez les dates puis réessayez.")});return()=>controller.abort()},[load])
   useEffect(()=>{const controller=new AbortController();setDocuments([]);setMaintenance([]);setDocumentError("");setMaintenanceError("");setDocumentLoading(true);setMaintenanceLoading(true);void fetch(`${base}/documents`,{cache:"no-store",signal:controller.signal}).then(async r=>{if(!r.ok)throw new Error();const data=await r.json();if(!controller.signal.aborted)setDocuments(data.documents)}).catch(()=>{if(!controller.signal.aborted)setDocumentError("Les justificatifs privés sont indisponibles. Les liens déjà enregistrés seront conservés.")}).finally(()=>{if(!controller.signal.aborted)setDocumentLoading(false)});void fetch(`${base}/maintenance`,{cache:"no-store",signal:controller.signal}).then(async r=>{if(!r.ok)throw new Error();const data=await r.json();if(!controller.signal.aborted)setMaintenance(data.history)}).catch(()=>{if(!controller.signal.aborted)setMaintenanceError("Les interventions sont indisponibles. Les liens déjà enregistrés seront conservés.")}).finally(()=>{if(!controller.signal.aborted)setMaintenanceLoading(false)});return()=>controller.abort()},[base])
+  useEffect(() => {
+    if (!pendingTicket || documentLoading) return
+    const draft = pendingTicket, form = expenseFormRef.current
+    setPendingTicket(null)
+    const document = documents.find((d) => d.id === draft.documentId)
+    if (!form || edit || documentError || !document || !draftDocumentAllowed(draft, documents)) { setTicketError(ticketDraftError("DOCUMENT")); return }
+    // Saisies faites pendant le chargement (montant, date, justificatif…) : conservées, jamais écrasées par le ticket.
+    const result = applyTicketDraft(form, draft, touchedRef.current)
+    if (!result.applied) { setTicketError(ticketDraftError("LINK_CHOSEN")); return }
+    // Le ticket constaté prime : l'estimation ne détient plus aucun champ et ne réécrira jamais ceux du ticket.
+    estimateRef.current = { form: null, state: emptyEstimateState(), proposal: null }; setEstimated([]); setWithheld(false)
+    for (const name of result.written) touchedRef.current.add(name)
+    setTicket({ draft, title: document.title, fields: result.written, kept: result.kept, notices: result.warnings })
+  }, [pendingTicket, documentLoading, documentError, documents, edit])
+  /** Autre justificatif (ou « Aucun ») choisi après le préremplissage : les valeurs du ticket encore intactes sont retirées. */
+  const ticketLinkChanged = (form: HTMLFormElement) => {
+    if (!ticket) return
+    const link = form.elements.namedItem("documentVersionId") as HTMLSelectElement | null
+    if (!link || link.value === ticket.draft.versionId) return
+    const removed = withdrawTicketFields(form, ticket.fields, ticket.draft.values, { category: "FUEL", date: today, currency })
+    for (const name of removed) touchedRef.current.delete(name)
+    setTicket(null)
+    setTicketError(`Justificatif changé : les valeurs lues sur « ${ticket.title} » encore intactes ont été retirées ; vos saisies sont conservées.`)
+  }
   async function command(payload: unknown) {
     if (busy) return
     setBusy(true); setError(""); setMessage("")
@@ -68,6 +104,8 @@ export function VehicleCostsPanel({ truckId, timeZone, fuelEstimateEnabled = fal
       if (!response.ok) { if (response.status < 500) requestRef.current = null; throw new Error(response.status===409?"La dépense ou sa source a changé. Rechargez et vérifiez la version avant de réessayer.":"Opération refusée. Vérifiez les informations et vos droits, puis réessayez.") }
       requestRef.current = null
       setMessage("Dépense enregistrée. Une correction exige une nouvelle approbation."); setTarget(null); setEdit(null); setReason("")
+      // Dépense issue d'un ticket : formulaire vidé pour qu'un second envoi ne la crée pas deux fois.
+      if (ticket) { expenseFormRef.current?.reset(); touchedRef.current = new Set(); setTicket(null) }
       await load()
     } catch (e) { setError(e instanceof Error ? e.message : "Erreur de connexion") } finally { setBusy(false) }
   }
@@ -107,8 +145,15 @@ export function VehicleCostsPanel({ truckId, timeZone, fuelEstimateEnabled = fal
     </section>
     <section className="border rounded p-4 space-y-3"><h2 className="text-xl font-semibold">Coûts affectés à un trajet</h2><p>Uniquement les imputations explicites au trajet choisi, quelle que soit la date d’achat. Ces montants proviennent du registre et ne sont jamais ajoutés au total du véhicule. Le calcul ne mesure pas la consommation réelle.</p><label>Trajet récent<select className={field} value={costTripId} onChange={e=>{setCostTripId(e.target.value);setTripCosts(null)}}><option value="">Choisir un trajet</option>{tripCandidates.map(t=><option key={t.id} value={t.id}>{t.label}</option>)}</select></label><button className={button} disabled={busy||!costTripId} onClick={()=>void loadTripCosts()}>Afficher le coût affecté dans la devise {currency}</button>{tripCosts&&<><p>{tripCosts.label} — {tripCosts.actualKm??"distance indisponible"} {tripCosts.actualKm!==null&&"km réels"}</p><p>Coût affecté : {tripCosts.total} {tripCosts.currency}, dont carburant : {tripCosts.totals.FUEL} {tripCosts.currency}.</p><p>Coût affecté par km : {tripCosts.costPerKm??"Non calculable (trajet ouvert, distance inconnue ou zéro kilomètre)"} {tripCosts.costPerKm&&`${tripCosts.currency}/km`}. Carburant affecté par km : {tripCosts.fuelAllocatedCostPerKm??"Non calculable"}.</p><p>Indicateurs partiels : {tripCosts.admittedAllocations} imputation(s) admise(s), {tripCosts.excludedSource} source(s) à rapprocher, {tripCosts.excludedCurrency} imputation(s) dans une autre devise et {tripCosts.excludedPending} dépense(s) non admise(s) exclues.</p></>}</section>
     <section className="border rounded p-4"><h2 className="text-xl font-semibold">{edit ? "Modifier une dépense" : "Proposer une dépense"}</h2>
-      <form ref={expenseFormRef} onInput={(e) => { const name = (e.target as HTMLInputElement).name; if (!name) return; touchedRef.current.add(name); setEstimated((list) => list.filter((n) => n !== name)); if (name === "currency" && estimateRef.current.proposal) applyEstimate(estimateRef.current.proposal, false) }} onKeyDown={preventImplicitEnter} key={edit?.id ?? "new"} onSubmit={submitExpense} className="grid md:grid-cols-2 gap-3">
-        {fuelEstimateEnabled && !edit && <VehicleFuelEstimate truckId={truckId} today={today} trips={tripCandidates} onPropose={applyEstimate} />}
+      {ticketError && <p role="status" className="text-sm text-amber-800">{ticketError}</p>}
+      {ticket && <div role="status" className="mb-3 space-y-1 rounded border border-slate-300 bg-slate-50 p-3 text-sm">
+        <p className="font-medium">Valeurs lues sur le ticket « {ticket.title} », justificatif lié. Vérifiez-les avant de valider : la dépense reste « À valider ».</p>
+        {ticket.fields.length > 0 && <p>{ticket.fields.map((n) => `${TICKET_FIELD_LABELS[n]} (${ticket.draft.confidence[n] === "READ" ? "lu sur le ticket" : ticket.draft.confidence[n] === "TO_CHECK" ? "à vérifier" : "votre saisie"})`).join(", ")}.</p>}
+        {ticket.kept.length > 0 && <p>Votre saisie est conservée pour : {ticket.kept.map((n) => TICKET_FIELD_LABELS[n]).join(", ")}.</p>}
+        {[...ticket.draft.warnings, ...ticket.notices].map((w) => <p key={w} className="text-amber-800">{w}</p>)}
+      </div>}
+      <form ref={expenseFormRef} onInput={(e) => { const name = (e.target as HTMLInputElement).name; if (!name) return; touchedRef.current.add(name); setEstimated((list) => list.filter((n) => n !== name)); if (name === "documentVersionId") ticketLinkChanged(e.currentTarget); else setTicket((t) => t && t.fields.includes(name as TicketFieldName) ? { ...t, fields: t.fields.filter((n) => n !== name) } : t); if (name === "currency" && estimateRef.current.proposal) applyEstimate(estimateRef.current.proposal, false) }} onKeyDown={preventImplicitEnter} key={edit?.id ?? "new"} onSubmit={submitExpense} className="grid md:grid-cols-2 gap-3">
+        {fuelEstimateEnabled && !edit && !ticket && !pendingTicket && <VehicleFuelEstimate truckId={truckId} today={today} trips={tripCandidates} onPropose={applyEstimate} />}
         {fuelEstimateEnabled && !edit && estimated.length > 0 && <p role="status" className="md:col-span-2 text-sm text-amber-800">Champs préremplis par l'estimation, à vérifier : {estimated.map((n) => ({ category: "catégorie", date: "date", amount: "montant", litres: "litres", mileage: "compteur", supplier: "fournisseur", notes: "notes" })[n]).join(", ")}. Remplacez par les valeurs du ticket dès qu'il est disponible.</p>}
         {fuelEstimateEnabled && !edit && withheld && <p role="status" className="md:col-span-2 text-sm text-amber-800">Montant estimé non repris : il est calculé en euros et la devise de cette dépense n'est pas EUR (aucune conversion).</p>}
         <label>Catégorie<select name="category" className={field} defaultValue={edit?.category ?? "FUEL"}>{["FUEL", "MAINTENANCE", "INSURANCE", "OTHER"].map(k => <option key={k} value={k}>{names[k]}</option>)}</select></label>

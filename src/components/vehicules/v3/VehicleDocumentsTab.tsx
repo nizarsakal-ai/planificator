@@ -12,6 +12,7 @@ import {
 } from "./vehicle-document-ui"
 import { applyRecognition, createLatestOnly, recognitionChecks, resetUntouched, recognitionError, recognitionFieldLabel, recognitionSummary, type FilledFields, type RecognizableKey } from "./vehicle-document-recognition-ui"
 import type { RecognitionProposal } from "@/lib/vehicules/v3/document-recognition-domain"
+import { saveTicketDraft, ticketExpenseValues, withDocumentCorrections, type TicketValues } from "./expense-ticket-handoff"
 
 const FIELD = "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
 
@@ -23,7 +24,7 @@ const EMPTY_FORM: FormState = { title: "", issuedOn: "", validFrom: "", validUnt
 type Recognition = { state: "idle" } | { state: "reading" } | { state: "done"; proposal: RecognitionProposal; filled: FilledFields } | { state: "error"; message: string }
 
 /** Onglet Documents de la fiche camion : lecture à la demande, commandes idempotentes, aucune URL de fichier persistée côté client. */
-export function VehicleDocumentsTab({ truckId, canManage, recognitionEnabled = false }: { truckId: string; canManage: boolean; recognitionEnabled?: boolean }) {
+export function VehicleDocumentsTab({ truckId, canManage, recognitionEnabled = false, expenseHandoff = null }: { truckId: string; canManage: boolean; recognitionEnabled?: boolean; expenseHandoff?: { companyId: string } | null }) {
   const id = useId()
   const [data, setData] = useState<DocumentsSnapshot | null>(null)
   const [loading, setLoading] = useState(false)
@@ -38,6 +39,8 @@ export function VehicleDocumentsTab({ truckId, canManage, recognitionEnabled = f
   const [settings, setSettings] = useState<{ thresholdsDays: number[]; revision: number } | null>(null)
   const [maintenance,setMaintenance]=useState<{id:string;kind:string;occurredAt:string;mileage:number}[]>([]),[maintenanceError,setMaintenanceError]=useState(""),[maintenanceLoading,setMaintenanceLoading]=useState(false)
   const [thresholdsInput, setThresholdsInput] = useState("")
+  // Ticket enregistré et lu : valeurs structurées prêtes pour une dépense (jamais créée sans l'opérateur).
+  const [ticketReady, setTicketReady] = useState<{ documentId: string; versionId: string; ticket: TicketValues } | null>(null)
   const pending = useRef<{ fingerprint: string; key: string } | null>(null)
   // Lecture automatique : chaque lecture porte un numéro ; une réponse dont le numéro n'est plus le courant (fichier
   // changé, formulaire fermé ou rouvert) est ignorée. Les champs modifiés à la main ne sont jamais réécrits.
@@ -114,17 +117,18 @@ export function VehicleDocumentsTab({ truckId, canManage, recognitionEnabled = f
     try {
       const response = await fetch(path, init)
       const body = await response.json().catch(() => ({}))
-      if (!response.ok) { if (response.status < 500) pending.current = null; setError(documentUiError(body.code)); return false }
+      if (!response.ok) { if (response.status < 500) pending.current = null; setError(documentUiError(body.code)); return null }
       pending.current = null
       setNotice(success)
       await refresh()
-      return true
-    } catch { setError("Connexion interrompue. Réessayez la même action : elle ne sera pas enregistrée deux fois."); return false }
+      return body as Record<string, unknown>
+    } catch { setError("Connexion interrompue. Réessayez la même action : elle ne sera pas enregistrée deux fois."); return null }
     finally { setBusy(false) }
   }
 
-  const openAdd = (category: VehicleDocumentCategoryCode) => { const initial = { ...EMPTY_FORM, title: VEHICLE_DOCUMENT_CATEGORY_LABELS[category] }; initialForm.current = initial; setDialog({ mode: "add", category }); setForm(initial); setFile(null); setError("") }
+  const openAdd = (category: VehicleDocumentCategoryCode) => { setTicketReady(null); const initial = { ...EMPTY_FORM, title: VEHICLE_DOCUMENT_CATEGORY_LABELS[category] }; initialForm.current = initial; setDialog({ mode: "add", category }); setForm(initial); setFile(null); setError("") }
   const openReplace = (document: DocumentView, mode: "replace" | "edit" = "replace") => {
+    setTicketReady(null)
     const v = document.currentVersion
     setDialog({ mode, document })
     const initial = { title: document.title, issuedOn: v?.issuedOn ?? "", validFrom: v?.validFrom ?? "", validUntil: v?.validUntil ?? "", issuerName: v?.issuerName ?? "", referenceNumber: v?.referenceNumber ?? "", observations: v?.observations ?? "", mileage: v?.mileage?.toString() ?? "", maintenanceEntryId: v?.maintenanceEntryId ?? "" }
@@ -160,8 +164,21 @@ export function VehicleDocumentsTab({ truckId, canManage, recognitionEnabled = f
       path = dialog.mode === "add" ? base : `${base}/${encodeURIComponent(dialog.document.id)}/versions`
       init = { method: "POST", headers: { "Idempotency-Key": pending.current.key }, body }
     }
-    const ok = await command(path, init, dialog.mode === "add" ? "Pièce enregistrée. Elle reste « à vérifier » tant qu'elle n'est pas validée." : "Modifications enregistrées dans une nouvelle version à vérifier. L'ancienne reste dans l'historique.")
-    if (ok) setDialog(null)
+    // Lecture du fichier enregistré (même fichier : toute nouvelle sélection relance la lecture), ticket de dépense seulement.
+    const reading = category === "EXPENSE_RECEIPT" && file && recognition.state === "done" && recognition.proposal.category === "EXPENSE_RECEIPT" ? recognition.proposal.expense ?? null : null
+    const saved = await command(path, init, dialog.mode === "add" ? "Pièce enregistrée. Elle reste « à vérifier » tant qu'elle n'est pas validée." : "Modifications enregistrées dans une nouvelle version à vérifier. L'ancienne reste dans l'historique.")
+    if (!saved) return
+    const documentId = typeof saved.documentId === "string" ? saved.documentId : null, versionId = typeof saved.versionId === "string" ? saved.versionId : null
+    setTicketReady(reading && expenseHandoff && documentId && versionId ? { documentId, versionId, ticket: withDocumentCorrections(ticketExpenseValues(reading), metadata, touched.current) } : null)
+    setDialog(null)
+  }
+  /** Ouvre le formulaire de dépense prérempli : brouillon éphémère (session, 10 min, lecture unique), identifiant opaque. */
+  const openTicketExpense = () => {
+    if (!ticketReady || !expenseHandoff) return
+    try {
+      const draftId = saveTicketDraft(window.sessionStorage, { id: crypto.randomUUID(), companyId: expenseHandoff.companyId, truckId, documentId: ticketReady.documentId, versionId: ticketReady.versionId, ...ticketReady.ticket }, Date.now())
+      window.location.assign(`/vehicules/${encodeURIComponent(truckId)}/couts?ticket=${draftId}`)
+    } catch { setError("Préremplissage indisponible dans ce navigateur : saisissez la dépense dans Carburant et coûts.") }
   }
 
   const verify = (document: DocumentView) => document.currentVersion && command(`${base}/${encodeURIComponent(document.id)}/verify`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedRevision: document.revision, versionId: document.currentVersion.id }) }, "Version validée.")
@@ -213,6 +230,10 @@ export function VehicleDocumentsTab({ truckId, canManage, recognitionEnabled = f
     {loading && <p role="status" className="text-sm text-slate-500">Chargement des documents…</p>}
     {error && !dialog && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
     {notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
+    {ticketReady && <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 p-3 text-sm">
+      <span>Ticket lu : la dépense peut être préremplie avec ce justificatif lié. Vous vérifierez avant de la valider.</span>
+      <Button type="button" size="sm" disabled={busy} onClick={openTicketExpense}>Créer la dépense depuis ce ticket</Button>
+    </div>}
     {data && !data.truckActive && <p className="text-sm text-slate-500">Véhicule archivé : documents consultables, ajout et remplacement désactivés.</p>}
     {data && groupDocumentsByCategory(data).map((group) => <VehicleDocumentCategorySection key={group.code} truckId={truckId} category={group} active={group.active} archived={group.archived}
       canManage={canManage} truckActive={data.truckActive} busy={busy} expandedId={expandedId} versions={versions}

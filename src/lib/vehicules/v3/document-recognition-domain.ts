@@ -40,6 +40,31 @@ export interface RecognitionProposal {
   checks: RecognitionCheck[]
   /** Le document ressemble à une autre rubrique que celle choisie. */
   otherCategory: VehicleDocumentCategoryCode | null
+  /**
+   * Ticket ou facture de dépense (`EXPENSE_RECEIPT`) : valeurs structurées pour préremplir une dépense, en plus des
+   * observations (inchangées). Absent pour les autres rubriques. Aucune valeur n'est déduite si elle n'est pas lue.
+   */
+  expense?: ExpenseReading | null
+}
+
+/**
+ * Valeurs d'un ticket de dépense. Montant : total TTC lu (`READ`) ou total sans mention TTC (`TO_CHECK`, `ttc` faux) ;
+ * jamais un montant HT ni de TVA. Devise : lue seulement si une seule devise figure sur le ticket ; absente
+ * (`UNKNOWN`) ou plusieurs (`CONFLICT`) : signalée, jamais supposée ni convertie.
+ */
+export interface ExpenseReading {
+  amount?: ProposedField<string> & { ttc: boolean }
+  /** AMBIGUOUS : symbole « $ » sans pays (USD, CAD, AUD…). */
+  currency: { value: string | null; status: "READ" | "UNKNOWN" | "CONFLICT" | "AMBIGUOUS" }
+  /** Le ticket nomme explicitement un carburant (gazole, SP95…) ; sinon ni catégorie Carburant ni litres. */
+  fuel: boolean
+  /** Avoir, remboursement, total ou volume négatif : jamais repris comme une dépense positive. */
+  refund?: true
+  litres?: ProposedField<string>
+  date?: ProposedField<string>
+  supplier?: ProposedField<string>
+  reference?: ProposedField<string>
+  mileage?: ProposedField<number>
 }
 
 export interface RecognitionInput {
@@ -131,8 +156,8 @@ const TTC_MARK = /\bT\.?\s?T\.?\s?C\.?(?![A-Z])|\bTOUTES\s+TAXES\b|\bNET\s+A\s+P
  * « TTC non indiqué ». Le texte qui précède le montant retenu — sur la ligne du libellé OU sur la ligne suivante quand le
  * montant y est lu — ne doit porter aucune marque HT/TVA : « TOTAL » puis « HT 100,00 » n'est jamais un TTC.
  */
-function amountIn(lines: string[]): { value: string; ttc: boolean } | null {
-  let weak: string | null = null
+function amountIn(lines: string[]): { value: string; ttc: boolean; negative: boolean } | null {
+  let weak: { value: string; negative: boolean } | null = null
   const valueOf = (m: RegExpExecArray) => `${m[1].replace(/[ .]/g, "")},${m[2]}`
   for (let i = 0; i < lines.length; i++) {
     const label = TOTAL_LABEL.exec(lines[i])
@@ -151,15 +176,73 @@ function amountIn(lines: string[]): { value: string; ttc: boolean } | null {
     if (!match) continue
     // « TOTAL 100,00 HT » : la marque peut suivre le montant.
     if (NOT_TTC.test(prefix) || /^\s*(?:€|EUR|EUROS?)?\s*\(?\s*(?:H\.?\s?T\.?(?![A-Z])|HORS\s+TAXES?)/.test(after)) continue
+    // Signe : même préfixe que la marque HT/TTC (ligne du libellé, ou ligne suivante), terminé par « - » ou « − ».
+    const negative = /[-−]\s*$/.test(prefix)
     const strong = !/^TOTAL$|^MONTANT$/.test(label[1]) || TTC_MARK.test(prefix) || /^\s*(?:€|EUR|EUROS?)?\s*\(?\s*T\.?\s?T\.?\s?C/.test(after)
-    if (strong) return { value: valueOf(match), ttc: true }
-    weak ??= valueOf(match)
+    if (strong) return { value: valueOf(match), ttc: true, negative }
+    weak ??= { value: valueOf(match), negative }
   }
-  return weak ? { value: weak, ttc: false } : null
+  return weak ? { value: weak.value, ttc: false, negative: weak.negative } : null
 }
-const formatAmount = (value: string) => {
+/** Montant lu suivi de SA devise : « € » seulement si l'euro est lu ; sinon le code lu, ou « devise à vérifier ». */
+const formatAmount = (value: string, currency: ExpenseReading["currency"]) => {
   const [units, cents] = value.split(",")
-  return `${units.replace(/\B(?=(\d{3})+(?!\d))/g, " ")},${cents} €`
+  const unit = currency.status !== "READ" ? " (devise à vérifier)" : currency.value === "EUR" ? " €" : ` ${currency.value}`
+  return `${units.replace(/\B(?=(\d{3})+(?!\d))/g, " ")},${cents}${unit}`
+}
+
+/**
+ * Devises écrites sur le ticket : code ou symbole sans ambiguïté. Le dollar n'est reconnu qu'avec son pays (USD, US$,
+ * CAD, C$, CA$, AUD, A$, AU$) ; un « $ » seul est AMBIGU (dollar de quel pays ?). Rien n'est supposé ni converti.
+ */
+const CURRENCY_MARKS: [string, RegExp][] = [
+  ["EUR", /€|\bEUR\b|\bEUROS?\b/], ["CHF", /\bCHF\b/], ["GBP", /£|\bGBP\b/],
+  ["USD", /\bUSD\b|\bUS\$/], ["CAD", /\bCAD\b|\bCA?\$/], ["AUD", /\bAUD\b|\bAU?\$/],
+]
+const DOLLARS = new Set(["USD", "CAD", "AUD"])
+function currencyIn(lines: string[]): ExpenseReading["currency"] {
+  let text = lines.join("\n")
+  const found: string[] = []
+  for (const [code, mark] of CURRENCY_MARKS) {
+    if (!mark.test(text)) continue
+    found.push(code)
+    text = text.replace(new RegExp(mark.source, "g"), " ")
+  }
+  // « $ » restant après retrait des dollars qualifiés : seul, ambigu ; avec un seul dollar qualifié, cohérent.
+  const bareDollar = text.includes("$")
+  if (bareDollar && !found.length) return { value: null, status: "AMBIGUOUS" }
+  if (bareDollar && !(found.length === 1 && DOLLARS.has(found[0]))) return { value: null, status: "CONFLICT" }
+  return found.length === 1 ? { value: found[0], status: "READ" } : { value: null, status: found.length ? "CONFLICT" : "UNKNOWN" }
+}
+
+/** Indice carburant explicite (jamais l'enseigne seule, ni « TOTAL TTC », ni une unité générique ; AdBlue exclu). */
+const FUEL_HINT = /\b(GAZOLE|GASOIL|DIESEL|SP ?95(?:[- ]?E10)?|SP ?98|E10|E85|SANS PLOMB|SUPERCARBURANT|SUPERETHANOL|GPLC?|B7|B10|HVO|XTL|CARBURANT)\b/
+const LITRES_WITH_UNIT = /\b(\d{1,4})[,.](\d{1,3})\s?(?:L|LITRES?|LTR)\b/
+/**
+ * Litres de CARBURANT pour une dépense : sur la ligne du carburant avec l'unité, ou sur une ligne « volume / quantité »
+ * avec l'unité quand le ticket nomme un carburant. Jamais une quantité sans unité, jamais sans indice carburant.
+ */
+function fuelLitresIn(lines: string[]): string | null {
+  if (!lines.some((line) => FUEL_HINT.test(line))) return null
+  const candidates = [...lines.filter((line) => FUEL_HINT.test(line)), ...lines.filter((line) => /\b(VOLUME|QUANTITE|QTE)\b/.test(line))]
+  for (const line of candidates) {
+    const match = LITRES_WITH_UNIT.exec(line)
+    if (match && Number(match[1]) > 0 && Number(match[1]) < 2000) return `${match[1]},${match[2]}`
+  }
+  return null
+}
+
+/**
+ * Avoir ou remboursement : titre « AVOIR » en début de ligne, « facture d'avoir », « note de crédit », remboursement
+ * (hors mentions négatives du type « pas de remboursement », « non remboursable »), ou total / volume NÉGATIF. Une
+ * remise négative sur un article d'un panier au total positif n'en est pas un.
+ */
+const REFUND_WORD = /^(?:FACTURE D'?)?AVOIR\b|\bFACTURE D'AVOIR\b|\bNOTE DE CREDIT\b|\bREMBOURSE(?:MENT|E)?\b/
+const REFUND_DENIED = /\b(?:PAS DE|AUCUN|NI|NON|SANS)\s+(?:[A-Z']+\s+){0,2}REMBOURS|\bNON REMBOURSABLES?\b/
+const NEGATIVE_TOTAL = /^(?!.*\b(?:REMISE|SOUS[- ]TOTAL)\b).*\b(?:TOTAL|MONTANT|NET A PAYER)\b.*(?:^|[\s:])[-−]\s?\d/
+const NEGATIVE_VOLUME = /\b(?:VOLUME|QUANTITE|QTE)\b.*[-−]\s?\d|[-−]\s?\d{1,4}[,.]\d{1,3}\s?(?:L|LITRES?|LTR)\b/
+function refundIn(lines: string[]): boolean {
+  return lines.some((line) => (REFUND_WORD.test(line) && !REFUND_DENIED.test(line)) || NEGATIVE_TOTAL.test(line) || NEGATIVE_VOLUME.test(line))
 }
 
 function litresIn(lines: string[]): string | null {
@@ -224,6 +307,9 @@ const INSURERS = ["AXA", "ALLIANZ", "MAAF", "MAIF", "MACIF", "MMA", "GMF", "GROU
 const CT_NETWORKS = ["AUTOSUR", "DEKRA", "SECURITEST", "AUTOVISION", "NORISKO", "CONTROLE TECHNIQUE AUTO", "SGS", "VERIF'AUTO", "AUTOBILAN", "CTPL"]
 const FUEL_BRANDS = ["TOTALENERGIES", "TOTAL ACCESS", "TOTAL", "ESSO", "SHELL", "BP", "AVIA", "AGIP", "ENI", "DYNEFF", "INTERMARCHE", "E.LECLERC", "LECLERC",
   "CARREFOUR", "AUCHAN", "SUPER U", "HYPER U", "SYSTEME U", "CASINO", "GEANT", "ELAN", "AS24", "DKV", "Q8", "VITO", "ARGEDIS"]
+
+/** Ligne de somme, de taxe ou de paiement : un nom d'enseigne qui y figure (« TOTAL ») n'est pas l'émetteur. */
+const SUM_LINE = /\b(TTC|T\.T\.C|HT|H\.T|TVA|A PAYER|MONTANT|SOUS[- ]TOTAL|NET|REMISE|PAIEMENT|ESPECES|RENDU)\b|\d+[,.]\d{2}\b/
 
 function brandIn(lines: string[], names: readonly string[]): string | null {
   for (const line of lines.slice(0, 40)) for (const name of names) {
@@ -386,7 +472,8 @@ function invoice(lines: string[], truck: RecognitionInput["truck"], kind: "REPAI
   const anyDate = datesIn(lines.join("\n"))[0]
   if (dated) draft.fields.issuedOn = read(dated)
   else if (anyDate) draft.fields.issuedOn = toCheck(anyDate)
-  const brand = kind === "EXPENSE_RECEIPT" ? brandIn(lines, FUEL_BRANDS) : null
+  // Enseigne : jamais lue sur une ligne de somme ou de taxe (« TOTAL TTC 100,00 » n'est pas l'enseigne TOTAL).
+  const brand = kind === "EXPENSE_RECEIPT" ? brandIn(lines.filter((line) => !SUM_LINE.test(line)), FUEL_BRANDS) : null
   const header = headerName(lines)
   if (brand) draft.fields.issuerName = read(brand)
   else if (header) draft.fields.issuerName = toCheck(header)
@@ -396,8 +483,10 @@ function invoice(lines: string[], truck: RecognitionInput["truck"], kind: "REPAI
   if (reference) draft.fields.referenceNumber = read(reference)
   const km = mileageIn(lines)
   if (km !== null) draft.fields.mileage = toCheck(km)
-  const amount = amountIn(lines)
-  if (amount) draft.observations.push(amount.ttc ? `Montant TTC lu : ${formatAmount(amount.value)}` : `Montant total lu (TTC non indiqué, à vérifier) : ${formatAmount(amount.value)}`)
+  const amount = amountIn(lines), currency = currencyIn(lines)
+  // Avoir ou remboursement : le montant lu n'est pas une dépense ; dit comme tel, sans signe deviné.
+  if (amount && (refundIn(lines) || amount.negative)) draft.observations.push(`Avoir ou remboursement, à traiter séparément : montant lu ${formatAmount(amount.value, currency)}`)
+  else if (amount) draft.observations.push(amount.ttc ? `Montant TTC lu : ${formatAmount(amount.value, currency)}` : `Montant total lu (TTC non indiqué, à vérifier) : ${formatAmount(amount.value, currency)}`)
   const litres = kind === "EXPENSE_RECEIPT" ? litresIn(lines) : null
   if (litres) draft.observations.push(`Volume lu : ${litres} L`)
   const plate = plateCheck(lines, truck.matricule)
@@ -433,5 +522,30 @@ export function extractVehicleDocumentFields(input: RecognitionInput): Omit<Reco
   }
   const probable = probableCategory(lines)
   return { category: input.category, fields, observations: draft.observations.slice(0, 6), checks: draft.checks,
-    otherCategory: probable && probable !== input.category ? probable : null }
+    otherCategory: probable && probable !== input.category ? probable : null,
+    ...(input.category === "EXPENSE_RECEIPT" ? { expense: expenseReading(lines, fields, !!input.lowConfidence) } : {}) }
+}
+
+/**
+ * Valeurs structurées d'un ticket : mêmes règles de lecture que les observations (montant TTC prioritaire, jamais HT ni
+ * TVA ; litres) et mêmes champs que la proposition (date, fournisseur, référence, kilométrage). Lecture peu sûre :
+ * tout passe « à vérifier ». Le montant n'est pas porteur de devise : celle-ci est lue à part, jamais supposée.
+ */
+function expenseReading(lines: string[], fields: ProposedFields, lowConfidence: boolean): ExpenseReading {
+  const level = <T>(value: T, sure: boolean): ProposedField<T> => sure && !lowConfidence ? read(value) : toCheck(value)
+  const fuel = lines.some((line) => FUEL_HINT.test(line))
+  // Total retenu négatif (même lecture que le montant : signe collé, après « : » ou sur la ligne suivante) = avoir.
+  const totalRead = lines.length ? amountIn(lines) : null
+  const out: ExpenseReading = { currency: currencyIn(lines), fuel, ...(refundIn(lines) || totalRead?.negative ? { refund: true } : {}) }
+  // Avoir ou remboursement : ni montant ni litres proposés (jamais une dépense positive) ; l'observation le dit.
+  const amount = out.refund ? null : totalRead
+  if (amount) out.amount = { ...level(amount.value, amount.ttc), ttc: amount.ttc }
+  // Litres de carburant seulement (indice carburant + unité) : une quantité d'eau ou sans unité n'en est pas.
+  const litres = fuel && !out.refund ? fuelLitresIn(lines) : null
+  if (litres) out.litres = level(litres, true)
+  if (fields.issuedOn) out.date = fields.issuedOn
+  if (fields.issuerName) out.supplier = fields.issuerName
+  if (fields.referenceNumber) out.reference = fields.referenceNumber
+  if (fields.mileage) out.mileage = fields.mileage
+  return out
 }

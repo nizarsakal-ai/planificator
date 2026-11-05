@@ -187,9 +187,11 @@ export const staySelectable = (stay: PlannedStay) => stay.estimable || stay.bloc
  * Paramètres de la requête : seules les décisions prises sont envoyées (aucune valeur par défaut) ; coupures seulement en
  * mode « un aller-retour pour le séjour » ; jours de réaffectation seulement si l'opérateur les a déclarés.
  */
-export function estimateQuery(source: string, fuel: FuelType, decisions?: EstimateDecisions | null, stay?: PlannedStay | null): URLSearchParams {
+export function estimateQuery(source: string, fuel: FuelType, decisions?: EstimateDecisions | null, stay?: PlannedStay | null, options?: { forecast?: boolean }): URLSearchParams {
   const kind = source.slice(0, 5), id = source.slice(5)
   const query = new URLSearchParams({ [kind === "stay:" ? "stayId" : "tripId"]: id, fuel })
+  // Prévision : lecture de l'itinéraire et des prix du séjour affiché, sans AUCUNE décision (rien n'est déclaré).
+  if (options?.forecast && kind === "stay:" && stay) { query.set("forecast", "1"); query.set("context", stay.context); return query }
   if (!decisions) return query
   if (kind === "stay:") {
     if (decisions.mode) query.set("mode", decisions.mode)
@@ -260,13 +262,13 @@ export const STALE_DECISION_CODES = new Set(["STAY_CONTEXT_CHANGED", "STAY_GAPS_
 export function createEstimateRequests(fetchFn: typeof fetch, handlers: EstimateRequestHandlers) {
   const latest = createLatestOnly()
   return {
-    select(truckId: string, source: string, fuel: FuelType, decisions?: EstimateDecisions | null, stay?: PlannedStay | null) {
+    select(truckId: string, source: string, fuel: FuelType, decisions?: EstimateDecisions | null, stay?: PlannedStay | null, options?: { forecast?: boolean }) {
       handlers.onReset()
       if (!source) { latest.cancel(); handlers.onLoading(false); return }
       const { token, signal } = latest.start()
       handlers.onLoading(true)
       const live = () => latest.isCurrent(token)
-      void fetchFn(`/api/trucks/${encodeURIComponent(truckId)}/fuel-estimate?${estimateQuery(source, fuel, decisions, stay)}`, { cache: "no-store", signal })
+      void fetchFn(`/api/trucks/${encodeURIComponent(truckId)}/fuel-estimate?${estimateQuery(source, fuel, decisions, stay, options)}`, { cache: "no-store", signal })
         .then(async (response) => {
           const body = await response.json().catch(() => ({}))
           if (!live()) return
@@ -291,7 +293,7 @@ export function stayLabel(stay: PlannedStay): string {
   const to = stay.returnKnown ? `retour ${dayFr(stay.return)}` : `toujours en cours le ${dayFr(stay.return)}`
   const cuts = stay.gaps.length ? `, ${stay.gaps.length} coupure${stay.gaps.length > 1 ? "s" : ""}` : ""
   const days = stay.departureKnown && stay.returnKnown ? ` (${stay.days} jour${stay.days > 1 ? "s" : ""}${stay.gaps.length ? " planifiés" : ""}${cuts})` : ""
-  const blocked = stay.estimable ? "" : stay.blocked === "HANDOVER" ? " — réaffectation à confirmer" : " — non estimable"
+  const blocked = stay.estimable ? "" : stay.blocked === "HANDOVER" ? " — affectation à vérifier" : " — non estimable"
   return `${stay.worksiteName} — ${from}, ${to}${days}${stay.teamName ? ` — ${stay.teamName}` : ""}${blocked}`
 }
 
@@ -378,11 +380,18 @@ export function priceWarnings(estimate: FuelEstimate, station: FuelStation | nul
   const out: string[] = []
   const days = (a: string, b: string) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000)
   if (station && days(station.updatedAt.slice(0, 10), today) > 7) out.push("Prix de cette station non mis à jour depuis plus de 7 jours.")
-  // Séjour à venir : le prix connu aujourd'hui est une projection.
-  if (estimate.tripDate > today) out.push("Départ à venir : prix actuels, susceptibles d'évoluer d'ici le départ.")
-  else if (days(estimate.tripDate, today) > 7) out.push("Trajet de plus de 7 jours : seul le prix actuel est disponible, pas celui du jour du trajet.")
+  // Séjour à venir : simple information (departureInfo), pas un avertissement.
+  if (estimate.tripDate <= today && days(estimate.tripDate, today) > 7) out.push("Trajet de plus de 7 jours : seul le prix actuel est disponible, pas celui du jour du trajet.")
   return out
 }
+
+/** Départ à venir : information neutre, sans blocage (le prix connu est celui d'aujourd'hui). */
+export function departureInfo(estimate: FuelEstimate, today: string): string | null {
+  return estimate.tripDate > today ? `Prix d'aujourd'hui ; départ prévu le ${dayFr(estimate.tripDate)}.` : null
+}
+
+/** Décisions saisies dans « Modifier les hypothèses » : dès qu'il y en a une, le calcul déclaré remplace la prévision. */
+export const hasDecisions = (d: EstimateDecisions) => d.mode !== null || d.depot || d.handover || Object.keys(d.gaps).length > 0
 
 export function fuelEstimateError(code?: string): string {
   switch (code) {

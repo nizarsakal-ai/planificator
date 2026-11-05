@@ -89,6 +89,13 @@ export interface FuelEstimateQuery {
   depot?: string | null
   /** Séjour réaffecté en journée : jours déclarés `AAAA-MM-JJ,…`, exactement ceux du séjour. */
   handover?: string | null
+  /**
+   * `1` : lecture de PRÉVISION d'un séjour (itinéraire et prix seulement), exigée avec `context` et refusée avec toute
+   * décision (mode, coupures, siège, réaffectation). Un séjour réaffecté en journée peut alors être lu sans
+   * déclaration : rien n'est attesté (`depotConfirmed` faux, `handoverDeclared` vide, aucun kilométrage rendu), le
+   * calcul de prévision reste au client et ses hypothèses sont affichées comme telles.
+   */
+  forecast?: string | null
 }
 
 const invalid = () => new MileageDomainError("INVALID_FUEL_ESTIMATE_QUERY", 400)
@@ -129,7 +136,12 @@ function parseQuery(query: FuelEstimateQuery) {
   if (mode === "DAILY" && rawGaps) throw invalid()
   // Une décision de séjour sans le contexte sur lequel elle a été prise ne peut pas être vérifiée : refus.
   if (stayId && (mode || rawGaps || handover) && !context) throw invalid()
-  return { tripId, stayId, fuel: fuel as FuelType, mode, gaps, depotConfirmed: rawDepot === "1", handover: handover?.sort() ?? null, context }
+  // Prévision : valeur exacte, séjour seulement, contexte obligatoire, aucune décision humaine mêlée.
+  const rawForecast = query.forecast?.trim() || null
+  if (rawForecast !== null && rawForecast !== "1") throw invalid()
+  const forecast = rawForecast === "1"
+  if (forecast && (!stayId || !context || mode || rawGaps || handover || rawDepot)) throw invalid()
+  return { tripId, stayId, fuel: fuel as FuelType, mode, gaps, depotConfirmed: rawDepot === "1", handover: handover?.sort() ?? null, context, forecast }
 }
 
 // ─── Séjours planifiés ───────────────────────────────────────────────────────
@@ -264,7 +276,7 @@ type Worksite = { name: string; latitude: number | null; longitude: number | nul
  */
 export async function readFuelEstimate(truckId: string, query: FuelEstimateQuery, deps: FuelEstimateDeps): Promise<FuelEstimate> {
   gate(deps)
-  const { tripId, stayId, fuel, mode, gaps: gapChoices, depotConfirmed, handover, context } = parseQuery(query)
+  const { tripId, stayId, fuel, mode, gaps: gapChoices, depotConfirmed, handover, context, forecast } = parseQuery(query)
   const session = requireMileageSession(await deps.auth())
   const scope = { companyId: session.companyId, truckId }
   const worksiteSelect = { name: true, latitude: true, longitude: true } as const
@@ -285,8 +297,9 @@ export async function readFuelEstimate(truckId: string, query: FuelEstimateQuery
       // Séjour non estimable : refus explicite par raison (aucune attribution ni retour inventés côté serveur). Seule
       // exception : réaffectation en journée déclarée par l'opérateur pour EXACTEMENT les jours concernés.
       if (stay.blocked === "HANDOVER") {
-        if (!handover) throw new MileageDomainError("STAY_HANDOVER", 409)
-        if (handover.join(",") !== [...stay.handoverDays].sort().join(",")) throw new MileageDomainError("STAY_HANDOVER_MISMATCH", 409)
+        // Prévision : lecture de l'itinéraire et des prix sans déclaration (rien n'est attribué ni attesté ici).
+        if (!handover && !forecast) throw new MileageDomainError("STAY_HANDOVER", 409)
+        if (handover && handover.join(",") !== [...stay.handoverDays].sort().join(",")) throw new MileageDomainError("STAY_HANDOVER_MISMATCH", 409)
       } else if (!stay.estimable) throw new MileageDomainError(stay.blocked === "NO_HISTORY" ? "STAY_NO_HISTORY" : "STAY_INCOMPLETE", 409)
       else if (handover) throw invalid()
       // Coupure inconnue (planning modifié depuis la liste ?) : refus plutôt qu'une décision rattachée au mauvais jour.
@@ -343,7 +356,7 @@ export async function readFuelEstimate(truckId: string, query: FuelEstimateQuery
     const result = stayRoundTrips(base.stay, { mode, gaps: gapChoices })
     missing.push(...result.missing)
     roundTrips = result.roundTrips
-    travel = { context: base.stay.context, mode, gaps: result.gaps, plannedDays: base.stay.days, roundTrips, oneWayKm: route?.oneWayKm ?? null, handoverDeclared: base.stay.blocked === "HANDOVER" ? [...base.stay.handoverDays].sort() : [] }
+    travel = { context: base.stay.context, mode, gaps: result.gaps, plannedDays: base.stay.days, roundTrips, oneWayKm: route?.oneWayKm ?? null, handoverDeclared: base.stay.blocked === "HANDOVER" && handover ? [...base.stay.handoverDays].sort() : [] }
   }
   if (base.km === null && route && !depotConfirmed) missing.push("DEPOT")
   const routeKm = route && depotConfirmed && roundTrips !== null && !missing.length ? Math.round(route.oneWayKm * 2 * roundTrips) : null
