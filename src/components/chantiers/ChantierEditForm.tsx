@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label"
 import { updateChantier } from "@/lib/actions/chantier.actions"
 import type { PhotoRecipientRow } from "@/lib/chantiers/photo-recipients"
 import { PhotoRecipientsEditor } from "@/components/chantiers/PhotoRecipientsEditor"
+import { COORDINATES_MODE_FIELD, COORDINATES_MODE_MANUAL, LATITUDE_FIELD, LONGITUDE_FIELD } from "@/lib/chantiers/worksite-coordinates"
 
 interface Client {
   id: string
@@ -28,6 +29,8 @@ interface Props {
     dailyHours:  number
   }
   clients: Client[]
+  /** Coordonnées enregistrées (colonnes existantes) : affichées et proposées en mode manuel. */
+  coordinates: { latitude: number | null; longitude: number | null }
   /**
    * Destinataires des photos : fournis par la page UNIQUEMENT pour un SUPER_ADMIN (minimisation). Absents ⇒ ni éditeur ni
    * adresse dans le formulaire, donc rien d'envoyé : le serveur conserve la configuration existante.
@@ -35,10 +38,12 @@ interface Props {
   photoRecipients?: { rows: PhotoRecipientRow[]; historicSuggestion: string | null }
 }
 
-export function ChantierEditForm({ worksiteId, defaultValues, clients, photoRecipients }: Props) {
+export function ChantierEditForm({ worksiteId, defaultValues, clients, coordinates, photoRecipients }: Props) {
   const router = useRouter()
   const [editing, setEditing] = useState(false)
   const [loading, setLoading] = useState(false)
+  // Mode manuel décoché par défaut : sans lui, aucun champ de coordonnées n'est envoyé (règle historique de l'adresse).
+  const [manualCoordinates, setManualCoordinates] = useState(false)
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -104,6 +109,29 @@ export function ChantierEditForm({ worksiteId, defaultValues, clients, photoReci
       <div className="space-y-1">
         <Label className="text-xs text-slate-600">Adresse</Label>
         <Input name="address" defaultValue={defaultValues.address} placeholder="Adresse du chantier" className="h-8 text-sm" />
+      </div>
+
+      {/* Coordonnées — saisie manuelle explicite, sinon calcul depuis l'adresse quand elle change */}
+      <div className="space-y-1">
+        <p className="text-xs text-slate-500">
+          Coordonnées enregistrées : {coordinates.latitude !== null && coordinates.longitude !== null ? `${coordinates.latitude}, ${coordinates.longitude}` : "aucune"}
+        </p>
+        <label className="flex items-start gap-2 text-xs text-slate-600">
+          <input type="checkbox" name={COORDINATES_MODE_FIELD} value={COORDINATES_MODE_MANUAL} checked={manualCoordinates} onChange={(e) => setManualCoordinates(e.target.checked)} />
+          <span>Saisir les coordonnées manuellement (sinon elles sont recalculées depuis l'adresse quand celle-ci change)</span>
+        </label>
+        {manualCoordinates && (
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs text-slate-600">Latitude (-90 à 90)</Label>
+              <Input name={LATITUDE_FIELD} inputMode="decimal" required defaultValue={coordinates.latitude ?? ""} placeholder="Ex. 48,8566" className="h-8 text-sm" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-slate-600">Longitude (-180 à 180)</Label>
+              <Input name={LONGITUDE_FIELD} inputMode="decimal" required defaultValue={coordinates.longitude ?? ""} placeholder="Ex. 2,3522" className="h-8 text-sm" />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Dates — optionnelles (NULL/NULL = dates inconnues ; paire partielle refusée côté serveur) */}

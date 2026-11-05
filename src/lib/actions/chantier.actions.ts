@@ -8,6 +8,7 @@ import { createWorksiteCore } from "@/lib/actions/chantier-create.core"
 import { assignTeamCore } from "@/lib/actions/assignment-team.core"
 import { updateWorksiteWithPhotoRecipients } from "@/lib/actions/chantier-photo-recipients.core"
 import { PHOTO_RECIPIENTS_FORBIDDEN, readPhotoRecipientsField } from "@/lib/chantiers/photo-recipients"
+import { readManualCoordinates, resolveWorksiteCoordinates } from "@/lib/chantiers/worksite-coordinates"
 import type { CoreResult, WriteActor } from "@/lib/actions/write-actor"
 import {
   updateChantierSchema,
@@ -77,6 +78,9 @@ export async function updateChantier(worksiteId: string, formData: FormData) {
   const photoRecipients = readPhotoRecipientsField(formData)
   if (photoRecipients.kind !== "absent" && user.role !== "SUPER_ADMIN") return { error: PHOTO_RECIPIENTS_FORBIDDEN }
   if (photoRecipients.kind === "invalid") return { error: photoRecipients.message }
+  // Coordonnées manuelles (case cochée) : paire validée AVANT toute lecture ou écriture ; refus = valeurs conservées.
+  const manualCoordinates = readManualCoordinates(formData)
+  if (manualCoordinates.kind === "invalid") return { error: manualCoordinates.message }
 
   const raw = {
     name:        formData.get("name")        as string,
@@ -101,16 +105,17 @@ export async function updateChantier(worksiteId: string, formData: FormData) {
   })
   if (!client) return { error: "Client introuvable." }
 
-  let latitude: number | null = worksite.latitude
-  let longitude: number | null = worksite.longitude
-  if (parsed.data.address && parsed.data.address !== worksite.address) {
-    const { defaultGeocodePort } = await import("@/lib/geo/geocode.port")
-    const geo = await defaultGeocodePort.geocodeAddress(parsed.data.address)
-    if (geo) {
-      latitude = geo.latitude
-      longitude = geo.longitude
-    }
-  }
+  // Mode manuel : aucun géocodage. Sinon règle historique : géocodage seulement si l'adresse change.
+  const { latitude, longitude } = await resolveWorksiteCoordinates({
+    manual: manualCoordinates,
+    current: { latitude: worksite.latitude, longitude: worksite.longitude },
+    previousAddress: worksite.address,
+    nextAddress: parsed.data.address,
+    geocode: async (address) => {
+      const { defaultGeocodePort } = await import("@/lib/geo/geocode.port")
+      return defaultGeocodePort.geocodeAddress(address)
+    },
+  })
 
   const data = {
     name:        parsed.data.name,

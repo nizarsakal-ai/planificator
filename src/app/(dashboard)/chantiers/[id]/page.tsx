@@ -200,6 +200,7 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
                   <ChantierEditForm
                     worksiteId={chantier.id}
                     clients={clients}
+                    coordinates={{ latitude: chantier.latitude, longitude: chantier.longitude }}
                     defaultValues={{
                       name:        chantier.name,
                       description: chantier.description ?? "",
