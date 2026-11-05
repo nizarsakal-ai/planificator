@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { companyCivilTimeToIso } from "@/lib/vehicules/v3/tour-time"
 import type { VehicleCostsDto,TripCostsDto } from "@/lib/vehicules/v3/cost-service"
 import { VehicleFuelEstimate } from "./VehicleFuelEstimate"
-import { mergeExpenseValues, type ExpenseFieldName, type ExpenseFieldValues } from "./vehicle-fuel-estimate-ui"
+import { applyEstimateToForm, currencyConflict, emptyEstimateState, liveProvenance, notesWithProvenance, readExpenseForm, type EstimateFormState, type ExpenseFieldName, type ExpenseProposal } from "./vehicle-fuel-estimate-ui"
 interface Expense { documentVersionId?:string|null; maintenanceEntryId?:string|null; id: string; category: string; occurredAt: string; amount: string; currency: string; litres: string | null; mileageObservation: number | null; supplier: string | null; reference: string | null; notes: string | null; status: string; revision: number; sourceExpenseReportId: string | null; sourceWarning: string | null; allocations:{id:string;mileageTripId:string|null;amount:string;label:string}[]; duplicateCandidates: { id: string; truckId: string;label:string }[] }
 const names: Record<string, string> = { FUEL: "Carburant", MAINTENANCE: "Entretien / réparation", INSURANCE: "Assurance", OTHER: "Autres", PENDING: "À valider", APPROVED: "Admise", REJECTED: "Refusée", CANCELLED: "Annulée" }
 const field = "block border rounded p-2 w-full text-black bg-white"
@@ -23,21 +23,27 @@ export function VehicleCostsPanel({ truckId, timeZone, fuelEstimateEnabled = fal
   const [documents,setDocuments]=useState<{id:string;title:string;category:string;archivedAt?:string|null;currentVersion:{id:string;versionNumber:number}|null}[]>([]),[maintenance,setMaintenance]=useState<{id:string;kind:string;occurredAt:string;mileage:number}[]>([])
   const [documentError,setDocumentError]=useState(""),[maintenanceError,setMaintenanceError]=useState(""),[documentLoading,setDocumentLoading]=useState(true),[maintenanceLoading,setMaintenanceLoading]=useState(true)
   const requestRef = useRef<{ body: string; key: string } | null>(null)
-  // Estimation du trajet : les champs saisis à la main (événement « input ») ne sont jamais réécrits automatiquement.
+  // Estimation du trajet : les champs saisis à la main (événement « input ») ne sont jamais réécrits automatiquement ;
+  // les champs écrits par l'estimation lui « appartiennent » tant qu'ils sont intacts, et sont retirés quand elle change,
+  // échoue ou disparaît. La provenance du calcul est gardée à part et ajoutée aux notes à l'envoi.
   const expenseFormRef = useRef<HTMLFormElement | null>(null), touchedRef = useRef<Set<string>>(new Set())
-  const [estimated, setEstimated] = useState<ExpenseFieldName[]>([])
-  useEffect(() => { touchedRef.current = new Set(); setEstimated([]) }, [edit])
-  const applyEstimate = useCallback((proposed: ExpenseFieldValues, explicit: boolean) => {
+  const estimateRef = useRef<{ form: HTMLFormElement | null; state: EstimateFormState; proposal: ExpenseProposal | null }>({ form: null, state: emptyEstimateState(), proposal: null })
+  const [estimated, setEstimated] = useState<ExpenseFieldName[]>([]), [withheld, setWithheld] = useState(false)
+  useEffect(() => { touchedRef.current = new Set(); estimateRef.current = { form: null, state: emptyEstimateState(), proposal: null }; setEstimated([]); setWithheld(false) }, [edit])
+  const applyEstimate = useCallback((proposal: ExpenseProposal | null, explicit: boolean) => {
     const form = expenseFormRef.current
+    const owner = estimateRef.current
+    // Autre formulaire (modification ouverte, formulaire recréé) : rien n'y appartient à l'estimation, rien n'y est retiré.
+    if (owner.form !== form) { owner.form = form; owner.state = emptyEstimateState() }
+    owner.proposal = proposal
     if (!form) return
-    const control = (name: string) => form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null
-    const current: ExpenseFieldValues = { notes: control("notes")?.value ?? "" }
-    const merged = mergeExpenseValues(current, proposed, touchedRef.current, explicit)
-    for (const [name, value] of Object.entries(merged)) { const el = control(name); if (el) el.value = value ?? "" }
-    if (explicit) for (const name of Object.keys(merged)) touchedRef.current.delete(name)
-    const names = Object.keys(merged) as ExpenseFieldName[]
+    const result = applyEstimateToForm(form, { state: owner.state, proposal, defaults: { category: "FUEL", date: today }, touched: touchedRef.current, explicit })
+    owner.state = result.state
+    if (explicit) for (const name of Object.keys(result.state.owned)) touchedRef.current.delete(name)
+    const names = Object.keys(result.state.owned) as ExpenseFieldName[]
     setEstimated((list) => list.length === names.length && list.every((n, i) => n === names[i]) ? list : names)
-  }, [])
+    setWithheld(result.withheld.length > 0)
+  }, [today])
   const base = `/api/trucks/${encodeURIComponent(truckId)}`
   const load = useCallback(async (signal?:AbortSignal) => {
     setError("");setCosts(null)
@@ -68,9 +74,14 @@ export function VehicleCostsPanel({ truckId, timeZone, fuelEstimateEnabled = fal
   async function loadTripCosts(){if(!costTripId||busy)return;setBusy(true);setError("");setTripCosts(null);try{const query=new URLSearchParams({tripId:costTripId,currency});const r=await fetch(`${base}/costs?${query}`,{cache:"no-store"});if(!r.ok)throw new Error("Le coût affecté à ce trajet est indisponible. Vérifiez vos droits et la devise.");setTripCosts(await r.json())}catch(e){setError(e instanceof Error?e.message:"Erreur de connexion")}finally{setBusy(false)}}
   function submitExpense(event: FormEvent<HTMLFormElement>) {
     if(!isExplicitSubmit(event))return; const form = new FormData(event.currentTarget)
+    // Estimation : montant en euros resté dans une dépense d'une autre devise = refus ; provenance ajoutée aux notes.
+    const owner = estimateRef.current, live = !edit && owner.form === event.currentTarget ? readExpenseForm(event.currentTarget) : null
+    if (live && currencyConflict(owner.state, live.values, live.currency)) { setError("Le montant estimé est en euros : choisissez la devise EUR ou saisissez le montant du ticket dans sa devise."); return }
+    const provenance = live ? liveProvenance(owner.state, live.values) : null
+    const notes = provenance ? notesWithProvenance(String(form.get("notes") ?? ""), provenance) : String(form.get("notes") ?? "")
     try {
       const selectedDocument=String(form.get("documentVersionId")??""),selectedMaintenance=String(form.get("maintenanceEntryId")??"")
-      const data = { category: form.get("category"), occurredAt: edit&&form.get("date")===companyDate(edit.occurredAt)?edit.occurredAt:companyCivilTimeToIso(`${form.get("date")}T00:00`,timeZone), amount: normalizeDecimal(form.get("amount")), currency: form.get("currency"), litres: form.get("litres") ? normalizeDecimal(form.get("litres")) : null, mileageObservation: form.get("mileage") ? Number(form.get("mileage")) : null, supplier: form.get("supplier") || null, reference: form.get("reference") || null, notes: form.get("notes") || null,
+      const data = { category: form.get("category"), occurredAt: edit&&form.get("date")===companyDate(edit.occurredAt)?edit.occurredAt:companyCivilTimeToIso(`${form.get("date")}T00:00`,timeZone), amount: normalizeDecimal(form.get("amount")), currency: form.get("currency"), litres: form.get("litres") ? normalizeDecimal(form.get("litres")) : null, mileageObservation: form.get("mileage") ? Number(form.get("mileage")) : null, supplier: form.get("supplier") || null, reference: form.get("reference") || null, notes: notes || null,
         ...(!edit||selectedDocument!==(edit.documentVersionId??"")?{documentVersionId:selectedDocument||null}:{}),
         ...(!edit||selectedMaintenance!==(edit.maintenanceEntryId??"")?{maintenanceEntryId:selectedMaintenance||null}:{}) }
       void command(edit ? { action: "CORRECT", expenseId: edit.id, expectedRevision: edit.revision, reason: form.get("reason"), data } : { action: "CREATE", data })
@@ -96,9 +107,10 @@ export function VehicleCostsPanel({ truckId, timeZone, fuelEstimateEnabled = fal
     </section>
     <section className="border rounded p-4 space-y-3"><h2 className="text-xl font-semibold">Coûts affectés à un trajet</h2><p>Uniquement les imputations explicites au trajet choisi, quelle que soit la date d’achat. Ces montants proviennent du registre et ne sont jamais ajoutés au total du véhicule. Le calcul ne mesure pas la consommation réelle.</p><label>Trajet récent<select className={field} value={costTripId} onChange={e=>{setCostTripId(e.target.value);setTripCosts(null)}}><option value="">Choisir un trajet</option>{tripCandidates.map(t=><option key={t.id} value={t.id}>{t.label}</option>)}</select></label><button className={button} disabled={busy||!costTripId} onClick={()=>void loadTripCosts()}>Afficher le coût affecté dans la devise {currency}</button>{tripCosts&&<><p>{tripCosts.label} — {tripCosts.actualKm??"distance indisponible"} {tripCosts.actualKm!==null&&"km réels"}</p><p>Coût affecté : {tripCosts.total} {tripCosts.currency}, dont carburant : {tripCosts.totals.FUEL} {tripCosts.currency}.</p><p>Coût affecté par km : {tripCosts.costPerKm??"Non calculable (trajet ouvert, distance inconnue ou zéro kilomètre)"} {tripCosts.costPerKm&&`${tripCosts.currency}/km`}. Carburant affecté par km : {tripCosts.fuelAllocatedCostPerKm??"Non calculable"}.</p><p>Indicateurs partiels : {tripCosts.admittedAllocations} imputation(s) admise(s), {tripCosts.excludedSource} source(s) à rapprocher, {tripCosts.excludedCurrency} imputation(s) dans une autre devise et {tripCosts.excludedPending} dépense(s) non admise(s) exclues.</p></>}</section>
     <section className="border rounded p-4"><h2 className="text-xl font-semibold">{edit ? "Modifier une dépense" : "Proposer une dépense"}</h2>
-      <form ref={expenseFormRef} onInput={(e) => { const name = (e.target as HTMLInputElement).name; if (name) { touchedRef.current.add(name); setEstimated((list) => list.filter((n) => n !== name)) } }} onKeyDown={preventImplicitEnter} key={edit?.id ?? "new"} onSubmit={submitExpense} className="grid md:grid-cols-2 gap-3">
+      <form ref={expenseFormRef} onInput={(e) => { const name = (e.target as HTMLInputElement).name; if (!name) return; touchedRef.current.add(name); setEstimated((list) => list.filter((n) => n !== name)); if (name === "currency" && estimateRef.current.proposal) applyEstimate(estimateRef.current.proposal, false) }} onKeyDown={preventImplicitEnter} key={edit?.id ?? "new"} onSubmit={submitExpense} className="grid md:grid-cols-2 gap-3">
         {fuelEstimateEnabled && !edit && <VehicleFuelEstimate truckId={truckId} today={today} trips={tripCandidates} onPropose={applyEstimate} />}
         {fuelEstimateEnabled && !edit && estimated.length > 0 && <p role="status" className="md:col-span-2 text-sm text-amber-800">Champs préremplis par l'estimation, à vérifier : {estimated.map((n) => ({ category: "catégorie", date: "date", amount: "montant", litres: "litres", mileage: "compteur", supplier: "fournisseur", notes: "notes" })[n]).join(", ")}. Remplacez par les valeurs du ticket dès qu'il est disponible.</p>}
+        {fuelEstimateEnabled && !edit && withheld && <p role="status" className="md:col-span-2 text-sm text-amber-800">Montant estimé non repris : il est calculé en euros et la devise de cette dépense n'est pas EUR (aucune conversion).</p>}
         <label>Catégorie<select name="category" className={field} defaultValue={edit?.category ?? "FUEL"}>{["FUEL", "MAINTENANCE", "INSURANCE", "OTHER"].map(k => <option key={k} value={k}>{names[k]}</option>)}</select></label>
         <label>Date d’achat ({timeZone})<input name="date" className={field} type="date" defaultValue={edit?companyDate(edit.occurredAt):today} required /></label>
         <label>Montant exact<input name="amount" className={field} inputMode="decimal" pattern="[0-9]+([.,][0-9]{1,2})?" defaultValue={edit?.amount} placeholder="Ex. 85,40" required /></label>

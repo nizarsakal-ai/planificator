@@ -12,7 +12,7 @@ import type { DocumentKind } from "../domain"
 import { parseMrz } from "./mrz"
 
 export type ReadingStatus = "TEXT_LAYER" | "OCR" | "ENGINE_MISSING" | "TECHNICAL_FAILURE" | "UNREADABLE"
-export type ReadingReason = "TIMEOUT" | "IMAGE_NOT_DECODABLE" | "PAGE_RENDER_UNAVAILABLE" | "PDF_UNREADABLE" | "OCR_ERROR"
+export type ReadingReason = "TIMEOUT" | "IMAGE_NOT_DECODABLE" | "PAGE_RENDER_UNAVAILABLE" | "PDF_UNREADABLE" | "OCR_ERROR" | "PDF_IMAGE_TOO_LARGE"
 export type Reading = {
   text: string
   status: ReadingStatus
@@ -50,11 +50,24 @@ export function meaningfulLength(text: string) {
   return (text.match(/[\p{L}\d]{2,}/gu) ?? []).join("").length
 }
 
+/** Moteur et arrêt de ses workers : `terminate` met fin au calcul en cours (workers tués), pas seulement à l'attente. */
+export type OcrEngineHandle = { engine: OcrEngine; terminate: () => Promise<void> }
+
 // Moteur Tesseract chargé à la demande, une fois par instance, avec deux workers : texte (fra) et bande MRZ (eng).
 let engine: Promise<OcrEngine> | null = null
 let idle: ReturnType<typeof setTimeout> | null = null
 let terminate: (() => Promise<void>) | null = null
 async function loadTesseract(): Promise<OcrEngine> {
+  const handle = await createOcrEngineHandle()
+  terminate = handle.terminate
+  return handle.engine
+}
+
+/**
+ * Moteur indépendant du moteur partagé : ses propres workers, arrêtés par son `terminate` sans toucher aux lectures
+ * en cours d'un autre module (documents RH). Utilisé par la lecture des pièces véhicule.
+ */
+export async function createOcrEngineHandle(): Promise<OcrEngineHandle> {
   let T: typeof import("tesseract.js"), fra: { langPath: string }, eng: { langPath: string }
   try {
     T = await import("tesseract.js")
@@ -74,15 +87,15 @@ async function loadTesseract(): Promise<OcrEngine> {
   // Résolution déclarée : les images préparées n'ont pas de métadonnée fiable (sinon Tesseract suppose 70 dpi).
   await page.setParameters({ tessedit_pageseg_mode: T.PSM.AUTO, preserve_interword_spaces: "1", user_defined_dpi: "300" })
   await mrz.setParameters({ tessedit_pageseg_mode: T.PSM.SINGLE_BLOCK, tessedit_char_whitelist: MRZ_ALPHABET, user_defined_dpi: "300" })
-  terminate = async () => { await Promise.allSettled([page.terminate(), mrz.terminate()]) }
-  return {
+  const stop = async () => { await Promise.allSettled([page.terminate(), mrz.terminate()]) }
+  return { terminate: stop, engine: {
     async recognize(png, mode) {
       if (mode === "mrz") { const r = await mrz.recognize(png); return { text: r.data.text ?? "", confidence: r.data.confidence ?? 0 } }
       const r = await page.recognize(png, {}, { text: true, blocks: true })
       const lines = (r.data.blocks ?? []).flatMap((b) => b.paragraphs.flatMap((p) => p.lines.map((l) => ({ text: l.text, bbox: l.bbox }))))
       return { text: r.data.text ?? "", confidence: r.data.confidence ?? 0, lines }
     },
-  }
+  } }
 }
 function tesseract(): Promise<OcrEngine> {
   if (idle) clearTimeout(idle)
@@ -144,8 +157,8 @@ const score = (p: OcrPass) => p.confidence * Math.min(1, meaningfulLength(p.text
 /** Lignes MRZ seules (alphabet, longueur plausible) : le reste d'une passe MRZ n'est que du bruit. */
 const mrzOnly = (t: string) => t.split(/\r?\n/).map((l) => l.replace(/\s+/g, "")).filter((l) => l.length >= 28 && l.includes("<")).join("\n")
 
-async function ocrRaster(r: Raster, ocr: OcrEngine, deadline: number): Promise<{ text: string; confidence: number; rotation: number; mrz: boolean }> {
-  const check = () => { if (Date.now() > deadline) throw new Timeout() }
+async function ocrRaster(r: Raster, ocr: OcrEngine, deadline: number, signal?: AbortSignal): Promise<{ text: string; confidence: number; rotation: number; mrz: boolean }> {
+  const check = () => { if (Date.now() > deadline || signal?.aborted) throw new Timeout() }
   // Orientation : passe droite d'abord ; si elle est faible, sondes rapides à 90/180/270° puis passe complète sur la meilleure.
   let rotation = 0
   let best = await ocr.recognize(await prepare(r, 0, TARGET_LONG_SIDE), "page")
@@ -195,12 +208,35 @@ async function ocrRaster(r: Raster, ocr: OcrEngine, deadline: number): Promise<{
     ...[0, 90, 180, 270].filter((a) => a !== rotation).map((a): Attempt => async () => bottomBand(await prepare(r, a, TARGET_LONG_SIDE), 0.32)),
   ]
   for (const attempt of attempts) {
-    if (Date.now() > deadline - 2_000) break
+    if (Date.now() > deadline - 2_000 || signal?.aborted) break
     const lines = mrzOnly((await ocr.recognize(await attempt(), "mrz")).text)
     if (lines && parseMrz(lines)?.checksValid) { mrzText = lines; break }
     if (lines && parseMrz(lines) && !mrzText) mrzText = lines
   }
   return { text: [...texts, mrzText].filter(Boolean).join("\n"), confidence: best.confidence, rotation, mrz: !!mrzText }
+}
+
+/**
+ * Pixels déclarés par les images du PDF, lus dans leurs dictionnaires AVANT toute décompression (un flux d'image ne
+ * peut pas être rangé dans un flux d'objets : son dictionnaire est toujours lisible tel quel). Null si une image a une
+ * largeur ou une hauteur indirecte ou absente : taille inconnue, donc refusée par l'appelant qui borne.
+ * Ne couvre pas les images « en ligne » d'un flux de contenu compressé (limite documentée).
+ */
+export function declaredPdfImagePixels(bytes: Uint8Array): { max: number; total: number; count: number } | null {
+  const text = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("latin1")
+  let max = 0, total = 0, count = 0
+  const marker = /\/Subtype\s*\/Image\b/g
+  for (let m = marker.exec(text); m; m = marker.exec(text)) {
+    const start = Math.max(text.lastIndexOf("obj", m.index), m.index - 4_000, 0)
+    const streamAt = text.indexOf("stream", m.index)
+    const end = streamAt === -1 ? Math.min(text.length, m.index + 4_000) : Math.min(streamAt, m.index + 4_000)
+    const dict = text.slice(start, end)
+    const width = /\/Width\s+(\d{1,9})(?![\d.])(?!\s+\d+\s+R)/.exec(dict), height = /\/Height\s+(\d{1,9})(?![\d.])(?!\s+\d+\s+R)/.exec(dict)
+    if (!width || !height) return null
+    const pixels = Number(width[1]) * Number(height[1])
+    max = Math.max(max, pixels); total += pixels; count++
+  }
+  return { max, total, count }
 }
 
 async function pdfImages(bytes: Uint8Array): Promise<{ pages: number; rasters: Raster[] }> {
@@ -220,19 +256,44 @@ async function pdfImages(bytes: Uint8Array): Promise<{ pages: number; rasters: R
   }
 }
 
+/** Promesse rejetée dès l'abandon : l'appelant n'attend plus un calcul que `terminate` arrêtera. */
+function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise
+  if (signal.aborted) { promise.catch(() => {}); return Promise.reject(new Timeout()) }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new Timeout())
+    signal.addEventListener("abort", onAbort, { once: true })
+    promise.then((v) => { signal.removeEventListener("abort", onAbort); resolve(v) }, (e) => { signal.removeEventListener("abort", onAbort); reject(e) })
+  })
+}
+
+/**
+ * Options ajoutées pour la lecture des pièces véhicule, sans effet si absentes (documents RH inchangés) :
+ * `signal` abandonne la lecture (rendu immédiat « TIMEOUT ») ; `maxPdfImagePixels` refuse avant décompression un PDF
+ * dont une image déclare plus de pixels, ou dont la taille d'une image est inconnue.
+ */
 export async function readDocument(bytes: Uint8Array, kind: DocumentKind,
-  opts: { engine?: () => Promise<OcrEngine>; timeoutMs?: number; now?: () => number } = {}): Promise<Reading> {
+  opts: { engine?: () => Promise<OcrEngine>; timeoutMs?: number; now?: () => number; signal?: AbortSignal; maxPdfImagePixels?: number } = {}): Promise<Reading> {
   const now = opts.now ?? Date.now
   const started = now()
   const deadline = started + (opts.timeoutMs ?? 45_000)
+  const { signal } = opts
   const done = (r: Omit<Reading, "durationMs">): Reading => ({ ...r, durationMs: now() - started })
   const base = { text: "", reason: null, pages: 1, rotation: null, confidence: null, mrzFound: false } as const
+  const timedOut = (pages = 1) => done({ ...base, pages, status: "TECHNICAL_FAILURE", reason: "TIMEOUT" })
 
   let rasters: Raster[]
   let pages = 1
+  if (signal?.aborted) return timedOut()
   if (kind === "pdf") {
     const layer = await extractPdfTextLayer(bytes, { maxChars: 20_000, timeoutMs: 4_000 })
     if (meaningfulLength(layer.text) >= 40) return done({ ...base, text: layer.text, status: "TEXT_LAYER", mrzFound: !!parseMrz(layer.text) })
+    if (signal?.aborted) return timedOut()
+    if (opts.maxPdfImagePixels !== undefined) {
+      const declared = declaredPdfImagePixels(bytes)
+      if (!declared || declared.max > opts.maxPdfImagePixels || declared.total > opts.maxPdfImagePixels * MAX_PAGES)
+        return done({ ...base, status: "TECHNICAL_FAILURE", reason: "PDF_IMAGE_TOO_LARGE" })
+    }
     try {
       ({ pages, rasters } = await pdfImages(bytes))
     } catch {
@@ -248,8 +309,10 @@ export async function readDocument(bytes: Uint8Array, kind: DocumentKind,
 
   let ocr: OcrEngine
   try {
-    ocr = await (opts.engine ?? tesseract)()
+    const loaded = await abortable((opts.engine ?? tesseract)(), signal)
+    ocr = signal ? { recognize: (png, mode) => abortable(loaded.recognize(png, mode), signal) } : loaded
   } catch (e) {
+    if (e instanceof Timeout) return timedOut(pages)
     return done({ ...base, pages, status: e instanceof OcrEngineMissing ? "ENGINE_MISSING" : "TECHNICAL_FAILURE", reason: e instanceof OcrEngineMissing ? null : "OCR_ERROR" })
   }
 
@@ -258,16 +321,16 @@ export async function readDocument(bytes: Uint8Array, kind: DocumentKind,
   let mrzFound = false
   try {
     for (const r of rasters) {
-      if (now() > deadline) throw new Timeout()
-      const out = await ocrRaster(r, ocr, deadline)
+      if (now() > deadline || signal?.aborted) throw new Timeout()
+      const out = await ocrRaster(r, ocr, deadline, signal)
       texts.push(out.text)
       first ??= { rotation: out.rotation, confidence: out.confidence }
       mrzFound ||= out.mrz
     }
   } catch (e) {
     const reason: ReadingReason = e instanceof Timeout ? "TIMEOUT" : "OCR_ERROR"
-    // Pages déjà lues conservées : un délai dépassé en page 3 n'efface pas les pages 1 et 2.
-    if (!texts.length) return done({ ...base, pages, status: "TECHNICAL_FAILURE", reason })
+    // Pages déjà lues conservées : un délai dépassé en page 3 n'efface pas les pages 1 et 2. Lecture abandonnée : rien.
+    if (!texts.length || signal?.aborted) return done({ ...base, pages, status: "TECHNICAL_FAILURE", reason })
   }
   const text = texts.join("\n\f\n")
   // Illisible seulement après une vraie passe OCR : presque aucun mot, ou confiance trop basse sans MRZ valide.

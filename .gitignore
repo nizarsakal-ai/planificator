@@ -8,6 +8,9 @@ node_modules/
 out/
 build/
 
+# Processus de lecture OCR des pièces véhicule (produit par scripts/build-vehicle-ocr-worker.mjs)
+.vehicle-ocr-worker/
+
 # Uploads
 public/uploads/*
 !public/uploads/.gitkeep

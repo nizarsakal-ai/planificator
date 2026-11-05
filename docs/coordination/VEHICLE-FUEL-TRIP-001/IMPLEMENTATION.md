@@ -108,3 +108,87 @@ factice des tests imite la contrainte.
 - La lenteur de chargement observée pendant la recette venait du panneau de navigateur masqué (page en arrière-plan),
   pas de l'application.
 - Revue Codex : mission déposée, résultat non reçu.
+
+## Corrections R2 après revue Codex R1 (NO-GO), 4 nov. 2026 — non revues à ce jour
+
+Plusieurs affirmations ci-dessus sont **remplacées** par cette section (géocodage, préremplissage des Notes, retour à
+« Aucun », médiane « de toutes les stations », rayon variable).
+
+- **Coordonnées seules (point 4)** : l'estimation ne géocode plus l'adresse d'un chantier. Sans coordonnées enregistrées :
+  statut `NO_COORDINATES`, ni itinéraire ni couloir (stations autour du siège si connu) ; aucune adresse ni nom dans les
+  requêtes publiques, aucun quota `GEOCODING` consommé.
+- **Formulaire (point 5)** :
+  - les champs écrits par l'estimation lui appartiennent tant qu'ils sont intacts ; tout changement de source, « Aucun »,
+    chargement, erreur, absence de distance ou de prix, consommation effacée ou démontage retire ceux qui ne sont plus
+    proposés (remise à la valeur d'ouverture) ;
+  - un champ saisi ou modifié à la main n'est jamais réécrit ni effacé ;
+  - la provenance n'est plus écrite dans Notes : elle est gardée à part et ajoutée aux notes à l'envoi, tant que le montant
+    ou les litres estimés sont intacts, même si l'opérateur a tapé une note ;
+  - montant estimé (euros) jamais écrit dans une dépense d'une autre devise, retiré si la devise change, envoi refusé s'il
+    reste ; litres conservés ; aucune conversion. PENDING reste imposé côté serveur ; aucun compteur ni imputation.
+- **Séjours (point 8)** :
+  - convention d'attribution d'un jour à une seule période du camion : celle qui détient le camion à minuit (Paris),
+    intervalle semi-ouvert [début, fin) ; à défaut, la première commencée dans la journée. Bascule en cours de journée :
+    jour laissé à l'ancienne période et signalé ;
+  - bornes canoniques : la liste lit le planning 62 jours de plus de chaque côté de aujourd'hui ±60 j, le détail la veille
+    du départ et 62 jours après : un séjour estimable a les mêmes identifiant, dates et chauffeur dans les deux ;
+  - séjour dont le départ ou le retour réel est inconnu, ou de plus de 62 jours : listé « non estimable » (option
+    désactivée), refusé au détail (`STAY_INCOMPLETE` 409 ou `STAY_NOT_FOUND` 404) ;
+  - planning lu dans l'ordre (date, id), 2 000 lignes au plus : au-delà, dernier jour écarté, liste « partielle »,
+    séjours coupés non estimables ;
+  - repli « équipe actuelle » signalé comme supposé ; chef affiché comme chef actuel ; noms bornés à la société.
+- **Couloir et prix (point 7)** :
+  - couloir de 2 km à vol d'oiseau du tracé, quelle que soit la longueur ; rayon de requête calculé pour couvrir cette
+    largeur entre deux échantillons (≤ 20 km) ; filtre sur la distance exacte ;
+  - tracé simplifié par Douglas-Peucker (≤ 1 000 points, tolérance rendue et ajoutée au filtre) au lieu de 200 points
+    pris par indice ;
+  - présenté comme « proximité approximative : accès et détour routier non vérifiés » ;
+  - troncature à 100 stations par requête détectée (`total_count`) : statistiques marquées « échantillon », médiane non
+    proposée par défaut, libellé et note qualifiés ; aucune pagination ni requête supplémentaire (quota inchangé).
+
+### Limites restantes (R2)
+
+- Le formulaire est testé par sa logique pure et un double de formulaire (`FakeForm`), plus un rendu statique ; aucune
+  bibliothèque DOM (jsdom) n'est installée, donc pas de test d'interaction navigateur ni de recette navigateur R2.
+- Diagnostic TypeScript non exécuté en R2 (commande refusée par les permissions de cette session) ; build non lancé.
+- Proximité à vol d'oiseau seulement ; la médiane d'un couloir dense reste un échantillon (signalé), pas la vraie médiane.
+- Les chantiers sans coordonnées n'ont plus d'itinéraire : à compléter dans leur fiche (choix de minimisation, à arbitrer).
+
+### R3 — comportements conservateurs (prix, séjours), 4 nov. 2026
+
+- Médiane d'un échantillon tronqué : **désactivée** (choix grisé, sans valeur chiffrée, explication « non
+  représentatif ») ; refusée par `priceChoice` même forcée ; `estimateNote` lève `SAMPLED_MEDIAN`. Choisir une station
+  reste possible.
+- Prix : « prix indicatif publié par … le … » (station) et « prix médian indicatif des N stations lues … » ; distance
+  toujours « à vol d'oiseau du tracé (accès non vérifié) », jamais « sur le tracé ».
+- Séjours : `blocked` = `OUT_OF_RANGE` | `TOO_LONG` | `NO_HISTORY` | `HANDOVER` | `null`. Réaffectation du camion en
+  cours de journée sur un jour du séjour, la veille ou le lendemain planifiés de la même équipe : **non estimable**
+  (aucune attribution à minuit). Aucun historique d'affectation (repli équipe actuelle) : **non estimable**. Refus au
+  détail : 409 `STAY_HANDOVER`, `STAY_NO_HISTORY`, `STAY_INCOMPLETE` (borne lue ou > 62 jours : aucun retour supposé).
+  Chef libellé « chef d'équipe actuel (aujourd'hui, pas forcément pendant le séjour) ».
+- Choix métier non tranchés (réserve conservée, à Nizar) : faut-il accepter une attribution conventionnelle des jours de
+  réaffectation ou de l'équipe actuelle sans historique ? plafond de 62 jours ? historique daté des chefs ?
+
+### R5 — décisions de séjour validées par Nizar, intégrées (4 nov. 2026, non commité)
+
+- **Déplacements explicites** : `mode=ONE_ROUND_TRIP` (un aller-retour pour le séjour) ou `mode=DAILY` (un aller-retour
+  par jour **planifié**, jours sans planning non comptés). Aucun mode par défaut ; sans mode, `km = null` et `missing`
+  contient `MODE` (aucun montant proposé). Exemple : 100 km aller, 3 jours → 200 ou 600 km.
+- **Coupures du planning** : suites du même chantier et de la même équipe reliées par une coupure de 7 jours au plus
+  (`MAX_GAP_DAYS`) si, chaque jour de la coupure, le camion est à cette équipe (sans réaffectation en journée) et
+  l'équipe n'est planifiée sur aucun autre chantier. Chaque coupure demande une décision (`STAY` sur place, `RETURN` au
+  siège) identifiée par son premier ET dernier jour (`gapKey`). Coupure plus longue : séjours distincts. Un jour planifié
+  n'appartient qu'à un séjour (pas de double compte dans le calcul ; les doublons de dépenses saisies à la main ne sont
+  pas empêchés par cette liste).
+- **Contexte canonique** : `PlannedStay.context` (empreinte des bornes, suites, coupures avec fin, jours, réaffectations,
+  équipe, chauffeur, blocage). Toute décision exige `context` ; recalcul serveur différent → 409 `STAY_CONTEXT_CHANGED` ;
+  l'encadré retire alors les choix et relit la liste.
+- **Siège** : `depot=1` exigé pour tout kilométrage d'itinéraire (séjour ou trajet en cours), sinon `missing: [DEPOT]` ;
+  compteur (trajet clos) inchangé, jamais multiplié. Km sur place toujours séparés.
+- **Transfert en journée** : séjour `HANDOVER` refusé sans déclaration (409 `STAY_HANDOVER`) ; `handover=` égal aux
+  jours exacts → estimation sous hypothèse (`travel.handoverDeclared`), sinon 409 `STAY_HANDOVER_MISMATCH`. Le GET
+  n'écrit rien ; la déclaration n'est consignée que si une dépense est sauvegardée, dans la provenance des notes, par la
+  commande existante (`vehicleExpenseCommand` : acteur, après-état). Historique d'affectation jamais modifié ; aucune
+  nouvelle table, aucune migration.
+- **Inchangé** : historique absent = refus (passé et futur) ; plafond 62 jours **civils** (coupures comprises) ; bornes
+  non lues = refus ; chef = chef actuel étiqueté ; chauffeur de la période au départ, sans preuve de présence quotidienne.

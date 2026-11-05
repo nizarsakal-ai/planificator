@@ -7,11 +7,13 @@ export const dynamic = "force-dynamic"
 
 const headers = { "Cache-Control": "private, no-store", Vary: "Cookie", "X-Content-Type-Options": "nosniff" }
 
-// V3 — estimation carburant d'un trajet (?tripId=… ou ?stayId=…, &fuel=GAZOLE) : kilomètres, stations du trajet et prix publics. Lecture seule.
+// V3 — estimation carburant d'un trajet (?tripId=… ou ?stayId=…, &fuel=GAZOLE) : kilomètres, stations du trajet et prix publics.
+// Décisions d'estimation (&mode=, &gaps=, &depot=1, &handover=) : hypothèses vérifiées puis rendues, jamais enregistrées. Lecture seule.
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }, deps: FuelEstimateDeps = { auth, db: prisma }) {
   try {
     const url = new URL(request.url)
-    const estimate = await readFuelEstimate((await context.params).id, { tripId: url.searchParams.get("tripId"), stayId: url.searchParams.get("stayId"), fuel: url.searchParams.get("fuel") }, deps)
+    const p = (name: string) => url.searchParams.get(name)
+    const estimate = await readFuelEstimate((await context.params).id, { tripId: p("tripId"), stayId: p("stayId"), fuel: p("fuel"), mode: p("mode"), gaps: p("gaps"), depot: p("depot"), handover: p("handover"), context: p("context") }, deps)
     return Response.json(estimate, { headers })
   } catch (error) {
     const known = error instanceof MileageDomainError

@@ -1,5 +1,29 @@
 import type { NextConfig } from "next"
+import { existsSync, readFileSync } from "node:fs"
+import path from "node:path"
 import withPWAInit from "@ducanh2912/next-pwa"
+
+/**
+ * VEHICLE-DOC-OCR-001 R4 — processus de lecture isolé des pièces véhicule : lancé par fork, il échappe au traçage
+ * automatique. `scripts/build-vehicle-ocr-worker.mjs` (exécuté par npm run build/dev avant Next) écrit le fichier et
+ * le manifeste de sa fermeture ; on les embarque avec la route de lecture. Manifeste absent : rien n'est ajouté et la
+ * route répond 503 (lecture indisponible). Manifeste présent mais invalide ou incomplet (fichier listé absent) : la
+ * configuration échoue (pas d'embarquement partiel silencieux). Chaque entrée désigne exactement un fichier existant
+ * sous node_modules.
+ */
+export function vehicleOcrWorkerTraceIncludes(root: string = process.cwd()): string[] {
+  const manifestPath = path.join(root, ".vehicle-ocr-worker/trace.json")
+  if (!existsSync(manifestPath)) return []
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { schema?: unknown; worker?: unknown; files?: unknown }
+  const safe = (f: unknown): f is string => typeof f === "string" && f.startsWith("node_modules/") && !/[*?[\]{}()!\\\0]/.test(f)
+    && path.posix.normalize(f) === f && !f.split("/").includes("..")
+  if (manifest.schema !== 1 || manifest.worker !== ".vehicle-ocr-worker/worker.cjs" || !Array.isArray(manifest.files)
+    || !manifest.files.length || !manifest.files.every(safe) || !existsSync(path.join(root, ".vehicle-ocr-worker/worker.cjs")))
+    throw new Error("Manifeste du processus de lecture OCR invalide : relancer npm run build:vehicle-ocr-worker.")
+  const missing = (manifest.files as string[]).filter((f) => !existsSync(path.join(root, f)))
+  if (missing.length) throw new Error(`Manifeste du processus de lecture OCR incomplet (${missing.length} fichier(s) absent(s)) : relancer npm run build:vehicle-ocr-worker.`)
+  return ["./.vehicle-ocr-worker/worker.cjs", ...manifest.files.map((f: string) => `./${f}`)]
+}
 
 const withPWA = withPWAInit({
   dest: "public",
@@ -56,7 +80,7 @@ const nextConfig: NextConfig = {
   // Même moteur pour la lecture des pièces véhicule (clé en motif : « [id] » serait lu comme une classe de caractères).
   outputFileTracingIncludes: {
     "/api/hr-documents/recognize": OCR_TRACE_INCLUDES,
-    "/api/trucks/*/documents/recognize": OCR_TRACE_INCLUDES,
+    "/api/trucks/*/documents/recognize": [...OCR_TRACE_INCLUDES, ...vehicleOcrWorkerTraceIncludes()],
   },
   outputFileTracingExcludes: {
     "/api/hr-documents/recognize": OCR_TRACE_EXCLUDES,

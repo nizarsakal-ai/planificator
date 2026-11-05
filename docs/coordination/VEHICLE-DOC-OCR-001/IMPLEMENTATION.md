@@ -68,6 +68,101 @@ pilote l'IA payante de l'import d'adresses et n'est pas utilisé ici.
 - Safari / iOS sur appareil réel, et lecteurs d'écran : non essayés.
 - Revue indépendante du code : non faite.
 
+## Corrections R2 après revue Codex R1 (NO-GO), 4 nov. 2026 — non revues à ce jour
+
+Plusieurs affirmations ci-dessus sont **remplacées** : « C.3 jamais lu », « module OCR inchangé », « délai 25 s et
+réponse à 30 s » comme borne suffisante.
+
+- **C.1 / C.3 (point 4)** : le titulaire est coupé au code suivant quelle que soit la ponctuation (`C.3:`, `C.3 :`,
+  `(C.3)`, `C,3`, `C3`, collé `FICTIVEC.3:`, lignes fusionnées, autres codes D.1, E, F.1…). S'il reste un fragment
+  d'adresse (numéro + voie, code postal, BP, CEDEX…), **aucun titulaire n'est proposé**. Même coupe sur la marque D.1.
+- **Montant TTC (point 7)** : la marque HT/TVA est cherchée avant le montant retenu, sur la ligne du libellé et sur la
+  ligne suivante quand le montant y est lu, ainsi qu'après le montant. « TOTAL » ou « MONTANT » sans preuve TTC devient
+  « Montant total lu (TTC non indiqué, à vérifier) ».
+- **Borne réelle (point 3)** :
+  - moteur Tesseract propre aux pièces véhicule (`document-recognition-engine.ts`), distinct de celui des documents RH ;
+  - à l'échéance, lecture abandonnée par signal, **workers terminés**, puis place rendue (délai de grâce de 3 s au plus) ;
+  - une lecture qui ne finit pas malgré tout reste comptée « abandonnée » : au-delà de deux lectures non finies, 429 ;
+  - le moteur est rechargé à la lecture suivante (reprise) ;
+  - dimensions des images d'un PDF lues dans leurs dictionnaires **avant décompression** : plus de 25 Mpx (ou 75 Mpx au
+    total), ou taille inconnue (indirecte) → `PDF_IMAGE_TOO_LARGE`, sans extraction ni OCR ;
+  - module RH : modifications rétrocompatibles et optionnelles (`signal`, `maxPdfImagePixels`, `createOcrEngineHandle`),
+    sans effet sur le parcours RH quand elles sont absentes ; 65 / 65 tests RH rejoués.
+
+### Limites restantes (R2)
+
+- Non préemptible : une opération native déjà lancée (décodage sharp/libvips, extraction d'images pdf.js) se termine
+  d'elle-même, bornée par les tailles ci-dessus ; les images « en ligne » d'un flux de contenu compressé ne sont pas
+  pré-contrôlées (bombe de décompression d'un flux de contenu non couverte).
+- Deux moteurs OCR peuvent coexister sur une instance (RH et véhicule) : ≈ 2 × 100 Mo au pire.
+- Limite par instance : plusieurs instances Vercel peuvent lire en parallèle. Aucune preuve Vercel : tests locaux seulement.
+- Diagnostic TypeScript et build non exécutés en R2 (permissions de cette session).
+
+### Corrections R2.1 après contrôle Codex de R2, 4 nov. 2026
+
+- R2 attendait `engine.kill()` sans échéance avant le délai de grâce : un chargement ou un `terminate` bloqués
+  bloquaient la réponse. Désormais l'arrêt est seulement **demandé** ; lecture et arrêt sont attendus ensemble au plus
+  le délai de grâce, puis 504. Le travail est compté « non terminé » dès l'échéance et le reste tant que la lecture **ou**
+  l'arrêt du moteur ne sont pas finis (même si la lecture a déjà rendu `TIMEOUT` sur le signal) : au plus deux
+  travaux non finis, donc au plus deux moteurs véhicule non arrêtés par instance ; au-delà, 429. Place rendue dès la fin
+  réelle (reprise).
+- Moteur : `kill()` oublie le moteur courant immédiatement ; un chargement tardif est terminé dès qu'il se résout ; un
+  ancien chargement en échec n'efface plus le handle d'un moteur plus récent.
+- Non préemptible (inchangé, précisé) : un chargement ou un `terminate` qui ne finissent jamais ne sont pas tués ; leur
+  place reste occupée. Contrôle `tsc --project tsconfig.vehicules.json --noEmit` exécuté : aucune erreur.
+
+### R3 — isolation interrompable de tout le traitement à risque, 4 nov. 2026
+
+- Par défaut, la lecture (couche texte PDF, analyse et extraction d'images, décodage sharp, chargement et calcul
+  Tesseract) s'exécute dans un **processus Node enfant neuf par lecture** (`src/lib/vehicules/v3/ocr-isolation/`),
+  tué par **SIGKILL** à l'abandon (échéance de réponse) ou à l'échéance absolue du parent : le calcul s'arrête réellement,
+  y compris en natif/WASM. La promesse ne se résout qu'à la fin réelle du processus (`exit`) : la place « non terminée »
+  est rendue en quelques millisecondes ; plus de 429 durable (5 lectures bloquées de suite → 5 × 504, 0 compté ensuite).
+- Ressources : tas JS de l'enfant `--max-old-space-size=256` ; chien de garde dans un fil `worker_threads` de l'enfant
+  (SIGKILL au-delà de 768 Mo de mémoire résidente, à l'échéance absolue, ou si le parent disparaît) qui fonctionne même
+  fil principal bloqué ; `sharp.concurrency(1)`, cache sharp coupé ; environnement de l'enfant réduit à 3 variables
+  (aucun secret transmis) ; sorties standard fermées ; réponse de l'enfant validée strictement.
+- Empaquetage : `node scripts/build-vehicle-ocr-worker.mjs [sortie]` (esbuild, CommonJS ; `sharp`, `tesseract.js`,
+  `unpdf`, `@tesseract.js-data/*` externes, résolus depuis `node_modules`). Chemin lu : `VEHICLE_OCR_WORKER_PATH`
+  (absolu) ou `<cwd>/.vehicle-ocr-worker/worker.cjs`. **Empaquetage absent : 503 `RECOGNITION_UNAVAILABLE`**, message
+  explicite dans le formulaire ; jamais de repli silencieux sur une lecture dans le serveur. Le mode « dans le serveur »
+  (R2.1) ne subsiste que par injection d'un moteur (tests).
+- Non fait (activation) : brancher l'empaquetage sur le build ; embarquer `.vehicle-ocr-worker/**` et les dépendances
+  externes via `outputFileTracingIncludes` de `next.config` ; vérifier que la plateforme autorise `child_process.fork`.
+- Limites : la mémoire résidente est échantillonnée (25 ms) ; un pic entre deux mesures peut dépasser la limite avant le
+  SIGKILL ; un processus bloqué dans le noyau ne meurt qu'à son retour ; démarrage d'un processus et de Tesseract à
+  chaque lecture (≈ 1 à 3 s) ; aucune preuve Vercel (fork, mémoire, traçage des fichiers non éprouvés).
+
+### R3.1 — cycle de vie du processus isolé, 4 nov. 2026
+
+- Défaut relevé par Codex : un `fork` qui ne démarre pas (aucun pid : ENOENT, EAGAIN, EPERM…) émet `error` sans `exit` ;
+  la lecture restait pendante. Corrigé : démarrage raté (ou exception de `fork`) → échec technique immédiat, sans
+  attendre `exit` ; résolution unique ; minuteries et écouteur d'abandon retirés ; erreurs tardives absorbées.
+- Enfant démarré : toute erreur (signal, envoi IPC en échec par exception ou par rappel) déclenche SIGKILL, et la
+  résolution attend TOUJOURS sa fin réelle (`exit`) ; la place n'est jamais rendue tant qu'il vit.
+- Tests : contre-exemple Codex rejoué, envoi en échec avec arrêt différé (place tenue jusqu'à la vraie fin), erreurs en
+  double, exception de `fork`, compteurs du service exacts et reprise.
+
+### R4 — empaquetage branché et fermeture vérifiée localement, 4 nov. 2026
+
+- `npm run build` = `prisma generate && node scripts/build-vehicle-ocr-worker.mjs && next build` ; `npm run dev` empaquette
+  aussi avant `next dev` (pas de reconstruction à chaud : relancer dev après modification du processus de lecture).
+- Le script écrit `.vehicle-ocr-worker/worker.cjs` et `.vehicle-ocr-worker/trace.json` (ignorés par git) : fermeture
+  calculée par `@vercel/nft` (livré avec Next) + cœurs WASM Tesseract et modèles `4.0.0_best_int` lus par chemin ; les
+  modèles `4.0.0` non utilisés sont retirés. Chemin hors `node_modules`, motif ou fichier absent : build en échec.
+- `next.config.ts` (`vehicleOcrWorkerTraceIncludes`) ajoute le processus et chaque fichier du manifeste à
+  `outputFileTracingIncludes` de `/api/trucks/*/documents/recognize` ; manifeste absent : rien (route 503) ; invalide ou
+  incomplet (fichier listé absent) : configuration en échec. Route RH inchangée.
+- `esbuild` 0.28.0 déclaré en dépendance de développement (déjà verrouillé et installé via `tsx`) ; seule la racine du
+  verrou change, aucune installation. `sharp` reste en dépendance de développement (voir limites).
+- Vérification : `npm run verify:vehicle-ocr-worker` copie le processus et les seuls fichiers du manifeste dans un dossier
+  temporaire sans `node_modules` ancêtre, lit un PDF à couche texte et une image (OCR réel) par le lecteur de production
+  (cwd = la copie, environnement réduit), puis vérifie que la copie privée des cœurs WASM ou de sharp échoue.
+- Limites : fermeture calculée pour la plateforme de build (binaires natifs sharp de la machine) ; taille ≈ 40 Mo en
+  local ; `sharp` en devDependencies (installé sur Vercel au build, mais ses binaires `@img/*` sont marqués « dev » dans le verrou et un `npm ci --omit=dev` les omettrait : le déplacer
+  en dépendance exige une installation, non autorisée ici) ; aucun build Next exécuté ; aucune preuve Vercel (fork,
+  mémoire, cwd de la fonction, taille du paquet).
+
 ## Pour activer plus tard (non fait)
 
 1. Essai sur la préproduction (`planificator-staging`) : nécessite un push, donc des builds Vercel, à arbitrer.

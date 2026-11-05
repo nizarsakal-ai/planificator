@@ -4,7 +4,9 @@
  * la pièce reste « à vérifier » jusqu'au clic humain, aucune dépense n'est créée, le compteur n'est jamais touché.
  *
  * Minimisation : seuls les champs déjà prévus par la rubrique sont proposés. L'adresse du titulaire (C.3) n'est jamais
- * lue ; le texte brut ne sort jamais de ce module. Aucune valeur n'est journalisée.
+ * proposée : le titulaire (C.1) est coupé au code suivant quelle que soit sa ponctuation (« C.3: », « (C.3) », collé,
+ * lignes fusionnées) et, s'il reste un fragment d'adresse, rien n'est proposé. Le texte brut ne sort jamais de ce module.
+ * Aucune valeur n'est journalisée.
  * Partageable côté navigateur pour ses types : aucun module serveur importé.
  */
 import type { VehicleDocumentCategoryCode } from "./document-view-domain"
@@ -121,21 +123,39 @@ function mileageIn(lines: string[]): number | null {
 
 const AMOUNT = /(\d{1,3}(?:[ .]\d{3})+|\d+)[,.](\d{2})\b/
 const TOTAL_LABEL = /\b(TOTAL\s+T\.?T\.?C\.?|MONTANT\s+T\.?T\.?C\.?|NET\s+A\s+PAYER|TOTAL\s+A\s+PAYER|TOTAL\s+TTC|MONTANT\s+TOTAL|MONTANT\s+REGLE|TOTAL|MONTANT)\b/
-/** Montant TTC le plus explicite : libellé fort d'abord, « TOTAL » ou « MONTANT » seuls ensuite. */
-function amountIn(lines: string[]): string | null {
+/** Marque hors taxes ou de taxe : « HT », « H.T. », « HORS TAXES », « TVA » (« TOUTES TAXES » reste un TTC). */
+const NOT_TTC = /\bH\.?\s?T\.?(?![A-Z])|\bHORS\s+TAXES?\b|\bTVA\b/
+const TTC_MARK = /\bT\.?\s?T\.?\s?C\.?(?![A-Z])|\bTOUTES\s+TAXES\b|\bNET\s+A\s+PAYER\b|\bA\s+PAYER\b|\bREGLE\b/
+/**
+ * Montant TTC : libellé fort (TTC, net à payer…) d'abord ; « TOTAL » ou « MONTANT » seuls ensuite, qualifiés de total
+ * « TTC non indiqué ». Le texte qui précède le montant retenu — sur la ligne du libellé OU sur la ligne suivante quand le
+ * montant y est lu — ne doit porter aucune marque HT/TVA : « TOTAL » puis « HT 100,00 » n'est jamais un TTC.
+ */
+function amountIn(lines: string[]): { value: string; ttc: boolean } | null {
   let weak: string | null = null
+  const valueOf = (m: RegExpExecArray) => `${m[1].replace(/[ .]/g, "")},${m[2]}`
   for (let i = 0; i < lines.length; i++) {
     const label = TOTAL_LABEL.exec(lines[i])
-    if (!label || /\bH\.?T\.?\b|\bTVA\b/.test(label[0])) continue
+    if (!label) continue
+    const before = lines[i].slice(0, label.index)
+    if (NOT_TTC.test(label[0]) || NOT_TTC.test(before)) continue
     const rest = lines[i].slice(label.index + label[0].length)
-    const match = AMOUNT.exec(rest) ?? (lines[i + 1] ? AMOUNT.exec(lines[i + 1]) : null)
+    let match = AMOUNT.exec(rest)
+    let prefix = match ? rest.slice(0, match.index) : rest
+    let after = match ? rest.slice(match.index + match[0].length) : ""
+    if (!match && lines[i + 1]) {
+      // Montant de la ligne suivante : tout ce qui le précède sur cette ligne compte aussi (« HT 100,00 »).
+      match = AMOUNT.exec(lines[i + 1])
+      if (match) { prefix = `${rest} ${lines[i + 1].slice(0, match.index)}`; after = lines[i + 1].slice(match.index + match[0].length) }
+    }
     if (!match) continue
-    if (/^\s*[:.]?\s*H\.?T\.?\b/.test(rest)) continue
-    const value = `${match[1].replace(/[ .]/g, "")},${match[2]}`
-    if (/^TOTAL$|^MONTANT$/.test(label[1])) { weak ??= value; continue }
-    return value
+    // « TOTAL 100,00 HT » : la marque peut suivre le montant.
+    if (NOT_TTC.test(prefix) || /^\s*(?:€|EUR|EUROS?)?\s*\(?\s*(?:H\.?\s?T\.?(?![A-Z])|HORS\s+TAXES?)/.test(after)) continue
+    const strong = !/^TOTAL$|^MONTANT$/.test(label[1]) || TTC_MARK.test(prefix) || /^\s*(?:€|EUR|EUROS?)?\s*\(?\s*T\.?\s?T\.?\s?C/.test(after)
+    if (strong) return { value: valueOf(match), ttc: true }
+    weak ??= valueOf(match)
   }
-  return weak
+  return weak ? { value: weak, ttc: false } : null
 }
 const formatAmount = (value: string) => {
   const [units, cents] = value.split(",")
@@ -250,6 +270,42 @@ function codedFields(lines: string[], code: string): string[] {
   return lines.map((line) => re.exec(line)?.[1]).filter((value): value is string => !!value)
 }
 const codedField = (lines: string[], code: string) => codedFields(lines, code)[0] ?? null
+
+/**
+ * Début du code de rubrique suivant dans une valeur : « C.3 », « C.3: », « C.3 : », « (C.3) », « C,3 », « C3 », collé
+ * (« FICTIVEC.3: ») ou après une ligne OCR fusionnée ; aussi les autres codes du certificat (D.1, E, F.1, G, J, K, P.1…).
+ * L'adresse du titulaire (C.3) n'est jamais conservée : tout ce qui suit un code est écarté.
+ */
+const NEXT_CODE = new RegExp([
+  // C.x, D.x, F.x, P.x, S.x, V.x, X.x, Y.x, Z.x avec point, virgule ou deux-points, collés ou non au mot précédent.
+  String.raw`[CDFPSVXYZ]\s?[.,:]\s?\d`,
+  // Mêmes codes sans ponctuation (« C3 ») : isolés.
+  String.raw`(?:^|[^A-Z0-9])[CDFPSVXYZ]\d(?![A-Z0-9])`,
+  // Codes d'une lettre (E, G, H, J, K, Q, U) isolés et suivis d'un séparateur de rubrique.
+  String.raw`(?:^|\s|\()[EGHJKQU]\s?[).:]`,
+  String.raw`(?:^|\s)[EGHJKQU](?:\s|$)`,
+  // Code entre parenthèses quel qu'il soit : « (C.3) », « (C 3) ».
+  String.raw`\(\s?[A-Z]\s?[.,]?\s?\d?\s?\)`,
+].join("|"))
+export function cutAtNextCode(value: string): string {
+  const match = NEXT_CODE.exec(value)
+  return match ? value.slice(0, match.index) : value
+}
+
+/** Fragment d'adresse : numéro + type de voie, code postal, boîte postale, ou type de voie seul. */
+const ADDRESS = /\b\d{5}\b|\b\d{1,4}\s?(?:BIS|TER)?\s*,?\s*(?:RUE|AV|AVE|AVENUE|BD|BLVD|BOULEVARD|CHEMIN|CHE|ALLEE|IMPASSE|IMP|PLACE|PL|ROUTE|RTE|QUAI|COURS|SQUARE|PASSAGE|RESIDENCE|LOTISSEMENT|LIEU[- ]DIT|HAMEAU|ZA|ZI|ZAC)\b|\b(?:RUE|AVENUE|BOULEVARD|CHEMIN|ALLEE|IMPASSE|QUAI|LIEU[- ]DIT|BP|CEDEX|CS)\b/
+export function looksLikeAddress(value: string): boolean {
+  return ADDRESS.test(value)
+}
+
+/** Titulaire (C.1) proposé seulement s'il est sûr : coupé au code suivant, sans fragment d'adresse ni chiffre en tête. */
+function holderName(raw: string): string | null {
+  const cut = cutAtNextCode(raw)
+  // Le reste après la coupe est ignoré ; si la partie conservée ressemble encore à une adresse, rien n'est proposé.
+  if (looksLikeAddress(cut)) return null
+  const value = clean(cut, 120)
+  return value.length >= 2 && !/^\d/.test(value) && /[A-Z]{2}/.test(value) ? value : null
+}
 /** Un code d'une lettre (« B », « I ») apparaît aussi dans le texte courant : on retient la première occurrence datée. */
 const codedDate = (lines: string[], code: string) => codedFields(lines, code).map((value) => datesIn(value)[0]).find(Boolean) ?? null
 
@@ -260,19 +316,18 @@ function registration(lines: string[], truck: RecognitionInput["truck"]): Draft 
   if (issuedOn) draft.fields.issuedOn = read(issuedOn)
   const firstOn = codedDate(lines, "B")
   if (firstOn) draft.observations.push(`1re immatriculation (B) : ${formatFr(firstOn)}`)
-  // C.1 : titulaire. Coupé avant tout code suivant (C.3 = adresse, jamais lue ni renvoyée).
+  // C.1 : titulaire. Coupé avant tout code suivant (C.3 = adresse, jamais lue ni renvoyée) ; ambigu = rien proposé.
   const holder = codedField(lines, "C.1")
-  if (holder) {
-    const value = clean(holder.split(/\s(?:C\.\d|D\.\d|E|F\.\d)\s/)[0], 120)
-    if (value.length >= 2 && !/^\d/.test(value)) draft.fields.issuerName = toCheck(value)
-  }
+  const value = holder === null ? null : holderName(holder)
+  if (value) draft.fields.issuerName = toCheck(value)
   const formula = /\b((?:19|20)\d{2}\s?[A-Z]{2}\s?\d{5})\b/.exec(lines.join(" "))
   if (formula) draft.fields.referenceNumber = read(formula[1].replace(/\s/g, ""))
   const platePreferred = codedFields(lines, "A").map((value) => platesIn([value])[0]).find(Boolean) ?? null
   const plateResult = plateCheck(lines, truck.matricule, platePreferred)
   if (plateResult) draft.checks.push(plateResult)
   const brand = codedField(lines, "D.1")
-  const brandValue = brand ? clean(brand.split(/\s(?:D\.\d|E|F\.\d)\s/)[0], 60) : null
+  const brandCut = brand ? cutAtNextCode(brand) : null
+  const brandValue = brandCut && !looksLikeAddress(brandCut) ? clean(brandCut, 60) : null
   if (brandValue && /[A-Z]{2}/.test(brandValue)) {
     const result = brandCheck(brandValue, truck.marque)
     if (result) draft.checks.push(result)
@@ -342,7 +397,7 @@ function invoice(lines: string[], truck: RecognitionInput["truck"], kind: "REPAI
   const km = mileageIn(lines)
   if (km !== null) draft.fields.mileage = toCheck(km)
   const amount = amountIn(lines)
-  if (amount) draft.observations.push(`Montant TTC lu : ${formatAmount(amount)}`)
+  if (amount) draft.observations.push(amount.ttc ? `Montant TTC lu : ${formatAmount(amount.value)}` : `Montant total lu (TTC non indiqué, à vérifier) : ${formatAmount(amount.value)}`)
   const litres = kind === "EXPENSE_RECEIPT" ? litresIn(lines) : null
   if (litres) draft.observations.push(`Volume lu : ${litres} L`)
   const plate = plateCheck(lines, truck.matricule)

@@ -8,8 +8,9 @@ import { after, before, describe, it } from "node:test"
 import sharp from "sharp"
 import { POST as recognizePost } from "@/app/api/trucks/[id]/documents/recognize/route"
 import { extractVehicleDocumentFields, normalizeText, plateKey, type RecognitionProposal } from "@/lib/vehicules/v3/document-recognition-domain"
-import { runningRecognitions, type DocumentReader } from "@/lib/vehicules/v3/document-recognition-service"
-import { readDocument, shutdownOcr, type Reading } from "@/lib/hr-documents/recognition/ocr"
+import { abandonedRecognitions, recognizeVehicleDocument, runningRecognitions, type DocumentReader } from "@/lib/vehicules/v3/document-recognition-service"
+import { createVehicleOcrEngine, type VehicleOcrEngine } from "@/lib/vehicules/v3/document-recognition-engine"
+import { declaredPdfImagePixels, readDocument, shutdownOcr, type OcrEngine, type OcrEngineHandle, type Reading } from "@/lib/hr-documents/recognition/ocr"
 import { applyRecognition, createLatestOnly, recognitionChecks, recognitionSummary, resetUntouched } from "@/components/vehicules/v3/vehicle-document-recognition-ui"
 import { jpegPdf } from "../../hr-documents/ocr/fixtures"
 import { ADMIN, LEADER, OTHER_ADMIN, PDF_BYTES, PNG_BYTES, TRUCK, V3MemoryDb } from "./v3-test-db"
@@ -107,7 +108,8 @@ describe("règles d'extraction par rubrique (textes synthétiques)", () => {
   it("ticket de carburant : enseigne, date à deux chiffres, ticket, kilométrage, montant et litres", () => {
     const p = extractVehicleDocumentFields({ category: "EXPENSE_RECEIPT", text: FUEL_TICKET, truck })
     assert.deepEqual(values(p), { issuedOn: "2026-11-04", issuerName: "TOTALENERGIES", referenceNumber: "004521", mileage: 120900 })
-    assert.deepEqual(p.observations, ["Montant TTC lu : 88,35 €", "Volume lu : 52,31 L"])
+    // « MONTANT » seul ne prouve pas le TTC (R2) : montant qualifié, à vérifier.
+    assert.deepEqual(p.observations, ["Montant total lu (TTC non indiqué, à vérifier) : 88,35 €", "Volume lu : 52,31 L"])
   })
   it("document d'une autre rubrique : signalé, jamais reclassé", () => {
     const p = extractVehicleDocumentFields({ category: "INSURANCE", text: REGISTRATION, truck })
@@ -330,5 +332,315 @@ describe("lecture réelle d'un scan synthétique (OCR local, aucun réseau)", ()
     const p = extractVehicleDocumentFields({ category: "INSURANCE", text: r.text, truck, lowConfidence: (r.confidence ?? 0) < 70 })
     assert.equal(p.fields.validFrom?.value, "2026-01-01"); assert.equal(p.fields.validUntil?.value, "2026-12-31")
     assert.equal(p.fields.issuerName?.value, "AXA")
+  })
+})
+
+// ═══ R2 — contre-exemples de la revue Codex (textes et fichiers synthétiques) ═══
+
+const ADDRESS_LEAK = /RUE|AVENUE|AV FICTIVE|BOULEVARD|NULLE|00000|12 (?:RUE|AV)|CEDEX/
+const grey = async (w: number, h: number) => sharp({ create: { width: w, height: h, channels: 3, background: "#ffffff" } }).png().toBuffer()
+
+describe("R2 point 4 — titulaire C.1 : jamais l'adresse C.3, quelle que soit la ponctuation", () => {
+  const registration = (holderLine: string) => `CERTIFICAT D'IMMATRICULATION\nA AB-123-CD B 12/03/2021\n${holderLine}\nD.1 RENAULT TRUCKS D.3 MASTER\nI 16/10/2026\n2026EE28718`
+  const cases: [string, string | null][] = [
+    ["C.1 SOCIETE FICTIVE C.3: 12 RUE FICTIVE", "SOCIETE FICTIVE"],
+    ["C.1 SOCIETE FICTIVE C.3 : 12 RUE FICTIVE", "SOCIETE FICTIVE"],
+    ["C.1 SOCIETE FICTIVE C.3:12 RUE FICTIVE", "SOCIETE FICTIVE"],
+    ["C.1 SOCIETE FICTIVE (C.3) 12 RUE FICTIVE", "SOCIETE FICTIVE"],
+    ["C.1 SOCIETE FICTIVE C .3 12 RUE FICTIVE", "SOCIETE FICTIVE"],
+    ["C.1 SOCIETE FICTIVE C,3 12 AV FICTIVE", "SOCIETE FICTIVE"],
+    ["C.1 SOCIETE FICTIVEC.3:12 RUE FICTIVE", "SOCIETE FICTIVE"],
+    ["C.1 SOCIETE FICTIVE C3 12 RUE FICTIVE", "SOCIETE FICTIVE"],
+    ["(C.1) SOCIETE FICTIVE (C.3) 12 RUE FICTIVE 00000 NULLE-PART", "SOCIETE FICTIVE"],
+    // Ligne OCR fusionnée : C.3 puis D.1 sur la même ligne que C.1.
+    ["C.1 SOCIETE FICTIVE C.3 12 RUE FICTIVE 00000 NULLE-PART D.1 RENAULT", "SOCIETE FICTIVE"],
+    // Ambigu : adresse sans code de rubrique (code C.3 perdu par l'OCR) : rien n'est proposé.
+    ["C.1 SOCIETE FICTIVE 12 RUE FICTIVE 00000 NULLE-PART", null],
+    ["C.1 SOCIETE FICTIVE 00000 NULLE-PART", null],
+    ["C.1 12 RUE FICTIVE", null],
+    ["C.1 C.3 12 RUE FICTIVE", null],
+  ]
+  for (const [line, expected] of cases) it(`« ${line} » → ${expected ?? "aucun titulaire"}`, () => {
+    const p = extractVehicleDocumentFields({ category: "REGISTRATION", text: registration(line), truck })
+    assert.equal(p.fields.issuerName?.value ?? null, expected)
+    assert.doesNotMatch(JSON.stringify(p), ADDRESS_LEAK, "aucun fragment d'adresse dans toute la proposition")
+  })
+  it("marque D.1 suivie d'une adresse fusionnée : ni marque d'adresse ni fragment dans les observations", () => {
+    const p = extractVehicleDocumentFields({ category: "REGISTRATION", text: registration("C.1 SOCIETE FICTIVE").replace("D.1 RENAULT TRUCKS D.3 MASTER", "D.1 IVECO C.3 12 RUE FICTIVE"), truck })
+    assert.doesNotMatch(JSON.stringify(p), ADDRESS_LEAK)
+    assert.ok(p.observations.includes("Marque lue (D.1) : IVECO"))
+  })
+  it("route : aucune adresse dans la réponse ni dans les journaux, pour chaque variante", async () => {
+    let savedV3 = process.env.PLANIFICATOR_VEHICLES_V3_ENABLED
+    process.env.PLANIFICATOR_VEHICLES_V3_ENABLED = "true"
+    const logged: string[] = []
+    const methods = ["log", "info", "warn", "error", "debug"] as const
+    const original = methods.map((m) => console[m])
+    methods.forEach((m) => { console[m] = (...args: unknown[]) => { logged.push(args.map(String).join(" ")) } })
+    try {
+      for (const [line] of cases) {
+        const db = new V3MemoryDb()
+        const response = await recognizePost(request({ category: "REGISTRATION" }), params, depsFor(db, ADMIN, async () => reading(registration(line))).deps)
+        assert.equal(response.status, 200)
+        assert.doesNotMatch(await response.text(), ADDRESS_LEAK, line)
+      }
+    } finally {
+      methods.forEach((m, i) => { console[m] = original[i] })
+      if (savedV3 === undefined) delete process.env.PLANIFICATOR_VEHICLES_V3_ENABLED; else process.env.PLANIFICATOR_VEHICLES_V3_ENABLED = savedV3
+      savedV3 = undefined
+    }
+    assert.doesNotMatch(logged.join("\n"), /FICTIVE|RUE|NULLE/)
+  })
+})
+
+describe("R2 point 7 — montant TTC : jamais un HT ou une TVA de la ligne suivante", () => {
+  const observation = (text: string) => extractVehicleDocumentFields({ category: "REPAIR_MAINTENANCE", text: `GARAGE EXEMPLE\n${text}`, truck }).observations.find((o) => o.startsWith("Montant")) ?? null
+  const cases: [string, string | null][] = [
+    ["TOTAL\nHT 100,00\nTVA 20,00", null],
+    ["TOTAL\nH.T. 100,00", null],
+    ["TOTAL\nTVA 20,00", null],
+    ["TOTAL 100,00 HT", null],
+    ["TOTAL (HT) 100,00", null],
+    ["TOTAL HORS TAXES 100,00", null],
+    ["TOTAL\nHT 100,00\nTOTAL TTC 120,00", "Montant TTC lu : 120,00 €"],
+    ["TOTAL\nTTC 120,00", "Montant TTC lu : 120,00 €"],
+    ["TOTAL 120,00 TTC", "Montant TTC lu : 120,00 €"],
+    ["TOTAL TOUTES TAXES 120,00", "Montant TTC lu : 120,00 €"],
+    ["NET A PAYER\n120,00", "Montant TTC lu : 120,00 €"],
+    ["TOTAL 120,00", "Montant total lu (TTC non indiqué, à vérifier) : 120,00 €"],
+    ["Total HT 100,00\nTVA 20 % 20,00\nTotal TTC 120,00", "Montant TTC lu : 120,00 €"],
+  ]
+  for (const [text, expected] of cases) it(`${JSON.stringify(text)} → ${expected ?? "aucun montant"}`, () => assert.equal(observation(text), expected))
+})
+
+/** Moteur factice : `recognize` reste en suspens jusqu'à `terminate`, qui le rejette (comme un worker tué). */
+function hangingHandle(log: string[]): OcrEngineHandle {
+  const pending: ((e: Error) => void)[] = []
+  const engine: OcrEngine = { recognize: () => new Promise((_, reject) => { log.push("recognize"); pending.push(reject) }) }
+  return { engine, terminate: async () => { log.push("terminate"); pending.splice(0).forEach((reject) => reject(new Error("worker terminated"))) } }
+}
+const quickHandle = (log: string[]): OcrEngineHandle => ({
+  engine: { recognize: async () => { log.push("recognize-ok"); return { text: "ATTESTATION D'ASSURANCE AXA FRANCE IARD Contrat 1234567 periode du 01/01/2026 au 31/12/2026 vehicule AB-123-CD", confidence: 92, lines: [] } } },
+  terminate: async () => { log.push("terminate-ok") },
+})
+
+describe("R2 point 3 — borne réelle de la lecture OCR : arrêt, libération, concurrence, reprise", () => {
+  let savedV3: string | undefined
+  before(() => { savedV3 = process.env.PLANIFICATOR_VEHICLES_V3_ENABLED; process.env.PLANIFICATOR_VEHICLES_V3_ENABLED = "true" })
+  after(() => { if (savedV3 === undefined) delete process.env.PLANIFICATOR_VEHICLES_V3_ENABLED; else process.env.PLANIFICATOR_VEHICLES_V3_ENABLED = savedV3 })
+  const pngFile = async () => ({ name: "photo.png", type: "image/png", bytes: new Uint8Array(await grey(400, 300)) })
+  const withEngine = (db: V3MemoryDb, engine: VehicleOcrEngine, over: Record<string, unknown> = {}) =>
+    ({ ...db.deps(ADMIN), env: { ...process.env, PLANIFICATOR_VEHICLE_DOCUMENT_RECOGNITION_ENABLED: "true" }, engine, ...over })
+
+  it("échéance : moteur véhicule arrêté (workers terminés), place rendue, seconde lecture 429 pendant, reprise avec un moteur rechargé", async () => {
+    const log: string[] = []
+    let made = 0
+    const engine = createVehicleOcrEngine(async () => (made++ === 0 ? hangingHandle(log) : quickHandle(log)))
+    const file = await pngFile()
+    const started = Date.now()
+    const first = recognizePost(request({ category: "INSURANCE" }, file), params, withEngine(new V3MemoryDb(), engine, { deadlineMs: 150, graceMs: 500 }) as never)
+    await new Promise((r) => setTimeout(r, 40))
+    assert.equal((await recognizePost(request({ category: "INSURANCE" }, file), params, withEngine(new V3MemoryDb(), engine) as never)).status, 429)
+    const response = await first
+    assert.deepEqual([response.status, (await response.json()).code], [504, "RECOGNITION_TIMEOUT"])
+    assert.ok(Date.now() - started < 2_000, "réponse bornée par l'échéance, pas par le moteur")
+    assert.ok(log.includes("terminate"), "workers du moteur véhicule terminés")
+    assert.deepEqual([runningRecognitions(), abandonedRecognitions(), engine.loaded()], [0, 0, false])
+    const again = await recognizePost(request({ category: "INSURANCE" }, file), params, withEngine(new V3MemoryDb(), engine) as never)
+    assert.equal(again.status, 200)
+    assert.equal(made, 2, "reprise : moteur rechargé")
+    assert.ok(log.includes("recognize-ok"))
+    await engine.kill()
+  })
+  it("lecteur qui ignore l'abandon : place rendue après le délai de grâce, lecture comptée « abandonnée » ; au-delà de deux, 429 ; libéré à sa fin", async () => {
+    const releases: (() => void)[] = []
+    const stuck: DocumentReader = () => new Promise<Reading>((resolve) => { releases.push(() => resolve(reading(""))) })
+    const engine = createVehicleOcrEngine(async () => quickHandle([]))
+    const deps = (read: DocumentReader) => ({ ...depsFor(new V3MemoryDb(), ADMIN, read).deps, engine, deadlineMs: 60, graceMs: 30 })
+    assert.equal((await recognizePost(request({ category: "INSURANCE" }), params, deps(stuck) as never)).status, 504)
+    assert.deepEqual([runningRecognitions(), abandonedRecognitions()], [0, 1])
+    assert.equal((await recognizePost(request({ category: "INSURANCE" }), params, deps(async () => reading(INSURANCE)) as never)).status, 200)
+    assert.equal((await recognizePost(request({ category: "INSURANCE" }), params, deps(stuck) as never)).status, 504)
+    assert.equal(abandonedRecognitions(), 2)
+    assert.equal((await recognizePost(request({ category: "INSURANCE" }), params, deps(async () => reading(INSURANCE)) as never)).status, 429)
+    releases.forEach((release) => release())
+    await new Promise((r) => setTimeout(r, 10))
+    assert.deepEqual([runningRecognitions(), abandonedRecognitions()], [0, 0])
+    assert.equal((await recognizePost(request({ category: "INSURANCE" }), params, deps(async () => reading(INSURANCE)) as never)).status, 200)
+  })
+  // R3 : le lecteur par défaut est désormais le processus isolé (tests/vehicules/v3/ocr-isolation.test.ts) ; ce test
+  // couvre le mode « dans le serveur » qui ne subsiste que par injection d'un moteur.
+  it("moteur injecté (mode dans le serveur) : moteur dédié aux pièces véhicule, jamais le moteur partagé des documents RH", async () => {
+    const log: string[] = []
+    const engine = createVehicleOcrEngine(async () => quickHandle(log))
+    const response = await recognizePost(request({ category: "INSURANCE" }, await pngFile()), params, withEngine(new V3MemoryDb(), engine) as never)
+    assert.equal(response.status, 200)
+    assert.ok(log.includes("recognize-ok"))
+    await engine.kill()
+    assert.ok(log.includes("terminate-ok"))
+  })
+  it("lecture partagée : l'abandon (signal) rend immédiatement « TIMEOUT » sans attendre le moteur", async () => {
+    const controller = new AbortController()
+    const log: string[] = []
+    const handle = hangingHandle(log)
+    setTimeout(() => controller.abort(), 50)
+    const started = Date.now()
+    const r = await readDocument(new Uint8Array(await grey(400, 300)), "png", { engine: async () => handle.engine, signal: controller.signal, timeoutMs: 60_000 })
+    assert.deepEqual([r.status, r.reason], ["TECHNICAL_FAILURE", "TIMEOUT"])
+    assert.ok(Date.now() - started < 1_000)
+    await handle.terminate()
+  })
+  it("PDF : dimensions d'image lues avant décompression ; trop grande ou inconnue = refus sans extraction ni OCR ; documents RH inchangés sans l'option", async () => {
+    const jpeg = await sharp({ create: { width: 200, height: 100, channels: 3, background: "#ffffff" } }).jpeg().toBuffer()
+    assert.deepEqual(declaredPdfImagePixels(jpegPdf(jpeg, 200, 100)), { max: 20_000, total: 20_000, count: 1 })
+    const huge = jpegPdf(jpeg, 20_000, 20_000)
+    const indirect = new Uint8Array(Buffer.from(Buffer.from(jpegPdf(jpeg, 200, 100)).toString("latin1").replace("/Width 200", "/Width 9 0 R"), "latin1"))
+    assert.equal(declaredPdfImagePixels(indirect), null)
+    let engineCalls = 0
+    const engine = async () => { engineCalls++; return quickHandle([]).engine }
+    for (const bytes of [huge, indirect]) {
+      const r = await readDocument(bytes, "pdf", { engine, maxPdfImagePixels: 25_000_000 })
+      assert.deepEqual([r.status, r.reason], ["TECHNICAL_FAILURE", "PDF_IMAGE_TOO_LARGE"])
+    }
+    assert.equal(engineCalls, 0)
+    // Sans l'option (chemin des documents RH) : aucun refus de ce type.
+    const legacy = await readDocument(huge, "pdf", { engine })
+    assert.notEqual(legacy.reason, "PDF_IMAGE_TOO_LARGE")
+  })
+})
+
+/** Promesse pilotée par le test (jamais résolue tant que le test ne le décide pas). */
+function deferred<T = void>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
+const PENDING = Symbol("PENDING")
+/** Résultat de `p` s'il arrive avant `ms`, sinon PENDING (témoin de non-réponse). */
+const within = <T>(p: Promise<T>, ms: number) => Promise.race([p, new Promise<typeof PENDING>((r) => setTimeout(() => r(PENDING), ms))])
+const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms))
+
+describe("R2.1 point 3 — arrêt du moteur lui-même borné : 504 en temps fini, arrêt pendant compté, reprise", () => {
+  let savedV3: string | undefined
+  before(() => { savedV3 = process.env.PLANIFICATOR_VEHICLES_V3_ENABLED; process.env.PLANIFICATOR_VEHICLES_V3_ENABLED = "true" })
+  after(() => { if (savedV3 === undefined) delete process.env.PLANIFICATOR_VEHICLES_V3_ENABLED; else process.env.PLANIFICATOR_VEHICLES_V3_ENABLED = savedV3 })
+  const env = { ...process.env, PLANIFICATOR_VEHICLE_DOCUMENT_RECOGNITION_ENABLED: "true" }
+  const png = { filename: "photo.png", declaredMimeType: "image/png", bytes: PNG_BYTES }
+  /** Lecteur qui rend aussitôt « TIMEOUT » sur le signal d'abandon (comme readDocument). */
+  const abortable = (onStart?: () => Promise<unknown>): DocumentReader => async (_bytes, _kind, { signal }) => {
+    await onStart?.()
+    return new Promise<Reading>((resolve) => signal.addEventListener("abort", () => resolve(reading("", { status: "TECHNICAL_FAILURE", reason: "TIMEOUT" }))))
+  }
+  const deps = (engine: VehicleOcrEngine, read: DocumentReader, over: Record<string, unknown> = {}) =>
+    ({ ...new V3MemoryDb().deps(ADMIN), env, engine, read, deadlineMs: 20, graceMs: 20, ...over })
+  const call = (d: ReturnType<typeof deps>) => recognizeVehicleDocument(TRUCK, { category: "INSURANCE" }, png, d as never)
+  const code = (p: Promise<unknown>) => p.then(() => "OK", (e: { code?: string; status?: number; message?: string }) => (e.code ? `${e.status} ${e.code}` : `ERR ${e.message}`))
+
+  it("contre-exemple Codex : lecture, chargement et kill jamais résolus → 504 avant le témoin de 200 ms ; travail compté jusqu'à sa vraie fin", async () => {
+    const read = deferred<Reading>(), load = deferred<OcrEngine>(), stop = deferred()
+    const engine: VehicleOcrEngine = { get: () => load.promise, kill: () => stop.promise, loaded: () => true }
+    const started = Date.now()
+    const outcome = await within(code(call(deps(engine, () => read.promise))), 200)
+    assert.equal(outcome, "504 RECOGNITION_TIMEOUT")
+    assert.ok(Date.now() - started < 200)
+    assert.deepEqual([runningRecognitions(), abandonedRecognitions()], [0, 1], "place de lecture rendue, travail non terminé compté")
+    read.resolve(reading(""))
+    await tick()
+    assert.equal(abandonedRecognitions(), 1, "lecture finie mais arrêt du moteur toujours pendant : encore compté")
+    stop.resolve()
+    await tick()
+    assert.deepEqual([runningRecognitions(), abandonedRecognitions()], [0, 0])
+  })
+
+  it("lecteur qui rend aussitôt sur le signal mais kill pendant : arrêt compté ; accumulation bornée à deux travaux puis 429 ; libération à la fin réelle", async () => {
+    const stops = [deferred(), deferred()]
+    let kills = 0
+    const engine: VehicleOcrEngine = { get: async () => quickHandle([]).engine, kill: () => stops[kills++].promise, loaded: () => false }
+    assert.equal(await within(code(call(deps(engine, abortable()))), 200), "504 RECOGNITION_TIMEOUT")
+    assert.deepEqual([runningRecognitions(), abandonedRecognitions()], [0, 1], "TIMEOUT déjà rendu par le lecteur, arrêt pendant : compté")
+    assert.equal(await code(call(deps(engine, async () => reading(INSURANCE)))), "OK", "une place reste pour une lecture")
+    assert.equal(await within(code(call(deps(engine, abortable()))), 200), "504 RECOGNITION_TIMEOUT")
+    assert.equal(abandonedRecognitions(), 2)
+    assert.equal(await code(call(deps(engine, async () => reading(INSURANCE)))), "429 RECOGNITION_BUSY", "pas de troisième moteur tant que deux arrêts sont pendants")
+    stops[0].resolve()
+    await tick()
+    assert.equal(abandonedRecognitions(), 1)
+    assert.equal(await code(call(deps(engine, async () => reading(INSURANCE)))), "OK", "reprise dès qu'un arrêt finit réellement")
+    stops[1].resolve()
+    await tick()
+    assert.deepEqual([runningRecognitions(), abandonedRecognitions(), kills], [0, 0, 2])
+  })
+
+  it("moteur réel : terminate pendant → 504 borné, moteur oublié, place tenue ; terminate fini → place rendue et reprise avec un moteur neuf", async () => {
+    const terminating = deferred()
+    const log: string[] = []
+    let made = 0
+    const engine = createVehicleOcrEngine(async () => (made++ === 0
+      ? { engine: { recognize: () => new Promise(() => {}) }, terminate: () => { log.push("terminate-1"); return terminating.promise } }
+      : quickHandle(log)))
+    const read = abortable(() => engine.get())
+    assert.equal(await within(code(call(deps(engine, read))), 200), "504 RECOGNITION_TIMEOUT")
+    assert.deepEqual([log, engine.loaded(), abandonedRecognitions()], [["terminate-1"], false, 1])
+    terminating.resolve()
+    await tick()
+    assert.equal(abandonedRecognitions(), 0)
+    const again = await recognizePost(request({ category: "INSURANCE" }, { name: "photo.png", type: "image/png", bytes: new Uint8Array(await grey(400, 300)) }), params,
+      { ...new V3MemoryDb().deps(ADMIN), env, engine } as never)
+    assert.equal(again.status, 200)
+    assert.equal(made, 2, "reprise : moteur rechargé")
+    await engine.kill()
+  })
+
+  it("chargement bloqué : kill pendant mais moteur oublié tout de suite ; chargement tardif aussitôt terminé, sans toucher au moteur plus récent", async () => {
+    const slow = deferred<OcrEngineHandle>()
+    const log: string[] = []
+    let made = 0
+    const engine = createVehicleOcrEngine(() => (made++ === 0 ? slow.promise : Promise.resolve(quickHandle(log))))
+    void engine.get().catch(() => {})
+    await tick()
+    const killing = engine.kill()
+    assert.equal(engine.loaded(), false)
+    assert.equal(await within(killing, 50), PENDING, "arrêt pendant tant que le chargement ne finit pas")
+    await engine.get()
+    assert.deepEqual([made, engine.loaded()], [2, true])
+    slow.resolve({ engine: quickHandle([]).engine, terminate: async () => { log.push("terminate-late") } })
+    assert.equal(await within(killing, 200), undefined, "arrêt fini dès que le chargement tardif est terminé")
+    assert.deepEqual([log, engine.loaded()], [["terminate-late"], true], "seul l'ancien moteur est terminé")
+    await engine.get()
+    assert.equal(made, 2, "moteur récent réutilisé")
+    await engine.kill()
+    assert.deepEqual(log, ["terminate-late", "terminate-ok"])
+  })
+
+  it("chargement ancien en échec tardif : n'efface pas le handle du moteur plus récent", async () => {
+    const failing = deferred<OcrEngineHandle>()
+    let made = 0
+    const engine = createVehicleOcrEngine(() => (made++ === 0 ? failing.promise : Promise.resolve(quickHandle([]))))
+    const first = engine.get().then(() => "ok", () => "rejected")
+    await tick()
+    const killing = engine.kill()
+    await engine.get()
+    failing.reject(new Error("chargement échoué"))
+    assert.deepEqual([await first, await within(killing, 200)], ["rejected", undefined])
+    assert.equal(engine.loaded(), true)
+    await engine.get()
+    assert.equal(made, 2)
+    await engine.kill()
+    assert.equal(engine.loaded(), false)
+  })
+
+  it("factory jamais résolue : la route rend 504 en temps fini et 429 tant que deux arrêts restent pendants", async () => {
+    const blocked = [deferred<OcrEngineHandle>(), deferred<OcrEngineHandle>()]
+    let made = 0
+    const engine = createVehicleOcrEngine(() => blocked[made++].promise)
+    const read = abortable(() => engine.get())
+    for (let i = 0; i < 2; i++) assert.equal(await within(code(call(deps(engine, read))), 200), "504 RECOGNITION_TIMEOUT")
+    assert.deepEqual([made, abandonedRecognitions()], [2, 2])
+    assert.equal(await code(call(deps(engine, read))), "429 RECOGNITION_BUSY")
+    assert.equal(made, 2, "aucun chargement supplémentaire")
+    blocked.forEach((b) => b.reject(new Error("chargement abandonné")))
+    await tick()
+    assert.deepEqual([runningRecognitions(), abandonedRecognitions(), engine.loaded()], [0, 0, false])
   })
 })

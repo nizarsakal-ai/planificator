@@ -1,7 +1,8 @@
 /**
  * Véhicules V3 — sources publiques gratuites et sans clé de l'estimation carburant :
  * tracé IGN Géoplateforme (itinéraire) et prix du flux instantané des carburants (data.economie.gouv.fr).
- * Seules des coordonnées sont envoyées (siège, chantier, points du tracé) ; corps borné, délai court, valeurs contrôlées.
+ * Seules des coordonnées sont envoyées (siège, chantier, points du tracé) : aucune adresse, aucun nom ; le parcours
+ * d'estimation n'appelle pas le géocodage. Corps borné, délai court, valeurs contrôlées.
  */
 import { readImportBoundedBody } from "../import-bounded-body"
 import { MileageDomainError } from "../mileage-domain"
@@ -45,11 +46,16 @@ export async function ignRouteGeometry(from: Point, to: Point, fetchFn: typeof f
 const FIELD: Record<FuelType, string> = { GAZOLE: "gazole", E10: "e10", SP95: "sp95", SP98: "sp98", E85: "e85", GPLC: "gplc" }
 const clean = (value: unknown, max: number) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, max) : ""
 
+/** Au plus 100 stations par requête (limite de l'API), les moins chères d'abord ; aucune pagination (quota inchangé). */
+export const STATIONS_PER_REQUEST = 100
+
 /**
- * Stations à moins de `radiusKm` d'au moins un point du couloir, avec un prix publié pour ce carburant.
- * L'écart au trajet est recalculé localement sur le tracé `line` ; au plus 100 stations, les moins chères d'abord.
+ * Stations à moins de `radiusKm` d'au moins un point du couloir, avec un prix publié pour ce carburant, puis gardées si
+ * leur distance à vol d'oiseau au tracé `line` est au plus `maxOffRouteKm` (proximité approximative : ni accès, ni
+ * chaussée, ni détour routier vérifiés). `truncated` : le service avait plus de 100 stations (total_count) — ou ne dit
+ * pas combien — et n'a rendu que les 100 moins chères : un échantillon, pas toutes les stations.
  */
-export async function stationsInCorridor(samples: readonly Point[], radiusKm: number, line: readonly Point[], fuel: FuelType, fetchFn: typeof fetch = fetch): Promise<FuelStation[]> {
+export async function stationsInCorridor(samples: readonly Point[], radiusKm: number, line: readonly Point[], fuel: FuelType, fetchFn: typeof fetch = fetch, maxOffRouteKm = radiusKm): Promise<{ stations: FuelStation[]; truncated: boolean }> {
   if (!samples.length || samples.length > 40 || !samples.every(validPoint) || !(radiusKm > 0) || radiusKm > 20) throw new MileageDomainError("INVALID_CORRIDOR", 400)
   const f = FIELD[fuel]
   const circles = samples.map((p) => `within_distance(geom, geom'POINT(${p.longitude.toFixed(5)} ${p.latitude.toFixed(5)})', ${radiusKm.toFixed(2)}km)`)
@@ -57,18 +63,22 @@ export async function stationsInCorridor(samples: readonly Point[], radiusKm: nu
   url.searchParams.set("where", `(${circles.join(" OR ")}) AND ${f}_prix IS NOT NULL`)
   url.searchParams.set("select", `id,adresse,ville,geom,${f}_prix,${f}_maj,horaires_automate_24_24`)
   url.searchParams.set("order_by", `${f}_prix`)
-  url.searchParams.set("limit", "100")
+  url.searchParams.set("limit", String(STATIONS_PER_REQUEST))
   const data = await getJson(url, fetchFn, "FUEL_PRICES_UNAVAILABLE", 500_000)
   if (!Array.isArray(data?.results)) throw new MileageDomainError("INVALID_FUEL_PRICES", 502)
+  const total = data?.total_count
+  const truncated = data.results.length >= STATIONS_PER_REQUEST && !(typeof total === "number" && Number.isFinite(total) && total <= STATIONS_PER_REQUEST)
   const out: FuelStation[] = []
-  for (const row of data.results.slice(0, 100)) {
+  for (const row of data.results.slice(0, STATIONS_PER_REQUEST)) {
     const price = Number(row?.[`${f}_prix`]), updatedAt = clean(row?.[`${f}_maj`], 40)
     const point = { latitude: Number(row?.geom?.lat), longitude: Number(row?.geom?.lon) }
     const id = String(row?.id ?? "").slice(0, 20)
     if (!/^\d{3,12}$/.test(id) || !(price > 0.3 && price < 10) || !validPoint(point) || Number.isNaN(Date.parse(updatedAt))) continue
-    const offRouteKm = Math.round(distanceToPolylineKm(point, line.length ? line : samples) * 10) / 10
-    if (offRouteKm > radiusKm + 0.5) continue
+    // Filtre sur la distance exacte, arrondi seulement pour l'affichage (2,04 km ne devient pas « 2,0 » gardée).
+    const exactKm = distanceToPolylineKm(point, line.length ? line : samples)
+    if (!(exactKm <= maxOffRouteKm)) continue
+    const offRouteKm = Math.round(exactKm * 10) / 10
     out.push({ id, label: clean(row.adresse, 120) || "Station", city: clean(row.ville, 80), price, updatedAt: new Date(updatedAt).toISOString(), offRouteKm, open24h: row.horaires_automate_24_24 === "Oui" })
   }
-  return out
+  return { stations: out, truncated }
 }

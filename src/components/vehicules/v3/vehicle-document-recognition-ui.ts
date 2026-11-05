@@ -80,6 +80,7 @@ export function recognitionError(code?: string): string {
   switch (code) {
     case "RECOGNITION_BUSY": return "Une autre lecture est en cours. Saisissez les informations ou rechoisissez le fichier dans un instant."
     case "RECOGNITION_TIMEOUT": return "La lecture automatique a pris trop de temps. Saisissez les informations."
+    case "RECOGNITION_UNAVAILABLE": return "Lecture automatique non installée sur ce serveur (module de lecture isolé absent). Saisissez les informations ; le fichier sera enregistré normalement."
     case "DOCUMENT_FILE_TOO_LARGE": case "DOCUMENT_TYPE_NOT_ALLOWED": case "DOCUMENT_TYPE_MISMATCH": case "DOCUMENT_ACTIVE_CONTENT": return "Ce fichier ne peut pas être lu automatiquement ; il sera contrôlé à l'enregistrement."
     default: return "Lecture automatique indisponible. Saisissez les informations."
   }
