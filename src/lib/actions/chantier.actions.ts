@@ -9,6 +9,7 @@ import { assignTeamCore } from "@/lib/actions/assignment-team.core"
 import { updateWorksiteWithPhotoRecipients } from "@/lib/actions/chantier-photo-recipients.core"
 import { PHOTO_RECIPIENTS_FORBIDDEN, readPhotoRecipientsField } from "@/lib/chantiers/photo-recipients"
 import { readManualCoordinates, resolveWorksiteCoordinates } from "@/lib/chantiers/worksite-coordinates"
+import { ymdToUtc } from "@/lib/chantiers/assignment-range"
 import type { CoreResult, WriteActor } from "@/lib/actions/write-actor"
 import {
   updateChantierSchema,
@@ -395,6 +396,9 @@ export async function deleteAssignmentBlock(
   endDate: string
 ) {
   const user = await requireAdmin()
+  // Plage partielle possible depuis l'interface : jours civils valides et ordonnés, sinon aucune suppression.
+  const from = ymdToUtc(startDate), to = ymdToUtc(endDate)
+  if (from === null || to === null || from > to) return { error: "Plage de dates invalide." }
 
   const worksite = await prisma.worksite.findFirst({
     where: { id: worksiteId, companyId: user.companyId! },
