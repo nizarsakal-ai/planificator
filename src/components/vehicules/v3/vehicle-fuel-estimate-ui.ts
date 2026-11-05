@@ -203,9 +203,37 @@ export function estimateQuery(source: string, fuel: FuelType, decisions?: Estima
   return query
 }
 
+/**
+ * Règle d'organisation interne de Galya (validée par Nizar, ce n'est pas une règle juridique) : distance ALLER routière
+ * depuis le siège ≤ 50 km → retour quotidien proposé ; > 50 km → séjour sur place, un aller-retour au total, proposé.
+ * Le siège n'est connu que pour cette société : ailleurs, aucune distance donc aucune proposition.
+ */
+export const DAILY_RETURN_MAX_ONE_WAY_KM = 50
+
+/**
+ * Mode PROPOSÉ d'après la distance aller déjà renvoyée par l'estimation (aucun appel supplémentaire). `null` si la
+ * distance est inconnue, nulle, négative ou non finie : aucune proposition arbitraire. Jamais appliqué d'office : seul
+ * le choix explicite de l'opérateur compte pour le calcul.
+ */
+export function recommendedTravelMode(oneWayKm: number | null | undefined): TravelMode | null {
+  if (typeof oneWayKm !== "number" || !Number.isFinite(oneWayKm) || !(oneWayKm > 0)) return null
+  return oneWayKm <= DAILY_RETURN_MAX_ONE_WAY_KM ? "DAILY" : "ONE_ROUND_TRIP"
+}
+
+/** Texte de la proposition (distance, seuil, règle interne) ; `null` sans distance exploitable. N'affirme aucun fait. */
+export function travelRecommendationLabel(oneWayKm: number | null | undefined): string | null {
+  const mode = recommendedTravelMode(oneWayKm)
+  if (!mode) return null
+  const km = decimalFr(oneWayKm as number, 1), max = DAILY_RETURN_MAX_ONE_WAY_KM
+  const what = mode === "DAILY"
+    ? `${km} km aller depuis le siège (${max} km ou moins) : retour quotidien au siège proposé`
+    : `${km} km aller depuis le siège (plus de ${max} km) : séjour sur place, un seul aller-retour au total, proposé`
+  return `Règle d’organisation Galya : ${what}. Choisissez le mode correspondant à l’organisation prévue.`
+}
+
 /** Décisions encore attendues, en clair (le montant n'est proposé qu'une fois toutes prises). */
 export function missingDecisionsLabel(missing: readonly EstimateDecision[]): string[] {
-  return missing.map((m) => m === "MODE" ? "Choisissez les déplacements : un aller-retour pour le séjour (camion sur place) ou un aller-retour chaque jour planifié."
+  return missing.map((m) => m === "MODE" ? "Choisissez les déplacements : séjour sur place avec un seul aller-retour, ou retour quotidien au siège (un aller-retour par jour planifié)."
     : m === "GAPS" ? "Pour chaque coupure du planning, indiquez si le camion est resté sur place ou rentré au siège."
     : "Confirmez que le camion part du siège et y revient : sinon l'itinéraire ne correspond pas au trajet réel.")
 }

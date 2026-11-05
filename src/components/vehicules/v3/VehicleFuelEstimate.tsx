@@ -1,9 +1,9 @@
 "use client"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { FUEL_LABELS, FUEL_TYPES, choicePrice, decimalFr, estimateFuel, estimateKmLimit, gapKey, parseConsumption, type FuelEstimate, type FuelType, type PlannedStay } from "@/lib/vehicules/v3/fuel-estimate-domain"
+import { FUEL_LABELS, FUEL_TYPES, choicePrice, decimalFr, estimateFuel, estimateKmLimit, gapKey, parseConsumption, type FuelEstimate, type FuelType, type PlannedStay, type TravelMode } from "@/lib/vehicules/v3/fuel-estimate-domain"
 import {
   STALE_DECISION_CODES, createEstimateRequests, decisionsFor, decisionsOwner, defaultPriceKey, emptyDecisions, gapLabel, handoverConfirmLabel, kmLabel, medianLabel, medianUsable, missingDecisionsLabel,
-  priceChoice, priceWarnings, proposedExpense, routeReason, stationDistanceLabel, stationsLabel, stayBlockedReason, stayDetails, stayLabel, staySelectable, totalKm, uncomputedReason,
+  priceChoice, priceWarnings, proposedExpense, routeReason, stationDistanceLabel, stationsLabel, stayBlockedReason, stayDetails, stayLabel, staySelectable, totalKm, travelRecommendationLabel, uncomputedReason,
   type EstimateDecisions, type ExpenseProposal,
 } from "./vehicle-fuel-estimate-ui"
 
@@ -11,6 +11,22 @@ const field = "block border rounded p-2 w-full text-black bg-white"
 const button = "border rounded px-3 py-2 disabled:opacity-50"
 const storageKey = (truckId: string) => `planificator:fuel-consumption:${truckId}`
 const litresFr = (litres: number) => decimalFr(litres, 3).replace(/0+$/, "").replace(/,$/, "")
+
+/**
+ * Choix des déplacements d'un séjour : proposition de la règle interne affichée si la distance aller est connue, mais
+ * les deux choix restent toujours accessibles et seul `mode` (choix explicite de l'opérateur) est coché — jamais la
+ * proposition.
+ */
+export function TravelModeChoice({ mode, oneWayKm, onChoose }: { mode: TravelMode | null; oneWayKm: number | null; onChoose: (mode: TravelMode) => void }) {
+  const recommendation = travelRecommendationLabel(oneWayKm)
+  return <>
+    {recommendation && <p className="text-slate-700">{recommendation}</p>}
+    <label className="flex items-start gap-2"><input type="radio" name="fuel-travel" value="ONE_ROUND_TRIP" checked={mode === "ONE_ROUND_TRIP"} onChange={() => onChoose("ONE_ROUND_TRIP")} />
+      <span>Séjour sur place (hébergement près du chantier) : un seul aller-retour siège ↔ chantier pour tout le séjour, le camion reste sur place</span></label>
+    <label className="flex items-start gap-2"><input type="radio" name="fuel-travel" value="DAILY" checked={mode === "DAILY"} onChange={() => onChoose("DAILY")} />
+      <span>Retour quotidien au siège : un aller-retour par jour planifié (jours sans planning non comptés)</span></label>
+  </>
+}
 
 /**
  * Encadré « Estimation du trajet ». Source : un séjour planifié sur un chantier (départ le premier jour, retour le dernier,
@@ -96,10 +112,9 @@ export function VehicleFuelEstimate({ truckId, today, trips, onPropose }: { truc
     {staysPartial && <p role="status" className="text-sm text-amber-800">Planning très chargé : la liste des chantiers est partielle.</p>}
     {stays?.some((s) => !s.estimable) && <p className="text-sm">{[...new Set(stays.filter((s) => !s.estimable).map((s) => stayBlockedReason(s)))].join(" ")}</p>}
     {selectedStay && <fieldset className="space-y-1 text-sm"><legend className="font-medium">Déplacements siège ↔ chantier (à choisir, aucun choix par défaut)</legend>
-      <label className="flex items-start gap-2"><input type="radio" name="fuel-travel" value="ONE_ROUND_TRIP" checked={decisions.mode === "ONE_ROUND_TRIP"} onChange={() => update({ mode: "ONE_ROUND_TRIP" })} />
-        <span>Un aller-retour pour le séjour (le camion reste sur place)</span></label>
-      <label className="flex items-start gap-2"><input type="radio" name="fuel-travel" value="DAILY" checked={decisions.mode === "DAILY"} onChange={() => update({ mode: "DAILY", gaps: {} })} />
-        <span>Un aller-retour chaque jour planifié (retour au siège chaque soir ; jours sans planning non comptés)</span></label>
+      {/* Distance aller du résultat déjà reçu pour ce séjour (réinitialisé à chaque changement de source) : aucun appel en plus. */}
+      <TravelModeChoice mode={decisions.mode} oneWayKm={estimate?.source === "STAY" ? estimate.route.oneWayKm : null}
+        onChoose={(mode) => update(mode === "DAILY" ? { mode, gaps: {} } : { mode })} />
       {decisions.mode === "ONE_ROUND_TRIP" && selectedStay.gaps.map((g) => { const k = gapKey(g); return <div key={k} role="group" aria-label={gapLabel(g)} className="pl-6 space-y-1">
         <p>{gapLabel(g)} : le camion est-il resté sur place ?</p>
         <label className="flex items-start gap-2"><input type="radio" name={`fuel-gap-${k}`} value="STAY" checked={decisions.gaps[k] === "STAY"} onChange={() => update({ gaps: { ...decisions.gaps, [k]: "STAY" } })} /><span>Resté sur place</span></label>
