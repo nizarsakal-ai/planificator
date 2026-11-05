@@ -1168,3 +1168,14 @@ describe("plafond des kilomètres : trajet et séjour cumulé", () => {
     assert.deepEqual([second.writes.amount, second.writes.litres, second.state.provenance], ["", "", null])
   })
 })
+
+describe("raison : distance nulle ou invalide", () => {
+  it("km nul, négatif ou non fini avec prix et consommation valides : raison de distance, jamais « Prix hors bornes »", () => {
+    const choice = { kind: "STATION" as const, station: station() }
+    for (const km of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const e = estimate({ km })
+      assert.equal(estimateFuel({ km, consumptionLPer100Km: 8, pricePerLitre: 2.25 }), null)
+      assert.equal(uncomputedReason(e, km, 8, choice), "Distance nulle ou invalide : litres et montant non estimés.")
+    }
+  })
+})

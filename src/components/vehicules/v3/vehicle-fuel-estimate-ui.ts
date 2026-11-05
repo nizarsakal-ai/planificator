@@ -49,6 +49,8 @@ export function totalKm(estimate: FuelEstimate, extraKm: number): number | null 
 export function uncomputedReason(estimate: FuelEstimate, km: number | null, consumption: number | null, choice: PriceChoice | null): string {
   if (consumption === null) return "Indiquez la consommation pour estimer les litres et le montant."
   if (estimate.km === null || km === null) return estimate.missing.length ? "Décisions manquantes : litres et montant non estimés." : "Distance inconnue : litres et montant non estimés."
+  // Même refus que `estimateFuel` (km > 0, fini) : jamais attribué au prix ni à la limite.
+  if (!Number.isFinite(km) || !(km > 0)) return "Distance nulle ou invalide : litres et montant non estimés."
   const limit = estimateKmLimit(estimate)
   if (km > limit) {
     const scope = limit > TRIP_KM_LIMIT ? `${limit} km pour ${roundTripsFr(limit / TRIP_KM_LIMIT)} (${TRIP_KM_LIMIT} km par aller-retour, km sur place compris)` : `${limit} km d'une estimation de trajet (km sur place compris)`
