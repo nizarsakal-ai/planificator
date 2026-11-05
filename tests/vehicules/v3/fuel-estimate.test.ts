@@ -8,7 +8,7 @@ import { after, before, describe, it } from "node:test"
 import { Prisma as PrismaRuntime, type Prisma } from "@prisma/client"
 import { GET as estimateGet } from "@/app/api/trucks/[id]/fuel-estimate/route"
 import {
-  MAX_GAP_DAYS, MAX_STAY_DAYS, STAY_EDGE_DAYS, addDays, distanceToPolylineKm, stayRoundTrips, estimateFuel, estimateNote, haversineKm, parisDayStart, parseConsumption, polylineKm, priceStats, rankStations, resolveStays, samplePolyline,
+  MAX_GAP_DAYS, MAX_STAY_DAYS, STAY_EDGE_DAYS, STAY_KM_CEILING, TRIP_KM_LIMIT, addDays, estimateKmLimit, distanceToPolylineKm, stayRoundTrips, estimateFuel, estimateNote, haversineKm, parisDayStart, parseConsumption, polylineKm, priceStats, rankStations, resolveStays, samplePolyline,
   simplifyPolyline, truckHolderOn,
   type FuelEstimate, type FuelStation, type PlannedStay, type Point, type ResolvedStay, type StayTruckPeriod,
 } from "@/lib/vehicules/v3/fuel-estimate-domain"
@@ -24,7 +24,7 @@ import {
   STALE_DECISION_CODES, decisionsFor, decisionsOwner, emptyDecisions, estimateQuery, handoverConfirmLabel, kmLabel, missingDecisionsLabel, staySelectable,
 } from "@/components/vehicules/v3/vehicle-fuel-estimate-ui"
 import { randomUUID } from "node:crypto"
-import { defaultPriceKey, medianUsable, priceChoice, priceWarnings, proposedExpense, reconcileEstimate, emptyEstimateState, stationDistanceLabel, stationsLabel, stayDetails, stayLabel } from "@/components/vehicules/v3/vehicle-fuel-estimate-ui"
+import { defaultPriceKey, medianUsable, priceChoice, priceWarnings, proposedExpense, reconcileEstimate, emptyEstimateState, stationDistanceLabel, stationsLabel, stayDetails, stayLabel, totalKm, uncomputedReason } from "@/components/vehicules/v3/vehicle-fuel-estimate-ui"
 import type { MileageSession } from "@/lib/vehicules/mileage-access"
 import { ADMIN, LEADER, TRUCK, V3MemoryDb } from "./v3-test-db"
 
@@ -1087,5 +1087,84 @@ describe("R5 — séjours : modes, coupures, contexte, transfert, traçabilité"
     const usd = reconcileEstimate({ state: emptyEstimateState(), proposal: a, current: {}, defaults: {}, touched: new Set(), explicit: false, currency: "USD" })
     assert.deepEqual([usd.writes.amount, usd.withheld], [undefined, ["amount"]])
     assert.match(notesWithProvenance("Péage à part", a.provenance), /^Péage à part\nEstimation trajet : chantier Chantier fictif, équipe BILEL A COMPO .*coupure du 07\/11\/2026 au 08\/11\/2026 : camion rentré au siège ; 2 allers-retours de 2 × 100,0 km ; contexte du planning v1-0123456789abcdef\)/)
+  })
+})
+
+// R11 : plafond d'un trajet (10 000 km) cohérent avec un séjour de plusieurs allers-retours. Valeurs de la recette
+// ALZONNE (aller 758,9 km, 8 L/100 km et 2,25 €/L confirmés par l'opérateur) ; chantier et équipe fictifs.
+describe("plafond des kilomètres : trajet et séjour cumulé", () => {
+  const ALLER = 758.9
+  const stayEstimate = (roundTrips: number, mode: "ONE_ROUND_TRIP" | "DAILY", oneWayKm = ALLER, kmOverride?: number) => estimate({
+    source: "STAY", stay: plannedStay({ days: 9, spanDays: 9 }), odometer: null, tripDate: "2026-11-19", kmSource: "STAY_ROUND_TRIP", depotConfirmed: true,
+    // Même formule que le service : arrondi(aller × 2 × allers-retours).
+    km: kmOverride ?? Math.round(oneWayKm * 2 * roundTrips), route: { status: "ROUTE", oneWayKm },
+    travel: { context: "v1-0000000000000000", mode, gaps: [], plannedDays: 9, roundTrips, oneWayKm, handoverDeclared: [] },
+    priceStats: { count: 181, min: 2.1, median: 2.25, max: 2.4, sampled: false },
+  })
+  const median = (e: FuelEstimate) => priceChoice(e, "MEDIAN", "2026-11-05")!
+
+  it("trajet : 10 000 km calculés, 10 001 refusés ; défaut et maxKm non fini = limite d'un trajet ; plafond absolu borné", () => {
+    assert.deepEqual(estimateFuel({ km: 10_000, consumptionLPer100Km: 8, pricePerLitre: 2.25 }), { litres: 800, amount: 1800 })
+    assert.equal(estimateFuel({ km: 10_001, consumptionLPer100Km: 8, pricePerLitre: 2.25 }), null)
+    for (const maxKm of [Number.POSITIVE_INFINITY, Number.NaN]) assert.equal(estimateFuel({ km: 10_001, consumptionLPer100Km: 8, pricePerLitre: 2.25, maxKm }), null)
+    assert.equal(STAY_KM_CEILING, MAX_STAY_DAYS * TRIP_KM_LIMIT)
+    assert.ok(estimateFuel({ km: STAY_KM_CEILING, consumptionLPer100Km: 8, pricePerLitre: 2.25, maxKm: 1e9 }))
+    assert.equal(estimateFuel({ km: STAY_KM_CEILING + 1, consumptionLPer100Km: 8, pricePerLitre: 2.25, maxKm: 1e9 }), null)
+    assert.equal(estimateKmLimit(estimate()), TRIP_KM_LIMIT)
+  })
+
+  it("un aller-retour (non-régression) : 1518 km → 121,44 L, 273,24 € ; limite d'un trajet conservée", () => {
+    const one = stayEstimate(1, "ONE_ROUND_TRIP")
+    assert.equal(estimateKmLimit(one), TRIP_KM_LIMIT)
+    const p = proposedExpense(one, median(one), 8)
+    assert.deepEqual([one.km, p.values.litres, p.values.amount], [1518, "121,44", "273,24"])
+  })
+
+  it("quotidien 9 jours : 13660 km → 1092,8 L, 2458,80 € ; limite dérivée 9 × 10 000 km", () => {
+    const daily = stayEstimate(9, "DAILY")
+    assert.deepEqual([daily.km, estimateKmLimit(daily)], [13_660, 90_000])
+    const p = proposedExpense(daily, median(daily), 8)
+    assert.deepEqual([p.values.litres, p.values.amount], ["1092,8", "2458,80"])
+    assert.match(p.provenance!, /13660 km \(itinéraire aller-retour/)
+  })
+
+  it("séjour à la limite : 10 000 km calculés, 10 001 refusés (un aller-retour, km sur place compris)", () => {
+    const edge = stayEstimate(1, "ONE_ROUND_TRIP", 5000)
+    assert.equal(proposedExpense(edge, median(edge), 8).values.amount, "1800,00")
+    assert.equal(proposedExpense(edge, median(edge), 8, 1).values.amount, undefined)
+    assert.match(uncomputedReason(edge, 10_001, 8, median(edge)), /^Distance hors limite : 10001 km dépassent la limite de 10000 km d'une estimation de trajet \(km sur place compris\)\./)
+  })
+
+  it("incohérences : aller-retour unitaire au-delà de 10 000 km ou km non recalculés → limite d'un trajet", () => {
+    assert.equal(estimateKmLimit(stayEstimate(2, "DAILY", 6000)), TRIP_KM_LIMIT)
+    assert.equal(estimateKmLimit(stayEstimate(9, "DAILY", ALLER, 50_000)), TRIP_KM_LIMIT)
+    assert.equal(estimateKmLimit(stayEstimate(MAX_STAY_DAYS + 1, "DAILY", 10)), TRIP_KM_LIMIT)
+    assert.equal(estimateKmLimit({ ...stayEstimate(9, "DAILY"), travel: null }), TRIP_KM_LIMIT)
+  })
+
+  it("km sur place qui franchissent la limite : aucun montant, message de limite même avec un prix choisi", () => {
+    const daily = stayEstimate(9, "DAILY"), choice = median(daily)
+    assert.equal(proposedExpense(daily, choice, 8, 76_340).values.amount, "16200,00")
+    const over = proposedExpense(daily, choice, 8, 76_341)
+    assert.deepEqual([over.values.amount, over.values.litres, over.provenance], [undefined, undefined, null])
+    const reason = uncomputedReason(daily, totalKm(daily, 76_341), 8, choice)
+    assert.equal(reason, "Distance hors limite : 90001 km dépassent la limite de 90000 km pour 9 allers-retours (10000 km par aller-retour, km sur place compris). Litres et montant non estimés ; saisissez le montant du ticket.")
+    assert.doesNotMatch(reason, /Choisissez un prix/)
+  })
+
+  it("autres raisons inchangées : consommation, décisions, distance inconnue, prix non choisi", () => {
+    const daily = stayEstimate(9, "DAILY")
+    assert.equal(uncomputedReason(daily, 13_660, null, median(daily)), "Indiquez la consommation pour estimer les litres et le montant.")
+    assert.equal(uncomputedReason(estimate({ km: null, kmSource: null, missing: ["MODE"] }), null, 8, null), "Décisions manquantes : litres et montant non estimés.")
+    assert.equal(uncomputedReason(estimate({ km: null, kmSource: null }), null, 8, null), "Distance inconnue : litres et montant non estimés.")
+    assert.equal(uncomputedReason(daily, 13_660, 8, null), "Choisissez un prix pour estimer le montant.")
+  })
+
+  it("aucune proposition périmée : passer d'un montant calculé à un total hors limite vide montant et litres", () => {
+    const daily = stayEstimate(9, "DAILY"), choice = median(daily)
+    const first = reconcileEstimate({ state: emptyEstimateState(), proposal: proposedExpense(daily, choice, 8), current: {}, defaults: {}, touched: new Set(), explicit: false, currency: "EUR" })
+    assert.deepEqual([first.writes.amount, first.writes.litres], ["2458,80", "1092,8"])
+    const second = reconcileEstimate({ state: first.state, proposal: proposedExpense(daily, choice, 8, 76_341), current: { ...first.writes }, defaults: { amount: "", litres: "" }, touched: new Set(), explicit: false, currency: "EUR" })
+    assert.deepEqual([second.writes.amount, second.writes.litres, second.state.provenance], ["", "", null])
   })
 })

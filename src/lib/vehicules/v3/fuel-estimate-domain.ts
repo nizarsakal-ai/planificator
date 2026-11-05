@@ -463,10 +463,33 @@ export function parseConsumption(raw: string): number | null {
   return raw.trim() && Number.isFinite(value) && value >= CONSUMPTION_BOUNDS.min && value <= CONSUMPTION_BOUNDS.max ? value : null
 }
 
-/** Litres = km × L/100 km ÷ 100 (3 décimales) ; montant = litres × prix (2 décimales). Null si une donnée manque. */
-export function estimateFuel(input: { km: number | null; consumptionLPer100Km: number | null; pricePerLitre: number | null }): { litres: number; amount: number } | null {
+/** Plafond d'un trajet (compteur ou un aller-retour, km sur place compris) et budget de chaque aller-retour d'un séjour. */
+export const TRIP_KM_LIMIT = 10_000
+/** Plafond absolu d'une estimation : le plus long séjour admis, un aller-retour par jour. */
+export const STAY_KM_CEILING = MAX_STAY_DAYS * TRIP_KM_LIMIT
+
+/**
+ * Plafond des kilomètres retenus (trajet + km sur place) pour une estimation. Trajet : TRIP_KM_LIMIT. Séjour dont les
+ * kilomètres sont exactement ceux recalculés par le serveur (allers-retours entiers, au plus MAX_STAY_DAYS, chacun d'au
+ * plus TRIP_KM_LIMIT) : TRIP_KM_LIMIT par aller-retour, km sur place compris. Un séjour d'un seul aller-retour garde
+ * donc la limite d'un trajet. Toute incohérence retombe sur la limite d'un trajet ; jamais au-delà de STAY_KM_CEILING.
+ */
+export function estimateKmLimit(estimate: Pick<FuelEstimate, "km" | "kmSource" | "travel">): number {
+  const travel = estimate.travel
+  if (estimate.kmSource !== "STAY_ROUND_TRIP" || !travel || travel.roundTrips === null || travel.oneWayKm === null) return TRIP_KM_LIMIT
+  const roundTrips = travel.roundTrips, leg = travel.oneWayKm * 2
+  if (!Number.isInteger(roundTrips) || roundTrips < 1 || roundTrips > MAX_STAY_DAYS || !(leg > 0) || leg > TRIP_KM_LIMIT || estimate.km !== Math.round(leg * roundTrips)) return TRIP_KM_LIMIT
+  return roundTrips * TRIP_KM_LIMIT
+}
+
+/**
+ * Litres = km × L/100 km ÷ 100 (3 décimales) ; montant = litres × prix (2 décimales). Null si une donnée manque ou si
+ * les km dépassent `maxKm` (par défaut la limite d'un trajet ; voir `estimateKmLimit`), borné à STAY_KM_CEILING.
+ */
+export function estimateFuel(input: { km: number | null; consumptionLPer100Km: number | null; pricePerLitre: number | null; maxKm?: number }): { litres: number; amount: number } | null {
   const { km, consumptionLPer100Km: c, pricePerLitre: price } = input
-  if (km === null || c === null || price === null || !(km > 0) || km > 10_000 || !(c >= CONSUMPTION_BOUNDS.min) || c > CONSUMPTION_BOUNDS.max || !(price > 0) || price > 10) return null
+  const maxKm = Number.isFinite(input.maxKm) ? Math.min(input.maxKm!, STAY_KM_CEILING) : TRIP_KM_LIMIT
+  if (km === null || c === null || price === null || !(km > 0) || km > maxKm || !(c >= CONSUMPTION_BOUNDS.min) || c > CONSUMPTION_BOUNDS.max || !(price > 0) || price > 10) return null
   const litres = Math.round(km * c / 100 * 1000) / 1000
   return { litres, amount: Math.round(litres * price * 100) / 100 }
 }

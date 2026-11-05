@@ -1,9 +1,9 @@
 "use client"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { FUEL_LABELS, FUEL_TYPES, choicePrice, decimalFr, estimateFuel, gapKey, parseConsumption, type FuelEstimate, type FuelType, type PlannedStay } from "@/lib/vehicules/v3/fuel-estimate-domain"
+import { FUEL_LABELS, FUEL_TYPES, choicePrice, decimalFr, estimateFuel, estimateKmLimit, gapKey, parseConsumption, type FuelEstimate, type FuelType, type PlannedStay } from "@/lib/vehicules/v3/fuel-estimate-domain"
 import {
   STALE_DECISION_CODES, createEstimateRequests, decisionsFor, decisionsOwner, defaultPriceKey, emptyDecisions, gapLabel, handoverConfirmLabel, kmLabel, medianLabel, medianUsable, missingDecisionsLabel,
-  priceChoice, priceWarnings, proposedExpense, routeReason, stationDistanceLabel, stationsLabel, stayBlockedReason, stayDetails, stayLabel, staySelectable, totalKm,
+  priceChoice, priceWarnings, proposedExpense, routeReason, stationDistanceLabel, stationsLabel, stayBlockedReason, stayDetails, stayLabel, staySelectable, totalKm, uncomputedReason,
   type EstimateDecisions, type ExpenseProposal,
 } from "./vehicle-fuel-estimate-ui"
 
@@ -74,7 +74,7 @@ export function VehicleFuelEstimate({ truckId, today, trips, onPropose }: { truc
   // `null` aussi : estimation effacée (autre source, erreur, « Aucun ») = valeurs automatiques retirées du formulaire.
   useEffect(() => { propose.current(proposed, false) }, [proposed])
   const km = estimate ? totalKm(estimate, extraKm) : null
-  const computed = estimate ? estimateFuel({ km, consumptionLPer100Km: consumption, pricePerLitre: choice ? choicePrice(choice) : null }) : null
+  const computed = estimate ? estimateFuel({ km, consumptionLPer100Km: consumption, pricePerLitre: choice ? choicePrice(choice) : null, maxKm: estimateKmLimit(estimate) }) : null
   const station = choice?.kind === "STATION" ? choice.station : null
   const median = estimate ? medianLabel(estimate) : null
 
@@ -131,7 +131,7 @@ export function VehicleFuelEstimate({ truckId, today, trips, onPropose }: { truc
       </fieldset>}
       {priceWarnings(estimate, station, today).map((w) => <p key={w} className="text-amber-800">{w}</p>)}
       {computed && choice ? <p className="font-medium">Estimation : {km} km × {decimalFr(consumption!, 1)} L/100 km = {litresFr(computed.litres)} L × {decimalFr(choicePrice(choice), 3)} €/L = {decimalFr(computed.amount, 2)} € (péages non compris)</p>
-        : <p>{consumption === null ? "Indiquez la consommation pour estimer les litres et le montant." : estimate.km === null ? (estimate.missing.length ? "Décisions manquantes : litres et montant non estimés." : "Distance inconnue : litres et montant non estimés.") : "Choisissez un prix pour estimer le montant."}</p>}
+        : <p>{uncomputedReason(estimate, km, consumption, choice)}</p>}
       {proposed?.provenance && <p className="text-xs text-slate-700">Provenance enregistrée avec la dépense (en plus de vos notes) : {proposed.provenance}</p>}
       {proposed && <button type="button" className={button} onClick={() => onPropose(proposed, true)}>Reprendre l'estimation</button>}
     </div>}

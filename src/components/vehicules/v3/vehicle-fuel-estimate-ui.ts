@@ -4,7 +4,7 @@
  * quand l'opérateur les a modifiés), provenance gardée hors du champ Notes, garde de devise, messages et requêtes.
  */
 import {
-  MAX_GAP_DAYS, MAX_STAY_DAYS, choicePrice, decimalFr, estimateFuel, estimateNote, gapKey, roundTripsFr,
+  MAX_GAP_DAYS, MAX_STAY_DAYS, TRIP_KM_LIMIT, choicePrice, decimalFr, estimateFuel, estimateKmLimit, estimateNote, gapKey, roundTripsFr,
   type EstimateDecision, type FuelEstimate, type FuelStation, type FuelType, type GapDecision, type PlannedStay, type PriceChoice, type RouteStatus,
   type StationsStatus, type TravelMode,
 } from "@/lib/vehicules/v3/fuel-estimate-domain"
@@ -42,13 +42,29 @@ export function totalKm(estimate: FuelEstimate, extraKm: number): number | null 
   return estimate.km === null ? null : estimate.km + Math.max(0, Math.round(extraKm))
 }
 
+/**
+ * Raison affichée quand litres et montant ne sont pas calculés (`km` : total avec km sur place). Distingue une distance
+ * au-delà de la limite d'estimation d'un prix non choisi : un prix choisi n'est jamais redemandé.
+ */
+export function uncomputedReason(estimate: FuelEstimate, km: number | null, consumption: number | null, choice: PriceChoice | null): string {
+  if (consumption === null) return "Indiquez la consommation pour estimer les litres et le montant."
+  if (estimate.km === null || km === null) return estimate.missing.length ? "Décisions manquantes : litres et montant non estimés." : "Distance inconnue : litres et montant non estimés."
+  const limit = estimateKmLimit(estimate)
+  if (km > limit) {
+    const scope = limit > TRIP_KM_LIMIT ? `${limit} km pour ${roundTripsFr(limit / TRIP_KM_LIMIT)} (${TRIP_KM_LIMIT} km par aller-retour, km sur place compris)` : `${limit} km d'une estimation de trajet (km sur place compris)`
+    return `Distance hors limite : ${km} km dépassent la limite de ${scope}. Litres et montant non estimés ; saisissez le montant du ticket.`
+  }
+  if (!choice) return "Choisissez un prix pour estimer le montant."
+  return "Prix hors bornes : litres et montant non estimés."
+}
+
 /** Valeurs proposées : catégorie, date, compteur, fournisseur ; montant et litres seulement si tout le calcul est possible. */
 export function proposedExpense(estimate: FuelEstimate, choice: PriceChoice | null, consumption: number | null, extraKm = 0): ExpenseProposal {
   const values: ExpenseFieldValues = { category: "FUEL", date: estimate.tripDate }
   if (estimate.odometer !== null) values.mileage = String(estimate.odometer)
   if (choice?.kind === "STATION") values.supplier = `${choice.station.label}, ${choice.station.city}`.slice(0, 200)
   const km = totalKm(estimate, extraKm)
-  const computed = estimateFuel({ km, consumptionLPer100Km: consumption, pricePerLitre: choice ? choicePrice(choice) : null })
+  const computed = estimateFuel({ km, consumptionLPer100Km: consumption, pricePerLitre: choice ? choicePrice(choice) : null, maxKm: estimateKmLimit(estimate) })
   let provenance: string | null = null
   if (computed && choice && km !== null && estimate.kmSource && consumption !== null) {
     values.amount = decimalFr(computed.amount, 2)
