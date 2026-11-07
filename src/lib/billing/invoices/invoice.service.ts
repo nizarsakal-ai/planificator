@@ -41,6 +41,9 @@ function toHeader(parsed: ParsedInvoice) {
   return {
     dueDate: parsed.dueDate, subject: parsed.subject, notes: parsed.notes, paymentTerms: parsed.paymentTerms, globalDiscountBp: parsed.globalDiscountBp, vatReverseCharge: parsed.vatReverseCharge,
     totalHT: centsToDecimalString(parsed.totals.totalHTCents), totalVAT: centsToDecimalString(parsed.totals.totalVATCents), totalTTC: centsToDecimalString(parsed.totals.totalTTCCents),
+    // Correctif R1 (revue Codex) : bon de commande client écrit SEULEMENT s'il figure dans la saisie (null = effacement explicite).
+    // Absent (formulaire antérieur) ⇒ clé omise ⇒ l'UPDATE conditionnel sous verrou de replaceInvoiceDraftCore conserve la valeur.
+    ...(parsed.clientPurchaseOrderRef !== undefined ? { clientPurchaseOrderRef: parsed.clientPurchaseOrderRef } : {}),
   }
 }
 async function checkReferences(db: Db, ctx: InvoiceContext, parsed: ParsedInvoice): Promise<LifecycleResult<{ clientId: string; periodStart: Date | null; periodEnd: Date | null }>> {

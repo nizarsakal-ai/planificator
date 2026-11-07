@@ -95,6 +95,7 @@ export async function getInvoiceDetail(db: Db, companyId: string, invoiceId: str
     select: {
       id: true, number: true, status: true, kind: true, issueDate: true, dueDate: true, periodStart: true, periodEnd: true, subject: true, notes: true, paymentTerms: true,
       totalHT: true, totalVAT: true, totalTTC: true, globalDiscountBp: true, vatReverseCharge: true, sentAt: true, paidAt: true, createdAt: true, creditedInvoiceId: true, quoteId: true,
+      clientPurchaseOrderRef: true,
       reminderDue30SentAt: true, reminderDue45SentAt: true, reminderDue60SentAt: true,
       client: { select: { id: true, name: true, email: true, address: true, siret: true, vatNumber: true } },
       worksite: { select: { id: true, name: true } }, company: { select: { name: true, address: true, siret: true } },

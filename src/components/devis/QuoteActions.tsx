@@ -5,9 +5,17 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { convertQuoteAction, deleteDraftQuoteAction, duplicateQuoteAction, quoteStatusAction, sendQuoteAction } from "@/lib/actions/quote.actions"
+import { deleteDraftQuoteAction, duplicateQuoteAction, quoteStatusAction } from "@/lib/actions/quote.actions"
+import type { RecipientSuggestions } from "@/lib/billing/quotes/quote-recipient"
+import { QuoteSendDialog } from "@/components/devis/QuoteSendDialog"
+import { QuoteConvertDialog } from "@/components/devis/QuoteConvertDialog"
 
-export function QuoteActions({ id, status, hasEmail, invoiceId, validityExpired = false }: { id: string; status: string; hasEmail: boolean; invoiceId: string | null; validityExpired?: boolean }) {
+// V2 06/11/2026 : envoi/renvoi via QuoteSendDialog (destinataire affiché, modifiable, confirmé) ; facturation via QuoteConvertDialog
+// (étapes expliquées pour un brouillon, acceptation explicite, bon de commande client facultatif). Autres actions inchangées.
+export function QuoteActions({ id, status, invoiceId, validityExpired = false, recipientSuggestions, totalTTC, purchaseOrderRef, depositsCount }: {
+  id: string; status: string; invoiceId: string | null; validityExpired?: boolean
+  recipientSuggestions: RecipientSuggestions | null; totalTTC: string; purchaseOrderRef: string | null; depositsCount: number
+}) {
   const router = useRouter()
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -27,21 +35,19 @@ export function QuoteActions({ id, status, hasEmail, invoiceId, validityExpired 
 
   const buttons: React.ReactNode[] = []
   if (status === "DRAFT") buttons.push(<Button key="edit" size="sm" variant="outline" asChild><Link href={`/devis/${id}/modifier`}>Modifier</Link></Button>)
-  if ((status === "DRAFT" || status === "SENT") && !validityExpired) {
-    buttons.push(B("send", status === "DRAFT" ? "Envoyer au client" : "Renvoyer (nouveau lien)", () => {
-      if (!hasEmail) { toast.error("Le client n'a pas d'adresse e-mail."); return }
-      if (!window.confirm(status === "DRAFT" ? "Envoyer ce devis ? Il ne sera plus modifiable." : "Renvoyer le devis ? L'ancien lien de signature sera invalidé.")) return
-      void act("send", () => sendQuoteAction(id), (r) => (r.status === "SENT" ? "Devis envoyé." : "Devis marqué envoyé (courrier simulé : envoi désactivé)."))
-    }, "default"))
+  if ((status === "DRAFT" || status === "SENT") && !validityExpired && recipientSuggestions) {
+    buttons.push(<QuoteSendDialog key="send" quoteId={id} status={status} suggestions={recipientSuggestions} disabled={busy !== null} />)
   }
   if (status === "SENT") {
     buttons.push(B("accept", "Marquer accepté", () => { if (window.confirm("Enregistrer l'acceptation du client (hors signature en ligne) ?")) void act("accept", () => quoteStatusAction(id, "ACCEPTED"), () => "Devis accepté.") }))
     buttons.push(B("refuse", "Refuser", () => { const reason = window.prompt("Motif du refus (facultatif) :", ""); if (reason !== null) void act("refuse", () => quoteStatusAction(id, "REFUSED", reason), () => "Devis refusé.") }))
   }
   if (status === "DRAFT" || status === "SENT") buttons.push(B("expire", "Expirer", () => { if (window.confirm("Marquer ce devis expiré ?")) void act("expire", () => quoteStatusAction(id, "EXPIRED"), () => "Devis expiré.") }))
-  if (status === "ACCEPTED") buttons.push(B("convert", "Convertir en facture", () => { if (window.confirm("Créer la facture (brouillon) à partir de ce devis ?")) void act("convert", () => convertQuoteAction(id), (r) => (r.existing ? `Facture déjà créée : ${r.invoiceNumber}` : `Facture ${r.invoiceNumber} créée (brouillon).`), (r) => `/factures/${r.invoiceId}`) }, "default"))
-  if (status === "CONVERTED" && invoiceId) buttons.push(<Button key="inv" size="sm" variant="outline" asChild><Link href={`/factures/${invoiceId}`}>Voir la facture</Link></Button>)
-  if (status === "CONVERTED" && !invoiceId) buttons.push(B("reconvert", "Créer la facture de solde", () => { if (window.confirm("Le brouillon de solde précédent a été abandonné : créer une nouvelle facture de solde (brouillon) ?")) void act("reconvert", () => convertQuoteAction(id), (r) => `Facture ${r.invoiceNumber} créée (brouillon).`, (r) => `/factures/${r.invoiceId}`) }, "default"))
+  const convertProps = { quoteId: id, status, totalTTC, currentPoRef: purchaseOrderRef, depositsCount }
+  if ((status === "DRAFT" || status === "SENT") && !validityExpired) buttons.push(<QuoteConvertDialog key="convert" {...convertProps} />)
+  if (status === "ACCEPTED" && !invoiceId) buttons.push(<QuoteConvertDialog key="convert" {...convertProps} />)
+  if ((status === "ACCEPTED" || status === "CONVERTED") && invoiceId) buttons.push(<Button key="inv" size="sm" variant="outline" asChild><Link href={`/factures/${invoiceId}`}>Voir la facture</Link></Button>)
+  if (status === "CONVERTED" && !invoiceId) buttons.push(<QuoteConvertDialog key="reconvert" {...convertProps} reconvert />)
   buttons.push(B("dup", "Dupliquer", () => void act("dup", () => duplicateQuoteAction(id), (r) => `Devis ${r.number} créé.`, (r) => `/devis/${r.id}`)))
   buttons.push(<Button key="pdf" size="sm" variant="outline" asChild><a href={`/api/pdf/devis/${id}`} target="_blank" rel="noopener">PDF</a></Button>)
   if (status === "DRAFT") buttons.push(B("del", "Supprimer le brouillon", () => { if (window.confirm("Supprimer définitivement ce brouillon ?")) void act("del", () => deleteDraftQuoteAction(id), () => "Brouillon supprimé.", () => "/devis") }, "destructive"))

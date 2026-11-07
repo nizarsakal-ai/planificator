@@ -3,6 +3,7 @@ import { z } from "zod"
 import { isCalendarDay } from "@/lib/accounting/ui/forms"
 import { MoneyError, computeDocumentTotals, parseEuroInputToCents, parsePercentToBp, parseQuantityToHundredths, parseVatRateToBp, type DocumentTotals } from "@/lib/billing/money"
 import { moneyErrorLabel, quoteLineFormSchema, type ParsedQuoteLine } from "@/lib/billing/quotes/quote-schemas"
+import { normalizePurchaseOrderRef } from "@/lib/billing/quotes/purchase-order-ref"
 
 const id = z.string().trim().min(1).max(64)
 const text = (max: number) => z.string().trim().max(max)
@@ -13,6 +14,9 @@ export const invoiceFormSchema = z.object({
   quoteId: z.string().trim().max(64).nullable().optional(),
   dueDate: z.union([isoDate, z.literal("")]).optional(),
   subject: text(200).optional(),
+  // V2 06/11/2026 : bon de commande client (normalisé ci-dessous). Correctif R1 (revue Codex) : ABSENT ≠ VIDE.
+  // Absent (formulaire antérieur) ⇒ undefined ⇒ colonne non écrite (valeur existante préservée) ; "" explicite ⇒ effacement volontaire.
+  clientPurchaseOrderRef: z.string().max(200).optional(),
   notes: text(2000).optional(),
   paymentTerms: text(500).optional(),
   globalDiscount: z.string().trim().max(10).optional(),
@@ -26,6 +30,8 @@ export interface ParsedInvoice {
   quoteId: string | null
   dueDate: Date | null
   subject: string | null
+  /** undefined = champ absent de la saisie (ne pas écrire) ; null = effacement explicite ; chaîne = référence normalisée. */
+  clientPurchaseOrderRef?: string | null
   notes: string | null
   paymentTerms: string | null
   globalDiscountBp: number
@@ -38,6 +44,8 @@ export function parseInvoiceForm(raw: unknown): { ok: true; value: ParsedInvoice
   const r = invoiceFormSchema.safeParse(raw)
   if (!r.success) return { ok: false, error: r.error.issues[0]?.message ?? "Saisie invalide" }
   const v = r.data
+  const po = v.clientPurchaseOrderRef === undefined ? { ok: true as const, value: undefined } : normalizePurchaseOrderRef(v.clientPurchaseOrderRef)
+  if (!po.ok) return { ok: false, error: po.error }
   const lines: ParsedQuoteLine[] = []
   for (const [i, l] of v.lines.entries()) {
     try {
@@ -56,7 +64,7 @@ export function parseInvoiceForm(raw: unknown): { ok: true; value: ParsedInvoice
   if (totals.totalTTCCents < BigInt(0)) return { ok: false, error: "Le total TTC d'une facture ne peut pas être négatif." }
   return { ok: true, value: {
     worksiteId: v.worksiteId, quoteId: v.quoteId ? v.quoteId : null, dueDate: v.dueDate ? new Date(`${v.dueDate}T00:00:00.000Z`) : null,
-    subject: v.subject ? v.subject : null, notes: v.notes ? v.notes : null, paymentTerms: v.paymentTerms ? v.paymentTerms : null,
+    subject: v.subject ? v.subject : null, clientPurchaseOrderRef: po.value, notes: v.notes ? v.notes : null, paymentTerms: v.paymentTerms ? v.paymentTerms : null,
     globalDiscountBp, vatReverseCharge: v.vatReverseCharge === true, lines, totals,
   } }
 }

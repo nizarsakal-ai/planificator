@@ -530,6 +530,13 @@ model Quote {
   reminderJ7SentAt        DateTime?
   reminderJ15SentAt       DateTime?
   importRef               String?   // référence externe d'import (unique par société)
+  // V2 06/11/2026 (destinataire des devis) : destinataire EFFECTIF du dernier envoi/renvoi, confirmé par l'utilisateur.
+  // Distinct de l'adresse principale du client (Client.email) qui n'est jamais modifiée par l'envoi ; historique = billing_mail_logs.
+  recipientName           String?
+  recipientEmail          String?
+  recipientSource         String?   // CONSULTATION | PREVIOUS | CLIENT | MANUAL (CHECK SQL)
+  // V2 06/11/2026 (devis → facture) : numéro du bon de commande CLIENT, facultatif, jamais inventé ; copié dans la facture.
+  clientPurchaseOrderRef  String?
 
   // Relations
   company  Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -615,6 +622,8 @@ model Invoice {
   creditReason        String?
   // Lot C5 : rapprochement bancaire.
   bankTransactions    BankTransaction[] @relation("BankMatchedInvoice")
+  // V2 06/11/2026 : numéro du bon de commande CLIENT (copié du devis à la conversion, modifiable en brouillon, figé à l'émission).
+  clientPurchaseOrderRef String?
 
   // Relations
   // Lot B : pièces conservées — aucune suppression en cascade depuis la société ou le chantier.

@@ -76,7 +76,7 @@ export async function getQuoteDetail(db: Db, companyId: string, quoteId: string)
       totalHT: true, totalVAT: true, totalTTC: true, globalDiscountBp: true, vatReverseCharge: true,
       sentAt: true, acceptedAt: true, refusedAt: true, refusalReason: true, expiredAt: true, convertedAt: true,
       signerName: true, signedAt: true, signatureTokenExpiresAt: true, reminderJ3SentAt: true, reminderJ7SentAt: true, reminderJ15SentAt: true,
-      createdAt: true, importRef: true,
+      createdAt: true, importRef: true, recipientName: true, recipientEmail: true, recipientSource: true, clientPurchaseOrderRef: true,
       client: { select: { id: true, name: true, email: true, address: true, siret: true, vatNumber: true, phone: true } },
       worksite: { select: { id: true, name: true, address: true } },
       lines: { orderBy: { position: "asc" }, select: { id: true, articleId: true, designation: true, description: true, unit: true, quantity: true, unitPrice: true, vatRate: true, lineHT: true, discountBp: true, position: true } },
@@ -89,6 +89,36 @@ export async function getQuoteDetail(db: Db, companyId: string, quoteId: string)
     select: { id: true, kind: true, to: true, status: true, createdAt: true, error: true },
   })
   return { ...q, mails }
+}
+
+/**
+ * V2 06/11/2026 — contexte des propositions de destinataire d'un devis, borné à la société : contact extrait de la consultation
+ * d'origine du chantier (brouillon d'import lié par createdWorksiteId), destinataires effectifs des autres devis du même client,
+ * adresse principale du client. Lecture seule ; aucune donnée d'une autre société (chaque requête filtre companyId).
+ */
+export async function getQuoteRecipientContext(db: Db, companyId: string, quoteId: string) {
+  const q = await db.quote.findFirst({
+    where: { id: quoteId, companyId },
+    select: { id: true, status: true, worksiteId: true, clientId: true, recipientName: true, recipientEmail: true, client: { select: { name: true, email: true } } },
+  })
+  if (!q) return null
+  const [draft, previous] = await Promise.all([
+    db.worksiteImportDraft.findFirst({
+      where: { companyId, createdWorksiteId: q.worksiteId },
+      select: { proposedContactName: true, proposedContactEmail: true, acquisitionMessage: { select: { senderEmail: true } } },
+    }),
+    db.quote.findMany({
+      where: { companyId, clientId: q.clientId, id: { not: q.id }, recipientEmail: { not: null } },
+      orderBy: { sentAt: "desc" }, take: 10, select: { recipientName: true, recipientEmail: true },
+    }),
+  ])
+  return {
+    status: q.status,
+    lastSent: q.status === "SENT" ? { name: q.recipientName, email: q.recipientEmail ?? q.client.email } : null,
+    consultation: draft ? { contactName: draft.proposedContactName, contactEmail: draft.proposedContactEmail, senderEmail: draft.acquisitionMessage.senderEmail } : null,
+    client: { name: q.client.name, email: q.client.email },
+    previous: previous.filter((p): p is { recipientName: string | null; recipientEmail: string } => !!p.recipientEmail).map((p) => ({ name: p.recipientName, email: p.recipientEmail })),
+  }
 }
 
 /** Options de formulaire : chantiers actifs (avec client), articles actifs, clients (filtre liste). */

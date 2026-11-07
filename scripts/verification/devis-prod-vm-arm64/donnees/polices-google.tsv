@@ -1,0 +1,5 @@
+# Polices next/font/google de l'application (src/app/layout.tsx : Inter ; src/components/auth/LoginExperience.tsx : Instrument_Serif).
+# URL EXACTES demandées par next 15.5.18 (get-font-axes.js, get-google-fonts-url.js, lus comme donnée) : clés du module de réponses simulées.
+# fichier_css_media	url_css_exacte
+inter.css	https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap
+instrument-serif.css	https://fonts.googleapis.com/css2?family=Instrument+Serif:ital,wght@0,400;1,400&display=swap

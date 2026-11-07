@@ -21,7 +21,7 @@ const emptyLine = (): QuoteLineFormInput => ({ articleId: null, designation: "",
 export function InvoiceForm({ mode, invoiceId, initial, worksites, articles }: { mode: "create" | "edit"; invoiceId?: string; initial?: InvoiceFormInput; worksites: WorksiteOption[]; articles: ArticleOption[] }) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
-  const [form, setForm] = useState<InvoiceFormInput>(initial ?? { worksiteId: worksites[0]?.id ?? "", quoteId: null, dueDate: "", subject: "", notes: "", paymentTerms: "", globalDiscount: "", vatReverseCharge: false, lines: [emptyLine()] })
+  const [form, setForm] = useState<InvoiceFormInput>(initial ?? { worksiteId: worksites[0]?.id ?? "", quoteId: null, dueDate: "", subject: "", clientPurchaseOrderRef: "", notes: "", paymentTerms: "", globalDiscount: "", vatReverseCharge: false, lines: [emptyLine()] })
   const totals = useMemo(() => previewQuoteTotals(form.lines, form.globalDiscount ?? "", form.vatReverseCharge === true), [form.lines, form.globalDiscount, form.vatReverseCharge])
   const setLine = (i: number, patch: Partial<QuoteLineFormInput>) => setForm((f) => ({ ...f, lines: f.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) }))
   const pickArticle = (i: number, articleId: string) => { const a = articles.find((x) => x.id === articleId); if (!a) { setLine(i, { articleId: null }); return }; setLine(i, { articleId: a.id, designation: a.designation, unit: a.unit, unitPrice: a.unitPrice, vatRate: VAT_OPTIONS.includes(a.vatRate) ? a.vatRate : "20" }) }
@@ -49,6 +49,7 @@ export function InvoiceForm({ mode, invoiceId, initial, worksites, articles }: {
           </select></div>
         <div><Label htmlFor="dueDate">Échéance (vide = émission + délai)</Label><Input id="dueDate" type="date" value={form.dueDate ?? ""} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} /></div>
         <div><Label htmlFor="subject">Objet</Label><Input id="subject" maxLength={200} value={form.subject ?? ""} onChange={(e) => setForm({ ...form, subject: e.target.value })} /></div>
+        <div><Label htmlFor="clientPurchaseOrderRef">N° de bon de commande du client (facultatif)</Label><Input id="clientPurchaseOrderRef" maxLength={64} autoComplete="off" value={form.clientPurchaseOrderRef ?? ""} onChange={(e) => setForm({ ...form, clientPurchaseOrderRef: e.target.value })} /></div>
       </CardContent></Card>
       <Card><CardContent className="space-y-2 p-4">
         <div className="hidden grid-cols-12 gap-2 text-xs font-medium text-slate-500 sm:grid"><span className="col-span-4">Désignation</span><span>Unité</span><span>Qté</span><span className="col-span-2">PU HT</span><span>Remise %</span><span>TVA %</span><span className="col-span-2 text-right">Total HT</span></div>

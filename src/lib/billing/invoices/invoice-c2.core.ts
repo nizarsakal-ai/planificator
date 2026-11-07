@@ -268,6 +268,8 @@ export interface InvoiceDraftHeader {
   quoteId?: string | null
   dueDate: Date | null
   subject: string | null
+  /** V2 06/11/2026 : bon de commande client (facultatif ; figé à l'émission par invoices_guard_issued). */
+  clientPurchaseOrderRef?: string | null
   notes: string | null
   paymentTerms: string | null
   globalDiscountBp: number

@@ -1,0 +1,5 @@
+# Moteurs Prisma 5.22.0 (engines-version 5.22.0-44.605197351a3c8bdd595af2d2a9bc3025bca48ea2), cible linux-arm64-openssl-3.0.x.
+# Empreintes PUBLIÉES lues le 05/11/2026 sur binaries.prisma.sh (fichiers .sha256 seulement ; aucun binaire téléchargé sur le VPS).
+# url_archive	sha256_archive_gz	fichier_decompresse	sha256_decompresse
+https://binaries.prisma.sh/all_commits/605197351a3c8bdd595af2d2a9bc3025bca48ea2/linux-arm64-openssl-3.0.x/libquery_engine.so.node.gz	25c51b86adf95ebc34422227c40faf4c11ee29705d9e60758b477d5b43a2ceb2	libquery_engine-linux-arm64-openssl-3.0.x.so.node	78f117413e51c2f9ec32bfd70e6afbd07f511ed63310fe61984f759f6f320c4f
+https://binaries.prisma.sh/all_commits/605197351a3c8bdd595af2d2a9bc3025bca48ea2/linux-arm64-openssl-3.0.x/schema-engine.gz	9f063cd93ed78b0731cc3825a31d65512a66e401b01d9e76b6088074a36be670	schema-engine-linux-arm64-openssl-3.0.x	0d727c44880c7bead5e676e48df87f92a586015f82ca4c0a6c6bc9bf28d6caf1

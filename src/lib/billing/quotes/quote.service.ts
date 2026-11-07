@@ -22,6 +22,7 @@ import { calendarDayIn, isQuoteValidAt } from "./quote-validity"
 import { candidateToParsedQuote, parseQuoteImport } from "./quote-import"
 import { listQuotes, type QuoteListFilters } from "./quote-queries"
 import type { ParsedQuote } from "./quote-schemas"
+import type { ConfirmedRecipient } from "./quote-recipient"
 
 export interface QuoteContext { companyId: string; userId: string }
 type Db = PrismaClient
@@ -142,20 +143,23 @@ export interface SendQuoteResult { status: string; signatureUrl: string }
 
 /**
  * Envoi (DRAFT → SENT) ou renvoi (SENT) : nouveau jeton de signature à chaque envoi, courrier journalisé après COMMIT.
+ * V2 06/11/2026 : `recipient` = destinataire CONFIRMÉ par l'utilisateur (dialogue d'envoi). Il est enregistré sur le devis dans la
+ * même écriture conditionnelle que le nouveau jeton (destinataire effectif, journal, relances) ; l'adresse principale du client n'est
+ * jamais modifiée. Sans `recipient` (appels internes antérieurs), comportement inchangé : dernier destinataire effectif, sinon client.
  * Correctif P2-04 : validité métier dépassée (validUntil, jour civil Europe/Paris inclus) ⇒ REFUS, aucun jeton, aucun courrier,
  * même simulé ; l'offre se renouvelle explicitement par duplication. Correctif P1-05 : le renouvellement du jeton est une
  * écriture conditionnelle sur la ligne (verrou de ligne), partageant le protocole de la signature/du refus par jeton.
  */
-export async function sendQuote(db: Db, ctx: QuoteContext, quoteId: string, now: Date, clock?: () => Date): Promise<LifecycleResult<SendQuoteResult>> {
+export async function sendQuote(db: Db, ctx: QuoteContext, quoteId: string, now: Date, clock?: () => Date, recipient?: ConfirmedRecipient): Promise<LifecycleResult<SendQuoteResult>> {
   const decide = decisionClock(now, clock) // R3 : créée dès l'entrée de la requête ; relue après le verrou (le temps réel d'attente compte)
   const q = await db.quote.findFirst({
     where: { id: quoteId, companyId: ctx.companyId },
-    select: { id: true, number: true, status: true, validUntil: true, totalTTC: true, client: { select: { name: true, email: true } }, company: { select: { name: true } } },
+    select: { id: true, number: true, status: true, validUntil: true, totalTTC: true, recipientEmail: true, client: { select: { name: true, email: true } }, company: { select: { name: true } } },
   })
   if (!q) return { ok: false, error: QUOTE_ERRORS.notFound }
   if (q.status !== "DRAFT" && q.status !== "SENT") return { ok: false, error: "Seul un devis brouillon ou envoyé peut être envoyé." }
   if (!isQuoteValidAt(q.validUntil, now)) return { ok: false, error: QUOTE_ERRORS.expired }
-  const to = q.client.email?.trim()
+  const to = recipient?.email ?? (q.recipientEmail ?? q.client.email)?.trim()
   if (!to) return { ok: false, error: QUOTE_ERRORS.noEmail }
   const { token, hash } = generateSignatureToken()
   const r = await db.$transaction(async (tx) => {
@@ -163,17 +167,26 @@ export async function sendQuote(db: Db, ctx: QuoteContext, quoteId: string, now:
     await lockQuoteRow(tx, quoteId, ctx.companyId)
     const decidedAt = decide()
     // Même famille que R2 : le contenu du courrier (montant, validité, destinataire) est celui relu SOUS VERROU, pas la lecture initiale.
-    const cur = await tx.quote.findFirst({ where: { id: quoteId, companyId: ctx.companyId }, select: { status: true, validUntil: true, totalTTC: true, number: true, client: { select: { name: true, email: true } }, company: { select: { name: true } } } })
+    const cur = await tx.quote.findFirst({ where: { id: quoteId, companyId: ctx.companyId }, select: { status: true, validUntil: true, totalTTC: true, number: true, recipientName: true, recipientEmail: true, client: { select: { name: true, email: true } }, company: { select: { name: true } } } })
     if (!cur || cur.status !== q.status) return { ok: false as const, error: QUOTE_ERRORS.conflict }
     if (!isQuoteValidAt(cur.validUntil, decidedAt)) return { ok: false as const, error: QUOTE_ERRORS.expired }
-    const curTo = cur.client.email?.trim()
+    const curTo = recipient?.email ?? (cur.recipientEmail ?? cur.client.email)?.trim()
     if (!curTo) return { ok: false as const, error: QUOTE_ERRORS.noEmail }
-    const data = { signatureTokenHash: hash, signatureTokenExpiresAt: signatureExpiry(cur.validUntil, decidedAt) }
-    const mailInput = { to: curTo, companyName: cur.company.name, clientName: cur.client.name, quoteNumber: cur.number, totalTTC: formatEuro(decimalToCents(cur.totalTTC)), validUntil: cur.validUntil ? dateFr.format(cur.validUntil) : "—" }
-    if (q.status === "DRAFT") { const t = await transitionQuoteCore(tx, { companyId: ctx.companyId, quoteId, to: "SENT", actorId: ctx.userId, now: decidedAt, data, detail: `Devis ${cur.number} envoyé à ${curTo}` }); return t.ok ? { ok: true as const, value: mailInput } : t }
+    const greetingName = recipient ? (recipient.name ?? cur.client.name) : cur.recipientEmail ? (cur.recipientName ?? cur.client.name) : cur.client.name
+    const recipientData = recipient ? { recipientName: recipient.name, recipientEmail: recipient.email, recipientSource: recipient.source } : {}
+    const data = { signatureTokenHash: hash, signatureTokenExpiresAt: signatureExpiry(cur.validUntil, decidedAt), ...recipientData }
+    const who = recipient?.name ? `${recipient.name} <${curTo}>` : curTo
+    const audit = recipient ? { oldValue: { recipientName: cur.recipientName, recipientEmail: cur.recipientEmail }, newValue: { recipientName: recipient.name, recipientEmail: recipient.email, recipientSource: recipient.source } } : {}
+    const mailInput = { to: curTo, companyName: cur.company.name, clientName: greetingName, quoteNumber: cur.number, totalTTC: formatEuro(decimalToCents(cur.totalTTC)), validUntil: cur.validUntil ? dateFr.format(cur.validUntil) : "—" }
+    if (q.status === "DRAFT") {
+      const t = await transitionQuoteCore(tx, { companyId: ctx.companyId, quoteId, to: "SENT", actorId: ctx.userId, now: decidedAt, data, detail: `Devis ${cur.number} envoyé à ${who}` })
+      if (!t.ok) return t
+      if (recipient) await tx.historyLog.create({ data: { companyId: ctx.companyId, actorId: ctx.userId, action: "UPDATED", entityType: "Quote", entityId: quoteId, detail: `Destinataire du devis ${cur.number} : ${who}`, ...audit } })
+      return { ok: true as const, value: mailInput }
+    }
     const u = await tx.quote.updateMany({ where: { id: quoteId, companyId: ctx.companyId, status: "SENT" }, data })
     if (u.count !== 1) return { ok: false as const, error: QUOTE_ERRORS.conflict }
-    await tx.historyLog.create({ data: { companyId: ctx.companyId, actorId: ctx.userId, action: "UPDATED", entityType: "Quote", entityId: quoteId, detail: `Devis ${cur.number} renvoyé à ${curTo} (nouveau lien de signature)` } })
+    await tx.historyLog.create({ data: { companyId: ctx.companyId, actorId: ctx.userId, action: "UPDATED", entityType: "Quote", entityId: quoteId, detail: `Devis ${cur.number} renvoyé à ${who} (nouveau lien de signature ; l'ancien est invalidé)`, ...audit } })
     return { ok: true as const, value: mailInput }
   })
   if (!r.ok) return r
@@ -208,11 +221,12 @@ export async function lockQuoteRow(tx: Prisma.TransactionClient, quoteId: string
   await tx.$queryRaw`SELECT 1 FROM "quotes" WHERE "id" = ${quoteId} AND "companyId" = ${companyId} FOR NO KEY UPDATE`
 }
 
-export async function convertQuote(db: Db, ctx: QuoteContext, quoteId: string, now: Date): Promise<LifecycleResult<{ invoiceId: string; invoiceNumber: string; existing: boolean }>> {
+/** V2 06/11/2026 : `clientPurchaseOrderRef` = numéro de bon de commande CLIENT saisi (déjà normalisé), facultatif. */
+export async function convertQuote(db: Db, ctx: QuoteContext, quoteId: string, now: Date, opts: { clientPurchaseOrderRef?: string | null } = {}): Promise<LifecycleResult<{ invoiceId: string; invoiceNumber: string; existing: boolean }>> {
   const s = await getBillingSettings(db, ctx.companyId)
   return db.$transaction(async (tx) => {
     const r = await convertQuoteCore(tx, {
-      companyId: ctx.companyId, quoteId, actorId: ctx.userId, now, paymentTermsDays: s.paymentTermsDays,
+      companyId: ctx.companyId, quoteId, actorId: ctx.userId, now, paymentTermsDays: s.paymentTermsDays, clientPurchaseOrderRef: opts.clientPurchaseOrderRef ?? null,
       nextDraftNumber: (t) => nextDocumentNumber(t, ctx.companyId, "INVOICE_DRAFT", businessYear(now)), lockQuote: lockQuoteRow,
     })
     if (r.ok && !r.value.existing) {
@@ -398,12 +412,13 @@ export async function runQuoteReminders(db: Db, now: Date, limit = 200): Promise
   const report: ReminderRunReport = { expired, reminders: STEPS.map(({ step }) => ({ step, sent: 0 })) }
   const threshold3 = new Date(now.getTime() - 3 * 86_400_000)
   const candidates = await db.quote.findMany({
-    where: { status: "SENT", sentAt: { lte: threshold3 }, OR: [{ validUntil: null }, { validUntil: { gte: today } }], client: { email: { not: null } } },
-    select: { id: true, companyId: true, number: true, sentAt: true, validUntil: true, totalTTC: true, reminderJ3SentAt: true, reminderJ7SentAt: true, reminderJ15SentAt: true, signatureTokenHash: true, signatureTokenExpiresAt: true, client: { select: { name: true, email: true } }, company: { select: { name: true } } },
+    // V2 06/11/2026 : la relance part vers le destinataire EFFECTIF du dernier envoi (sinon, devis antérieurs, l'adresse du client).
+    where: { status: "SENT", sentAt: { lte: threshold3 }, AND: [{ OR: [{ validUntil: null }, { validUntil: { gte: today } }] }, { OR: [{ recipientEmail: { not: null } }, { client: { email: { not: null } } }] }] },
+    select: { id: true, companyId: true, number: true, sentAt: true, validUntil: true, totalTTC: true, reminderJ3SentAt: true, reminderJ7SentAt: true, reminderJ15SentAt: true, signatureTokenHash: true, signatureTokenExpiresAt: true, recipientName: true, recipientEmail: true, client: { select: { name: true, email: true } }, company: { select: { name: true } } },
     take: limit,
   })
   for (const q of candidates) {
-    const to = q.client.email?.trim()
+    const to = (q.recipientEmail ?? q.client.email)?.trim()
     if (!to || !q.sentAt) continue
     const ageMs = now.getTime() - q.sentAt.getTime()
     // Paliers dus et non encore traités ; on envoie le plus élevé, les inférieurs sont marqués sautés.
@@ -427,7 +442,7 @@ export async function runQuoteReminders(db: Db, now: Date, limit = 200): Promise
     }
     const claimed = await db.quote.updateMany({ where, data })
     if (claimed.count !== 1) continue
-    const mail = quoteReminderMail({ step: top.step, companyName: q.company.name, clientName: q.client.name, quoteNumber: q.number, totalTTC: formatEuro(decimalToCents(q.totalTTC)), validUntil: q.validUntil ? dateFr.format(q.validUntil) : "—", signatureUrl })
+    const mail = quoteReminderMail({ step: top.step, companyName: q.company.name, clientName: q.recipientEmail ? (q.recipientName ?? q.client.name) : q.client.name, quoteNumber: q.number, totalTTC: formatEuro(decimalToCents(q.totalTTC)), validUntil: q.validUntil ? dateFr.format(q.validUntil) : "—", signatureUrl })
     await sendBillingMail(db, { companyId: q.companyId, kind: `QUOTE_REMINDER_J${top.step}`, documentType: "Quote", documentId: q.id }, { to, ...mail })
     const row = report.reminders.find((r) => r.step === top.step)
     if (row) row.sent++

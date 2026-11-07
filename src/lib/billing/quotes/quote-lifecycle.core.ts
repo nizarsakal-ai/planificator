@@ -153,11 +153,18 @@ export interface ConvertQuoteInput {
   nextDraftNumber: (tx: Prisma.TransactionClient) => Promise<string>
   /** Verrou de la ligne devis (FOR UPDATE) : injectable pour les tests sans base. */
   lockQuote: (tx: Prisma.TransactionClient, quoteId: string, companyId: string) => Promise<void>
+  /**
+   * V2 06/11/2026 : numéro de bon de commande CLIENT saisi (déjà normalisé par l'appelant), facultatif. null/absent ⇒ référence
+   * déjà conservée sur le devis (s'il y en a une), sinon aucune : jamais inventée. Ignoré si une facture existe déjà (idempotence).
+   */
+  clientPurchaseOrderRef?: string | null
 }
 
 /**
  * Conversion ACCEPTED → CONVERTED : verrou du devis, idempotence (une facture INVOICE liée au devis existe ⇒
  * renvoyée telle quelle), création d'une facture DRAFT copie des lignes, puis transition. Tout ou rien.
+ * V2 06/11/2026 : le numéro de bon de commande client est conservé sur le devis et copié dans la facture brouillon ; une facture
+ * existante est renvoyée SANS réécrire sa référence (double clic, réessai, concurrence sérialisée par le verrou du devis).
  */
 export async function convertQuoteCore(tx: Prisma.TransactionClient, input: ConvertQuoteInput): Promise<LifecycleResult<{ invoiceId: string; invoiceNumber: string; existing: boolean }>> {
   await input.lockQuote(tx, input.quoteId, input.companyId)
@@ -165,7 +172,7 @@ export async function convertQuoteCore(tx: Prisma.TransactionClient, input: Conv
     where: { id: input.quoteId, companyId: input.companyId },
     select: {
       id: true, status: true, number: true, worksiteId: true, clientId: true, notes: true, paymentTerms: true,
-      totalHT: true, totalVAT: true, totalTTC: true, globalDiscountBp: true, vatReverseCharge: true,
+      totalHT: true, totalVAT: true, totalTTC: true, globalDiscountBp: true, vatReverseCharge: true, subject: true, clientPurchaseOrderRef: true,
       worksite: { select: { startDate: true, endDate: true } },
       lines: { orderBy: { position: "asc" }, select: { articleId: true, designation: true, description: true, unit: true, quantity: true, unitPrice: true, vatRate: true, lineHT: true, discountBp: true, position: true } },
     },
@@ -175,9 +182,16 @@ export async function convertQuoteCore(tx: Prisma.TransactionClient, input: Conv
     where: { companyId: input.companyId, quoteId: quote.id, kind: "INVOICE", status: { not: "CANCELLED" } },
     select: { id: true, number: true },
   })
+  // Facture existante renvoyée telle quelle : sa référence de commande n'est jamais réécrite.
   if (existing) return { ok: true, value: { invoiceId: existing.id, invoiceNumber: existing.number, existing: true } }
   // Devis déjà converti dont le brouillon de solde a été abandonné : une nouvelle facture de solde peut être créée.
   if (quote.status !== "ACCEPTED" && quote.status !== "CONVERTED") return { ok: false, error: QUOTE_ERRORS.notAccepted }
+  const poRef = input.clientPurchaseOrderRef ?? quote.clientPurchaseOrderRef ?? null
+  if (input.clientPurchaseOrderRef && input.clientPurchaseOrderRef !== quote.clientPurchaseOrderRef) {
+    // Référence du client conservée sur le devis (métadonnée de commande : lignes, montants et signature du devis inchangés).
+    const u = await tx.quote.updateMany({ where: { id: quote.id, companyId: input.companyId, status: quote.status }, data: { clientPurchaseOrderRef: input.clientPurchaseOrderRef } })
+    if (u.count !== 1) return { ok: false, error: QUOTE_ERRORS.conflict }
+  }
 
   const number = await input.nextDraftNumber(tx)
   const dueDate = new Date(input.now.getTime() + input.paymentTermsDays * 86_400_000)
@@ -189,6 +203,7 @@ export async function convertQuoteCore(tx: Prisma.TransactionClient, input: Conv
       totalHT: quote.totalHT, totalVAT: quote.totalVAT, totalTTC: quote.totalTTC,
       globalDiscountBp: quote.globalDiscountBp, vatReverseCharge: quote.vatReverseCharge,
       notes: quote.notes, paymentTerms: quote.paymentTerms, createdById: input.actorId,
+      subject: quote.subject, clientPurchaseOrderRef: poRef,
       lines: { create: quote.lines.map((l) => ({ ...l })) },
     },
     select: { id: true, number: true },
@@ -204,7 +219,7 @@ export async function convertQuoteCore(tx: Prisma.TransactionClient, input: Conv
   await tx.historyLog.create({
     data: {
       companyId: input.companyId, worksiteId: quote.worksiteId, actorId: input.actorId, action: "CREATED", entityType: "Invoice", entityId: invoice.id,
-      detail: `Facture ${invoice.number} créée (brouillon) depuis le devis ${quote.number}`, newValue: { quoteId: quote.id },
+      detail: `Facture ${invoice.number} créée (brouillon) depuis le devis ${quote.number}${poRef ? ` — bon de commande client ${poRef}` : ""}`, newValue: { quoteId: quote.id, clientPurchaseOrderRef: poRef },
     },
   })
   return { ok: true, value: { invoiceId: invoice.id, invoiceNumber: invoice.number, existing: false } }

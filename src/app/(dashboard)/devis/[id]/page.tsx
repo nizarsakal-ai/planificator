@@ -3,7 +3,8 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { requireBillingPage } from "@/lib/billing/access"
-import { getQuoteDetail } from "@/lib/billing/quotes/quote-queries"
+import { getQuoteDetail, getQuoteRecipientContext } from "@/lib/billing/quotes/quote-queries"
+import { RECIPIENT_SOURCE_LABEL, buildRecipientSuggestions, type RecipientSource } from "@/lib/billing/quotes/quote-recipient"
 import { linesAndTotals, fmtDate } from "@/lib/billing/pdf/document-data"
 import { Card, CardContent } from "@/components/ui/card"
 import { QuoteStatusBadge } from "@/components/devis/QuoteStatusBadge"
@@ -38,6 +39,10 @@ export default async function DevisDetailPage({ params }: { params: Promise<{ id
   const issuer = q.status === "DRAFT" ? await prisma.company.findUnique({ where: { id: ctx.companyId }, select: { name: true, address: true, siret: true, email: true, phone: true } }) : null
   const identityBlocking = issuer ? assessIssuerIdentity({ ...issuer, settings }).blocking : []
   const clientVatInvalid = !!q.client.vatNumber && !isPlausibleVatNumber(q.client.vatNumber)
+  // V2 06/11/2026 : propositions de destinataire (envoi/renvoi seulement), bornées à la société de session.
+  const recipientCtx = q.status === "DRAFT" || q.status === "SENT" ? await getQuoteRecipientContext(prisma, ctx.companyId, q.id) : null
+  const recipientSuggestions = recipientCtx ? buildRecipientSuggestions(recipientCtx) : null
+  const issuedDeposits = deposits.filter((d) => d.status !== "CANCELLED" && d.status !== "DRAFT").length
 
   return (
     <div className="space-y-4">
@@ -57,7 +62,7 @@ export default async function DevisDetailPage({ params }: { params: Promise<{ id
           <h1 className="flex items-center gap-3 text-2xl font-bold text-slate-900">{q.number} <QuoteStatusBadge status={q.status} /></h1>
           {q.subject && <p className="text-slate-600">{q.subject}</p>}
         </div>
-        <QuoteActions id={q.id} status={q.status} hasEmail={!!q.client.email} invoiceId={invoice?.id ?? null} validityExpired={!isQuoteValidAt(q.validUntil, new Date())} />
+        <QuoteActions id={q.id} status={q.status} invoiceId={invoice?.id ?? null} validityExpired={!isQuoteValidAt(q.validUntil, new Date())} recipientSuggestions={recipientSuggestions} totalTTC={totals.totalTTC} purchaseOrderRef={q.clientPurchaseOrderRef} depositsCount={issuedDeposits} />
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">
@@ -67,6 +72,14 @@ export default async function DevisDetailPage({ params }: { params: Promise<{ id
           <p className="text-slate-600">{q.client.email ?? "aucun e-mail"}</p>
           {q.client.address && <p className="text-slate-600">{q.client.address}</p>}
           <ClientBillingIdsForm clientId={q.client.id} siret={q.client.siret} vatNumber={q.client.vatNumber} />
+          <p className="mt-2 text-xs uppercase text-slate-500">Destinataire du devis</p>
+          {q.recipientEmail ? (
+            <><p className="font-medium">{q.recipientName ?? "(nom non renseigné)"}</p><p className="text-slate-600">{q.recipientEmail}</p>{q.recipientSource && <p className="text-xs text-slate-500">{RECIPIENT_SOURCE_LABEL[q.recipientSource as RecipientSource] ?? q.recipientSource}</p>}</>
+          ) : q.status === "DRAFT" ? (
+            <p className="text-slate-600">{recipientSuggestions?.proposed?.email ? `Proposé : ${recipientSuggestions.proposed.name ? `${recipientSuggestions.proposed.name} — ` : ""}${recipientSuggestions.proposed.email}` : recipientSuggestions?.proposed?.name ? `Proposé : ${recipientSuggestions.proposed.name} (adresse à saisir)` : "À choisir à l'envoi"}</p>
+          ) : (
+            <p className="text-slate-600">Adresse du client (envoi antérieur)</p>
+          )}
           <p className="mt-2 text-xs uppercase text-slate-500">Chantier</p>
           <p>{q.worksite.name}</p>
         </CardContent></Card>
@@ -78,6 +91,7 @@ export default async function DevisDetailPage({ params }: { params: Promise<{ id
           {q.acceptedAt && <p className="text-green-700">Accepté le {fmtDate(q.acceptedAt)}{q.signerName ? ` — ${q.signerName}` : ""}</p>}
           {q.refusedAt && <p className="text-red-600">Refusé le {fmtDate(q.refusedAt)}{q.refusalReason ? ` — ${q.refusalReason}` : ""}</p>}
           {q.expiredAt && <p className="text-amber-700">Expiré le {fmtDate(q.expiredAt)}</p>}
+          {q.clientPurchaseOrderRef && <p>Bon de commande client : <span className="font-medium">{q.clientPurchaseOrderRef}</span></p>}
           {q.convertedAt && <p>Converti le {fmtDate(q.convertedAt)}{invoice ? <> — <Link className="underline" href={`/factures/${invoice.id}`}>{invoice.number}</Link></> : null}</p>}
         </CardContent></Card>
         <Card><CardContent className="p-4 text-sm">

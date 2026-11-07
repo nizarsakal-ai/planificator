@@ -17,7 +17,7 @@ export default async function ModifierFacturePage({ params }: { params: Promise<
   if (inv.status !== "DRAFT" || inv.kind !== "INVOICE") redirect(`/factures/${inv.id}`)
   const dec = (d: { toFixed(n: number): string }) => d.toFixed(2).replace(/\.?0+$/, "")
   const initial = {
-    worksiteId: inv.worksite.id, quoteId: inv.quoteId, dueDate: inv.dueDate ? inv.dueDate.toISOString().slice(0, 10) : "", subject: inv.subject ?? "", notes: inv.notes ?? "", paymentTerms: inv.paymentTerms ?? "",
+    worksiteId: inv.worksite.id, quoteId: inv.quoteId, dueDate: inv.dueDate ? inv.dueDate.toISOString().slice(0, 10) : "", subject: inv.subject ?? "", clientPurchaseOrderRef: inv.clientPurchaseOrderRef ?? "", notes: inv.notes ?? "", paymentTerms: inv.paymentTerms ?? "",
     globalDiscount: inv.globalDiscountBp ? bpToPercentString(inv.globalDiscountBp) : "", vatReverseCharge: inv.vatReverseCharge,
     lines: inv.lines.filter((l) => !l.deductsDepositId).map((l) => ({ articleId: l.articleId, designation: l.designation, description: l.description ?? "", unit: l.unit, quantity: dec(l.quantity), unitPrice: l.unitPrice.toFixed(2), discount: l.discountBp ? bpToPercentString(l.discountBp) : "", vatRate: bpToPercentString(storedVatRateToBp(l.vatRate)) })),
   }

@@ -1,0 +1,21 @@
+# Fichiers applicatifs (src/) ajoutés ou modifiés par le lot devis (destinataire, bon de commande client) par rapport à main
+# e952b2ec (arbre 6c683d34). Liste fermée : 19 fichiers. `next lint` ne lint par défaut que src/ (ni tests/ ni scripts/).
+src/app/(dashboard)/devis/[id]/page.tsx
+src/app/(dashboard)/factures/[id]/modifier/page.tsx
+src/app/(dashboard)/factures/[id]/page.tsx
+src/components/devis/QuoteActions.tsx
+src/components/devis/QuoteConvertDialog.tsx
+src/components/devis/QuoteSendDialog.tsx
+src/components/factures/InvoiceForm.tsx
+src/lib/actions/quote.actions.ts
+src/lib/billing/invoices/invoice-c2.core.ts
+src/lib/billing/invoices/invoice-queries.ts
+src/lib/billing/invoices/invoice-schemas.ts
+src/lib/billing/invoices/invoice.service.ts
+src/lib/billing/pdf/document-snapshot.ts
+src/lib/billing/pdf/invoice-pdf.ts
+src/lib/billing/quotes/purchase-order-ref.ts
+src/lib/billing/quotes/quote-lifecycle.core.ts
+src/lib/billing/quotes/quote-queries.ts
+src/lib/billing/quotes/quote-recipient.ts
+src/lib/billing/quotes/quote.service.ts

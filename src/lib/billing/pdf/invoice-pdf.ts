@@ -28,7 +28,7 @@ export async function buildInvoicePdfData(db: Db, companyId: string, invoiceId: 
   const inv = await db.invoice.findFirst({
     where: { id: invoiceId, companyId },
     select: {
-      number: true, status: true, kind: true, issueDate: true, dueDate: true, periodStart: true, periodEnd: true, subject: true, notes: true, paymentTerms: true, globalDiscountBp: true, vatReverseCharge: true, totalHT: true, totalVAT: true, totalTTC: true, creditReason: true, depositBp: true,
+      number: true, status: true, kind: true, clientPurchaseOrderRef: true, issueDate: true, dueDate: true, periodStart: true, periodEnd: true, subject: true, notes: true, paymentTerms: true, globalDiscountBp: true, vatReverseCharge: true, totalHT: true, totalVAT: true, totalTTC: true, creditReason: true, depositBp: true,
       depositDeductions: { select: { amountTTCCents: true, deposit: { select: { number: true, issueDate: true } } } },
       creditNotes: { where: { creditScope: "PARTIAL", status: { not: "CANCELLED" } }, select: { number: true, totalTTC: true } },
       company: { select: { name: true, address: true, siret: true, email: true, phone: true, logoUrl: true } },
@@ -49,12 +49,15 @@ export async function buildInvoicePdfData(db: Db, companyId: string, invoiceId: 
   const title = isCredit ? "AVOIR" : isDeposit ? "FACTURE D'ACOMPTE" : "FACTURE"
   const worksiteName = snapshot?.document.worksiteName ?? inv.worksite.name
   const quoteNumber = snapshot ? snapshot.document.quoteNumber : inv.quote?.number ?? null
+  // V2 06/11/2026 : pièce émise ⇒ référence FIGÉE au snapshot (absente des snapshots antérieurs ⇒ non affichée) ; brouillon ⇒ courante.
+  const purchaseOrderRef = snapshot ? snapshot.document.clientPurchaseOrderRef ?? null : inv.clientPurchaseOrderRef
   const credited = snapshot ? snapshot.document.creditedInvoice : inv.creditedInvoice ? { number: inv.creditedInvoice.number, issueDate: inv.creditedInvoice.issueDate.toISOString() } : null
   const meta = [
     { label: "Date d'émission", value: draft ? "non émise" : fmtDate(inv.issueDate) },
     ...(isCredit ? [] : [{ label: "Échéance", value: fmtDate(inv.dueDate) }]),
     { label: "Chantier", value: worksiteName },
     ...(quoteNumber ? [{ label: "Devis", value: quoteNumber }] : []),
+    ...(purchaseOrderRef ? [{ label: "Bon de commande client", value: purchaseOrderRef }] : []),
     ...(credited ? [{ label: "Facture d'origine", value: `${credited.number} du ${fmtDate(new Date(credited.issueDate))}` }] : []),
     ...(inv.periodStart || inv.periodEnd ? [{ label: "Période", value: `${fmtDate(inv.periodStart)} → ${fmtDate(inv.periodEnd)}` }] : []),
   ]

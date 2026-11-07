@@ -17,6 +17,8 @@ export const DOCUMENT_SNAPSHOT_SCHEMA_VERSION = 1
 export interface DocumentSnapshotContent {
   worksiteName: string
   quoteNumber: string | null
+  /** V2 06/11/2026 : absent des snapshots antérieurs (lu comme null : aucun changement rétroactif d'une pièce émise). */
+  clientPurchaseOrderRef?: string | null
   creditedInvoice: { number: string; issueDate: string } | null
   subject: string | null
   notes: string | null
@@ -29,7 +31,7 @@ export interface DocumentSnapshotContent {
 export interface DocumentSnapshot { schemaVersion: number; seller: PdfParty; buyer: PdfParty; document: DocumentSnapshotContent; createdAt: Date }
 
 const invoiceSelect = {
-  id: true, number: true, kind: true, status: true, sentAt: true, subject: true, notes: true, paymentTerms: true, vatReverseCharge: true, totalVAT: true,
+  id: true, number: true, kind: true, status: true, sentAt: true, subject: true, clientPurchaseOrderRef: true, notes: true, paymentTerms: true, vatReverseCharge: true, totalVAT: true,
   company: { select: { name: true, address: true, siret: true, email: true, phone: true } },
   client: { select: { name: true, address: true, siret: true, vatNumber: true, email: true } },
   worksite: { select: { name: true } }, quote: { select: { number: true } }, creditedInvoice: { select: { number: true, issueDate: true } },
@@ -48,7 +50,7 @@ export async function captureDocumentSnapshot(tx: Prisma.TransactionClient, comp
   const settings = await getBillingSettings(tx, companyId)
   const isCredit = inv.kind === "CREDIT_NOTE"
   const document: DocumentSnapshotContent = {
-    worksiteName: inv.worksite.name, quoteNumber: inv.quote?.number ?? null,
+    worksiteName: inv.worksite.name, quoteNumber: inv.quote?.number ?? null, clientPurchaseOrderRef: inv.clientPurchaseOrderRef,
     creditedInvoice: inv.creditedInvoice ? { number: inv.creditedInvoice.number, issueDate: inv.creditedInvoice.issueDate.toISOString() } : null,
     subject: inv.subject, notes: inv.notes, paymentTerms: inv.paymentTerms,
     mentions: legalMentions(settings, { vatReverseCharge: inv.vatReverseCharge, paymentTerms: inv.paymentTerms, kind: isCredit ? "credit" : "invoice", vatExempt: !settings.vatNumber && decimalToCents(inv.totalVAT) === BigInt(0) && !inv.vatReverseCharge }),

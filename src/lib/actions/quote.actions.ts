@@ -9,6 +9,8 @@ import { BillingAccessError, billingAccessMessage, requireBillingAdmin } from "@
 import { isBillingCompleteEnabled } from "@/lib/billing/billing-feature-flag"
 import { parseQuoteForm } from "@/lib/billing/quotes/quote-schemas"
 import { hashIp } from "@/lib/billing/quotes/quote-signature"
+import { parseRecipientInput } from "@/lib/billing/quotes/quote-recipient"
+import { normalizePurchaseOrderRef } from "@/lib/billing/quotes/purchase-order-ref"
 import {
   acceptQuoteManually, convertQuote, createQuote, deleteDraftQuote, duplicateQuote, expireQuote, importQuotes,
   refuseQuote, refuseQuoteByToken, sendQuote, signQuoteByToken, updateQuote, type ImportReport,
@@ -70,11 +72,17 @@ export async function duplicateQuoteAction(quoteId: unknown): Promise<Result<{ i
   return r.ok ? { ok: true, ...r.value } : r
 }
 
-export async function sendQuoteAction(quoteId: unknown): Promise<Result<{ status: string }>> {
+/**
+ * V2 06/11/2026 : envoi ou renvoi UNIQUEMENT avec un destinataire confirmé dans le dialogue (nom facultatif, e-mail valide
+ * obligatoire, origine du choix). Aucun envoi sans cette confirmation explicite ; l'adresse principale du client n'est pas modifiée.
+ */
+export async function sendQuoteAction(quoteId: unknown, recipient: unknown): Promise<Result<{ status: string; to: string }>> {
   const id = idSchema.safeParse(quoteId)
   if (!id.success) return { ok: false, error: "Devis introuvable." }
-  const r = await run((ctx) => sendQuote(prisma, ctx, id.data, new Date()))
-  return r.ok ? { ok: true, status: r.value.status } : r
+  const rec = parseRecipientInput(recipient)
+  if (!rec.ok) return { ok: false, error: rec.error }
+  const r = await run((ctx) => sendQuote(prisma, ctx, id.data, new Date(), undefined, rec.value))
+  return r.ok ? { ok: true, status: r.value.status, to: rec.value.email } : r
 }
 
 export async function quoteStatusAction(quoteId: unknown, to: unknown, reason?: unknown): Promise<Result> {
@@ -90,10 +98,21 @@ export async function quoteStatusAction(quoteId: unknown, to: unknown, reason?: 
   return r.ok ? { ok: true } : r
 }
 
-export async function convertQuoteAction(quoteId: unknown): Promise<Result<{ invoiceId: string; invoiceNumber: string; existing: boolean }>> {
+/**
+ * V2 06/11/2026 : `purchaseOrderRef` = numéro de bon de commande CLIENT saisi (facultatif, normalisé, jamais inventé). Le résultat
+ * indique la référence portée par la facture : pour une facture déjà créée (double clic, réessai), elle n'est jamais réécrite.
+ */
+export async function convertQuoteAction(quoteId: unknown, purchaseOrderRef?: unknown): Promise<Result<{ invoiceId: string; invoiceNumber: string; existing: boolean; clientPurchaseOrderRef: string | null }>> {
   const id = idSchema.safeParse(quoteId)
   if (!id.success) return { ok: false, error: "Devis introuvable." }
-  const r = await run((ctx) => convertQuote(prisma, ctx, id.data, new Date()))
+  const po = normalizePurchaseOrderRef(purchaseOrderRef)
+  if (!po.ok) return { ok: false, error: po.error }
+  const r = await run(async (ctx) => {
+    const c = await convertQuote(prisma, ctx, id.data, new Date(), { clientPurchaseOrderRef: po.value })
+    if (!c.ok) return c
+    const inv = await prisma.invoice.findFirst({ where: { id: c.value.invoiceId, companyId: ctx.companyId }, select: { clientPurchaseOrderRef: true } })
+    return { ok: true as const, value: { ...c.value, clientPurchaseOrderRef: inv?.clientPurchaseOrderRef ?? null } }
+  })
   return r.ok ? { ok: true, ...r.value } : r
 }
 
