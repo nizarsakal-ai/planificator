@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { availableCategories, categoryLabel, type CategoryDefinition } from "@/lib/hr-documents/catalog"
+import { fetchHrDocument } from "@/lib/hr-documents/download-client"
 
 type Employee={id:string;firstName:string;lastName:string;draft?:boolean}
 type Category=Pick<CategoryDefinition,"code"|"label"|"family">
@@ -14,6 +15,13 @@ async function call(url:string,init?:RequestInit){
   const response=await fetch(url,{...init,cache:"no-store"});const data=await response.json()
   if(!response.ok)throw new Error(data.error??"Opération indisponible.")
   return data
+}
+/** Téléchargement par fetch : seule une réponse document validée est enregistrée ; sinon le message s'affiche dans la page. */
+async function downloadDocument(id:string){
+  const {blob,name}=await fetchHrDocument(id)
+  const url=URL.createObjectURL(blob),link=document.createElement("a")
+  link.href=url;link.download=name;document.body.appendChild(link);link.click();link.remove()
+  setTimeout(()=>URL.revokeObjectURL(url),1000)
 }
 export function Documents({manage=false,configure=false,canImport=false,canPublish=false,mailEnabled=false,employeeId,employeeContext,canReturnToEmployee=false,categories=LEGACY,recognition=false,images=false,drafts=false}:{manage?:boolean;configure?:boolean;canImport?:boolean;canPublish?:boolean;mailEnabled?:boolean;employeeId?:string;employeeContext?:Employee;canReturnToEmployee?:boolean;categories?:Category[];recognition?:boolean;images?:boolean;drafts?:boolean}){
   const [docs,setDocs]=useState<Doc[]>([]),[employees,setEmployees]=useState<Employee[]>([])
@@ -65,7 +73,7 @@ export function Documents({manage=false,configure=false,canImport=false,canPubli
       {!loading&&!shown.length&&<p className="py-6 text-slate-600">Aucun document dans cette sélection.</p>}
       <ul className="space-y-4">{shown.map(doc=><li key={doc.id} className="rounded-xl border border-slate-200 p-4">
         <div className="flex flex-wrap justify-between gap-2"><div className="min-w-0"><h2 className="break-words font-semibold">{doc.title}</h2><p className="text-sm text-slate-600">{categoryLabel(doc.category)} · {doc.period} · {Math.ceil(doc.size/1024)} Ko</p>{manage&&<p className="text-sm font-medium text-blue-950">Destinataire : {employees.find(e=>e.id===doc.employeeId)?.lastName??"identifiant interne"} {employees.find(e=>e.id===doc.employeeId)?.firstName??doc.employeeId}</p>}</div><span className="h-fit rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-900">{labels[doc.status]}</span></div>
-        <div className="mt-3 flex flex-wrap gap-3">{["READY","REVIEWED","PUBLISHED"].includes(doc.status)&&<a className="rounded-lg border border-blue-200 px-3 py-2 text-sm text-blue-900" href={`/api/hr-documents/${doc.id}/download`}>Télécharger le PDF{manage?" à vérifier":""}</a>}
+        <div className="mt-3 flex flex-wrap gap-3">{["READY","REVIEWED","PUBLISHED"].includes(doc.status)&&<button type="button" className="rounded-lg border border-blue-200 px-3 py-2 text-sm text-blue-900" onClick={()=>{setError("");void downloadDocument(doc.id).catch(e=>setError(e instanceof Error?e.message:"Téléchargement indisponible."))}}>Télécharger le PDF{manage?" à vérifier":""}</button>}
           {manage&&canPublish&&doc.status==="REVIEWED"&&<PublishButton key={`${doc.id}:${doc.version}`} doc={doc} busy={busy} run={action}/>}
           {manage&&canImport&&doc.status==="REVIEWED"&&<button disabled={busy} type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={()=>void action(()=>call(`/api/hr-documents/${doc.id}/edit`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({expectedVersion:doc.version,key:crypto.randomUUID()})}),"La validation a été retirée. Corrigez puis vérifiez à nouveau.")}>Corriger l’affectation avant publication</button>}
           {manage&&canPublish&&mailEnabled&&doc.status==="PUBLISHED"&&<button type="button" disabled={busy} className="rounded-lg border px-3 py-2 text-sm" onClick={()=>void action(()=>call(`/api/hr-documents/${doc.id}/notify`,{method:"POST"}),"Notification traitée. Aucun renvoi si elle était déjà envoyée.")}>Notifier la disponibilité par email</button>}

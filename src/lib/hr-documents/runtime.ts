@@ -35,12 +35,13 @@ export function hrService(){
     // Reuse only the transport credential, never Photos rootFolderId, events, purges or authorization.
     // Explicit account bindings: no production identity is hardcoded in the repository.
     let bindings:unknown
-    try{bindings=JSON.parse(process.env.HR_DOCUMENT_DRIVE_ACCOUNTS??"{}")}catch{throw new HrError("STORAGE_NOT_READY",409)}
-    if(!bindings||typeof bindings!=="object"||Array.isArray(bindings))throw new HrError("STORAGE_NOT_READY",409)
+    try{bindings=JSON.parse(process.env.HR_DOCUMENT_DRIVE_ACCOUNTS??"{}")}catch{throw new HrError("STORAGE_NOT_READY",409,"variable_comptes_invalide")}
+    if(!bindings||typeof bindings!=="object"||Array.isArray(bindings))throw new HrError("STORAGE_NOT_READY",409,"variable_comptes_invalide")
     const expected=(bindings as Record<string,unknown>)[companyId]
-    if(typeof expected!=="string"||!expected.includes("@"))throw new HrError("STORAGE_NOT_READY",409)
+    if(typeof expected!=="string"||!expected.includes("@"))throw new HrError("STORAGE_NOT_READY",409,"entree_entreprise_absente")
     const connection=await db.worksitePhotoDriveConnection.findUnique({where:{companyId}})
-    if(!connection||connection.status!=="ACTIVE"||connection.accountEmail.toLowerCase()!==expected.toLowerCase())throw new HrError("STORAGE_NOT_READY",409)
+    if(!connection||connection.status!=="ACTIVE")throw new HrError("STORAGE_NOT_READY",409,"connexion_drive_non_active")
+    if(connection.accountEmail.toLowerCase()!==expected.toLowerCase())throw new HrError("STORAGE_NOT_READY",409,"compte_drive_different")
     const generation=digest(connection.refreshToken)
     // Pin the generation for refresh: a Photos reconnection to another account cannot leak its token into RH.
     const adapter:DriveConnectionDb={worksitePhotoDriveConnection:{

@@ -30,8 +30,8 @@ export const NAV_CATEGORY_DEFINITIONS: readonly NavCategoryDefinition[] = [
     id: "rh", label: "Équipes & RH", icon: Users,
     hrefs: ["/mes-documents", "/rh/documents", "/employes", "/equipes", "/planning/equipe", "/absences", "/mes-absences", "/pointages", "/pointage", "/notes-de-frais", "/mes-notes-de-frais"],
   },
-  { id: "commercial", label: "Commercial", icon: Handshake, hrefs: ["/clients", "/consultations", "/opportunites", "/devis", "/articles"] },
-  { id: "finance", label: "Finance", icon: Calculator, hrefs: ["/factures", "/comptabilite", "/factures-fournisseurs"] },
+  { id: "commercial", label: "Commercial", icon: Handshake, hrefs: ["/clients", "/consultations", "/opportunites", "/articles"] },
+  { id: "finance", label: "Finance", icon: Calculator, hrefs: ["/devis", "/factures", "/comptabilite", "/factures-fournisseurs"] },
   { id: "administration", label: "Administration", icon: Settings, hrefs: ["/super-admin/entreprises", "/parametres"] },
 ]
 

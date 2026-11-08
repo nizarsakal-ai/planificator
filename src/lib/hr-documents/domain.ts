@@ -34,8 +34,10 @@ export function capabilitiesFor(raw: string | undefined, identity: Identity): Ca
     return [...new Set(parsed.data.filter(g => g.userId === identity.userId && g.companyId === identity.companyId).flatMap(g => g.capabilities))]
   } catch { return [] }
 }
+export type StorageNotReadyReason = "stockage_absent" | "variable_comptes_invalide" | "entree_entreprise_absente" | "connexion_drive_non_active" | "compte_drive_different" | "generation_differente" | "url_notification_invalide"
 export class HrError extends Error {
-  constructor(readonly code: string, readonly status = 400) { super(code) }
+  /** `reason` : motif technique fixe (jamais une valeur), journalisé seulement pour STORAGE_NOT_READY, jamais renvoyé au client. */
+  constructor(readonly code: string, readonly status = 400, readonly reason?: StorageNotReadyReason) { super(code) }
 }
 export function requireCapability(actor: Actor, capability: Capability) {
   if (!actor.capabilities.includes(capability)) throw new HrError("FORBIDDEN", 403)

@@ -7,7 +7,7 @@ export async function deliverNotice(repo:Repository,identity:Identity,documentId
   if(!options.enabled)return "DISABLED"
   const now=(options.clock??(()=>new Date()))()
   const origin=new URL(options.appUrl)
-  if(origin.protocol!=="https:"||origin.username||origin.password)throw new HrError("STORAGE_NOT_READY",409)
+  if(origin.protocol!=="https:"||origin.username||origin.password)throw new HrError("STORAGE_NOT_READY",409,"url_notification_invalide")
   const claim=await repo.run(identity,async(tx,a)=>{
     requireCapability(a,"PUBLISH");requireCapability(a,"READ")
     const doc=await tx.find(a.companyId,documentId),notice=await tx.notice(a.companyId,documentId)

@@ -9,6 +9,8 @@ export function hrJson(body:unknown,status=200){return Response.json(body,{statu
 export async function hrHttp(fn:()=>Promise<Response>){
   try{return await fn()}catch(error){
     if(error instanceof ZodError)return hrJson({error:messages.INVALID_INPUT,code:"INVALID_INPUT"},400)
+    // Motif technique fixe seulement (aucune valeur, aucun identifiant) : distingue les causes de STORAGE_NOT_READY.
+    if(error instanceof HrError&&error.code==="STORAGE_NOT_READY")console.warn("[hr-documents] STORAGE_NOT_READY",{reason:error.reason??"non_precise"})
     if(error instanceof HrError)return hrJson({error:messages[error.code]??"Opération indisponible.",code:error.code},error.status)
     if(error instanceof HttpGuardError)return hrJson({error:"Accès non autorisé."},403)
     // No raw Prisma/provider exception, filename, body, token or employee data is logged or returned.

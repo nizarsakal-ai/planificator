@@ -63,15 +63,15 @@ describe("cartographie validée", () => {
       terrain: ["Chantiers", "Photos engins", "Véhicules", "Logements"],
       planning: ["Planning", "Calendrier", "Gantt", "Personnel"],
       rh: ["Employés", "Équipes", "Absences", "Pointages", "Notes de frais"],
-      commercial: ["Clients", "Consultations", "Devis", "Bibliothèque"],
-      finance: ["Factures", "Comptabilité", "Factures fournisseurs & OCR"],
+      commercial: ["Clients", "Consultations", "Bibliothèque"],
+      finance: ["Devis", "Factures", "Comptabilité", "Factures fournisseurs & OCR"],
       administration: ["Administration", "Paramètres"],
       footer: ["Mon profil"],
     })
   })
   it("ADMIN, tous drapeaux : Comptabilité dans Finance, pas d'Administration entreprises", () => {
     const s = shape("ADMIN", ALL_ON)
-    assert.deepEqual(s.finance, ["Factures", "Comptabilité", "Factures fournisseurs & OCR"])
+    assert.deepEqual(s.finance, ["Devis", "Factures", "Comptabilité", "Factures fournisseurs & OCR"])
     assert.deepEqual(s.administration, ["Paramètres"])
   })
   it("TEAM_LEADER : Mes chantiers → Terrain, Mon planning → Planning, Mon équipe et entrées personnelles → RH", () => {

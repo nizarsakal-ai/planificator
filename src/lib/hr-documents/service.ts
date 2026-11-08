@@ -81,9 +81,10 @@ export class HrDocumentsService {
     })
   }
   private async binding(companyId:string,storage:Storage|null) {
-    if (!storage) throw new HrError("STORAGE_NOT_READY",409)
+    if (!storage) throw new HrError("STORAGE_NOT_READY",409,"stockage_absent")
     const binding=await this.connect(companyId)
-    if (binding.generation!==storage.connectionGeneration || binding.accountEmail!==storage.accountEmail) throw new HrError("STORAGE_NOT_READY",409)
+    if (binding.accountEmail!==storage.accountEmail) throw new HrError("STORAGE_NOT_READY",409,"compte_drive_different")
+    if (binding.generation!==storage.connectionGeneration) throw new HrError("STORAGE_NOT_READY",409,"generation_differente")
     return {storage,drive:binding.drive}
   }
   async configure(identity:Identity) {
@@ -110,9 +111,9 @@ export class HrDocumentsService {
   }
   async reassociate(identity:Identity) {
     const storage=await this.repo.run(identity,async(tx,a)=>{requireCapability(a,"CONFIGURE");return tx.storage(a.companyId)})
-    if(!storage)throw new HrError("STORAGE_NOT_READY",409)
+    if(!storage)throw new HrError("STORAGE_NOT_READY",409,"stockage_absent")
     const binding=await this.connect(identity.companyId)
-    if(binding.accountEmail!==storage.accountEmail)throw new HrError("STORAGE_NOT_READY",409)
+    if(binding.accountEmail!==storage.accountEmail)throw new HrError("STORAGE_NOT_READY",409,"compte_drive_different")
     await binding.drive.checkPrivate(storage.rootId)
     await this.repo.run(identity,async(tx,a)=>{
       requireCapability(a,"CONFIGURE")
@@ -217,7 +218,9 @@ export class HrDocumentsService {
     const current=await tx.storage(a.companyId)
     if(!current||current.rootId!==storage.rootId||current.connectionGeneration!==storage.connectionGeneration)throw new HrError("CONFLICT",409)
     const connection=await tx.connection(a.companyId)
-    if(!connection||connection.generation!==storage.connectionGeneration||connection.accountEmail!==storage.accountEmail)throw new HrError("STORAGE_NOT_READY",409)
+    if(!connection)throw new HrError("STORAGE_NOT_READY",409,"connexion_drive_non_active")
+    if(connection.accountEmail!==storage.accountEmail)throw new HrError("STORAGE_NOT_READY",409,"compte_drive_different")
+    if(connection.generation!==storage.connectionGeneration)throw new HrError("STORAGE_NOT_READY",409,"generation_differente")
   }
   async review(identity:Identity,id:string,raw:unknown) {
     const input=reviewSchema.parse(raw)
