@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { Prisma, type PrismaClient } from "@prisma/client"
 import { resolveCompanyAccess } from "@/lib/company-access"
-import { capabilitiesFor, digest, employeeDraftsEnabled, HrError, type Actor, type DraftInput, type Identity } from "./domain"
-import type { DocumentRecord, Repository, Storage, Tx, Notice } from "./service"
+import { capabilitiesFor, digest, employeeDraftsEnabled, HrError, MESSAGE_PAGE, OWN_SUBMISSION_STATUSES, REQUEST_SCAN_PAGE, privateSpaceEnabled, SUBMISSION_INTENT_PREFIX, type Actor, type DraftInput, type Identity } from "./domain"
+import type { DocumentRecord, MessageRecord, Repository, Storage, Tx, Notice } from "./service"
 
 export class PrismaHrRepository implements Repository {
   constructor(private readonly db:PrismaClient,private readonly grants=()=>process.env.HR_DOCUMENT_OPERATORS) {}
@@ -77,7 +77,11 @@ class PrismaHrTx implements Tx {
     if(result.count!==1)throw new HrError("CONFLICT",409)
   }
   list(actor:Actor,manage:boolean,cursor?:string,employeeId?:string){
-    const where:Prisma.HrDocumentWhereInput={companyId:actor.companyId,...(manage?(employeeId?{employeeId}:{}):{employeeId:actor.employeeId??"__NO_EMPLOYEE__",status:"PUBLISHED"}),...(cursor?{id:{gt:cursor}}:{})}
+    // Salarié : ses documents publiés ; avec l'espace privé, aussi ses propres dépôts (jamais un brouillon RH).
+    const own:Prisma.HrDocumentWhereInput={employeeId:actor.employeeId??"__NO_EMPLOYEE__",...(privateSpaceEnabled()
+      ?{OR:[{status:"PUBLISHED"},{uploadedById:actor.userId,uploadIntent:{startsWith:SUBMISSION_INTENT_PREFIX},status:{in:[...OWN_SUBMISSION_STATUSES]}}]}
+      :{status:"PUBLISHED"})}
+    const where:Prisma.HrDocumentWhereInput={companyId:actor.companyId,...(manage?(employeeId?{employeeId}:{}):own),...(cursor?{id:{gt:cursor}}:{})}
     return this.db.hrDocument.findMany({where,orderBy:{id:"asc"},take:26})
   }
   async employees(companyId:string){
@@ -100,5 +104,39 @@ class PrismaHrTx implements Tx {
       identityExpiry:input.identityExpiry?new Date(`${input.identityExpiry}T00:00:00Z`):null,documentNumberEnd:input.documentNumberEnd??null,
       sourceSha256:input.sourceSha256??null}})
     return {...employee,draft:true}
+  }
+
+  // ——— Espace privé RH ↔ salarié ———
+  async ownDuplicate(companyId:string,employeeId:string,category:string,period:string,sha256:string){
+    return !!await this.db.hrDocument.findFirst({where:{companyId,employeeId,category,period,sha256},select:{id:true}})
+  }
+  async messages(companyId:string,employeeId:string,cursor?:string){
+    // Curseur d'un autre fil : la ligne de départ doit appartenir au même salarié et à la même société.
+    if(cursor&&!await this.db.hrMessage.findFirst({where:{id:cursor,companyId,employeeId},select:{id:true}}))throw new HrError("INVALID_INPUT")
+    const rows=await this.db.hrMessage.findMany({where:{companyId,employeeId},orderBy:[{createdAt:"desc"},{id:"desc"}],take:MESSAGE_PAGE+1,
+      ...(cursor?{cursor:{id:cursor},skip:1}:{})})
+    return rows as MessageRecord[]
+  }
+  async message(companyId:string,id:string){return await this.db.hrMessage.findFirst({where:{id,companyId}}) as MessageRecord|null}
+  async messageByKey(companyId:string,authorId:string,key:string){
+    return await this.db.hrMessage.findUnique({where:{companyId_authorId_createKey:{companyId,authorId,createKey:key}}}) as MessageRecord|null
+  }
+  async insertMessage(value:MessageRecord){await this.db.hrMessage.create({data:value})}
+  async markRead(companyId:string,employeeId:string,ids:string[],at:Date){
+    await this.db.hrMessage.updateMany({where:{companyId,employeeId,id:{in:ids},readAt:null},data:{readAt:at}})
+  }
+  async closeRequest(companyId:string,employeeId:string,id:string){
+    const {count}=await this.db.hrMessage.updateMany({where:{id,companyId,employeeId,kind:"REQUEST",requestStatus:"OPEN"},data:{requestStatus:"DONE"}})
+    if(count!==1)throw new HrError("REQUEST_CLOSED",409)
+  }
+  async requestIdsPage(companyId:string,employeeId:string,after?:string){
+    const rows=await this.db.hrMessage.findMany({where:{companyId,employeeId,kind:"REQUEST",...(after?{id:{gt:after}}:{})},select:{id:true},orderBy:{id:"asc"},take:REQUEST_SCAN_PAGE})
+    return rows.map(r=>r.id)
+  }
+  async recordAccess(doc:DocumentRecord,userId:string,at:Date){
+    await this.db.hrDocumentAccess.createMany({data:[{id:randomUUID(),companyId:doc.companyId,documentId:doc.id,version:doc.version,userId,firstAt:at}],skipDuplicates:true})
+  }
+  accesses(companyId:string,documentIds:string[],userId:string){
+    return this.db.hrDocumentAccess.findMany({where:{companyId,documentId:{in:documentIds},userId},select:{documentId:true,version:true,firstAt:true}})
   }
 }

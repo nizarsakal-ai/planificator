@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import { describe, it } from "node:test"
 import React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { createPreviewSession, PreviewBody, PREVIEW_MESSAGES, restoreFocus, type PreviewState } from "../../src/components/hr-documents/DocumentPreview"
+import { canShowPdfInline, createPreviewSession, PreviewBody, PREVIEW_MESSAGES, restoreFocus, type PreviewState } from "../../src/components/hr-documents/DocumentPreview"
 import { fetchHrDocument, HR_DOWNLOAD_MESSAGES, type HrDownload } from "../../src/lib/hr-documents/download-client"
 ;(globalThis as {React?:typeof React}).React=React
 
@@ -109,6 +109,22 @@ describe("aperçu RH : fenêtre interne privée, téléchargement seulement sur 
     assert.match(img,/<img[^>]*alt="Aperçu de Bulletin synthétique A"/)
     assert.match(renderToStaticMarkup(<PreviewBody state={{status:"loading",id:"doc-a",title:"t"}}/>),/role="status"/)
     assert.equal(renderToStaticMarkup(<PreviewBody state={{status:"idle"}}/>),"")
+  })
+  it("v7 : navigateur sans lecteur PDF intégré → aucun cadre (donc aucun téléchargement à l'ouverture), message explicite",()=>{
+    const ready:PreviewState={status:"ready",id:"doc-a",title:"Bulletin synthétique A",name:"x",url:"blob:synthetic/1",mime:"application/pdf"}
+    const noViewer=renderToStaticMarkup(<PreviewBody state={ready} pdfInline={false}/>)
+    assert.doesNotMatch(noViewer,/<iframe|blob:synthetic/);assert.match(noViewer,/role="status"/)
+    assert.ok(noViewer.includes(PREVIEW_MESSAGES.pdfNoViewer));assert.match(PREVIEW_MESSAGES.pdfNoViewer,/Rien n’a été téléchargé/)
+    assert.match(renderToStaticMarkup(<PreviewBody state={ready} pdfInline={true}/>),/<iframe[^>]*src="blob:synthetic\/1"/)
+    // Les images ne dépendent pas du lecteur PDF.
+    assert.match(renderToStaticMarkup(<PreviewBody state={{...ready,url:"blob:synthetic/2",mime:"image/png"}} pdfInline={false}/>),/<img[^>]*src="blob:synthetic\/2"/)
+  })
+  it("v7 : détection du lecteur PDF : seul pdfViewerEnabled === false retire le cadre",()=>{
+    assert.equal(canShowPdfInline({pdfViewerEnabled:false}),false)
+    assert.equal(canShowPdfInline({pdfViewerEnabled:true}),true)
+    assert.equal(canShowPdfInline({}),true)
+    assert.equal(canShowPdfInline(undefined),true)
+    assert.match(readFileSync("src/components/hr-documents/DocumentPreview.tsx","utf8"),/<PreviewBody state=\{state\} pdfInline=\{canShowPdfInline\(\)\}\/>/)
   })
   it("focus rendu au bouton Visualiser mémorisé ; repli Radix si le bouton a disparu",()=>{
     let prevented=0,focused=0

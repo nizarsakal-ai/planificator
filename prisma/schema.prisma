@@ -915,6 +915,8 @@ model Employee {
   hrDocuments         HrDocument[]
   /// PLV2-DOC-RH-002 : relation inverse seulement, aucune colonne ajoutée à employees.
   hrDraft             HrEmployeeDraft?
+  /// Espace privé RH : relation inverse seulement, aucune colonne ajoutée à employees.
+  hrMessages          HrMessage[]
   assignedTasks       Task[]               @relation("TaskAssignee")
 
   @@unique([id, companyId])
@@ -3437,6 +3439,8 @@ model HrDocument {
   events HrDocumentEvent[]
   receipts HrDocumentReceipt[]
   notices HrDocumentNotice[]
+  messages HrMessage[]
+  accesses HrDocumentAccess[]
   @@unique([id,companyId])
   @@unique([companyId,uploadedById,uploadKey])
   @@unique([companyId,employeeId,category,period,sha256])
@@ -3501,6 +3505,39 @@ model HrDocumentStoreEvent {
 
 /// PLV2-DOC-RH-002 — fiche à compléter créée depuis une pièce d'identité, après validation d'un opérateur RH.
 /// Table séparée : employees et users gardent leur forme. Le numéro de pièce n'est jamais conservé en entier.
+/// Espace privé RH : un fil par salarié, entre ce salarié et les RH habilités. Texte seul, aucun envoi externe.
+model HrMessage {
+  id String @id
+  companyId String
+  employeeId String
+  authorId String
+  authorSide String
+  kind String
+  body String
+  documentId String?
+  requestStatus String?
+  createKey String
+  createdAt DateTime @default(now())
+  readAt DateTime?
+  employee Employee @relation(fields:[employeeId,companyId],references:[id,companyId],onDelete:Restrict)
+  document HrDocument? @relation(fields:[documentId],references:[id],onDelete:Restrict)
+  @@unique([companyId,authorId,createKey])
+  @@index([companyId,employeeId,createdAt])
+  @@map("hr_messages")
+}
+/// Espace privé RH : première remise réussie d'une version publiée au salarié destinataire (fait serveur, pas une signature).
+model HrDocumentAccess {
+  id String @id
+  companyId String
+  documentId String
+  version Int
+  userId String
+  firstAt DateTime @default(now())
+  document HrDocument @relation(fields:[documentId,companyId],references:[id,companyId],onDelete:Restrict)
+  @@unique([documentId,version,userId])
+  @@index([companyId,documentId])
+  @@map("hr_document_accesses")
+}
 model HrEmployeeDraft {
   id                String    @id
   companyId         String

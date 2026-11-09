@@ -21,6 +21,26 @@ export const draftSchema = z.object({ firstName: z.string().trim().min(1).max(80
 export type DraftInput = z.infer<typeof draftSchema>
 export function recognitionEnabled(env: NodeJS.ProcessEnv = process.env) { return env.HR_DOCUMENT_RECOGNITION_ENABLED === "true" }
 export function employeeDraftsEnabled(env: NodeJS.ProcessEnv = process.env) { return env.HR_DOCUMENT_EMPLOYEE_DRAFTS_ENABLED === "true" }
+/** Espace privé RH ↔ salarié (dépôts, messages, suivi) : absent = désactivé, tant que sa migration n'est pas appliquée. */
+export function privateSpaceEnabled(env: NodeJS.ProcessEnv = process.env) { return env.HR_DOCUMENT_PRIVATE_SPACE_ENABLED === "true" }
+/** Pièce déposée par le salarié : marqueur d'origine porté par uploadIntent (aucune colonne nouvelle). */
+export const SUBMISSION_INTENT_PREFIX = "submission:"
+/** Statuts d'un dépôt salarié qu'il peut suivre lui-même ; BLOCKED reste une affaire RH. */
+export const OWN_SUBMISSION_STATUSES = ["RECEIVING", "RECEIVED", "READY", "REVIEWED"] as const
+export const MESSAGE_PAGE = 50
+/** Lecture par pages des demandes d'un salarié (reprise d'un dépôt) : taille de page technique, sans limite fonctionnelle. */
+export const REQUEST_SCAN_PAGE = 200
+export const DOWNLOADABLE_STATUSES = ["RECEIVED", "READY", "REVIEWED", "PUBLISHED"] as const
+const category = z.string().regex(/^[A-Z_]{2,40}$/).refine(c=>isAcceptedCategory(c))
+const period = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)
+/** Dépôt salarié : aucun champ employeeId, le salarié est toujours celui de la session. */
+export const submissionSchema = z.object({ category, period, title: z.string().trim().min(1).max(120), key: z.string().uuid(),
+  requestId: id.optional() }).strict()
+export type SubmissionInput = z.infer<typeof submissionSchema>
+/** Message privé : employeeId seulement côté RH ; texte seul, sans HTML interprété. */
+export const messageSchema = z.object({ employeeId: id.optional(), kind: z.enum(["MESSAGE", "REQUEST"]).default("MESSAGE"),
+  body: z.string().trim().min(1).max(2000), documentId: id.optional(), key: z.string().uuid() }).strict()
+export type MessageInput = z.infer<typeof messageSchema>
 export const publicationSchema = z.object({ expectedVersion: z.number().int().positive().max(2147483647), key: z.string().uuid() }).strict()
 export type ReviewInput = z.infer<typeof reviewSchema>
 export type Identity = { userId: string; companyId: string }
@@ -42,9 +62,24 @@ export class HrError extends Error {
 export function requireCapability(actor: Actor, capability: Capability) {
   if (!actor.capabilities.includes(capability)) throw new HrError("FORBIDDEN", 403)
 }
-export function canRead(actor: Actor, doc: {companyId: string; employeeId: string; status: string}): boolean {
-  return doc.companyId === actor.companyId && (actor.capabilities.includes("READ") ||
-    (doc.status === "PUBLISHED" && actor.employeeId === doc.employeeId))
+type Readable = {companyId: string; employeeId: string; status: string; uploadedById?: string; uploadIntent?: string}
+export function isOwnSubmission(doc: Readable, userId: string): boolean {
+  return doc.uploadedById === userId && !!doc.uploadIntent?.startsWith(SUBMISSION_INTENT_PREFIX) &&
+    (OWN_SUBMISSION_STATUSES as readonly string[]).includes(doc.status)
+}
+/** Ce que le salarié destinataire peut voir : ses documents publiés et ses propres dépôts, jamais un brouillon RH. */
+export function employeeVisible(doc: Readable, employeeId: string, employeeUserId: string): boolean {
+  return doc.employeeId === employeeId && (doc.status === "PUBLISHED" || isOwnSubmission(doc, employeeUserId))
+}
+/**
+ * Lecture : RH habilité (historique), ou salarié destinataire pour ses documents publiés (historique). La lecture par le
+ * salarié de ses propres dépôts non publiés n'existe que tant que l'espace privé est actif (retour historique exact sinon).
+ */
+export function canRead(actor: Actor, doc: Readable, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (doc.companyId !== actor.companyId) return false
+  if (actor.capabilities.includes("READ")) return true
+  if (!actor.employeeId || doc.employeeId !== actor.employeeId) return false
+  return doc.status === "PUBLISHED" || (privateSpaceEnabled(env) && employeeVisible(doc, actor.employeeId, actor.userId))
 }
 export function digest(bytes: Uint8Array | string) { return createHash("sha256").update(bytes).digest("hex") }
 export function validatePdf(bytes: Uint8Array): string {
@@ -88,4 +123,5 @@ export const messages: Record<string,string> = {
   DUPLICATE: "Un document identique existe déjà pour ce salarié et cette période.",
   RECEIPT_CONFLICT: "Cette opération a déjà été utilisée avec un autre contenu.",
   DRAFT_EMPLOYEE: "Fiche à compléter : la publication sera possible une fois le salarié activé.",
+  REQUEST_CLOSED: "Cette demande de pièce est déjà close.",
 }

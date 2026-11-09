@@ -8,7 +8,7 @@ import { DocumentPreview, saveBlob, type PreviewTarget } from "./DocumentPreview
 type Employee={id:string;firstName:string;lastName:string;draft?:boolean}
 type Category=Pick<CategoryDefinition,"code"|"label"|"family">
 type Doc={id:string;employeeId:string;title:string;period:string;category:string;status:string;version:number;size:number;canResume?:boolean}
-const labels:Record<string,string>={UPLOADING:"Dépôt à reprendre",READY:"À vérifier",REVIEWED:"Vérifié, à publier",PUBLISHED:"Publié",BLOCKED:"Remise suspendue"}
+const labels:Record<string,string>={UPLOADING:"Dépôt à reprendre",READY:"À vérifier",REVIEWED:"Vérifié, à publier",PUBLISHED:"Publié",BLOCKED:"Remise suspendue",RECEIVING:"Dépôt du salarié en cours",RECEIVED:"Reçu du salarié, à vérifier"}
 // Codes historiques par défaut ; la page passe le catalogue autorisé par les drapeaux (PLV2-DOC-RH-002).
 const LEGACY:Category[]=availableCategories({} as NodeJS.ProcessEnv).map(({code,label,family})=>({code,label,family}))
 const control="w-full rounded-lg border border-slate-300 bg-white p-2 text-sm"

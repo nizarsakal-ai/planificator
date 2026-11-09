@@ -5,6 +5,8 @@ import { Briefcase, Calendar, ClipboardList, Receipt, FileText } from "lucide-re
 import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { EmployeEditForm } from "@/components/employes/EmployeEditForm"
+import { HrPrivateSpace } from "@/components/hr-documents/EmployeeHrFolder"
+import type { Category } from "@/components/hr-documents/space-client"
 
 const TYPE_LABELS: Record<string, string> = {
   VACATION: "Congé payé", SICK: "Maladie", UNPAID: "Congé sans solde",
@@ -40,6 +42,8 @@ interface DefaultValues {
 interface Props {
   employeeId: string
   hrDocumentsHref?: string
+  /** Espace privé RH ↔ salarié, calculé côté serveur (habilitation READ) ; absent = lien historique inchangé. */
+  hrSpace?: { canAccept: boolean; canWrite: boolean; images: boolean; categories: Category[] }
   defaultValues: DefaultValues
   absences: Absence[]
   assignments: Assignment[]
@@ -58,7 +62,7 @@ const TABS = [
   { id: "notes-de-frais", label: "Notes de frais",  icon: Receipt      },
 ]
 
-export function EmployeeProfileTabs({ employeeId, hrDocumentsHref, defaultValues, absences, assignments, expenses }: Props) {
+export function EmployeeProfileTabs({ employeeId, hrDocumentsHref, hrSpace, defaultValues, absences, assignments, expenses }: Props) {
   const [active, setActive] = useState("modifier")
 
   return (
@@ -83,10 +87,15 @@ export function EmployeeProfileTabs({ employeeId, hrDocumentsHref, defaultValues
             </button>
           )
         })}
-        {hrDocumentsHref&&<Link href={hrDocumentsHref} className="flex items-center gap-1.5 border-b-2 border-transparent px-4 py-2.5 text-sm font-medium text-slate-500 hover:text-slate-800"><FileText className="h-4 w-4"/>Documents RH</Link>}
+        {hrSpace&&<button type="button" aria-pressed={active==="documents-rh"} onClick={()=>setActive("documents-rh")} className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${active==="documents-rh"?"border-[#0f3460] text-[#0f3460]":"border-transparent text-slate-500 hover:text-slate-800"}`}><FileText className="h-4 w-4"/>Documents RH</button>}
+        {!hrSpace&&hrDocumentsHref&&<Link href={hrDocumentsHref} className="flex items-center gap-1.5 border-b-2 border-transparent px-4 py-2.5 text-sm font-medium text-slate-500 hover:text-slate-800"><FileText className="h-4 w-4"/>Documents RH</Link>}
       </div>
 
       {/* Contenu */}
+      {active === "documents-rh" && hrSpace && (
+        <HrPrivateSpace key={employeeId} mode="hr" employeeId={employeeId} categories={hrSpace.categories} canAccept={hrSpace.canAccept}
+          canWrite={hrSpace.canWrite} images={hrSpace.images} manageHref={hrDocumentsHref} />
+      )}
       {active === "modifier" && (
         <Card>
           <CardContent className="pt-6">

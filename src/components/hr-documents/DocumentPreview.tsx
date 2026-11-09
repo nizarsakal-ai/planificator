@@ -14,7 +14,16 @@ export const PREVIEW_MESSAGES = {
   unavailable: "Aperçu indisponible.",
   imageFailed: "Cette image ne peut pas être affichée dans le navigateur. Utilisez « Télécharger » pour l’ouvrir sur votre appareil.",
   pdfFallback: "Si le document ne s’affiche pas ci-dessus, votre navigateur ne sait pas l’afficher : utilisez « Télécharger ».",
+  pdfNoViewer: "Ce navigateur n’affiche pas les PDF dans la page. Rien n’a été téléchargé : utilisez « Télécharger » pour ouvrir le document sur votre appareil.",
 } as const
+
+/**
+ * Lecteur PDF intégré disponible ? Un navigateur qui déclare ne pas en avoir (navigator.pdfViewerEnabled === false) télécharge
+ * le PDF chargé dans un cadre : l'aperçu ne doit alors jamais créer ce cadre. Propriété absente (navigateur ancien) : cadre conservé.
+ */
+export function canShowPdfInline(nav: { pdfViewerEnabled?: boolean } | undefined = typeof navigator === "undefined" ? undefined : navigator) {
+  return nav?.pdfViewerEnabled !== false
+}
 
 export type PreviewTarget = { id: string; title: string }
 export type PreviewState =
@@ -90,11 +99,13 @@ function PreviewImage({ url, title }: { url: string; title: string }) {
 }
 
 /** Contenu de la fenêtre selon l'état de la session : rendu testable hors navigateur. */
-export function PreviewBody({ state }: { state: PreviewState }) {
+export function PreviewBody({ state, pdfInline = true }: { state: PreviewState; pdfInline?: boolean }) {
   if (state.status === "loading") return <p role="status" className="py-6 text-sm text-slate-600">Chargement de l’aperçu…</p>
   if (state.status === "error") return <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{state.message}</p>
   if (state.status !== "ready") return null
   if (!state.url) return <p role="status" className={notice}>{PREVIEW_MESSAGES.unsupported}</p>
+  // Sans lecteur intégré : message explicite, aucun cadre, donc aucun téléchargement déclenché par l'ouverture de l'aperçu.
+  if (state.mime === "application/pdf" && !pdfInline) return <p role="status" className={notice}>{PREVIEW_MESSAGES.pdfNoViewer}</p>
   if (state.mime === "application/pdf") return <div className="space-y-2">
     <iframe src={state.url} title={`Aperçu de ${state.title}`} className="h-[70vh] w-full rounded-lg border border-slate-200" referrerPolicy="no-referrer"/>
     <p className="text-xs text-slate-600">{PREVIEW_MESSAGES.pdfFallback}</p>
@@ -120,7 +131,7 @@ export function DocumentPreview({ target, onClose, returnFocus }: { target: Prev
         <DialogTitle className="break-words pr-8">{title}</DialogTitle>
         <DialogDescription>Aperçu privé, aucun téléchargement automatique. Le fichier n’est téléchargé que sur clic sur « Télécharger ».</DialogDescription>
       </DialogHeader>
-      <PreviewBody state={state}/>
+      <PreviewBody state={state} pdfInline={canShowPdfInline()}/>
       <DialogFooter className="gap-2">
         <button type="button" className={button} onClick={onClose}>Fermer</button>
         <button type="button" className={button} disabled={state.status !== "ready"} onClick={() => { session.current?.download() }}>Télécharger</button>
