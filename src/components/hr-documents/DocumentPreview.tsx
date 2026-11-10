@@ -2,34 +2,28 @@
 import { useEffect, useRef, useState, type RefObject } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { fetchHrDocument, type HrDownload } from "@/lib/hr-documents/download-client"
+import { PdfCanvasPreview } from "@/components/hr-documents/PdfCanvasPreview"
 
 /**
  * Aperçu privé d'un document RH dans une fenêtre interne. Les octets viennent de fetchHrDocument (même route, mêmes
  * droits, même contrôle MIME et session) ; aucun lien public, aucun lecteur externe, aucun enregistrement sans clic
  * explicite sur « Télécharger ». Visualiser ne modifie aucun statut : la route de téléchargement est en lecture seule.
+ * r1 : les PDF ne passent plus par un cadre ni par le lecteur du navigateur (aperçu blanc dans les navigateurs intégrés,
+ * téléchargement implicite sans lecteur) ; ils sont rendus en <canvas> par PdfCanvasPreview, sans URL ni réseau.
  */
 export const PREVIEWABLE_MIME = ["application/pdf", "image/jpeg", "image/png"] as const
 export const PREVIEW_MESSAGES = {
   unsupported: "Ce format (HEIC) ne peut pas être affiché dans le navigateur. Utilisez « Télécharger » pour l’ouvrir sur votre appareil.",
   unavailable: "Aperçu indisponible.",
   imageFailed: "Cette image ne peut pas être affichée dans le navigateur. Utilisez « Télécharger » pour l’ouvrir sur votre appareil.",
-  pdfFallback: "Si le document ne s’affiche pas ci-dessus, votre navigateur ne sait pas l’afficher : utilisez « Télécharger ».",
-  pdfNoViewer: "Ce navigateur n’affiche pas les PDF dans la page. Rien n’a été téléchargé : utilisez « Télécharger » pour ouvrir le document sur votre appareil.",
 } as const
-
-/**
- * Lecteur PDF intégré disponible ? Un navigateur qui déclare ne pas en avoir (navigator.pdfViewerEnabled === false) télécharge
- * le PDF chargé dans un cadre : l'aperçu ne doit alors jamais créer ce cadre. Propriété absente (navigateur ancien) : cadre conservé.
- */
-export function canShowPdfInline(nav: { pdfViewerEnabled?: boolean } | undefined = typeof navigator === "undefined" ? undefined : navigator) {
-  return nav?.pdfViewerEnabled !== false
-}
 
 export type PreviewTarget = { id: string; title: string }
 export type PreviewState =
   | { status: "idle" }
   | { status: "loading"; id: string; title: string }
-  | { status: "ready"; id: string; title: string; url: string | null; name: string; mime: HrDownload["mime"] }
+  /** url : image seulement (blob révocable) ; pdf : octets validés rendus en canvas, sans URL ; HEIC : ni l'un ni l'autre. */
+  | { status: "ready"; id: string; title: string; url: string | null; pdf: Blob | null; name: string; mime: HrDownload["mime"] }
   | { status: "error"; id: string; title: string; message: string }
 export type ObjectUrls = { create: (blob: Blob) => string; revoke: (url: string) => void }
 type FetchDocument = (id: string) => Promise<HrDownload>
@@ -66,10 +60,12 @@ export function createPreviewSession({ fetchDocument = fetchHrDocument, urls = b
       }
       if (token !== request) return
       const previewable = (PREVIEWABLE_MIME as readonly string[]).includes(doc.mime)
-      // Type imposé par le contrôle MIME : le blob ne peut pas être interprété comme une page HTML.
-      const url = previewable ? urls.create(new Blob([doc.blob], { type: doc.mime })) : null
+      const isPdf = doc.mime === "application/pdf"
+      // Type imposé par le contrôle MIME : le blob ne peut pas être interprété comme une page HTML. Aucune URL pour un PDF.
+      const url = previewable && !isPdf ? urls.create(new Blob([doc.blob], { type: doc.mime })) : null
+      const pdf = isPdf ? new Blob([doc.blob], { type: "application/pdf" }) : null
       current = doc
-      set({ status: "ready", ...target, url, name: doc.name, mime: doc.mime })
+      set({ status: "ready", ...target, url, pdf, name: doc.name, mime: doc.mime })
     },
     close() { request++; release(); if (state.status !== "idle") set({ status: "idle" }) },
     download(save: (blob: Blob, name: string) => void = saveBlob) {
@@ -99,17 +95,13 @@ function PreviewImage({ url, title }: { url: string; title: string }) {
 }
 
 /** Contenu de la fenêtre selon l'état de la session : rendu testable hors navigateur. */
-export function PreviewBody({ state, pdfInline = true }: { state: PreviewState; pdfInline?: boolean }) {
+export function PreviewBody({ state }: { state: PreviewState }) {
   if (state.status === "loading") return <p role="status" className="py-6 text-sm text-slate-600">Chargement de l’aperçu…</p>
   if (state.status === "error") return <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{state.message}</p>
   if (state.status !== "ready") return null
+  // PDF : rendu canvas local, indépendant du lecteur PDF du navigateur ; aucun cadre, aucune URL, aucun téléchargement.
+  if (state.mime === "application/pdf" && state.pdf) return <PdfCanvasPreview key={state.id} blob={state.pdf} title={state.title}/>
   if (!state.url) return <p role="status" className={notice}>{PREVIEW_MESSAGES.unsupported}</p>
-  // Sans lecteur intégré : message explicite, aucun cadre, donc aucun téléchargement déclenché par l'ouverture de l'aperçu.
-  if (state.mime === "application/pdf" && !pdfInline) return <p role="status" className={notice}>{PREVIEW_MESSAGES.pdfNoViewer}</p>
-  if (state.mime === "application/pdf") return <div className="space-y-2">
-    <iframe src={state.url} title={`Aperçu de ${state.title}`} className="h-[70vh] w-full rounded-lg border border-slate-200" referrerPolicy="no-referrer"/>
-    <p className="text-xs text-slate-600">{PREVIEW_MESSAGES.pdfFallback}</p>
-  </div>
   return <PreviewImage key={state.url} url={state.url} title={state.title}/>
 }
 
@@ -131,7 +123,7 @@ export function DocumentPreview({ target, onClose, returnFocus }: { target: Prev
         <DialogTitle className="break-words pr-8">{title}</DialogTitle>
         <DialogDescription>Aperçu privé, aucun téléchargement automatique. Le fichier n’est téléchargé que sur clic sur « Télécharger ».</DialogDescription>
       </DialogHeader>
-      <PreviewBody state={state} pdfInline={canShowPdfInline()}/>
+      <PreviewBody state={state}/>
       <DialogFooter className="gap-2">
         <button type="button" className={button} onClick={onClose}>Fermer</button>
         <button type="button" className={button} disabled={state.status !== "ready"} onClick={() => { session.current?.download() }}>Télécharger</button>

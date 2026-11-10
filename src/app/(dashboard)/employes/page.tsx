@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import Image from "next/image"
+import Link from "next/link"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
@@ -17,7 +18,15 @@ export const metadata: Metadata = { title: "Employés" }
 export default async function EmployesPage() {
   const session = await auth()
   if (!session?.user) redirect("/login")
-  if (!["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)) redirect("/dashboard")
+  // Rôle non habilité : refus rendu sur place, sans redirection, avant toute lecture de la liste des employés.
+  if (!["ADMIN", "SUPER_ADMIN", "TEAM_LEADER"].includes(session.user.role)) {
+    return (
+      <div role="alert" className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-800">
+        <p>Cette page est réservée aux responsables.</p>
+        <Link href="/dashboard" className="mt-2 inline-block text-blue-700 underline">Retour au tableau de bord</Link>
+      </div>
+    )
+  }
 
   const companyId = session.user.companyId!
 

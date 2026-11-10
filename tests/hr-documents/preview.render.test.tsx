@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs"
 import { describe, it } from "node:test"
 import React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { canShowPdfInline, createPreviewSession, PreviewBody, PREVIEW_MESSAGES, restoreFocus, type PreviewState } from "../../src/components/hr-documents/DocumentPreview"
+import { createPreviewSession, PreviewBody, PREVIEW_MESSAGES, restoreFocus, type PreviewState } from "../../src/components/hr-documents/DocumentPreview"
+import { PDF_CANVAS_MESSAGES } from "../../src/components/hr-documents/PdfCanvasPreview"
 import { fetchHrDocument, HR_DOWNLOAD_MESSAGES, type HrDownload } from "../../src/lib/hr-documents/download-client"
 ;(globalThis as {React?:typeof React}).React=React
 
@@ -25,8 +26,10 @@ describe("aperçu RH : fenêtre interne privée, téléchargement seulement sur 
     const calls:string[]=[];const h=harness(async id=>{calls.push(id);return pdf()})
     await h.session.open(A)
     assert.deepEqual(calls,["doc-a"])
-    assert.equal(h.session.state.status,"ready")
-    assert.equal(h.created.length,1);assert.equal(h.created[0].type,"application/pdf")
+    const s=h.session.state;assert.equal(s.status,"ready")
+    // r1 : un PDF ne crée plus aucune URL blob ; ses octets validés sont rendus en canvas.
+    assert.equal(h.created.length,0);assert.equal(s.status==="ready"&&s.url,null)
+    assert.equal(s.status==="ready"&&s.pdf?.type,"application/pdf")
     assert.equal(h.saved.length,0)
     assert.deepEqual(h.states.map(s=>s.status),["loading","ready"])
   })
@@ -34,17 +37,17 @@ describe("aperçu RH : fenêtre interne privée, téléchargement seulement sur 
     const d=deferred<HrDownload>();let calls=0;const h=harness(()=>{calls++;return d.promise})
     const first=h.session.open(A);void h.session.open(A)
     d.resolve(pdf());await first;await h.session.open(A)
-    assert.equal(calls,1);assert.equal(h.created.length,1)
+    assert.equal(calls,1);assert.equal(h.created.length,0)
   })
   it("Fermer révoque l'URL blob, revient à l'état initial et n'autorise plus aucun téléchargement",async()=>{
-    const h=harness(async()=>pdf())
+    const h=harness(async()=>({...pdf(),mime:"image/png",name:"document-2026-10.png"}))
     await h.session.open(A);h.session.close()
     assert.deepEqual(h.revoked,["blob:synthetic/1"])
     assert.equal(h.session.state.status,"idle")
     assert.equal(h.session.download(h.save),false);assert.equal(h.saved.length,0)
   })
   it("changement de document : l'URL précédente est révoquée avant l'affichage suivant",async()=>{
-    const h=harness(async id=>id===A.id?pdf():{...pdf(),mime:"image/png",name:"document-2026-10.png"})
+    const h=harness(async id=>id===A.id?{...pdf(),mime:"image/jpeg",name:"document-2026-09.jpg"}:{...pdf(),mime:"image/png",name:"document-2026-10.png"})
     await h.session.open(A);await h.session.open(B)
     assert.deepEqual(h.revoked,["blob:synthetic/1"])
     const s=h.session.state;assert.equal(s.status,"ready");assert.equal(s.status==="ready"&&s.id,"doc-b")
@@ -57,7 +60,7 @@ describe("aperçu RH : fenêtre interne privée, téléchargement seulement sur 
     assert.equal(h.created.length,0);assert.equal(h.session.state.status,"idle")
     const lateA2=deferred<HrDownload>(),h2=harness(id=>id===A.id?lateA2.promise:lateB.promise)
     const a2=h2.session.open(A),b2=h2.session.open(B);lateB.resolve(pdf());await b2;lateA2.resolve(pdf());await a2
-    const s=h2.session.state;assert.equal(s.status==="ready"&&s.id,"doc-b");assert.equal(h2.created.length,1)
+    const s=h2.session.state;assert.equal(s.status==="ready"&&s.id,"doc-b");assert.equal(s.status==="ready"&&s.pdf!==null,true);assert.equal(h2.created.length,0)
     const failing=deferred<HrDownload>(),h3=harness(()=>failing.promise)
     const a3=h3.session.open(A);h3.session.close();failing.reject(new Error("tardif"));await a3
     assert.equal(h3.session.state.status,"idle")
@@ -74,7 +77,7 @@ describe("aperçu RH : fenêtre interne privée, téléchargement seulement sur 
   it("HEIC non affichable : aucune URL d'aperçu, message clair, téléchargement toujours possible",async()=>{
     const h=harness(async()=>heic())
     await h.session.open(A)
-    const s=h.session.state;assert.equal(s.status,"ready");assert.equal(s.status==="ready"&&s.url,null)
+    const s=h.session.state;assert.equal(s.status,"ready");assert.equal(s.status==="ready"&&s.url,null);assert.equal(s.status==="ready"&&s.pdf,null)
     assert.equal(h.created.length,0)
     assert.match(renderToStaticMarkup(<PreviewBody state={s}/>),/HEIC/)
     assert.equal(h.session.download(h.save),true);assert.equal(h.saved[0].name,"document-2026-11.heic")
@@ -100,31 +103,29 @@ describe("aperçu RH : fenêtre interne privée, téléchargement seulement sur 
     const h=harness(async()=>{throw new Error("")})
     await h.session.open(A);const s=h.session.state;assert.equal(s.status==="error"&&s.message,PREVIEW_MESSAGES.unavailable)
   })
-  it("rendu : PDF dans un cadre interne titré, image avec texte alternatif, chargement annoncé",()=>{
+  it("rendu r1 : PDF en zone canvas titrée et défilable au clavier, jamais de cadre ni d'URL ; image avec texte alternatif",()=>{
     const base={id:"doc-a",title:"Bulletin synthétique A",name:"x"}
-    const frame=renderToStaticMarkup(<PreviewBody state={{status:"ready",...base,url:"blob:synthetic/1",mime:"application/pdf"}}/>)
-    assert.match(frame,/<iframe[^>]*src="blob:synthetic\/1"/);assert.match(frame,/title="Aperçu de Bulletin synthétique A"/)
-    assert.ok(frame.includes(PREVIEW_MESSAGES.pdfFallback),"indication de repli PDF toujours présente")
-    const img=renderToStaticMarkup(<PreviewBody state={{status:"ready",...base,url:"blob:synthetic/2",mime:"image/jpeg"}}/>)
+    const zone=renderToStaticMarkup(<PreviewBody state={{status:"ready",...base,url:null,pdf:pdf().blob,mime:"application/pdf"}}/>)
+    assert.doesNotMatch(zone,/<iframe|<object|<embed|blob:|src=/)
+    assert.match(zone,/role="region"/);assert.match(zone,/aria-label="Aperçu de Bulletin synthétique A"/);assert.match(zone,/tabindex="0"/)
+    assert.ok(zone.includes(PDF_CANVAS_MESSAGES.loading),"chargement annoncé avant le rendu")
+    const img=renderToStaticMarkup(<PreviewBody state={{status:"ready",...base,url:"blob:synthetic/2",pdf:null,mime:"image/jpeg"}}/>)
     assert.match(img,/<img[^>]*alt="Aperçu de Bulletin synthétique A"/)
     assert.match(renderToStaticMarkup(<PreviewBody state={{status:"loading",id:"doc-a",title:"t"}}/>),/role="status"/)
     assert.equal(renderToStaticMarkup(<PreviewBody state={{status:"idle"}}/>),"")
   })
-  it("v7 : navigateur sans lecteur PDF intégré → aucun cadre (donc aucun téléchargement à l'ouverture), message explicite",()=>{
-    const ready:PreviewState={status:"ready",id:"doc-a",title:"Bulletin synthétique A",name:"x",url:"blob:synthetic/1",mime:"application/pdf"}
-    const noViewer=renderToStaticMarkup(<PreviewBody state={ready} pdfInline={false}/>)
-    assert.doesNotMatch(noViewer,/<iframe|blob:synthetic/);assert.match(noViewer,/role="status"/)
-    assert.ok(noViewer.includes(PREVIEW_MESSAGES.pdfNoViewer));assert.match(PREVIEW_MESSAGES.pdfNoViewer,/Rien n’a été téléchargé/)
-    assert.match(renderToStaticMarkup(<PreviewBody state={ready} pdfInline={true}/>),/<iframe[^>]*src="blob:synthetic\/1"/)
-    // Les images ne dépendent pas du lecteur PDF.
-    assert.match(renderToStaticMarkup(<PreviewBody state={{...ready,url:"blob:synthetic/2",mime:"image/png"}} pdfInline={false}/>),/<img[^>]*src="blob:synthetic\/2"/)
-  })
-  it("v7 : détection du lecteur PDF : seul pdfViewerEnabled === false retire le cadre",()=>{
-    assert.equal(canShowPdfInline({pdfViewerEnabled:false}),false)
-    assert.equal(canShowPdfInline({pdfViewerEnabled:true}),true)
-    assert.equal(canShowPdfInline({}),true)
-    assert.equal(canShowPdfInline(undefined),true)
-    assert.match(readFileSync("src/components/hr-documents/DocumentPreview.tsx","utf8"),/<PreviewBody state=\{state\} pdfInline=\{canShowPdfInline\(\)\}\/>/)
+  it("r1 : aucun chemin d'aperçu PDF ne dépend du lecteur du navigateur (navigateurs intégrés : plus d'aperçu blanc)",()=>{
+    const src=readFileSync("src/components/hr-documents/DocumentPreview.tsx","utf8")
+    assert.doesNotMatch(src,/<iframe|<object|<embed|pdfViewerEnabled|canShowPdfInline/)
+    assert.match(src,/<PreviewBody state=\{state\}\/>/)
+    assert.match(src,/<PdfCanvasPreview key=\{state\.id\} blob=\{state\.pdf\} title=\{state\.title\}\/>/)
+    const canvas=readFileSync("src/components/hr-documents/PdfCanvasPreview.tsx","utf8")
+    // PDF.js local de la dépendance existante, chargé à la demande ; aucune URL distante, aucun CDN, aucun worker externe.
+    assert.match(canvas,/import\("unpdf\/pdfjs"\)/)
+    assert.doesNotMatch(canvas,/https?:\/\/|workerSrc|cdn|createObjectURL|\.download\s*=/i)
+    assert.doesNotMatch(canvas,/standardFontDataUrl|cMapUrl|wasmUrl/)
+    // Les images ne dépendent pas du rendu PDF.
+    assert.match(renderToStaticMarkup(<PreviewBody state={{status:"ready",id:"doc-a",title:"t",name:"x",url:"blob:synthetic/2",pdf:null,mime:"image/png"}}/>),/<img[^>]*src="blob:synthetic\/2"/)
   })
   it("focus rendu au bouton Visualiser mémorisé ; repli Radix si le bouton a disparu",()=>{
     let prevented=0,focused=0
