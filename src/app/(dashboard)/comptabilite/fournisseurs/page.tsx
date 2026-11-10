@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { supplierRowAction } from "@/lib/accounting/ui/supplier-row-action"
+import { supplierExportHref } from "@/lib/accounting/ui/supplier-export"
 import { SupplierQuickValidateButton } from "@/components/comptabilite/SupplierQuickValidateButton"
 
 export const metadata: Metadata = { title: "Comptabilité — Factures fournisseurs" }
@@ -28,7 +29,11 @@ export default async function FournisseursPage({ searchParams }: { searchParams:
         <form method="get" className="flex flex-wrap gap-2"><Input name="q" placeholder="Fournisseur, n°, SIRET / SIREN" defaultValue={q} className="w-64" aria-label="Recherche" />
           <select name="statut" defaultValue={status ?? ""} className="h-10 rounded-md border border-input bg-background px-3 text-sm" aria-label="Statut"><option value="">Tous</option><option value="PENDING">À valider</option><option value="VALIDATED">Validées</option><option value="REJECTED">Rejetées</option></select>
           <Button type="submit" variant="secondary">Filtrer</Button></form>
-        <Button asChild><Link href="/comptabilite/fournisseurs/nouvelle">Scanner / importer une facture</Link></Button>
+        {/* Export comptable : CSV des factures correspondant aux filtres actifs (toutes pages), téléchargé via <a> (pas de navigation client). */}
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline"><a href={supplierExportHref({ q, status })}>Export comptable</a></Button>
+          <Button asChild><Link href="/comptabilite/fournisseurs/nouvelle">Scanner / importer une facture</Link></Button>
+        </div>
       </div>
       <p className="text-xs text-slate-500">Extraction automatique (OCR Claude) : {isBillingOcrEnabled() ? "activée" : "désactivée — saisie manuelle après import du fichier"}. Les valeurs extraites doivent toujours être vérifiées avant validation.</p>
       {/* 29/10/2026 — retours Nizar (« le bouton à côté de À valider », puis « dissocier Vérifier de Valider ») : dans la cellule Statut, à côté

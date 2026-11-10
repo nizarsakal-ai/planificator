@@ -235,8 +235,8 @@ export async function findOrCreateSupplier(tx: Tx, ctx: AccountingContext, input
 export interface SupplierInvoiceFilters { search?: string; status?: "PENDING" | "VALIDATED" | "REJECTED"; page?: number }
 export const SUPPLIER_PAGE_SIZE = 50
 
-export async function listSupplierInvoices(db: Db, ctx: { companyId: string }, f: SupplierInvoiceFilters) {
-  const companyId = ctx.companyId
+/** Filtre commun à la liste et à l'export comptable : mêmes critères, donc l'export contient exactement ce que la liste affiche. */
+function supplierInvoiceWhere(companyId: string, f: Pick<SupplierInvoiceFilters, "search" | "status">): Prisma.SupplierInvoiceWhereInput {
   const where: Prisma.SupplierInvoiceWhereInput = { companyId }
   if (f.status) where.status = f.status
   const q = f.search?.trim().slice(0, 100)
@@ -244,6 +244,25 @@ export async function listSupplierInvoices(db: Db, ctx: { companyId: string }, f
     const digits = q.replace(/\s/g, "")
     where.OR = [{ supplierName: { contains: q, mode: "insensitive" } }, { number: { contains: q, mode: "insensitive" } }, ...(/^\d{9,14}$/.test(digits) ? [{ siret: { startsWith: digits } }] : []), { supplier: { name: { contains: q, mode: "insensitive" } } }]
   }
+  return where
+}
+
+/** Plafond de l'export comptable (une ligne par facture). Au-delà, l'export est tronqué et le signale. */
+export const SUPPLIER_EXPORT_MAX_ROWS = 50_000
+
+/** Export comptable : toutes les factures correspondant aux filtres de la liste (sans pagination), en ordre chronologique. */
+export async function listSupplierInvoicesForExport(db: Db, ctx: { companyId: string }, f: Pick<SupplierInvoiceFilters, "search" | "status">) {
+  const rows = await db.supplierInvoice.findMany({
+    where: supplierInvoiceWhere(ctx.companyId, f),
+    orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+    take: SUPPLIER_EXPORT_MAX_ROWS + 1,
+    select: { supplierName: true, siret: true, number: true, date: true, dueDate: true, totalHTCents: true, vatCents: true, totalTTCCents: true, vatRateBp: true, status: true, category: true, validatedAt: true, paidAt: true, expenseAccount: { select: { number: true, label: true } }, supplier: { select: { name: true } } },
+  })
+  return { rows: rows.slice(0, SUPPLIER_EXPORT_MAX_ROWS), truncated: rows.length > SUPPLIER_EXPORT_MAX_ROWS }
+}
+
+export async function listSupplierInvoices(db: Db, ctx: { companyId: string }, f: SupplierInvoiceFilters) {
+  const where = supplierInvoiceWhere(ctx.companyId, f)
   const page = Math.max(1, Math.min(10_000, Math.trunc(f.page ?? 1)))
   const [total, rows] = await Promise.all([
     db.supplierInvoice.count({ where }),

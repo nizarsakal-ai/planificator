@@ -215,7 +215,7 @@ describe("devis → facture avec bon de commande client", () => {
     assert.equal(snap?.document.clientPurchaseOrderRef, "BC 2026/118")
     await assert.rejects(db.$executeRawUnsafe(`UPDATE invoices SET "clientPurchaseOrderRef" = 'BC-FAUX' WHERE id = '${need("final")}'`), /INVOICE_IMMUTABLE/)
     const pdf = await buildInvoicePdfData(db, "coA", need("final"))
-    assert.ok(pdf?.meta.some((m) => m.label === "Bon de commande client" && m.value === "BC 2026/118")); assert.equal(pdf?.reissue.source, "SNAPSHOT")
+    assert.ok(pdf?.meta.some((m) => m.label === "Bon de commande client" && m.value === "BC 2026/118")); assert.equal(pdf?.reissue?.source, "SNAPSHOT")
     // R1 : pièce émise — aucune saisie (avec, vide ou sans le champ) ne la modifie.
     for (const over of [{ clientPurchaseOrderRef: "BC-APRES" }, { clientPurchaseOrderRef: "" }, {}]) {
       const r = await updateDraftInvoice(db, A, need("final"), await draftForm(over))

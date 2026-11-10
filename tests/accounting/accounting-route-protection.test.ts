@@ -43,6 +43,7 @@ describe("/comptabilite (A2) — protection côté serveur de chaque écran (pas
       `${UI_DIR}/fec/page.tsx`,
       `${UI_DIR}/fournisseurs/[id]/fichier/route.ts`,
       `${UI_DIR}/fournisseurs/[id]/page.tsx`,
+      `${UI_DIR}/fournisseurs/export/route.ts`,
       `${UI_DIR}/fournisseurs/nouvelle/page.tsx`,
       `${UI_DIR}/fournisseurs/page.tsx`,
       `${UI_DIR}/grand-livre/export/route.ts`,
@@ -240,6 +241,7 @@ describe("A1 — périmètre du moteur comptable (aucun branchement facture, auc
       "src/lib/accounting/ui/labels.ts",
       "src/lib/accounting/ui/page-context.ts",
       "src/lib/accounting/ui/route-guard.ts",
+      "src/lib/accounting/ui/supplier-export.ts", // 10/11/2026 : export comptable CSV des factures fournisseurs (pur, aucun accès base)
       "src/lib/accounting/ui/supplier-row-action.ts", // 29/10/2026 : action par ligne de la liste fournisseurs (pure, aucun accès base)
     ])
   })
