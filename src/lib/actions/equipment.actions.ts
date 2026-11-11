@@ -9,7 +9,8 @@ import { parseEuroInputToCents } from "@/lib/billing/money"
 import { EquipmentAccessError, equipmentAccessMessage, requireEquipmentAdmin, type EquipmentContext } from "@/lib/equipment/access"
 import { parseDay } from "@/lib/equipment/equipment.core"
 import * as svc from "@/lib/equipment/equipment.service"
-import { afterEquipmentChange, equipmentDesignation } from "@/lib/integration/event-sync"
+import { afterEquipmentChange, autoEquipmentNumber, createFromCatalog, equipmentDesignation } from "@/lib/integration/event-sync"
+import { EVENT_STOCK_ARTICLES } from "@/components/equipment/event-catalog"
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/
 const str = (f: FormData, k: string, max = 500) => String(f.get(k) ?? "").trim().slice(0, max)
@@ -60,11 +61,26 @@ export async function createEquipmentAction(form: FormData) {
     const cost = euros(str(form, "dailyCost", 20))
     if (cost === "invalide") return { ok: false, error: "Coût journalier invalide." }
     const ownership = str(form, "ownership", 10) === "RENTED" ? "RENTED" : "OWNED"
+    const quantity = Number(str(form, "quantity", 6) || "1")
+    const serialNumber = str(form, "serialNumber", 1000) || null
+    const notes = str(form, "notes", 5000) || null
+    const warehouseId = optId(form, "warehouseId")
+    const manualNumber = str(form, "number", 200)
+    const item = EVENT_STOCK_ARTICLES.find((a) => a.reference === str(form, "catalogRef", 80))
+    // Article du catalogue, sans n° imposé : création automatique (fiches numérotées, ou entrée en stock si géré en quantité).
+    if (item && !manualNumber) {
+      const r = await createFromCatalog(prisma, ctx, { item, quantity, warehouseId, ownership, serialNumber, dailyCostCents: cost, notes })
+      if (!r.ok) return r
+      if (r.kind === "stock") return { ok: true, okMessage: `${r.quantity} × ${item.designation} entré(s) en stock.`, redirectTo: "/stock" }
+      return { ok: true, okMessage: r.ids.length === 1 ? `Fiche ${r.numbers[0]} créée (stock mis à jour).` : `${r.ids.length} fiches créées : ${r.numbers[0]} à ${r.numbers.at(-1)} (stock mis à jour).`, redirectTo: r.ids.length === 1 ? `/materiel/${r.ids[0]}` : "/materiel" }
+    }
+    if (quantity !== 1 && manualNumber) return { ok: false, error: "Un n° interne imposé ne vaut que pour une seule fiche : laissez-le vide pour une quantité." }
+    const name = item?.designation ?? str(form, "name", 1000)
+    const category = item?.category ?? str(form, "category", 1000)
     // Lecture large puis validation par le service : une saisie trop longue est refusée, jamais tronquée en silence.
     const r = await svc.createEquipment(prisma, ctx, {
-      number: str(form, "number", 200), name: str(form, "name", 1000), category: str(form, "category", 1000),
-      serialNumber: str(form, "serialNumber", 1000) || null, ownership, warehouseId: optId(form, "warehouseId"),
-      dailyCostCents: cost, notes: str(form, "notes", 5000) || null,
+      number: manualNumber || await autoEquipmentNumber(prisma, ctx, category || name), name, category,
+      serialNumber, ownership, warehouseId, dailyCostCents: cost, notes,
     })
     if (r.ok) await afterEquipmentChange(prisma, ctx, r.value.id, "créé")
     return r.ok ? { ok: true, okMessage: "Équipement créé (stock mis à jour).", redirectTo: `/materiel/${r.value.id}` } : r

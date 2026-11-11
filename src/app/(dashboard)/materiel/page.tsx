@@ -70,16 +70,21 @@ export default async function EquipmentPage({ searchParams }: { searchParams: Pr
       </CardContent></Card>
 
       <Card><CardContent className="space-y-3 p-4">
-        <h2 className="text-sm font-semibold text-slate-900">Nouvel équipement</h2>
+        <h2 className="text-sm font-semibold text-slate-900">Nouvel équipement</h2><p className="text-xs text-slate-500">Choisissez le matériel et la quantité : tout le reste est rempli automatiquement.</p>
         <form action={createEquipmentAction} className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <CatalogFields />
-          <Input name="number" required maxLength={40} placeholder="N° interne (ex. TENTE-01)" aria-label="Numéro interne" />
-          <Input name="serialNumber" maxLength={120} placeholder="N° de série (facultatif)" aria-label="Numéro de série" />
-          <select name="ownership" className={SELECT_CLASS} aria-label="Propriété"><option value="OWNED">En propriété</option><option value="RENTED">Loué (contrat fournisseur)</option></select>
           <select name="warehouseId" className={SELECT_CLASS} aria-label="Dépôt"><option value="">Sans dépôt</option>{options.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>
-          <Input name="dailyCost" inputMode="decimal" placeholder="Coût interne / jour (€, facultatif)" aria-label="Coût interne par jour" />
-          <Input name="notes" maxLength={2000} placeholder="Notes (facultatif)" aria-label="Notes" />
-          <div className="sm:col-span-2 lg:col-span-4"><Button type="submit">Créer l&apos;équipement</Button></div>
+          <select name="ownership" className={SELECT_CLASS} aria-label="Propriété"><option value="OWNED">En propriété</option><option value="RENTED">Loué (contrat fournisseur)</option></select>
+          <details className="sm:col-span-2 lg:col-span-4">
+            <summary className="cursor-pointer text-sm text-slate-500">Plus d&apos;options (n° interne imposé, n° de série, coût interne, notes)</summary>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <Input name="number" maxLength={40} placeholder="N° interne (vide = automatique)" aria-label="Numéro interne" />
+              <Input name="serialNumber" maxLength={120} placeholder="N° de série (quantité 1)" aria-label="Numéro de série" />
+              <Input name="dailyCost" inputMode="decimal" placeholder="Coût interne / jour (€)" aria-label="Coût interne par jour" />
+              <Input name="notes" maxLength={2000} placeholder="Notes" aria-label="Notes" />
+            </div>
+          </details>
+          <div className="sm:col-span-2 lg:col-span-4"><Button type="submit">Créer</Button></div>
         </form>
       </CardContent></Card>
     </div>
