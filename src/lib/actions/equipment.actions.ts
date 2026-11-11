@@ -11,6 +11,7 @@ import { parseDay } from "@/lib/equipment/equipment.core"
 import * as svc from "@/lib/equipment/equipment.service"
 import { afterEquipmentChange, autoEquipmentNumber, createFromCatalog, equipmentDesignation } from "@/lib/integration/event-sync"
 import { EVENT_STOCK_ARTICLES } from "@/components/equipment/event-catalog"
+import { resolveWorksite } from "@/lib/integration/quick-event"
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/
 const str = (f: FormData, k: string, max = 500) => String(f.get(k) ?? "").trim().slice(0, max)
@@ -119,7 +120,9 @@ export async function createBookingAction(form: FormData) {
     if (!first || !last || first === "invalide" || last === "invalide") return { ok: false, error: "Dates de réservation invalides." }
     const deposit = euros(str(form, "deposit", 20))
     if (deposit === "invalide") return { ok: false, error: "Caution invalide." }
-    const r = await svc.createBooking(prisma, ctx, { equipmentId: id, firstDay: first, lastDay: last, worksiteId: optId(form, "worksiteId"), responsibleEmployeeId: optId(form, "responsibleId"), depositCents: deposit })
+    const site = await resolveWorksite(prisma, ctx, form, { first, last })
+    if (!site.ok) return site
+    const r = await svc.createBooking(prisma, ctx, { equipmentId: id, firstDay: first, lastDay: last, worksiteId: site.worksiteId, responsibleEmployeeId: optId(form, "responsibleId"), depositCents: deposit })
     return r.ok ? { ok: true, okMessage: "Réservation enregistrée : contrat de location établi automatiquement.", redirectTo: `/materiel/reservations/${r.value.id}/contrat` } : r
   })
 }

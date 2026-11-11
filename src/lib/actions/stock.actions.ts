@@ -12,6 +12,7 @@ import * as svc from "@/lib/stock/stock.service"
 import type { MovementType } from "@/lib/stock/stock.core"
 import { EVENT_STOCK_ARTICLES } from "@/components/equipment/event-catalog"
 import { afterGoodsReceipt, syncAllTracked } from "@/lib/integration/event-sync"
+import { resolveWorksite } from "@/lib/integration/quick-event"
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/
 const str = (f: FormData, k: string, max = 500) => String(f.get(k) ?? "").trim().slice(0, max)
@@ -86,8 +87,10 @@ export async function recordMovementAction(form: FormData) {
     // entrée : arrivée seulement ; sortie : départ seulement (le champ non pertinent est ignoré).
     const from = optId(form, "fromWarehouseId")
     const to = optId(form, "toWarehouseId")
+    const site = await resolveWorksite(prisma, ctx, form)
+    if (!site.ok) return site
     const r = await svc.recordMovement(prisma, ctx, {
-      type, quantityMilli, articleId: await articleFrom(form, "articleId", ctx), worksiteId: optId(form, "worksiteId"), reason: str(form, "reason") || null,
+      type, quantityMilli, articleId: await articleFrom(form, "articleId", ctx), worksiteId: site.worksiteId, reason: str(form, "reason") || null,
       fromWarehouseId: type === "RECEIPT" ? null : from,
       toWarehouseId: type === "ISSUE" ? null : to,
     })
