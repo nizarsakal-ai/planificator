@@ -76,3 +76,20 @@ export const EVENT_CATALOG: { group: string; items: CatalogItem[] }[] = [
     { name: "Fontaine à eau", category: "Réception" },
   ] },
 ]
+
+/** Préfixe des références d'articles de stock issus du catalogue événementiel. */
+export const EVENT_REF_PREFIX = "EVT-"
+
+/** Référence stable d'un article du catalogue (« Tente pliante 3x3 m » → « EVT-TENTE-PLIANTE-3X3-M »). */
+export function eventArticleReference(name: string): string {
+  const slug = name.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+  return `${EVENT_REF_PREFIX}${slug}`.slice(0, 40).replace(/-+$/, "")
+}
+
+/** Unité de stock d'un article du catalogue : m² pour les sols au mètre carré, sinon l'unité. */
+export const eventArticleUnit = (name: string) => (/\(m²\)/.test(name) ? "m²" : "u")
+
+/** Articles à créer en stock : tout le catalogue, à plat, avec référence et unité. */
+export const EVENT_STOCK_ARTICLES = EVENT_CATALOG.flatMap((g) => g.items.map((it) => ({
+  reference: eventArticleReference(it.name), designation: it.name.replace(/\s*\(m²\)$/, ""), unit: eventArticleUnit(it.name), group: g.group,
+})))

@@ -10,6 +10,7 @@ import { StockAccessError, requireStockAdmin, stockAccessMessage, type StockCont
 import { parseQuantityToMilli } from "@/lib/stock/quantity"
 import * as svc from "@/lib/stock/stock.service"
 import type { MovementType } from "@/lib/stock/stock.core"
+import { EVENT_STOCK_ARTICLES } from "@/components/equipment/event-catalog"
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/
 const str = (f: FormData, k: string, max = 500) => String(f.get(k) ?? "").trim().slice(0, max)
@@ -167,4 +168,13 @@ export async function linkSupplierInvoiceAction(form: FormData) {
     const r = await svc.linkSupplierInvoice(prisma, ctx, reqId(form, "receiptId"), optId(form, "supplierInvoiceId"))
     return r.ok ? { ok: true, okMessage: "Rapprochement mis à jour." } : r
   })
+}
+
+export async function importEventCatalogAction(form: FormData) {
+  return run("/stock", async (ctx) => {
+    const r = await svc.importEventCatalog(prisma, ctx, EVENT_STOCK_ARTICLES)
+    if (!r.ok) return r
+    const { created, reactivated } = r.value
+    return { ok: true, okMessage: created || reactivated ? `Catalogue événementiel : ${created} article(s) ajouté(s)${reactivated ? `, ${reactivated} réactivé(s)` : ""}. Prix à renseigner dans Articles.` : "Le catalogue événementiel est déjà présent." }
+  }, keepDepot(form))
 }

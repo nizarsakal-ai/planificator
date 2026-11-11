@@ -1,4 +1,5 @@
 // Lot A Planificator V2 : mouvements de stock (entrée hors commande, sortie vers un chantier, transfert, ajustement).
+import { ArticleOptions } from "@/components/stock/ArticleOptions"
 import Link from "next/link"
 import { ArrowLeftRight, Boxes } from "lucide-react"
 import { prisma } from "@/lib/prisma"
@@ -39,7 +40,7 @@ export default async function StockMovementsPage({ searchParams }: { searchParam
             <option value="TRANSFER">Transfert entre dépôts</option>
             <option value="ADJUSTMENT">Ajustement motivé</option>
           </select>
-          <select name="articleId" required className={SELECT_CLASS} aria-label="Article">{options.articles.map((a) => <option key={a.id} value={a.id}>{a.reference ? `${a.reference} · ` : ""}{a.designation} ({a.unit})</option>)}</select>
+          <select name="articleId" required className={SELECT_CLASS} aria-label="Article"><ArticleOptions articles={options.articles} /></select>
           <Input name="quantity" required inputMode="decimal" placeholder="Quantité" aria-label="Quantité" />
           <select name="worksiteId" className={SELECT_CLASS} aria-label="Chantier"><option value="">Sans chantier</option>{options.worksites.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>
           <select name="fromWarehouseId" className={SELECT_CLASS} aria-label="Dépôt de départ"><option value="">Dépôt de départ (sortie, transfert ; ajustement en moins)</option>{warehouseOptions}</select>

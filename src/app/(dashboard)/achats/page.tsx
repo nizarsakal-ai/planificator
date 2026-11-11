@@ -1,4 +1,5 @@
 // Lot A Planificator V2 : commandes d'achat (liste et création). Drapeau STOCK_PURCHASING_ENABLED + ADMIN.
+import { ArticleOptions } from "@/components/stock/ArticleOptions"
 import Link from "next/link"
 import { Boxes, ShoppingCart } from "lucide-react"
 import { prisma } from "@/lib/prisma"
@@ -65,7 +66,7 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
             <div className="space-y-2">
               {Array.from({ length: LINE_ROWS }, (_, i) => (
                 <div key={i} className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                  <select name={`line${i}_article`} className={SELECT_CLASS} aria-label={`Article, ligne ${i + 1}`}><option value="">Article (facultatif)</option>{options.articles.map((a) => <option key={a.id} value={a.id}>{a.reference ? `${a.reference} · ` : ""}{a.designation} ({a.unit})</option>)}</select>
+                  <select name={`line${i}_article`} className={SELECT_CLASS} aria-label={`Article, ligne ${i + 1}`}><option value="">Article (facultatif)</option><ArticleOptions articles={options.articles} /></select>
                   <Input name={`line${i}_designation`} maxLength={500} placeholder="Désignation (si pas d'article)" aria-label={`Désignation, ligne ${i + 1}`} />
                   <Input name={`line${i}_quantity`} inputMode="decimal" placeholder="Quantité" aria-label={`Quantité, ligne ${i + 1}`} />
                   <Input name={`line${i}_price`} inputMode="decimal" placeholder="Prix HT (€), vide = prix de l'article" aria-label={`Prix unitaire, ligne ${i + 1}`} />
