@@ -7,7 +7,7 @@ import { stockPageAccess } from "@/lib/stock/access"
 import { AdminOnlyNotice } from "@/components/stock/AdminOnlyNotice"
 import { listStockLevels, listWarehouses, stockFormOptions } from "@/lib/stock/queries"
 import { formatMilli } from "@/lib/stock/quantity"
-import { createWarehouseAction, importEventCatalogAction, inventoryCountAction, setThresholdAction, setWarehouseActiveAction } from "@/lib/actions/stock.actions"
+import { createWarehouseAction, importEventCatalogAction, syncEquipmentStockAction, inventoryCountAction, setThresholdAction, setWarehouseActiveAction } from "@/lib/actions/stock.actions"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -70,8 +70,8 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
       </CardContent></Card>
 
       <Card><CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-        <div><h2 className="text-sm font-semibold text-slate-900">Catalogue événementiel</h2><p className="text-xs text-slate-500">Les menus Stock, Inventaire et Mouvements proposent les {EVENT_STOCK_ARTICLES.length} articles du matériel événementiel (même liste que Matériel). Chaque article est créé automatiquement à son premier mouvement ; ce bouton les crée tous d&apos;un coup si vous préférez. Les prix se renseignent dans Articles.</p></div>
-        <form action={importEventCatalogAction}>{depot && <input type="hidden" name="depot" value={depot} />}<Button type="submit" variant="secondary">Tout créer maintenant</Button></form>
+        <div><h2 className="text-sm font-semibold text-slate-900">Catalogue événementiel</h2><p className="text-xs text-slate-500">Les menus Stock, Inventaire et Mouvements proposent les {EVENT_STOCK_ARTICLES.length} articles du matériel événementiel (même liste que Matériel). Chaque article est créé automatiquement à son premier mouvement. Matériel suivi à l&apos;unité (tentes, photobooth, sono…) : le stock suit les fiches Matériel (création, sortie, retour, réforme) et une réception d&apos;achat crée les fiches. Matériel en quantité (chaises, tables, textile, moquette…) : stock seul.</p></div>
+        <div className="flex flex-wrap gap-2"><form action={importEventCatalogAction}>{depot && <input type="hidden" name="depot" value={depot} />}<Button type="submit" variant="secondary">Tout créer maintenant</Button></form><form action={syncEquipmentStockAction}>{depot && <input type="hidden" name="depot" value={depot} />}<Button type="submit" variant="outline">Aligner sur le Matériel</Button></form></div>
       </CardContent></Card>
 
       <div className="grid gap-4 lg:grid-cols-3">

@@ -11,6 +11,7 @@ import { parseQuantityToMilli } from "@/lib/stock/quantity"
 import * as svc from "@/lib/stock/stock.service"
 import type { MovementType } from "@/lib/stock/stock.core"
 import { EVENT_STOCK_ARTICLES } from "@/components/equipment/event-catalog"
+import { afterGoodsReceipt, syncAllTracked } from "@/lib/integration/event-sync"
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/
 const str = (f: FormData, k: string, max = 500) => String(f.get(k) ?? "").trim().slice(0, max)
@@ -166,7 +167,9 @@ export async function receiveGoodsAction(form: FormData) {
       lines.push({ orderLineId: m[1], quantityMilli: q })
     }
     const r = await svc.receiveGoods(prisma, ctx, id, { lines, warehouseId: optId(form, "warehouseId"), supplierInvoiceId: optId(form, "supplierInvoiceId"), notes: str(form, "notes", 2000) || null })
-    return r.ok ? { ok: true, okMessage: `Réception ${r.value.number} enregistrée.` } : r
+    if (!r.ok) return r
+    const fiches = await afterGoodsReceipt(prisma, ctx, r.value.id)
+    return { ok: true, okMessage: `Réception ${r.value.number} enregistrée${fiches ? ` : ${fiches} fiche(s) Matériel créée(s) automatiquement` : ""}.` }
   })
 }
 
@@ -184,5 +187,12 @@ export async function importEventCatalogAction(form: FormData) {
     if (!r.ok) return r
     const { created, reactivated } = r.value
     return { ok: true, okMessage: created || reactivated ? `Catalogue événementiel : ${created} article(s) ajouté(s)${reactivated ? `, ${reactivated} réactivé(s)` : ""}. Prix à renseigner dans Articles.` : "Le catalogue événementiel est déjà présent." }
+  }, keepDepot(form))
+}
+
+export async function syncEquipmentStockAction(form: FormData) {
+  return run("/stock", async (ctx) => {
+    const n = await syncAllTracked(prisma, ctx)
+    return { ok: true, okMessage: n ? `Stock aligné sur le Matériel : ${n} ajustement(s) tracé(s).` : "Stock déjà aligné sur le Matériel." }
   }, keepDepot(form))
 }
