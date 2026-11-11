@@ -99,3 +99,20 @@ export async function equipmentCostsByWorksite(db: Db, companyId: string) {
   }
   return [...by.values()].sort((a, b) => a.name.localeCompare(b.name, "fr"))
 }
+
+/** Données du contrat de location complet (document imprimable), borné à l'entreprise de la session. */
+export async function getRentalContractDocumentData(db: Db, companyId: string, id: string) {
+  const [contract, company] = await Promise.all([
+    db.equipmentRentalContract.findFirst({
+      where: { id, companyId },
+      select: {
+        id: true, number: true, status: true, startDate: true, endDate: true, returnedOn: true, dailyRateCents: true, fixedFeesCents: true, costCents: true, notes: true, createdAt: true,
+        supplier: { select: { name: true, address: true, siret: true, vatNumber: true, email: true } },
+        equipment: { select: { id: true, number: true, name: true, category: true, serialNumber: true, condition: true } },
+        worksite: { select: { name: true, address: true } },
+      },
+    }),
+    db.company.findUnique({ where: { id: companyId }, select: { name: true, address: true, siret: true, phone: true, email: true, logoUrl: true } }),
+  ])
+  return contract && company ? { ...contract, company } : null
+}

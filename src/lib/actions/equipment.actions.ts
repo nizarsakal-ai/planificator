@@ -138,7 +138,7 @@ export async function createRentalContractAction(form: FormData) {
     if (rate === null || rate === "invalide") return { ok: false, error: "Tarif journalier invalide." }
     if (fees === "invalide") return { ok: false, error: "Frais fixes invalides." }
     const r = await svc.createRentalContract(prisma, ctx, { equipmentId: id, supplierId: reqId(form, "supplierId"), worksiteId: optId(form, "worksiteId"), startDate: start, endDate: end, dailyRateCents: rate, fixedFeesCents: fees ?? 0, notes: str(form, "notes", 5000) || null })
-    return r.ok ? { ok: true, okMessage: `Contrat ${r.value.number} enregistré.` } : r
+    return r.ok ? { ok: true, okMessage: `Contrat ${r.value.number} enregistré : contrat complet prêt à imprimer.`, redirectTo: `/materiel/locations/${r.value.id}/contrat` } : r
   })
 }
 

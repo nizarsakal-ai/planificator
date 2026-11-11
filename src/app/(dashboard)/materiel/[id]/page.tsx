@@ -132,7 +132,7 @@ export default async function EquipmentDetailPage({ params, searchParams }: { pa
               {e.rentals.length === 0 && <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-400">Aucun contrat.</td></tr>}
               {e.rentals.map((r) => (
                 <tr key={r.id} className="border-t align-top">
-                  <td className="px-3 py-2 font-medium">{r.number}</td>
+                  <td className="px-3 py-2 font-medium">{r.number}<div><Link href={`/materiel/locations/${r.id}/contrat`} className="text-xs font-normal text-[#0f3460] hover:underline">Contrat complet</Link></div></td>
                   <td className="px-3 py-2">{r.supplier.name}</td>
                   <td className="px-3 py-2 tabular-nums">{fmtDay(r.startDate)} → {fmtDay(r.endDate)}{r.returnedOn && <div className="text-xs text-slate-400">Rendu le {fmtDay(r.returnedOn)}</div>}</td>
                   <td className="hidden px-3 py-2 md:table-cell">{r.worksite?.name ?? "—"}</td>

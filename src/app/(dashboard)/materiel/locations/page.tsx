@@ -35,7 +35,7 @@ export default async function RentalsPage({ searchParams }: { searchParams: Prom
             {contracts.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-400">Aucun contrat de location.</td></tr>}
             {contracts.map((c) => (
               <tr key={c.id} className="border-t hover:bg-slate-50">
-                <td className="px-3 py-2 font-medium">{c.number}</td>
+                <td className="px-3 py-2 font-medium">{c.number}<div><Link href={`/materiel/locations/${c.id}/contrat`} className="text-xs font-normal text-[#0f3460] hover:underline">Contrat complet</Link></div></td>
                 <td className="px-3 py-2"><Link href={`/materiel/${c.equipment.id}`} className="text-[#0f3460] hover:underline">{c.equipment.number}</Link> {c.equipment.name}</td>
                 <td className="hidden px-3 py-2 md:table-cell">{c.supplier.name}</td>
                 <td className="hidden px-3 py-2 tabular-nums md:table-cell">{fmtDay(c.startDate)} → {fmtDay(c.returnedOn ?? c.endDate)}</td>
