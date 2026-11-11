@@ -57,7 +57,7 @@
     "test:invitations": "node --import tsx --experimental-test-module-mocks --test tests/employes/invitation-superadmin.action.test.ts",
     "test:invitations:pg": "node --import tsx tests/employes/pg/invitation-superadmin-run.ts test",
     "test:navigation": "node --import tsx --test tests/navigation/nav-config.test.ts tests/navigation/nav-worksite-photos.test.ts tests/navigation/nav-categories.test.ts tests/navigation/appearance.test.ts && node --import tsx --experimental-test-module-mocks --test tests/navigation/nav-categories.render.test.tsx tests/auth/login-experience.render.test.tsx",
-    "test:stock": "node --import tsx --test tests/stock/stock-core.test.ts tests/stock/access.test.ts tests/stock/migration.test.ts tests/navigation/nav-stock-purchasing.test.ts",
+    "test:stock": "node --import tsx --test tests/stock/event-sync.test.ts tests/stock/event-catalog.test.ts tests/stock/stock-core.test.ts tests/stock/access.test.ts tests/stock/migration.test.ts tests/navigation/nav-stock-purchasing.test.ts",
     "test:stock:pg": "node --import tsx --test --test-concurrency=1 tests/stock/pg/stock-service.pg.test.ts tests/stock/pg/stock-concurrence.pg.test.ts",
     "test:equipment": "node --import tsx --test tests/equipment/equipment-core.test.ts tests/equipment/access.test.ts tests/equipment/migration.test.ts tests/navigation/nav-equipment.test.ts tests/equipment/equipment-periode-effective.test.ts tests/equipment/rental-contract-document.test.ts",
     "test:equipment:pg": "node --import tsx --test --test-concurrency=1 tests/equipment/pg/equipment-service.pg.test.ts",

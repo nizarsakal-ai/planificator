@@ -9,6 +9,7 @@ import { parseEuroInputToCents } from "@/lib/billing/money"
 import { EquipmentAccessError, equipmentAccessMessage, requireEquipmentAdmin, type EquipmentContext } from "@/lib/equipment/access"
 import { parseDay } from "@/lib/equipment/equipment.core"
 import * as svc from "@/lib/equipment/equipment.service"
+import { afterEquipmentChange, equipmentDesignation } from "@/lib/integration/event-sync"
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/
 const str = (f: FormData, k: string, max = 500) => String(f.get(k) ?? "").trim().slice(0, max)
@@ -65,7 +66,8 @@ export async function createEquipmentAction(form: FormData) {
       serialNumber: str(form, "serialNumber", 1000) || null, ownership, warehouseId: optId(form, "warehouseId"),
       dailyCostCents: cost, notes: str(form, "notes", 5000) || null,
     })
-    return r.ok ? { ok: true, okMessage: "Équipement créé.", redirectTo: `/materiel/${r.value.id}` } : r
+    if (r.ok) await afterEquipmentChange(prisma, ctx, r.value.id, "créé")
+    return r.ok ? { ok: true, okMessage: "Équipement créé (stock mis à jour).", redirectTo: `/materiel/${r.value.id}` } : r
   })
 }
 
@@ -74,10 +76,12 @@ export async function updateEquipmentAction(form: FormData) {
   return run(path, async (ctx) => {
     const cost = euros(str(form, "dailyCost", 20))
     if (cost === "invalide") return { ok: false, error: "Coût journalier invalide." }
+    const previous = await equipmentDesignation(prisma, ctx, id)
     const r = await svc.updateEquipment(prisma, ctx, id, {
       name: str(form, "name", 1000), category: str(form, "category", 1000), serialNumber: str(form, "serialNumber", 1000) || null,
       warehouseId: optId(form, "warehouseId"), dailyCostCents: cost, notes: str(form, "notes", 5000) || null,
     })
+    if (r.ok) await afterEquipmentChange(prisma, ctx, id, "fiche modifiée", previous)
     return r.ok ? { ok: true, okMessage: "Fiche enregistrée." } : r
   })
 }
@@ -86,6 +90,7 @@ export async function setEquipmentStatusAction(form: FormData) {
   const { id, path } = detail(form)
   return run(path, async (ctx) => {
     const r = await svc.setEquipmentStatus(prisma, ctx, id, str(form, "status", 20))
+    if (r.ok) await afterEquipmentChange(prisma, ctx, id, "changement d'état")
     return r.ok ? { ok: true, okMessage: "État mis à jour." } : r
   })
 }
@@ -104,18 +109,20 @@ export async function createBookingAction(form: FormData) {
 }
 
 export async function checkoutBookingAction(form: FormData) {
-  const { path } = detail(form)
+  const { id, path } = detail(form)
   return run(path, async (ctx) => {
     const bookingId = reqId(form, "bookingId")
     const r = await svc.checkoutBooking(prisma, ctx, bookingId, str(form, "condition", 20))
+    if (r.ok) await afterEquipmentChange(prisma, ctx, id, "sorti")
     return r.ok ? { ok: true, okMessage: "Sortie enregistrée : contrat de location à jour (état à la sortie).", redirectTo: `/materiel/reservations/${bookingId}/contrat` } : r
   })
 }
 
 export async function returnBookingAction(form: FormData) {
-  const { path } = detail(form)
+  const { id, path } = detail(form)
   return run(path, async (ctx) => {
     const r = await svc.returnBooking(prisma, ctx, reqId(form, "bookingId"), { condition: str(form, "condition", 20), notes: str(form, "notes", 5000) || null, warehouseId: optId(form, "warehouseId") })
+    if (r.ok) await afterEquipmentChange(prisma, ctx, id, "rentré")
     return r.ok ? { ok: true, okMessage: r.value.nextStatus === "MAINTENANCE" ? "Retour enregistré : équipement endommagé, passé en entretien." : "Retour enregistré." } : r
   })
 }

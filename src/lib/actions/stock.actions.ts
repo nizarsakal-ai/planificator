@@ -10,12 +10,22 @@ import { StockAccessError, requireStockAdmin, stockAccessMessage, type StockCont
 import { parseQuantityToMilli } from "@/lib/stock/quantity"
 import * as svc from "@/lib/stock/stock.service"
 import type { MovementType } from "@/lib/stock/stock.core"
+import { EVENT_STOCK_ARTICLES } from "@/components/equipment/event-catalog"
+import { afterGoodsReceipt, syncAllTracked } from "@/lib/integration/event-sync"
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/
 const str = (f: FormData, k: string, max = 500) => String(f.get(k) ?? "").trim().slice(0, max)
 const optId = (f: FormData, k: string) => { const v = str(f, k, 64); return v && ID.test(v) ? v : null }
 const reqId = (f: FormData, k: string) => optId(f, k) ?? ""
 const keepDepot = (f: FormData): Record<string, string> => { const d = optId(f, "depot"); return d ? { depot: d } : {} }
+
+/** Article choisi : identifiant existant, ou « evt:RÉF » d'un élément du catalogue événementiel (créé au premier usage). */
+async function articleFrom(form: FormData, key: string, ctx: StockContext): Promise<string> {
+  const v = str(form, key, 80)
+  if (!v.startsWith("evt:")) return v && ID.test(v) ? v : ""
+  const item = EVENT_STOCK_ARTICLES.find((a) => a.reference === v.slice(4))
+  return item ? svc.ensureEventArticle(prisma, ctx, item) : ""
+}
 
 function back(path: string, params: Record<string, string>, keep: Record<string, string> = {}): never {
   const q = new URLSearchParams({ ...keep, ...params }).toString()
@@ -61,7 +71,7 @@ export async function setThresholdAction(form: FormData) {
     const raw = str(form, "min", 20)
     const min = raw === "" ? null : parseQuantityToMilli(raw, { allowZero: true })
     if (raw !== "" && min === null) return { ok: false, error: "Seuil invalide." }
-    const r = await svc.setThreshold(prisma, ctx, { warehouseId: reqId(form, "warehouseId"), articleId: reqId(form, "articleId"), minQuantityMilli: min })
+    const r = await svc.setThreshold(prisma, ctx, { warehouseId: reqId(form, "warehouseId"), articleId: await articleFrom(form, "articleId", ctx), minQuantityMilli: min })
     return r.ok ? { ok: true, okMessage: "Seuil enregistré." } : r
   }, keepDepot(form))
 }
@@ -77,7 +87,7 @@ export async function recordMovementAction(form: FormData) {
     const from = optId(form, "fromWarehouseId")
     const to = optId(form, "toWarehouseId")
     const r = await svc.recordMovement(prisma, ctx, {
-      type, quantityMilli, articleId: reqId(form, "articleId"), worksiteId: optId(form, "worksiteId"), reason: str(form, "reason") || null,
+      type, quantityMilli, articleId: await articleFrom(form, "articleId", ctx), worksiteId: optId(form, "worksiteId"), reason: str(form, "reason") || null,
       fromWarehouseId: type === "RECEIPT" ? null : from,
       toWarehouseId: type === "ISSUE" ? null : to,
     })
@@ -89,7 +99,7 @@ export async function inventoryCountAction(form: FormData) {
   return run("/stock", async (ctx) => {
     const counted = parseQuantityToMilli(str(form, "counted", 20), { allowZero: true })
     if (counted === null) return { ok: false, error: "Quantité comptée invalide." }
-    const r = await svc.recordInventoryCount(prisma, ctx, { warehouseId: reqId(form, "warehouseId"), articleId: reqId(form, "articleId"), countedMilli: counted, reason: str(form, "reason") })
+    const r = await svc.recordInventoryCount(prisma, ctx, { warehouseId: reqId(form, "warehouseId"), articleId: await articleFrom(form, "articleId", ctx), countedMilli: counted, reason: str(form, "reason") })
     return r.ok ? { ok: true, okMessage: r.value ? "Inventaire enregistré (écart ajusté)." : "Inventaire conforme : aucun écart." } : r
   }, keepDepot(form))
 }
@@ -98,7 +108,7 @@ export async function createPurchaseOrderAction(form: FormData) {
   return run("/achats", async (ctx) => {
     const lines: svc.PurchaseOrderLineInput[] = []
     for (let i = 0; i < 50; i++) {
-      const articleId = optId(form, `line${i}_article`)
+      const articleId = (await articleFrom(form, `line${i}_article`, ctx)) || null
       const designation = str(form, `line${i}_designation`)
       const q = str(form, `line${i}_quantity`, 20)
       if (!articleId && !designation && !q) continue
@@ -157,7 +167,9 @@ export async function receiveGoodsAction(form: FormData) {
       lines.push({ orderLineId: m[1], quantityMilli: q })
     }
     const r = await svc.receiveGoods(prisma, ctx, id, { lines, warehouseId: optId(form, "warehouseId"), supplierInvoiceId: optId(form, "supplierInvoiceId"), notes: str(form, "notes", 2000) || null })
-    return r.ok ? { ok: true, okMessage: `Réception ${r.value.number} enregistrée.` } : r
+    if (!r.ok) return r
+    const fiches = await afterGoodsReceipt(prisma, ctx, r.value.id)
+    return { ok: true, okMessage: `Réception ${r.value.number} enregistrée${fiches ? ` : ${fiches} fiche(s) Matériel créée(s) automatiquement` : ""}.` }
   })
 }
 
@@ -167,4 +179,20 @@ export async function linkSupplierInvoiceAction(form: FormData) {
     const r = await svc.linkSupplierInvoice(prisma, ctx, reqId(form, "receiptId"), optId(form, "supplierInvoiceId"))
     return r.ok ? { ok: true, okMessage: "Rapprochement mis à jour." } : r
   })
+}
+
+export async function importEventCatalogAction(form: FormData) {
+  return run("/stock", async (ctx) => {
+    const r = await svc.importEventCatalog(prisma, ctx, EVENT_STOCK_ARTICLES)
+    if (!r.ok) return r
+    const { created, reactivated } = r.value
+    return { ok: true, okMessage: created || reactivated ? `Catalogue événementiel : ${created} article(s) ajouté(s)${reactivated ? `, ${reactivated} réactivé(s)` : ""}. Prix à renseigner dans Articles.` : "Le catalogue événementiel est déjà présent." }
+  }, keepDepot(form))
+}
+
+export async function syncEquipmentStockAction(form: FormData) {
+  return run("/stock", async (ctx) => {
+    const n = await syncAllTracked(prisma, ctx)
+    return { ok: true, okMessage: n ? `Stock aligné sur le Matériel : ${n} ajustement(s) tracé(s).` : "Stock déjà aligné sur le Matériel." }
+  }, keepDepot(form))
 }

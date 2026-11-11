@@ -340,3 +340,48 @@ export async function orderMatch(db: Db, ctx: StockServiceContext, orderId: stri
   const invoicedHTCents = invoices.reduce((s, i) => s + BigInt(i.totalHTCents), BigInt("0"))
   return matchOrder({ lines: order.lines, invoicedHTCents, toleranceCents })
 }
+
+// ─────────────────────────────── Catalogue événementiel ───────────────────────────────
+
+/**
+ * Crée les articles du catalogue événementiel absents de l'entreprise (prix 0 € HT, TVA 20 %, à compléter dans
+ * Articles). Idempotent : un article déjà présent (même référence, ou même désignation) n'est ni recréé ni modifié ;
+ * un article désactivé de même référence est réactivé.
+ */
+export async function importEventCatalog(db: Db, ctx: StockServiceContext, items: { reference: string; designation: string; unit: string }[]): Promise<StockResult<{ created: number; reactivated: number }>> {
+  return inTx(db, async (tx) => {
+    const existing = await tx.article.findMany({ where: { companyId: ctx.companyId }, select: { id: true, reference: true, designation: true, active: true } })
+    const byRef = new Map(existing.filter((a) => a.reference).map((a) => [a.reference!, a]))
+    const byName = new Set(existing.map((a) => a.designation.trim().toLowerCase()))
+    let created = 0
+    let reactivated = 0
+    for (const it of items) {
+      const same = byRef.get(it.reference)
+      if (same) {
+        if (!same.active) { await tx.article.update({ where: { id: same.id }, data: { active: true } }); reactivated++ }
+        continue
+      }
+      if (byName.has(it.designation.trim().toLowerCase())) continue
+      await tx.article.create({ data: { companyId: ctx.companyId, reference: it.reference, designation: it.designation, unit: it.unit, unitPrice: 0, vatRate: 20 } })
+      created++
+    }
+    if (created || reactivated) await audit(tx, ctx, { action: "CREATED", entityType: "Article", entityId: "catalogue-evenementiel", detail: `Catalogue événementiel : ${created} article(s) créé(s), ${reactivated} réactivé(s)` })
+    return { created, reactivated }
+  })
+}
+
+/**
+ * Article de stock d'un élément du catalogue événementiel : l'existant (même référence, ou même désignation) ou un
+ * article créé à la volée au premier mouvement (prix 0 € HT à compléter dans Articles). Retourne son identifiant.
+ */
+export async function ensureEventArticle(db: Db, ctx: StockServiceContext, item: { reference: string; designation: string; unit: string }): Promise<string> {
+  const find = () => db.article.findFirst({
+    where: { companyId: ctx.companyId, OR: [{ reference: item.reference }, { designation: { equals: item.designation, mode: "insensitive" } }] },
+    orderBy: { active: "desc" }, select: { id: true },
+  })
+  const found = await find()
+  if (found) return found.id
+  const r = await importEventCatalog(db, ctx, [item])
+  if (!r.ok) throw new StockFailure(r.error)
+  return (await find())?.id ?? fail("Article introuvable.")
+}

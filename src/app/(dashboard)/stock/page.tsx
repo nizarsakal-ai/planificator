@@ -7,11 +7,13 @@ import { stockPageAccess } from "@/lib/stock/access"
 import { AdminOnlyNotice } from "@/components/stock/AdminOnlyNotice"
 import { listStockLevels, listWarehouses, stockFormOptions } from "@/lib/stock/queries"
 import { formatMilli } from "@/lib/stock/quantity"
-import { createWarehouseAction, inventoryCountAction, setThresholdAction, setWarehouseActiveAction } from "@/lib/actions/stock.actions"
+import { createWarehouseAction, importEventCatalogAction, syncEquipmentStockAction, inventoryCountAction, setThresholdAction, setWarehouseActiveAction } from "@/lib/actions/stock.actions"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { SELECT_CLASS, StockFlash } from "@/components/stock/StockFlash"
+import { ArticleOptions } from "@/components/stock/ArticleOptions"
+import { EVENT_STOCK_ARTICLES } from "@/components/equipment/event-catalog"
 
 export default async function StockPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await stockPageAccess()
@@ -23,7 +25,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
     listWarehouses(prisma, ctx.companyId), listStockLevels(prisma, ctx.companyId, depot), stockFormOptions(prisma, ctx.companyId),
   ])
   const alerts = levels.filter((l) => l.alert).length
-  const articleOptions = options.articles.map((a) => <option key={a.id} value={a.id}>{a.reference ? `${a.reference} · ` : ""}{a.designation} ({a.unit})</option>)
+  const articleOptions = <ArticleOptions articles={options.articles} />
   const warehouseOptions = options.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)
 
   return (
@@ -65,6 +67,11 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
             ))}
           </tbody>
         </table>
+      </CardContent></Card>
+
+      <Card><CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+        <div><h2 className="text-sm font-semibold text-slate-900">Catalogue événementiel</h2><p className="text-xs text-slate-500">Les menus Stock, Inventaire et Mouvements proposent les {EVENT_STOCK_ARTICLES.length} articles du matériel événementiel (même liste que Matériel). Chaque article est créé automatiquement à son premier mouvement. Matériel suivi à l&apos;unité (tentes, photobooth, sono…) : le stock suit les fiches Matériel (création, sortie, retour, réforme) et une réception d&apos;achat crée les fiches. Matériel en quantité (chaises, tables, textile, moquette…) : stock seul.</p></div>
+        <div className="flex flex-wrap gap-2"><form action={importEventCatalogAction}>{depot && <input type="hidden" name="depot" value={depot} />}<Button type="submit" variant="secondary">Tout créer maintenant</Button></form><form action={syncEquipmentStockAction}>{depot && <input type="hidden" name="depot" value={depot} />}<Button type="submit" variant="outline">Aligner sur le Matériel</Button></form></div>
       </CardContent></Card>
 
       <div className="grid gap-4 lg:grid-cols-3">
