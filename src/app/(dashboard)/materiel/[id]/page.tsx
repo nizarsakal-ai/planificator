@@ -15,6 +15,7 @@ import {
   createBookingAction, createRentalContractAction, linkRentalInvoiceAction, recordMaintenanceAction, returnBookingAction, setEquipmentStatusAction, updateEquipmentAction,
 } from "@/lib/actions/equipment.actions"
 import { Button } from "@/components/ui/button"
+import { WorksitePicker } from "@/components/equipment/WorksitePicker"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { SELECT_CLASS, StockFlash } from "@/components/stock/StockFlash"
@@ -115,7 +116,7 @@ export default async function EquipmentDetailPage({ params, searchParams }: { pa
         {e.status !== "RETIRED" && <form action={createBookingAction} className="grid gap-2 border-t pt-3 sm:grid-cols-2 lg:grid-cols-6">{hidden}
           <Input name="firstDay" type="date" required aria-label="Premier jour" />
           <Input name="lastDay" type="date" required aria-label="Dernier jour" />
-          <select name="worksiteId" className={SELECT_CLASS} aria-label="Chantier"><option value="">Sans chantier</option>{worksiteOptions}</select>
+          <WorksitePicker worksites={options.worksites} />
           <select name="responsibleId" className={SELECT_CLASS} aria-label="Responsable"><option value="">Sans responsable</option>{options.employees.map((p) => <option key={p.id} value={p.id}>{p.lastName} {p.firstName}</option>)}</select>
           <Input name="deposit" inputMode="decimal" placeholder="Caution (€, facultatif)" aria-label="Caution" />
           <Button type="submit">Réserver</Button>
