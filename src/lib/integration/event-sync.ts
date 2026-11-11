@@ -15,7 +15,7 @@
  * principale : elle est journalisée et rattrapée à la prochaine synchronisation (bouton dédié).
  */
 import type { PrismaClient } from "@prisma/client"
-import { EVENT_STOCK_ARTICLES } from "@/components/equipment/event-catalog"
+import { EVENT_STOCK_ARTICLES, eventShortCode } from "@/components/equipment/event-catalog"
 import * as stock from "@/lib/stock/stock.service"
 import * as equipment from "@/lib/equipment/equipment.service"
 import { isEquipmentRentalEnabled } from "@/lib/equipment/equipment-feature-flag"
@@ -90,16 +90,52 @@ export async function afterEquipmentChange(db: Db, ctx: Ctx, equipmentId: string
   }
 }
 
-/** Numéro libre pour une fiche créée à la réception : préfixe de l'article + compteur (« TENTE-PLIANTE-3X3-M-001 »). */
-async function nextEquipmentNumber(db: Db, companyId: string, item: CatalogStockItem, taken: Set<string>): Promise<string> {
-  const prefix = item.reference.replace(/^EVT-/, "").slice(0, 34).replace(/-+$/, "")
-  const existing = await db.equipment.findMany({ where: { companyId, number: { startsWith: `${prefix}-` } }, select: { number: true } })
-  for (const n of existing) taken.add(n.number)
-  for (let i = 1; i < 100000; i++) {
+/** Prochains n° internes libres pour un code (« TENTE-3X3-001 », « TENTE-3X3-002 »…), bornés à l'entreprise. */
+export async function nextEquipmentNumbers(db: Db, companyId: string, code: string, count: number): Promise<string[]> {
+  const prefix = code.slice(0, 34).replace(/-+$/, "") || "MAT"
+  const taken = new Set((await db.equipment.findMany({ where: { companyId, number: { startsWith: `${prefix}-` } }, select: { number: true } })).map((n) => n.number))
+  const out: string[] = []
+  for (let i = 1; out.length < count && i < 100000; i++) {
     const n = `${prefix}-${String(i).padStart(3, "0")}`
-    if (!taken.has(n)) { taken.add(n); return n }
+    if (!taken.has(n)) out.push(n)
   }
-  throw new Error("numérotation épuisée")
+  return out
+}
+
+/**
+ * Création en un geste depuis Matériel : un article du catalogue + une quantité + un dépôt.
+ *  - suivi à l'unité : une fiche par unité, désignation, catégorie et n° interne générés (« TENTE-3X3-004 »),
+ *    puis stock du dépôt aligné ;
+ *  - en quantité (chaises, textile…) : entrée en stock de la quantité dans le dépôt, sans fiche.
+ */
+export async function createFromCatalog(db: Db, ctx: Ctx, input: {
+  item: CatalogStockItem; quantity: number; warehouseId: string | null; ownership: "OWNED" | "RENTED"
+  serialNumber?: string | null; dailyCostCents?: number | null; notes?: string | null
+}): Promise<{ ok: true; kind: "fiches"; ids: string[]; numbers: string[] } | { ok: true; kind: "stock"; quantity: number } | { ok: false; error: string }> {
+  const { item } = input
+  const quantity = Math.floor(input.quantity)
+  if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 200) return { ok: false, error: "Quantité invalide (1 à 200)." }
+  if (!item.tracked) {
+    if (!input.warehouseId) return { ok: false, error: `${item.designation} se gère en quantité : choisissez le dépôt où l'entrer en stock.` }
+    const articleId = await stock.ensureEventArticle(db, ctx, item)
+    const r = await stock.recordMovement(db, ctx, { type: "RECEIPT", quantityMilli: quantity * 1000, toWarehouseId: input.warehouseId, articleId, reason: "Entrée depuis Matériel" })
+    return r.ok ? { ok: true, kind: "stock", quantity } : r
+  }
+  if (quantity > 1 && input.serialNumber) return { ok: false, error: "Un n° de série ne s'applique qu'à une seule fiche (quantité 1)." }
+  const numbers = await nextEquipmentNumbers(db, ctx.companyId, item.code, quantity)
+  const ids: string[] = []
+  for (const number of numbers) {
+    const r = await equipment.createEquipment(db, ctx, {
+      number, name: item.designation, category: item.category, serialNumber: input.serialNumber ?? null, ownership: input.ownership,
+      warehouseId: input.warehouseId, dailyCostCents: input.dailyCostCents ?? null, notes: input.notes ?? null,
+    })
+    if (!r.ok) { if (ids.length === 0) return r; break }
+    ids.push(r.value.id)
+  }
+  try { await syncTrackedItem(db, ctx, item, `${ids.length} fiche(s) créée(s)`) } catch (err) {
+    console.error("[event-sync] synchronisation Matériel → Stock en échec", err instanceof Error ? err.name : "erreur")
+  }
+  return { ok: true, kind: "fiches", ids, numbers: numbers.slice(0, ids.length) }
 }
 
 /**
@@ -116,16 +152,14 @@ export async function afterGoodsReceipt(db: Db, ctx: Ctx, receiptId: string): Pr
     if (!receipt) return 0
     let created = 0
     const touched = new Map<string, CatalogStockItem>()
-    const taken = new Set<string>()
     for (const l of receipt.lines) {
       const a = l.orderLine.article
       const item = a ? catalogItemForArticle(a) : null
       if (!item?.tracked) continue
-      const units = Math.floor(l.quantityMilli / 1000)
-      for (let i = 0; i < units && i < 500; i++) {
-        const number = await nextEquipmentNumber(db, ctx.companyId, item, taken)
+      const units = Math.min(500, Math.floor(l.quantityMilli / 1000))
+      for (const number of await nextEquipmentNumbers(db, ctx.companyId, item.code, units)) {
         const r = await equipment.createEquipment(db, ctx, {
-          number, name: item.designation, category: item.group, ownership: "OWNED", warehouseId: receipt.warehouseId,
+          number, name: item.designation, category: item.category, ownership: "OWNED", warehouseId: receipt.warehouseId,
           notes: `Créé automatiquement à la réception ${receipt.number}.`,
         })
         if (r.ok) created++
@@ -145,4 +179,9 @@ export async function syncAllTracked(db: Db, ctx: Ctx): Promise<number> {
   let n = 0
   for (const it of EVENT_STOCK_ARTICLES) if (it.tracked) n += await syncTrackedItem(db, ctx, it, "rattrapage")
   return n
+}
+
+/** N° interne automatique pour une fiche saisie librement (hors catalogue), à partir de sa désignation ou catégorie. */
+export async function autoEquipmentNumber(db: Db, ctx: Ctx, label: string): Promise<string> {
+  return (await nextEquipmentNumbers(db, ctx.companyId, eventShortCode(label), 1))[0]
 }

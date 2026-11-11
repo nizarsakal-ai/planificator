@@ -90,7 +90,15 @@ export function eventArticleReference(name: string): string {
 /** Unité de stock d'un article du catalogue : m² pour les sols au mètre carré, sinon l'unité. */
 export const eventArticleUnit = (name: string) => (/\(m²\)/.test(name) ? "m²" : "u")
 
-/** Articles à créer en stock : tout le catalogue, à plat, avec référence et unité. */
+const CODE_STOP = new Set(["PLIANTE", "DE", "DU", "DES", "LA", "LE", "LES", "ET", "M", "A", "AU", "LOT", "PERS", "D", "L", "PAR", "JEU", "4", "8", "10"])
+/** Code court d'un article, préfixe des n° internes (« Tente pliante 3x3 m » → « TENTE-3X3 », « Photobooth 360° » → « PHOTOBOOTH-360 »). */
+export function eventShortCode(name: string): string {
+  const words = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().split(/[^A-Z0-9]+/).filter((w) => w && !CODE_STOP.has(w))
+  return (words.slice(0, 2).join("-") || "MAT").slice(0, 24).replace(/-+$/, "")
+}
+
+/** Articles du catalogue à plat : référence de stock, code court, unité, catégorie, mode de suivi. */
 export const EVENT_STOCK_ARTICLES = EVENT_CATALOG.flatMap((g) => g.items.map((it) => ({
-  reference: eventArticleReference(it.name), designation: it.name.replace(/\s*\(m²\)$/, ""), unit: eventArticleUnit(it.name), group: g.group, tracked: !it.bulk,
+  reference: eventArticleReference(it.name), designation: it.name.replace(/\s*\(m²\)$/, ""), unit: eventArticleUnit(it.name),
+  group: g.group, category: it.category, code: eventShortCode(it.name), tracked: !it.bulk,
 })))
