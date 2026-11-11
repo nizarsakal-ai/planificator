@@ -10,6 +10,7 @@ import { parisToday } from "@/lib/equipment/equipment.core"
 import { serverNow } from "@/lib/billing/clock"
 import { createEquipmentAction } from "@/lib/actions/equipment.actions"
 import { Button } from "@/components/ui/button"
+import { CatalogFields } from "@/components/equipment/CatalogFields"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { SELECT_CLASS, StockFlash } from "@/components/stock/StockFlash"
@@ -71,9 +72,8 @@ export default async function EquipmentPage({ searchParams }: { searchParams: Pr
       <Card><CardContent className="space-y-3 p-4">
         <h2 className="text-sm font-semibold text-slate-900">Nouvel équipement</h2>
         <form action={createEquipmentAction} className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <Input name="number" required maxLength={40} placeholder="N° interne (ex. MAT-012)" aria-label="Numéro interne" />
-          <Input name="name" required maxLength={160} placeholder="Désignation" aria-label="Désignation" />
-          <Input name="category" required maxLength={80} placeholder="Catégorie (ex. Échafaudage)" aria-label="Catégorie" />
+          <CatalogFields />
+          <Input name="number" required maxLength={40} placeholder="N° interne (ex. TENTE-01)" aria-label="Numéro interne" />
           <Input name="serialNumber" maxLength={120} placeholder="N° de série (facultatif)" aria-label="Numéro de série" />
           <select name="ownership" className={SELECT_CLASS} aria-label="Propriété"><option value="OWNED">En propriété</option><option value="RENTED">Loué (contrat fournisseur)</option></select>
           <select name="warehouseId" className={SELECT_CLASS} aria-label="Dépôt"><option value="">Sans dépôt</option>{options.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>

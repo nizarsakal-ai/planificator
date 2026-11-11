@@ -45,3 +45,29 @@ describe("contrat de location complet", () => {
     assert.match(buildRentalContractDocument({ ...base, status: "CANCELLED" }).statusNote ?? "", /annulé/i)
   })
 })
+
+describe("contrat client établi automatiquement pour une réservation", () => {
+  const booking = {
+    status: "RESERVED" as const, firstDay: d("2026-12-05"), lastDay: d("2026-12-06"), depositCents: 50000, checkoutCondition: null, returnedAt: null,
+    createdAt: new Date("2026-11-11T10:00:00Z"), company: base.company,
+    client: { name: "Mairie de Cassis", address: "Place Baragnon", siret: null, vatNumber: null, phone: null, email: "fetes@cassis.fr" },
+    equipment: { number: "TENTE-01", name: "Tente pliante 3x3 m", category: "Tente", serialNumber: null, condition: "GOOD" },
+    worksite: { name: "Marché de Noël", address: "Port de Cassis" }, responsible: "Sakal Nizar",
+  }
+  it("la société est le loueur, le client du chantier le locataire ; seule la période est saisie", async () => {
+    const { buildBookingContractDocument, bookingContractNumber } = await import("@/lib/equipment/rental-contract-document")
+    const doc = buildBookingContractDocument(booking)
+    assert.equal(doc.lessor.name, "GALYA EVENTS")
+    assert.equal(doc.lessee.name, "Mairie de Cassis")
+    assert.equal(bookingContractNumber("TENTE-01", d("2026-12-05")), "LOC-TENTE-01-20261205")
+    const t = text(doc)
+    assert.match(t, /2 jours calendaires/)
+    assert.match(t, /Marché de Noël, Port de Cassis/)
+    assert.match(t, /500,00 €/)
+    assert.match(t, /devis n°/)
+  })
+  it("sans chantier, le locataire reste à compléter", async () => {
+    const { buildBookingContractDocument } = await import("@/lib/equipment/rental-contract-document")
+    assert.equal(buildBookingContractDocument({ ...booking, client: null, worksite: null }).lessee.name, BLANK)
+  })
+})

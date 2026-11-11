@@ -94,7 +94,7 @@ export default async function EquipmentDetailPage({ params, searchParams }: { pa
                     {b.checkedOutAt ? `Sorti le ${fmtInstant(b.checkedOutAt)} (${CONDITION_LABEL[b.checkoutCondition ?? ""] ?? "—"})` : "—"}
                     {b.returnedAt && <div>Rendu le {fmtInstant(b.returnedAt)} ({CONDITION_LABEL[b.returnCondition ?? ""] ?? "—"}){b.returnNotes ? ` : ${b.returnNotes}` : ""}</div>}
                   </td>
-                  <td className="px-3 py-2"><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${BOOKING_STATUS_CLASS[b.status] ?? ""}`}>{BOOKING_STATUS_LABEL[b.status] ?? b.status}</span></td>
+                  <td className="px-3 py-2"><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${BOOKING_STATUS_CLASS[b.status] ?? ""}`}>{BOOKING_STATUS_LABEL[b.status] ?? b.status}</span><div><Link href={`/materiel/reservations/${b.id}/contrat`} className="text-xs text-[#0f3460] hover:underline">Contrat de location</Link></div></td>
                   <td className="px-3 py-2 text-right">
                     {b.status === "RESERVED" && <div className="flex flex-wrap justify-end gap-2">
                       <form action={checkoutBookingAction} className="flex gap-2">{hidden}<input type="hidden" name="bookingId" value={b.id} /><select name="condition" required defaultValue={e.condition} className={SELECT_CLASS} aria-label="État à la sortie">{conditionOptions}</select><Button type="submit" size="sm">Sortie</Button></form>
@@ -119,6 +119,7 @@ export default async function EquipmentDetailPage({ params, searchParams }: { pa
           <select name="responsibleId" className={SELECT_CLASS} aria-label="Responsable"><option value="">Sans responsable</option>{options.employees.map((p) => <option key={p.id} value={p.id}>{p.lastName} {p.firstName}</option>)}</select>
           <Input name="deposit" inputMode="decimal" placeholder="Caution (€, facultatif)" aria-label="Caution" />
           <Button type="submit">Réserver</Button>
+          <p className="text-xs text-slate-500 sm:col-span-2 lg:col-span-6">Le contrat de location est établi automatiquement : indiquez la période, et le chantier pour reprendre le client.</p>
         </form>}
         {e.ownership === "RENTED" && <p className="text-xs text-slate-500">Équipement loué : la période réservée doit être entièrement couverte par un contrat de location en cours.</p>}
       </CardContent></Card>

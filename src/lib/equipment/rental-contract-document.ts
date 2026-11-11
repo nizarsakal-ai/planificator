@@ -53,53 +53,35 @@ function party(role: string, p: { name: string; address: string | null; siret: s
   return { role, name: p.name, lines }
 }
 
-export function buildRentalContractDocument(c: RentalContractDocumentInput): ContractDocument {
-  const days = billedDays(c.startDate, c.endDate)
-  const committed = committedRentalCents(c)
-  const site = c.worksite ? `${c.worksite.name}${c.worksite.address ? `, ${c.worksite.address}` : ""}` : null
-  const closed = c.status === "CLOSED" && c.returnedOn
-  const realDays = closed ? billedDays(c.startDate, c.returnedOn!) : null
+type ConditionsInput = {
+  lessorName: string; lesseeName: string; equipment: RentalContractDocumentInput["equipment"]
+  start: Date; end: Date; days: number; site: string | null; priceSentence: string; notes: string | null
+}
 
-  const particular: { label: string; value: string }[] = [
-    { label: "Matériel", value: `${c.equipment.name} (réf. interne ${c.equipment.number})` },
-    { label: "Catégorie", value: c.equipment.category },
-    { label: "N° de série", value: or(c.equipment.serialNumber) },
-    { label: "Début de location", value: fmtLongDay(c.startDate) },
-    { label: "Fin prévue", value: fmtLongDay(c.endDate) },
-    { label: "Durée prévue", value: `${days} jour${days > 1 ? "s" : ""} calendaire${days > 1 ? "s" : ""} (bornes incluses)` },
-    { label: "Lieu d'utilisation", value: site ?? BLANK },
-    { label: "Tarif journalier HT", value: eur(c.dailyRateCents) },
-    { label: "Frais fixes HT (transport, livraison…)", value: eur(c.fixedFeesCents) },
-    { label: "Montant prévisionnel HT", value: eur(committed) },
-    { label: "Dépôt de garantie", value: `${BLANK} € (le cas échéant)` },
-  ]
-  if (closed) {
-    particular.push({ label: "Restitution effective", value: fmtLongDay(c.returnedOn!) })
-    particular.push({ label: "Montant définitif HT", value: `${eur(c.costCents ?? BigInt(0))} (${realDays} jour${realDays! > 1 ? "s" : ""})` })
-  }
-
+/** Conditions générales communes aux contrats fournisseur (la société loue) et client (la société donne en location). */
+function generalConditions(o: ConditionsInput): ContractArticle[] {
   const articles: ContractArticle[] = [
     { title: "Objet", paragraphs: [
-      `Le présent contrat a pour objet la location, par ${c.supplier.name} (le « Loueur ») à ${c.company.name} (le « Locataire »), du matériel désigné aux conditions particulières, pour les besoins de l'activité professionnelle du Locataire.`,
+      `Le présent contrat a pour objet la location, par ${o.lessorName} (le « Loueur ») à ${o.lesseeName} (le « Locataire »), du matériel désigné aux conditions particulières, pour les besoins de l'activité professionnelle du Locataire.`,
       "Le contrat se compose des conditions particulières ci-dessus et des présentes conditions générales. En cas de contradiction, les conditions particulières prévalent.",
     ] },
     { title: "Désignation et état du matériel", paragraphs: [
-      `Le matériel loué est : ${c.equipment.name}, catégorie ${c.equipment.category}, référence interne ${c.equipment.number}, n° de série ${or(c.equipment.serialNumber)}.`,
-      `Il est remis en ${CONDITION_FR[c.equipment.condition] ?? BLANK}, en ordre de marche, avec ses accessoires et la documentation nécessaire à son utilisation. Un état contradictoire est établi à la mise à disposition ; à défaut de réserve écrite, le matériel est réputé conforme et en bon état.`,
+      `Le matériel loué est : ${o.equipment.name}, catégorie ${o.equipment.category}, référence interne ${o.equipment.number}, n° de série ${or(o.equipment.serialNumber)}.`,
+      `Il est remis en ${CONDITION_FR[o.equipment.condition] ?? BLANK}, en ordre de marche, avec ses accessoires et la documentation nécessaire à son utilisation. Un état contradictoire est établi à la mise à disposition ; à défaut de réserve écrite, le matériel est réputé conforme et en bon état.`,
     ] },
     { title: "Durée", paragraphs: [
-      `La location prend effet le ${fmtLongDay(c.startDate)} et prend fin le ${fmtLongDay(c.endDate)}, soit ${days} jour${days > 1 ? "s" : ""} calendaire${days > 1 ? "s" : ""}, premier et dernier jour inclus.`,
+      `La location prend effet le ${fmtLongDay(o.start)} et prend fin le ${fmtLongDay(o.end)}, soit ${o.days} jour${o.days > 1 ? "s" : ""} calendaire${o.days > 1 ? "s" : ""}, premier et dernier jour inclus.`,
       "Toute prolongation fait l'objet d'un accord écrit préalable (courriel accepté). À défaut, la conservation du matériel au-delà de la date de fin est facturée au tarif journalier, sans préjudice des droits du Loueur.",
       "Une restitution anticipée réduit la durée facturée aux jours réellement écoulés, sauf minimum de facturation prévu aux conditions particulières.",
     ] },
     { title: "Lieu d'utilisation", paragraphs: [
-      site
-        ? `Le matériel est utilisé exclusivement sur le chantier ${site}.`
+      o.site
+        ? `Le matériel est utilisé exclusivement sur le chantier ${o.site}.`
         : `Le matériel est utilisé exclusivement à l'adresse suivante : ${BLANK}.`,
       "Il ne peut être déplacé vers un autre site, ni sorti du territoire français, sans l'accord écrit du Loueur.",
     ] },
     { title: "Prix et conditions de paiement", paragraphs: [
-      `Le loyer est fixé à ${eur(c.dailyRateCents)} HT par jour calendaire, auquel s'ajoutent ${eur(c.fixedFeesCents)} HT de frais fixes (transport, livraison, reprise). Le montant prévisionnel s'élève à ${eur(committed)} HT pour la durée prévue.`,
+      o.priceSentence,
       "Les prix s'entendent hors taxes ; la TVA est due en sus au taux en vigueur. Le montant définitif est arrêté sur les jours réels de location, constatés à la restitution.",
       "Sauf conditions particulières, les factures sont payables à trente (30) jours à compter de leur date d'émission. Tout retard de paiement entraîne de plein droit des pénalités au taux prévu par l'article L. 441-10 du Code de commerce et une indemnité forfaitaire pour frais de recouvrement de 40 €.",
     ] },
@@ -143,7 +125,39 @@ export function buildRentalContractDocument(c: RentalContractDocumentInput): Con
       "Le présent contrat est soumis au droit français. Les parties recherchent une solution amiable avant toute action. À défaut, tout litige relève du tribunal de commerce du ressort du siège social du Loueur.",
     ] },
   ]
-  if (c.notes?.trim()) articles.push({ title: "Conditions particulières complémentaires", paragraphs: [c.notes.trim()] })
+  if (o.notes?.trim()) articles.push({ title: "Conditions particulières complémentaires", paragraphs: [o.notes.trim()] })
+  return articles
+}
+
+export function buildRentalContractDocument(c: RentalContractDocumentInput): ContractDocument {
+  const days = billedDays(c.startDate, c.endDate)
+  const committed = committedRentalCents(c)
+  const site = c.worksite ? `${c.worksite.name}${c.worksite.address ? `, ${c.worksite.address}` : ""}` : null
+  const closed = c.status === "CLOSED" && c.returnedOn
+  const realDays = closed ? billedDays(c.startDate, c.returnedOn!) : null
+
+  const particular: { label: string; value: string }[] = [
+    { label: "Matériel", value: `${c.equipment.name} (réf. interne ${c.equipment.number})` },
+    { label: "Catégorie", value: c.equipment.category },
+    { label: "N° de série", value: or(c.equipment.serialNumber) },
+    { label: "Début de location", value: fmtLongDay(c.startDate) },
+    { label: "Fin prévue", value: fmtLongDay(c.endDate) },
+    { label: "Durée prévue", value: `${days} jour${days > 1 ? "s" : ""} calendaire${days > 1 ? "s" : ""} (bornes incluses)` },
+    { label: "Lieu d'utilisation", value: site ?? BLANK },
+    { label: "Tarif journalier HT", value: eur(c.dailyRateCents) },
+    { label: "Frais fixes HT (transport, livraison…)", value: eur(c.fixedFeesCents) },
+    { label: "Montant prévisionnel HT", value: eur(committed) },
+    { label: "Dépôt de garantie", value: `${BLANK} € (le cas échéant)` },
+  ]
+  if (closed) {
+    particular.push({ label: "Restitution effective", value: fmtLongDay(c.returnedOn!) })
+    particular.push({ label: "Montant définitif HT", value: `${eur(c.costCents ?? BigInt(0))} (${realDays} jour${realDays! > 1 ? "s" : ""})` })
+  }
+
+  const articles = generalConditions({
+    lessorName: c.supplier.name, lesseeName: c.company.name, equipment: c.equipment, start: c.startDate, end: c.endDate, days, site, notes: c.notes,
+    priceSentence: `Le loyer est fixé à ${eur(c.dailyRateCents)} HT par jour calendaire, auquel s'ajoutent ${eur(c.fixedFeesCents)} HT de frais fixes (transport, livraison, reprise). Le montant prévisionnel s'élève à ${eur(committed)} HT pour la durée prévue.`,
+  })
 
   const statusNote = c.status === "CANCELLED"
     ? "Contrat annulé : document conservé pour mémoire, sans effet."
@@ -157,5 +171,63 @@ export function buildRentalContractDocument(c: RentalContractDocumentInput): Con
     lessee: party("Le Locataire", { ...c.company, vatNumber: undefined }),
     particular,
     articles,
+  }
+}
+
+const pad = (n: number) => String(n).padStart(2, "0")
+/** Numéro de contrat client déterministe : équipement + premier jour (une réservation ne chevauche jamais une autre). */
+export const bookingContractNumber = (equipmentNumber: string, firstDay: Date) =>
+  `LOC-${equipmentNumber}-${firstDay.getUTCFullYear()}${pad(firstDay.getUTCMonth() + 1)}${pad(firstDay.getUTCDate())}`
+
+export type BookingContractDocumentInput = {
+  status: "RESERVED" | "CHECKED_OUT" | "RETURNED" | "CANCELLED"
+  firstDay: Date
+  lastDay: Date
+  depositCents: number | null
+  checkoutCondition: string | null
+  returnedAt: Date | null
+  createdAt: Date
+  company: RentalContractDocumentInput["company"]
+  client: { name: string; address: string | null; siret: string | null; vatNumber: string | null; phone: string | null; email: string | null } | null
+  equipment: RentalContractDocumentInput["equipment"]
+  worksite: { name: string; address: string | null } | null
+  responsible: string | null
+}
+
+/**
+ * Contrat établi automatiquement quand la société donne un matériel en location (réservation / sortie) : la société
+ * est le Loueur, le client du chantier (événement) est le Locataire. Seule la période vient de la saisie ; le prix
+ * renvoie au devis, aucune donnée commerciale n'est inventée.
+ */
+export function buildBookingContractDocument(b: BookingContractDocumentInput): ContractDocument {
+  const days = billedDays(b.firstDay, b.lastDay)
+  const site = b.worksite ? `${b.worksite.name}${b.worksite.address ? `, ${b.worksite.address}` : ""}` : null
+  const equipment = { ...b.equipment, condition: b.checkoutCondition ?? b.equipment.condition }
+  const lesseeName = b.client?.name ?? BLANK
+  const particular = [
+    { label: "Matériel", value: `${b.equipment.name} (réf. ${b.equipment.number})` },
+    { label: "Catégorie", value: b.equipment.category },
+    { label: "N° de série", value: or(b.equipment.serialNumber) },
+    { label: "Début de location", value: fmtLongDay(b.firstDay) },
+    { label: "Fin de location", value: fmtLongDay(b.lastDay) },
+    { label: "Durée", value: `${days} jour${days > 1 ? "s" : ""} calendaire${days > 1 ? "s" : ""} (bornes incluses)` },
+    { label: "Événement / lieu d'utilisation", value: site ?? BLANK },
+    { label: "Prix de la location HT", value: `Selon devis n° ${BLANK}` },
+    { label: "Dépôt de garantie", value: b.depositCents !== null ? eur(b.depositCents) : `${BLANK} € (le cas échéant)` },
+    { label: "Responsable côté Loueur", value: or(b.responsible) },
+  ]
+  const statusNote = b.status === "CANCELLED" ? "Réservation annulée : document conservé pour mémoire, sans effet."
+    : b.returnedAt ? "Matériel restitué : contrat exécuté." : null
+  return {
+    title: "Contrat de location de matériel événementiel",
+    reference: `Contrat n° ${bookingContractNumber(b.equipment.number, b.firstDay)} établi le ${fmtLongDay(b.createdAt)}`,
+    statusNote,
+    lessor: party("Le Loueur", b.company),
+    lessee: b.client ? party("Le Locataire", b.client) : { role: "Le Locataire", name: BLANK, lines: [`Adresse : ${BLANK}`, `SIRET : ${BLANK}`, `Téléphone : ${BLANK}`, `E-mail : ${BLANK}`, `Représenté par : ${BLANK}, en qualité de ${BLANK}`] },
+    particular,
+    articles: generalConditions({
+      lessorName: b.company.name, lesseeName, equipment, start: b.firstDay, end: b.lastDay, days, site, notes: null,
+      priceSentence: `Le prix de la location, le transport, le montage et le démontage éventuels sont fixés au devis n° ${BLANK} accepté par le Locataire, qui fait partie intégrante du présent contrat.`,
+    }),
   }
 }

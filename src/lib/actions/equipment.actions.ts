@@ -99,15 +99,16 @@ export async function createBookingAction(form: FormData) {
     const deposit = euros(str(form, "deposit", 20))
     if (deposit === "invalide") return { ok: false, error: "Caution invalide." }
     const r = await svc.createBooking(prisma, ctx, { equipmentId: id, firstDay: first, lastDay: last, worksiteId: optId(form, "worksiteId"), responsibleEmployeeId: optId(form, "responsibleId"), depositCents: deposit })
-    return r.ok ? { ok: true, okMessage: "Réservation enregistrée." } : r
+    return r.ok ? { ok: true, okMessage: "Réservation enregistrée : contrat de location établi automatiquement.", redirectTo: `/materiel/reservations/${r.value.id}/contrat` } : r
   })
 }
 
 export async function checkoutBookingAction(form: FormData) {
   const { path } = detail(form)
   return run(path, async (ctx) => {
-    const r = await svc.checkoutBooking(prisma, ctx, reqId(form, "bookingId"), str(form, "condition", 20))
-    return r.ok ? { ok: true, okMessage: "Sortie enregistrée." } : r
+    const bookingId = reqId(form, "bookingId")
+    const r = await svc.checkoutBooking(prisma, ctx, bookingId, str(form, "condition", 20))
+    return r.ok ? { ok: true, okMessage: "Sortie enregistrée : contrat de location à jour (état à la sortie).", redirectTo: `/materiel/reservations/${bookingId}/contrat` } : r
   })
 }
 

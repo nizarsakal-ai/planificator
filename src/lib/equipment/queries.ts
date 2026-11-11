@@ -116,3 +116,28 @@ export async function getRentalContractDocumentData(db: Db, companyId: string, i
   ])
   return contract && company ? { ...contract, company } : null
 }
+
+/** Données du contrat client établi automatiquement pour une réservation (la société donne le matériel en location). */
+export async function getBookingContractDocumentData(db: Db, companyId: string, id: string) {
+  const [booking, company] = await Promise.all([
+    db.equipmentBooking.findFirst({
+      where: { id, companyId },
+      select: {
+        id: true, status: true, startAt: true, endAt: true, depositCents: true, checkoutCondition: true, returnedAt: true, createdAt: true,
+        equipment: { select: { id: true, number: true, name: true, category: true, serialNumber: true, condition: true } },
+        worksite: { select: { name: true, address: true, client: { select: { name: true, address: true, siret: true, vatNumber: true, phone: true, email: true } } } },
+        responsible: { select: { firstName: true, lastName: true } },
+      },
+    }),
+    db.company.findUnique({ where: { id: companyId }, select: { name: true, address: true, siret: true, phone: true, email: true, logoUrl: true } }),
+  ])
+  if (!booking || !company) return null
+  return {
+    id: booking.id, status: booking.status, depositCents: booking.depositCents, checkoutCondition: booking.checkoutCondition, returnedAt: booking.returnedAt, createdAt: booking.createdAt,
+    firstDay: booking.startAt, lastDay: new Date(booking.endAt.getTime() - DAY_MS),
+    equipment: booking.equipment, company,
+    worksite: booking.worksite ? { name: booking.worksite.name, address: booking.worksite.address } : null,
+    client: booking.worksite?.client ?? null,
+    responsible: booking.responsible ? `${booking.responsible.firstName} ${booking.responsible.lastName}` : null,
+  }
+}
