@@ -70,8 +70,8 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
       </CardContent></Card>
 
       <Card><CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-        <div><h2 className="text-sm font-semibold text-slate-900">Catalogue événementiel</h2><p className="text-xs text-slate-500">Ajoute en une fois les {EVENT_STOCK_ARTICLES.length} articles (tentes, photobooth, mobilier, son, vidéo…) aux menus Stock, Inventaire, Mouvements et Achats. Les articles déjà présents ne sont pas dupliqués ; les prix se renseignent ensuite dans Articles.</p></div>
-        <form action={importEventCatalogAction}>{depot && <input type="hidden" name="depot" value={depot} />}<Button type="submit" variant="secondary">Ajouter le catalogue événementiel</Button></form>
+        <div><h2 className="text-sm font-semibold text-slate-900">Catalogue événementiel</h2><p className="text-xs text-slate-500">Les menus Stock, Inventaire et Mouvements proposent les {EVENT_STOCK_ARTICLES.length} articles du matériel événementiel (même liste que Matériel). Chaque article est créé automatiquement à son premier mouvement ; ce bouton les crée tous d&apos;un coup si vous préférez. Les prix se renseignent dans Articles.</p></div>
+        <form action={importEventCatalogAction}>{depot && <input type="hidden" name="depot" value={depot} />}<Button type="submit" variant="secondary">Tout créer maintenant</Button></form>
       </CardContent></Card>
 
       <div className="grid gap-4 lg:grid-cols-3">

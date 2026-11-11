@@ -369,3 +369,19 @@ export async function importEventCatalog(db: Db, ctx: StockServiceContext, items
     return { created, reactivated }
   })
 }
+
+/**
+ * Article de stock d'un élément du catalogue événementiel : l'existant (même référence, ou même désignation) ou un
+ * article créé à la volée au premier mouvement (prix 0 € HT à compléter dans Articles). Retourne son identifiant.
+ */
+export async function ensureEventArticle(db: Db, ctx: StockServiceContext, item: { reference: string; designation: string; unit: string }): Promise<string> {
+  const find = () => db.article.findFirst({
+    where: { companyId: ctx.companyId, OR: [{ reference: item.reference }, { designation: { equals: item.designation, mode: "insensitive" } }] },
+    orderBy: { active: "desc" }, select: { id: true },
+  })
+  const found = await find()
+  if (found) return found.id
+  const r = await importEventCatalog(db, ctx, [item])
+  if (!r.ok) throw new StockFailure(r.error)
+  return (await find())?.id ?? fail("Article introuvable.")
+}
