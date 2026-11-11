@@ -34,6 +34,9 @@ import {
   Calculator,
   Camera,
   Radar,
+  Boxes,
+  ShoppingCart,
+  Wrench,
 } from "lucide-react"
 
 export interface NavItem {
@@ -140,24 +143,30 @@ export function withAccountingNavItem(items: readonly NavItem[], visible: boolea
   return result
 }
 
-/**
- * Lot C (facturation complète) — entrée « Devis », ajoutée seulement si `visible` (drapeau serveur
- * BILLING_COMPLETE_ENABLED + rôle ADMIN/SUPER_ADMIN + société, calculé côté serveur). Insérée juste avant
- * « Factures » ; sans « Factures » ou déjà présente, la liste est inchangée. Affichage uniquement.
- */
+/** Raccourcis de la facturation complète, soumis à la visibilité calculée côté serveur. */
 export const QUOTES_NAV_ITEM: NavItem = {
   label: "Devis",
   href: "/devis",
   icon: FileText,
 }
 
+const CREDIT_NOTES_NAV_ITEM: NavItem = {
+  label: "Avoir",
+  href: "/factures/avoirs",
+  icon: Receipt,
+}
+
 export function withBillingNavItems(items: readonly NavItem[], visible: boolean): NavItem[] {
   const result = [...items]
   if (visible !== true) return result
-  if (result.some((item) => item.href === QUOTES_NAV_ITEM.href)) return result
   const anchor = result.findIndex((item) => item.href === "/factures")
   if (anchor === -1) return result
-  result.splice(anchor, 0, QUOTES_NAV_ITEM)
+  if (!result.some((item) => item.href === CREDIT_NOTES_NAV_ITEM.href)) {
+    result.splice(anchor + 1, 0, CREDIT_NOTES_NAV_ITEM)
+  }
+  if (!result.some((item) => item.href === QUOTES_NAV_ITEM.href)) {
+    result.splice(anchor, 0, QUOTES_NAV_ITEM)
+  }
   return result
 }
 
@@ -240,5 +249,36 @@ export function withProspectionNavItem(items: readonly NavItem[], visible: boole
   if (visible !== true || result.some((item) => item.href === PROSPECTION_NAV_ITEM.href)) return result
   const anchor = result.findIndex((item) => item.href === "/consultations")
   result.splice(anchor < 0 ? result.length : anchor + 1, 0, PROSPECTION_NAV_ITEM)
+  return result
+}
+
+/**
+ * Lot A Planificator V2 : entrées « Stock » et « Achats » (drapeau serveur STOCK_PURCHASING_ENABLED, ADMIN et
+ * SUPER_ADMIN avec société). Affichage seulement : chaque page et action du module refuse côté serveur.
+ */
+export function withStockPurchasingNavItems(items: readonly NavItem[], visible: boolean): NavItem[] {
+  const result = [...items]
+  if (visible !== true) return result
+  const profile = result.findIndex(i => i.href === "/profil")
+  const add = [
+    { label: "Stock", href: "/stock", icon: Boxes },
+    { label: "Achats", href: "/achats", icon: ShoppingCart },
+  ].filter(entry => !result.some(i => i.href === entry.href))
+  result.splice(profile < 0 ? result.length : profile, 0, ...add)
+  return result
+}
+
+/**
+ * Lot B Planificator V2 : entrée « Matériel » (drapeau serveur EQUIPMENT_RENTAL_ENABLED, ADMIN et SUPER_ADMIN avec
+ * société), placée après « Achats » si présent, sinon avant « Profil ». Affichage seulement : chaque page et action
+ * du module refuse côté serveur.
+ */
+export function withEquipmentNavItem(items: readonly NavItem[], visible: boolean): NavItem[] {
+  const result = [...items]
+  if (visible !== true || result.some(i => i.href === "/materiel")) return result
+  const achats = result.findIndex(i => i.href === "/achats")
+  const profile = result.findIndex(i => i.href === "/profil")
+  const at = achats >= 0 ? achats + 1 : profile < 0 ? result.length : profile
+  result.splice(at, 0, { label: "Matériel", href: "/materiel", icon: Wrench })
   return result
 }

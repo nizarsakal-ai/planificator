@@ -12,9 +12,7 @@ export default async function NouveauDevisPage() {
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold text-slate-900">Nouveau devis</h1>
-      {options.worksites.length === 0
-        ? <p className="text-sm text-slate-600">Créez d&apos;abord un chantier (avec son client) pour établir un devis.</p>
-        : <QuoteForm mode="create" worksites={options.worksites} articles={options.articles} />}
+      <QuoteForm mode="create" {...options} />
     </div>
   )
 }

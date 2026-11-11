@@ -13,7 +13,7 @@ export default async function NouvelleFacturePage() {
     <div className="space-y-4">
       <h1 className="text-2xl font-bold text-slate-900">Nouvelle facture</h1>
       <p className="text-sm text-slate-500">Le brouillon reçoit un numéro provisoire ; le numéro légal est attribué à l&apos;émission.</p>
-      {options.worksites.length === 0 ? <p className="text-sm text-slate-600">Créez d&apos;abord un chantier (avec son client).</p> : <InvoiceForm mode="create" worksites={options.worksites} articles={options.articles} />}
+      <InvoiceForm mode="create" {...options} />
     </div>
   )
 }

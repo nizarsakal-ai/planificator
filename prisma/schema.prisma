@@ -417,6 +417,16 @@ model Company {
   tasks                       Task[]
   /// PLAN-AGENT-GATEWAY-001 — LOT-1A (relation inverse, sans effet SQL sur companies)
   agentPrincipals             AgentPrincipal[]
+  // Lot A V2 (stocks et achats)
+  warehouses       Warehouse[]
+  stockLevels      StockLevel[]
+  stockMovements   StockMovement[]
+  purchaseOrders   PurchaseOrder[]
+  equipment        Equipment[]
+  equipmentBookings EquipmentBooking[]
+  equipmentRentals EquipmentRentalContract[]
+  equipmentMaintenances EquipmentMaintenance[]
+  goodsReceipts    GoodsReceipt[]
 
   @@map("companies")
 
@@ -479,7 +489,11 @@ model Article {
   company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   quoteLines   QuoteLine[]
   invoiceLines InvoiceLine[]
+  stockLevels        StockLevel[]
+  stockMovements     StockMovement[]
+  purchaseOrderLines PurchaseOrderLine[]
 
+  @@unique([companyId, id])
   @@index([companyId])
   @@map("articles")
 }
@@ -918,6 +932,7 @@ model Employee {
   /// Espace privé RH : relation inverse seulement, aucune colonne ajoutée à employees.
   hrMessages          HrMessage[]
   assignedTasks       Task[]               @relation("TaskAssignee")
+  equipmentBookings   EquipmentBooking[]   @relation("EquipmentBookingResponsible")
 
   @@unique([id, companyId])
   @@index([companyId])
@@ -1070,6 +1085,10 @@ model Worksite {
   mileageTrips MileageTrip[] @relation("MileageWorksite")
   tasks        Task[]
   photoRecipients WorksitePhotoRecipient[] // destinataires des photos (configuration, SUPER_ADMIN)
+  stockMovements StockMovement[]
+  purchaseOrders PurchaseOrder[]
+  equipmentBookings EquipmentBooking[]
+  equipmentRentals EquipmentRentalContract[]
 
   @@unique([id, companyId])
   @@index([companyId])
@@ -3016,6 +3035,9 @@ model Supplier {
   company               Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
   defaultExpenseAccount AccountingAccount? @relation(fields: [companyId, defaultExpenseAccountId], references: [companyId, id], onDelete: Restrict)
   invoices              SupplierInvoice[]
+  purchaseOrders PurchaseOrder[]
+  equipmentRentals EquipmentRentalContract[]
+  equipmentMaintenances EquipmentMaintenance[]
 
   @@unique([companyId, id])
   @@unique([companyId, siret])
@@ -3080,6 +3102,8 @@ model SupplierInvoice {
   expenseAccount AccountingAccount?   @relation(fields: [companyId, expenseAccountId], references: [companyId, id], onDelete: Restrict)
   file           SupplierInvoiceFile? @relation(fields: [companyId, fileId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
   bankTransactions BankTransaction[]
+  goodsReceipts    GoodsReceipt[]
+  equipmentRentals EquipmentRentalContract[]
 
   @@unique([companyId, id])
   @@index([companyId, status])
@@ -3610,4 +3634,329 @@ model ProspectOpportunity {
   @@index([companyId, deadlineAt])
   @@index([companyId, fingerprint])
   @@map("prospect_opportunities")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Lot A Planificator V2 (04/11/2026) : stocks multi-dépôts, commandes d'achat et réceptions.
+// Quantités en millièmes d'unité de l'article (entiers, jamais de flottant) ; montants en centimes.
+// Clés étrangères composites (companyId, id) : un dépôt, un article, un fournisseur, un chantier, une commande ou
+// une facture fournisseur d'une autre entreprise ne peut pas être référencé (même règle que le Correctif P2-02).
+// Module désactivé par défaut (STOCK_PURCHASING_ENABLED).
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum StockMovementType {
+  RECEIPT
+  ISSUE
+  TRANSFER
+  ADJUSTMENT
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  ORDERED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+model Warehouse {
+  id        String   @id @default(cuid())
+  companyId String
+  name      String
+  address   String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  stockLevels    StockLevel[]
+  movementsFrom  StockMovement[] @relation("StockMovementFrom")
+  movementsTo    StockMovement[] @relation("StockMovementTo")
+  purchaseOrders PurchaseOrder[]
+  goodsReceipts  GoodsReceipt[]
+  equipment      Equipment[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, name])
+  @@map("warehouses")
+}
+
+model StockLevel {
+  id               String   @id @default(cuid())
+  companyId        String
+  warehouseId      String
+  articleId        String
+  quantityMilli    Int      @default(0)
+  minQuantityMilli Int?
+  updatedAt        DateTime @updatedAt
+
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  warehouse Warehouse @relation(fields: [companyId, warehouseId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  article   Article   @relation(fields: [companyId, articleId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([warehouseId, articleId])
+  @@index([companyId, articleId])
+  @@map("stock_levels")
+}
+
+model StockMovement {
+  id                 String            @id @default(cuid())
+  companyId          String
+  type               StockMovementType
+  articleId          String
+  fromWarehouseId    String?
+  toWarehouseId      String?
+  quantityMilli      Int
+  worksiteId         String?
+  goodsReceiptLineId String?           @unique
+  reason             String?
+  createdById        String
+  createdAt          DateTime          @default(now())
+
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  article          Article           @relation(fields: [companyId, articleId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  fromWarehouse    Warehouse?        @relation("StockMovementFrom", fields: [companyId, fromWarehouseId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  toWarehouse      Warehouse?        @relation("StockMovementTo", fields: [companyId, toWarehouseId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  worksite         Worksite?         @relation(fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  goodsReceiptLine GoodsReceiptLine? @relation(fields: [goodsReceiptLineId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([companyId, createdAt])
+  @@index([companyId, articleId])
+  @@index([companyId, worksiteId])
+  @@map("stock_movements")
+}
+
+model PurchaseOrder {
+  id           String              @id @default(cuid())
+  companyId    String
+  number       String
+  supplierId   String
+  warehouseId  String
+  worksiteId   String?
+  status       PurchaseOrderStatus @default(DRAFT)
+  orderedAt    DateTime?
+  expectedAt   DateTime?           @db.Date
+  notes        String?
+  totalHTCents BigInt              @default(0)
+  createdById  String
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  company   Company             @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  supplier  Supplier            @relation(fields: [companyId, supplierId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  warehouse Warehouse           @relation(fields: [companyId, warehouseId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  worksite  Worksite?           @relation(fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  lines     PurchaseOrderLine[]
+  receipts  GoodsReceipt[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, number])
+  @@index([companyId, status])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderLine {
+  id              String  @id @default(cuid())
+  purchaseOrderId String
+  position        Int
+  articleId       String?
+  designation     String
+  quantityMilli   Int
+  receivedMilli   Int     @default(0)
+  unitPriceCents  Int
+
+  purchaseOrder PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  article       Article?           @relation(fields: [articleId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  receiptLines  GoodsReceiptLine[]
+
+  @@unique([purchaseOrderId, position])
+  @@map("purchase_order_lines")
+}
+
+model GoodsReceipt {
+  id                String    @id @default(cuid())
+  companyId         String
+  number            String
+  purchaseOrderId   String
+  warehouseId       String
+  supplierInvoiceId String?
+  receivedAt        DateTime  @default(now())
+  notes             String?
+  createdById       String
+  createdAt         DateTime  @default(now())
+
+  company         Company            @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  purchaseOrder   PurchaseOrder      @relation(fields: [companyId, purchaseOrderId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  warehouse       Warehouse          @relation(fields: [companyId, warehouseId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  supplierInvoice SupplierInvoice?   @relation(fields: [companyId, supplierInvoiceId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  lines           GoodsReceiptLine[]
+
+  @@unique([companyId, number])
+  @@index([companyId, purchaseOrderId])
+  @@map("goods_receipts")
+}
+
+model GoodsReceiptLine {
+  id             String @id @default(cuid())
+  goodsReceiptId String
+  orderLineId    String
+  quantityMilli  Int
+
+  goodsReceipt GoodsReceipt      @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  orderLine    PurchaseOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  movement     StockMovement?
+
+  @@unique([goodsReceiptId, orderLineId])
+  @@map("goods_receipt_lines")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Lot B Planificator V2 (04/11/2026) : matériel et location.
+// Un équipement (propre ou loué) est rattaché à un dépôt du lot A ; il se réserve sur une période, sort et revient
+// avec un état constaté ; un équipement loué l'est par un contrat fournisseur dont le coût est imputé au chantier.
+// Clés composites (companyId, id) comme au lot A. Module désactivé par défaut (EQUIPMENT_RENTAL_ENABLED).
+// Pas de double réservation : verrou de la ligne équipement (SELECT … FOR UPDATE) puis contrôle de chevauchement
+// dans la même transaction (voir equipment.service.ts).
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum EquipmentStatus {
+  AVAILABLE
+  OUT
+  MAINTENANCE
+  RETIRED
+}
+
+enum EquipmentCondition {
+  GOOD
+  WORN
+  DAMAGED
+}
+
+enum EquipmentOwnership {
+  OWNED
+  RENTED
+}
+
+enum EquipmentBookingStatus {
+  RESERVED
+  CHECKED_OUT
+  RETURNED
+  CANCELLED
+}
+
+enum EquipmentRentalStatus {
+  ACTIVE
+  CLOSED
+  CANCELLED
+}
+
+model Equipment {
+  id             String             @id @default(cuid())
+  companyId      String
+  number         String
+  name           String
+  category       String
+  serialNumber   String?
+  ownership      EquipmentOwnership @default(OWNED)
+  status         EquipmentStatus    @default(AVAILABLE)
+  condition      EquipmentCondition @default(GOOD)
+  warehouseId    String?
+  dailyCostCents Int?
+  notes          String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  company      Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  warehouse    Warehouse?                @relation(fields: [companyId, warehouseId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  bookings     EquipmentBooking[]
+  rentals      EquipmentRentalContract[]
+  maintenances EquipmentMaintenance[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, number])
+  @@index([companyId, status])
+  @@map("equipment")
+}
+
+model EquipmentBooking {
+  id                    String                 @id @default(cuid())
+  companyId             String
+  equipmentId           String
+  worksiteId            String?
+  responsibleEmployeeId String?
+  startAt               DateTime
+  endAt                 DateTime
+  status                EquipmentBookingStatus @default(RESERVED)
+  depositCents          Int?
+  checkedOutAt          DateTime?
+  checkoutCondition     EquipmentCondition?
+  returnedAt            DateTime?
+  returnCondition       EquipmentCondition?
+  returnNotes           String?
+  createdById           String
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  equipment   Equipment @relation(fields: [companyId, equipmentId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  worksite    Worksite? @relation(fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  responsible Employee? @relation("EquipmentBookingResponsible", fields: [responsibleEmployeeId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([companyId, equipmentId, startAt])
+  @@index([companyId, worksiteId])
+  @@index([companyId, status])
+  @@map("equipment_bookings")
+}
+
+model EquipmentRentalContract {
+  id                String                @id @default(cuid())
+  companyId         String
+  number            String
+  equipmentId       String
+  supplierId        String
+  worksiteId        String?
+  startDate         DateTime              @db.Date
+  endDate           DateTime              @db.Date
+  dailyRateCents    Int
+  fixedFeesCents    Int                   @default(0)
+  status            EquipmentRentalStatus @default(ACTIVE)
+  returnedOn        DateTime?             @db.Date
+  costCents         BigInt?
+  supplierInvoiceId String?
+  notes             String?
+  createdById       String
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  equipment       Equipment        @relation(fields: [companyId, equipmentId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  supplier        Supplier         @relation(fields: [companyId, supplierId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  worksite        Worksite?        @relation(fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  supplierInvoice SupplierInvoice? @relation(fields: [companyId, supplierInvoiceId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([companyId, number])
+  @@index([companyId, equipmentId])
+  @@index([companyId, worksiteId])
+  @@map("equipment_rental_contracts")
+}
+
+model EquipmentMaintenance {
+  id          String    @id @default(cuid())
+  companyId   String
+  equipmentId String
+  description String
+  plannedOn   DateTime? @db.Date
+  performedOn DateTime? @db.Date
+  costCents   Int?
+  supplierId  String?
+  createdById String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  equipment Equipment @relation(fields: [companyId, equipmentId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  supplier  Supplier? @relation(fields: [companyId, supplierId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([companyId, equipmentId])
+  @@map("equipment_maintenances")
 }

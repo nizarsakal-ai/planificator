@@ -1,6 +1,8 @@
 "use client"
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
+import { Download, Eye, FileText, LockKeyhole } from "lucide-react"
+import { DocumentFolders } from "./DocumentFolders"
 import { availableCategories, categoryLabel, type CategoryDefinition } from "@/lib/hr-documents/catalog"
 import { fetchHrDocument } from "@/lib/hr-documents/download-client"
 import { DocumentPreview, saveBlob, type PreviewTarget } from "./DocumentPreview"
@@ -13,8 +15,11 @@ const labels:Record<string,string>={UPLOADING:"Dépôt à reprendre",READY:"À v
 const LEGACY:Category[]=availableCategories({} as NodeJS.ProcessEnv).map(({code,label,family})=>({code,label,family}))
 const control="w-full rounded-lg border border-slate-300 bg-white p-2 text-sm"
 async function call(url:string,init?:RequestInit){
-  const response=await fetch(url,{...init,cache:"no-store"});const data=await response.json()
-  if(!response.ok)throw new Error(data.error??"Opération indisponible.")
+  // Coupure réseau ou réponse non JSON (page de connexion, erreur d'un proxy) : message lisible, jamais l'erreur brute du navigateur.
+  let response:Response
+  try{response=await fetch(url,{...init,cache:"no-store"})}catch{throw new Error("Connexion au serveur impossible. Réessayez.")}
+  const data=await response.json().catch(()=>null)
+  if(!response.ok||response.redirected||!data)throw new Error(typeof data?.error==="string"&&data.error?data.error:"Opération indisponible.")
   return data
 }
 /** Téléchargement par fetch : seule une réponse document validée est enregistrée ; sinon le message s'affiche dans la page. */
@@ -28,6 +33,7 @@ export function Documents({manage=false,configure=false,canImport=false,canPubli
   const [cursor,setCursor]=useState<string|null>(null),[busy,setBusy]=useState(false)
   const [year,setYear]=useState(""),[kind,setKind]=useState("")
   const [importOpen,setImportOpen]=useState(false)
+  const [employeeChoice,setEmployeeChoice]=useState("")
   const [preview,setPreview]=useState<PreviewTarget|null>(null),previewTrigger=useRef<HTMLButtonElement|null>(null)
   const loadVersion=useRef(0)
   const load=useCallback(async(append=false,next?:string)=>{
@@ -54,16 +60,57 @@ export function Documents({manage=false,configure=false,canImport=false,canPubli
   }
   const shown=docs.filter(d=>(!year||d.period.startsWith(year))&&(!kind||d.category===kind))
   const selectedEmployee=employeeId?(employeeContext??employees.find(e=>e.id===employeeId)):undefined
-  return <section className="mx-auto max-w-5xl space-y-5">
+  const employeeFolder = manage && !!employeeId
+  const renderDoc = (doc: Doc, month?: string) => {
+    const review = manage&&canImport&&doc.status==="READY"
+      ? <ReviewForm key={`${doc.id}:${doc.version}`} doc={doc} employees={employees} categories={categories} busy={busy} run={action}/>
+      : null
+    const viewable = ["READY","REVIEWED","PUBLISHED"].includes(doc.status)
+    const iconButton = "inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-blue-950 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2"
+    return <li key={doc.id} className={employeeFolder?"px-3 py-3":"rounded-xl border border-slate-200 p-4"}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h4 className="flex items-start gap-2 break-words text-sm font-semibold text-slate-900"><FileText size={17} aria-hidden="true" className="mt-0.5 shrink-0 text-blue-950"/>{month??doc.title}</h4>
+            {month&&doc.title!==categoryLabel(doc.category)&&<p className="ml-6 break-words text-xs text-slate-600">{doc.title}</p>}
+            {(!employeeFolder||doc.status!=="PUBLISHED")&&<p className="ml-6 text-xs text-slate-600">{categoryLabel(doc.category)} · {doc.period} · {labels[doc.status]}{!employeeFolder&&` · ${Math.ceil(doc.size/1024)} Ko`}</p>}
+            {manage&&!employeeFolder&&<p className="ml-6 text-sm font-medium text-blue-950">Destinataire : {employees.find(e=>e.id===doc.employeeId)?.lastName??"identifiant interne"} {employees.find(e=>e.id===doc.employeeId)?.firstName??doc.employeeId}</p>}
+          </div>
+          {viewable&&<div className="flex shrink-0 gap-0.5">
+            <button type="button" className={iconButton} title="Visualiser" aria-haspopup="dialog" onClick={e=>{previewTrigger.current=e.currentTarget;setError("");setPreview(old=>old?.id===doc.id?old:{id:doc.id,title:doc.title})}}>
+              <Eye size={17} aria-hidden="true"/><span className="sr-only">Visualiser</span></button>
+            <button type="button" className={iconButton} title="Télécharger" onClick={()=>{setError("");void downloadDocument(doc.id).catch(e=>setError(e instanceof Error?e.message:"Téléchargement indisponible."))}}>
+              <Download size={17} aria-hidden="true"/><span className="sr-only">Télécharger</span></button>
+          </div>}
+        </div>
+        <div className="flex flex-wrap gap-3 empty:hidden [&:not(:empty)]:mt-2">
+          {manage&&canPublish&&doc.status==="REVIEWED"&&<PublishButton key={`${doc.id}:${doc.version}`} doc={doc} busy={busy} run={action}/>}
+          {manage&&canImport&&doc.status==="REVIEWED"&&<button disabled={busy} type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={()=>void action(()=>call(`/api/hr-documents/${doc.id}/edit`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({expectedVersion:doc.version,key:crypto.randomUUID()})}),"La validation a été retirée. Corrigez puis vérifiez à nouveau.")}>Corriger l’affectation avant publication</button>}
+          {manage&&canPublish&&mailEnabled&&doc.status==="PUBLISHED"&&<button type="button" disabled={busy} className="rounded-lg border px-3 py-2 text-sm" onClick={()=>void action(()=>call(`/api/hr-documents/${doc.id}/notify`,{method:"POST"}),"Notification traitée. Aucun renvoi si elle était déjà envoyée.")}>Notifier la disponibilité par email</button>}
+        </div>
+        {review && (employeeFolder ? <details className="mt-2"><summary className="cursor-pointer text-sm text-blue-900">Vérifier l’affectation</summary>{review}</details> : review)}
+        {doc.status==="UPLOADING"&&manage&&canImport&&doc.canResume&&<RecoveryForm key={`${doc.id}:${doc.version}`} doc={doc} action="RESUME" busy={busy} run={action}/>}
+        {doc.status==="BLOCKED"&&<div className="mt-2 space-y-3"><p className="text-sm text-red-800">L’intégrité ou les accès Drive doivent être revérifiés par une personne RH habilitée.</p>{manage&&canImport&&<><button disabled={busy} type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={()=>void action(()=>call(`/api/hr-documents/${doc.id}/recover`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"REVERIFY",expectedVersion:doc.version})}),"Intégrité et droits revérifiés. Revue et publication à refaire.")}>Revérifier après réparation des accès</button><RecoveryForm key={`${doc.id}:${doc.version}`} doc={doc} action="RESTORE" busy={busy} run={action}/></>}</div>}
+      </li>
+  }
+  return <section className={`mx-auto space-y-5 ${employeeFolder?"max-w-7xl":"max-w-5xl"}`}>
     {manage&&<nav aria-label="Parcours RH" className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">{[["/employes","Personnel"],["/absences","Absences"],["/pointages","Pointages"],["/notes-de-frais","Notes de frais"],["/rh/documents","Documents RH"]].map(([href,label])=><Link key={href} href={href} aria-current={href==="/rh/documents"?"page":undefined} className={`rounded-lg px-3 py-2 text-sm ${href==="/rh/documents"?"bg-blue-50 font-semibold text-blue-900":"text-slate-600 hover:bg-slate-50"}`}>{label}</Link>)}</nav>}
-    <header className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-semibold text-slate-900">{manage?(employeeId?`Documents RH — ${selectedEmployee?`${selectedEmployee.firstName} ${selectedEmployee.lastName}`:"salarié sélectionné"}`:"Documents RH"):"Mes documents"}</h1>
-      <p className="mt-2 text-sm text-slate-600">{manage?"Les informations du salarié proviennent de sa fiche. Vérifiez le PDF avant chaque publication.":"Vos documents personnels, classés par période. Aucun document d’un autre salarié n’est accessible."}</p></div>{manage&&canImport&&<button type="button" className="rounded-lg bg-blue-800 px-4 py-2 text-sm text-white" onClick={()=>setImportOpen(v=>!v)}>{importOpen?"Fermer le dépôt":"Ajouter des documents"}</button>}</header>
+    <header className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="flex flex-wrap items-center gap-3 text-2xl font-semibold text-slate-900">{employeeFolder
+      ? `Dossier de ${selectedEmployee ? `${selectedEmployee.firstName} ${selectedEmployee.lastName}`.trim() : "ce salarié"}`
+      : manage ? "Documents RH" : "Mes documents"}
+      {employeeFolder && <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium"><LockKeyhole size={14} aria-hidden="true"/>Privé</span>}</h1>
+      <p className="mt-2 text-sm text-slate-600">{manage?"Les informations du salarié proviennent de sa fiche. Vérifiez le PDF avant chaque publication.":"Vos documents personnels, classés par période. Aucun document d’un autre salarié n’est accessible."}</p></div>{manage&&canImport&&<button type="button" className="rounded-lg bg-blue-800 px-4 py-2 text-sm text-white" disabled={busy} onClick={()=>setImportOpen(v=>!v)}>{importOpen?"Fermer le dépôt":"Ajouter des fichiers"}</button>}</header>
     {manage&&employeeId&&<div className="flex flex-wrap gap-4 text-sm text-blue-900">{canReturnToEmployee&&<Link className="underline" href={`/employes/${encodeURIComponent(employeeId)}`}>Retour à la fiche employé</Link>}<Link className="underline" href="/rh/documents">Tous les documents RH</Link></div>}
+    {manage&&!employeeId&&employees.length>0&&<div className="flex flex-wrap items-end gap-3 rounded-xl border bg-white p-4">
+      <label className="min-w-48 text-sm">Dossier salarié<select className={control} value={employeeChoice} onChange={e=>setEmployeeChoice(e.target.value)}>
+        <option value="">Choisir un salarié</option>{employees.filter(e=>!e.draft).map(e=><option key={e.id} value={e.id}>{e.lastName} {e.firstName}</option>)}
+      </select></label>
+      {employeeChoice&&<Link className="rounded-lg bg-blue-900 px-4 py-2 text-sm text-white" href={`/rh/documents?employeeId=${encodeURIComponent(employeeChoice)}`}>Ouvrir le dossier</Link>}
+    </div>}
     <p className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-950">Copies documentaires privées. Le circuit officiel de remise des bulletins reste inchangé jusqu’à qualification du service.</p>
     {error&&<p role="alert" className="rounded-lg bg-red-50 p-3 text-red-800">{error} <button type="button" className="underline" onClick={()=>void load()}>Actualiser</button></p>}
     {message&&<p role="status" className="rounded-lg bg-green-50 p-3 text-green-900">{message}</p>}
     {manage&&configure&&<details className="rounded-xl border bg-white p-4"><summary className="cursor-pointer text-sm font-medium text-slate-600">Stockage privé dédié</summary><p className="my-2 text-sm text-slate-600">L’initialisation crée uniquement la racine RH privée dans le compte explicitement configuré. Elle ne déplace aucun document et ne change aucun partage existant.</p><div className="flex flex-wrap gap-3"><button disabled={busy} type="button" className="rounded-lg bg-slate-800 px-4 py-2 text-white disabled:opacity-50" onClick={()=>void action(()=>call("/api/hr-documents/storage",{method:"POST"}),"Racine privée vérifiée.")}>Initialiser ou vérifier le stockage RH</button><button disabled={busy} type="button" className="rounded-lg border px-4 py-2 text-sm" onClick={()=>void action(()=>call("/api/hr-documents/storage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"REASSOCIATE"})}),"Racine réassociée après contrôle du même compte et des droits privés.")}>Réassocier après reconnexion du même compte</button></div></details>}
-    {manage&&canImport&&importOpen&&<ImportPanel employees={employees} employeeId={employeeId} busy={busy} run={action} categories={categories} recognition={recognition} images={images} drafts={drafts} onDraft={e=>setEmployees(list=>[...list,e])}/>}
+    {manage&&canImport&&importOpen&&<ImportPanel employees={employees} employeeId={employeeId} employeeName={selectedEmployee?`${selectedEmployee.firstName} ${selectedEmployee.lastName}`.trim():undefined} busy={busy} run={action} categories={categories} recognition={recognition} images={images} drafts={drafts} onDraft={e=>setEmployees(list=>[...list,e])}/>}
     <div className="rounded-xl border bg-white p-4">
       <div className="flex flex-wrap items-end gap-3"><label className="min-w-32 text-sm">Année chargée<input className={control} inputMode="numeric" maxLength={4} placeholder="Toutes" value={year} onChange={e=>setYear(e.target.value.replace(/\D/g,""))}/></label>
         <label className="min-w-48 text-sm">Catégorie<select className={control} value={kind} onChange={e=>setKind(e.target.value)}><option value="">Toutes</option>{categories.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}</select></label>
@@ -71,18 +118,8 @@ export function Documents({manage=false,configure=false,canImport=false,canPubli
       <p className="my-3 text-xs text-slate-500">Filtres appliqués uniquement aux pages déjà chargées. Utilisez « Charger la suite » pour parcourir les autres documents.</p>
       {loading&&<p role="status">Chargement…</p>}
       {!loading&&!shown.length&&<p className="py-6 text-slate-600">Aucun document dans cette sélection.</p>}
-      <ul className="space-y-4">{shown.map(doc=><li key={doc.id} className="rounded-xl border border-slate-200 p-4">
-        <div className="flex flex-wrap justify-between gap-2"><div className="min-w-0"><h2 className="break-words font-semibold">{doc.title}</h2><p className="text-sm text-slate-600">{categoryLabel(doc.category)} · {doc.period} · {Math.ceil(doc.size/1024)} Ko</p>{manage&&<p className="text-sm font-medium text-blue-950">Destinataire : {employees.find(e=>e.id===doc.employeeId)?.lastName??"identifiant interne"} {employees.find(e=>e.id===doc.employeeId)?.firstName??doc.employeeId}</p>}</div><span className="h-fit rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-900">{labels[doc.status]}</span></div>
-        <div className="mt-3 flex flex-wrap gap-3">{["READY","REVIEWED","PUBLISHED"].includes(doc.status)&&<button type="button" className="rounded-lg border border-blue-200 px-3 py-2 text-sm text-blue-900" onClick={()=>{setError("");void downloadDocument(doc.id).catch(e=>setError(e instanceof Error?e.message:"Téléchargement indisponible."))}}>Télécharger le PDF{manage?" à vérifier":""}</button>}
-          {["READY","REVIEWED","PUBLISHED"].includes(doc.status)&&<button type="button" className="rounded-lg border border-blue-200 px-3 py-2 text-sm text-blue-900" aria-haspopup="dialog" onClick={e=>{previewTrigger.current=e.currentTarget;setError("");setPreview(old=>old?.id===doc.id?old:{id:doc.id,title:doc.title})}}>Visualiser</button>}
-          {manage&&canPublish&&doc.status==="REVIEWED"&&<PublishButton key={`${doc.id}:${doc.version}`} doc={doc} busy={busy} run={action}/>}
-          {manage&&canImport&&doc.status==="REVIEWED"&&<button disabled={busy} type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={()=>void action(()=>call(`/api/hr-documents/${doc.id}/edit`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({expectedVersion:doc.version,key:crypto.randomUUID()})}),"La validation a été retirée. Corrigez puis vérifiez à nouveau.")}>Corriger l’affectation avant publication</button>}
-          {manage&&canPublish&&mailEnabled&&doc.status==="PUBLISHED"&&<button type="button" disabled={busy} className="rounded-lg border px-3 py-2 text-sm" onClick={()=>void action(()=>call(`/api/hr-documents/${doc.id}/notify`,{method:"POST"}),"Notification traitée. Aucun renvoi si elle était déjà envoyée.")}>Notifier la disponibilité par email</button>}
-        </div>
-        {manage&&canImport&&doc.status==="READY"&&<ReviewForm key={`${doc.id}:${doc.version}`} doc={doc} employees={employees} categories={categories} busy={busy} run={action}/>}
-        {doc.status==="UPLOADING"&&manage&&canImport&&doc.canResume&&<RecoveryForm key={`${doc.id}:${doc.version}`} doc={doc} action="RESUME" busy={busy} run={action}/>}
-        {doc.status==="BLOCKED"&&<div className="mt-2 space-y-3"><p className="text-sm text-red-800">L’intégrité ou les accès Drive doivent être revérifiés par une personne RH habilitée.</p>{manage&&canImport&&<><button disabled={busy} type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={()=>void action(()=>call(`/api/hr-documents/${doc.id}/recover`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"REVERIFY",expectedVersion:doc.version})}),"Intégrité et droits revérifiés. Revue et publication à refaire.")}>Revérifier après réparation des accès</button><RecoveryForm key={`${doc.id}:${doc.version}`} doc={doc} action="RESTORE" busy={busy} run={action}/></>}</div>}
-      </li>)}</ul>
+      {employeeFolder&&cursor&&<p className="mb-3 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">Dossier partiellement chargé : les sous-dossiers, les années et leurs compteurs ne montrent que les documents déjà chargés. Utilisez « Charger la suite » en bas de la liste.</p>}
+      {employeeFolder ? <DocumentFolders documents={shown} renderDocument={renderDoc}/> : <ul className="space-y-4">{shown.map(doc=>renderDoc(doc))}</ul>}
       {cursor&&<button type="button" className="mt-4 rounded-lg border px-4 py-2" disabled={loading} onClick={()=>void load(true,cursor)}>Charger la suite</button>}
     </div>
     <DocumentPreview target={preview} onClose={()=>setPreview(null)} returnFocus={previewTrigger}/>
@@ -159,18 +196,114 @@ function FieldNote({id,k}:{id:NonNullable<Proposal["identity"]>;k:IdentityKey}){
   const why=id.missing[k]
   return why?<span className="mt-1 block text-xs text-slate-600">Non lu : {MISSING[why]??why}.</span>:null
 }
-type ImportProps={employees:Employee[];employeeId?:string;busy:boolean;run:Runner;categories:Category[];recognition:boolean;images:boolean;drafts:boolean;onDraft:(e:Employee)=>void}
+/**
+ * Dépôt groupé depuis le dossier d'un salarié : le destinataire est fixé par le dossier, jamais par la lecture.
+ * - OTHER_EMPLOYEE : la lecture (ou le nom du fichier) désigne sans ambiguïté un AUTRE salarié → le fichier bloque tout le lot ;
+ * - AMBIGUOUS (homonymes) et PARTIAL (nom de famille seul) : aucun salarié proposé, la vérification humaine reste requise.
+ */
+export type BatchRecipient="OK"|"OTHER_EMPLOYEE"|"AMBIGUOUS"|"PARTIAL"
+export function batchRecipientCheck(p:Pick<Proposal,"candidates"|"proposedEmployeeId">|undefined,employeeId:string):BatchRecipient{
+  if(!p)return "OK"
+  if(p.proposedEmployeeId)return p.proposedEmployeeId===employeeId?"OK":"OTHER_EMPLOYEE"
+  if(p.candidates.filter(c=>c.level==="STRONG").length>1)return "AMBIGUOUS"
+  return p.candidates.length?"PARTIAL":"OK"
+}
+type ImportProps={employees:Employee[];employeeId?:string;employeeName?:string;busy:boolean;run:Runner;categories:Category[];recognition:boolean;images:boolean;drafts:boolean;onDraft:(e:Employee)=>void}
+type ImportFile = { file: File; key: string }
+type DepositResult = { state: "done" | "error"; message: string }
+
 function ImportPanel(props:ImportProps){
-  const {busy,images,recognition}=props
-  const [files,setFiles]=useState<{file:File;key:string}[]>([])
+  const {busy,images,recognition,employeeId,run,categories}=props
+  const [files,setFiles]=useState<ImportFile[]>([])
+  const [sharedCategory,setSharedCategory]=useState("")
+  const [selectionError,setSelectionError]=useState("")
+  const [results,setResults]=useState<Record<string,DepositResult>>({})
+  const [sending,setSending]=useState(false)
+  const active=useRef(false)
+  const inputs=useRef<HTMLDivElement>(null)
+  const attempts=useRef(new Map<string,FormData>())
   const accept=images?"application/pdf,.pdf,image/jpeg,.jpg,.jpeg,image/png,.png,image/heic,.heic":"application/pdf,.pdf"
-  return <div className="rounded-xl border bg-white p-4"><h2 className="font-semibold">{images?"Dépôt de documents — unitaire ou lot":"Dépôt PDF — unitaire ou lot"}</h2>
-    <p className="my-2 text-sm text-slate-600">10 fichiers au maximum par sélection, 10 Mo par {images?"fichier (PDF, JPG, PNG ou HEIC)":"PDF"}. Chaque affectation est vérifiée séparément. {recognition?"Planificator propose le type, le salarié et la période : rien n’est déposé ni créé sans votre validation, et rien n’est publié automatiquement.":"Aucun classement automatique ni publication par l’IA."}</p>
-    <label className="block text-sm">{images?"Choisir les documents":"Choisir les PDF"}<input type="file" accept={accept} multiple disabled={busy} className="mt-2 block max-w-full text-sm" onChange={e=>setFiles(Array.from(e.target.files??[]).slice(0,10).map(file=>({file,key:crypto.randomUUID()})))}/></label>
-    <div className="space-y-4">{files.map(({file,key})=><ImportItem key={key} file={file} fileKey={key} {...props}/>)}</div>
+  const batch=!!employeeId
+  const pending=files.filter(({key})=>results[key]?.state!=="done")
+  const locked=busy||sending
+
+  async function deposit(){
+    if(active.current||busy||!employeeId||!sharedCategory||!pending.length)return
+    setSelectionError("")
+    const forms=new Map(Array.from(inputs.current?.querySelectorAll<HTMLFormElement>("form[data-import-key]")??[])
+      .map(form=>[form.dataset.importKey,form]))
+    // Avant toute requête : un seul fichier désignant un autre salarié bloque tout le lot (aucun envoi, même des fichiers confirmés).
+    if(pending.some(({key})=>!attempts.current.has(key)&&forms.get(key)?.dataset.importBlocked==="true")){
+      setSelectionError("Dépôt du lot bloqué : un fichier semble concerner un autre salarié que celui de ce dossier. Retirez-le avant de déposer. Aucun fichier n’a été envoyé.");return
+    }
+    const requests:{key:string;body:FormData}[]=[]
+    for(const {key,file} of pending){
+      const previous=attempts.current.get(key)
+      if(previous){requests.push({key,body:previous});continue}
+      const form=forms.get(key)
+      if(!form){setSelectionError("Attendez la fin de la lecture de tous les fichiers.");return}
+      if(!form.reportValidity())return
+      const body=new FormData(form)
+      body.delete("checked")
+      body.set("employeeId",employeeId)
+      body.set("category",sharedCategory)
+      body.set("key",key)
+      body.set("file",file)
+      requests.push({key,body})
+    }
+    active.current=true
+    setSending(true)
+    try {
+      await run(async()=>{
+        for(const {key,body} of requests){
+          attempts.current.set(key,body)
+          try{
+            await call("/api/hr-documents",{method:"POST",body})
+            setResults(old=>({...old,[key]:{state:"done",message:"Déposé · À vérifier"}}))
+          }catch(e){
+            setResults(old=>({...old,[key]:{state:"error",message:e instanceof Error?e.message:"Dépôt indisponible."}}))
+          }
+        }
+      },"Traitement du lot terminé. Consultez le résultat de chaque fichier. Les dépôts restent à vérifier.")
+    }finally{
+      active.current=false
+      setSending(false)
+    }
+  }
+
+  return <div className="rounded-xl border bg-white p-4"><h2 className="font-semibold">{batch?"Ajouter plusieurs fichiers":images?"Dépôt de documents — unitaire ou lot":"Dépôt PDF — unitaire ou lot"}</h2>
+    <p className="my-2 text-sm text-slate-600">10 fichiers au maximum par sélection, 10 Mo par {images?"fichier (PDF, JPG, PNG ou HEIC)":"PDF"}. {batch?"Choisissez la catégorie une fois, puis vérifiez la période et l’affectation de chaque fichier. Aucun document n’est publié lors du dépôt.":recognition?"Vérifiez chaque proposition de classement avant de déposer le fichier.":"Chaque affectation est vérifiée séparément."}</p>
+    {batch&&<div className="mb-3 grid gap-3 sm:grid-cols-2">
+      <p className="text-sm">Salarié <strong className="block">{props.employeeName||"Salarié de ce dossier"}</strong></p>
+      <label className="text-sm">Catégorie du lot<select className={control} value={sharedCategory} disabled={locked||attempts.current.size>0} onChange={e=>{
+        setSharedCategory(e.target.value)
+        inputs.current?.querySelectorAll<HTMLInputElement>('input[name="checked"]').forEach(box=>{box.checked=false})
+      }}>
+        <option value="">Choisir une catégorie</option>{categories.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}
+      </select></label>
+    </div>}
+    <label className="block text-sm">{images?"Choisir les documents":"Choisir les PDF"}<input type="file" accept={accept} multiple disabled={locked} className="mt-2 block max-w-full text-sm" onChange={e=>{
+      const selection=Array.from(e.target.files??[])
+      e.target.value=""
+      if(!selection.length)return
+      if(selection.length>10){setSelectionError("Sélectionnez 10 fichiers au maximum.");return}
+      setSelectionError("");setResults({});attempts.current.clear()
+      setFiles(selection.map(file=>({file,key:crypto.randomUUID()})))
+    }}/></label>
+    {selectionError&&<p role="alert" className="mt-2 text-sm text-red-800">{selectionError}</p>}
+    <div ref={inputs} className="space-y-4">{files.map(({file,key})=><div key={key}>
+      {results[key]?.state==="done"
+        ?<p className="mt-3 rounded-lg bg-green-50 p-3 text-sm text-green-900">{file.name} · {results[key].message}</p>
+        :<><ImportItem file={file} fileKey={key} {...props} busy={locked} batch={batch} attempted={attempts.current.has(key)} onRemove={()=>{setSelectionError("");setFiles(list=>list.filter(f=>f.key!==key))}}/>
+          {results[key]?.state==="error"&&<p role="alert" className="mt-1 text-sm text-red-800">{results[key].message}</p>}
+        </>}
+    </div>)}</div>
+    {batch&&pending.length>0&&<button type="button" disabled={locked||!sharedCategory} className="mt-4 rounded-lg bg-blue-900 px-4 py-2 text-sm text-white disabled:opacity-50" onClick={()=>void deposit()}>
+      {sending?"Dépôt en cours…":attempts.current.size?"Reprendre les dépôts en échec":`Déposer ${pending.length} fichier${pending.length===1?"":"s"}`}
+    </button>}
   </div>
 }
-function ImportItem({file,fileKey,employees,employeeId,busy,run,categories,recognition,drafts,onDraft}:ImportProps&{file:File;fileKey:string}){
+function ImportItem({file,fileKey,employees,employeeId,busy,run,categories,recognition,drafts,onDraft,batch=false,attempted=false,onRemove}:ImportProps&{file:File;fileKey:string;batch?:boolean;attempted?:boolean;onRemove?:()=>void}){
   const [state,setState]=useState<{status:"idle"|"loading"|"done"|"error";proposal?:Proposal}>(recognition?{status:"loading"}:{status:"idle"})
   const [selected,setSelected]=useState<string|undefined>(employeeId)
   // Fin de validité saisie dans la fiche : reprise comme période du document si aucune n'a été proposée.
@@ -187,21 +320,37 @@ function ImportItem({file,fileKey,employees,employeeId,busy,run,categories,recog
   // Salarié proposé : la confiance est celle du nom lu ; venu du seul nom du fichier, il reste « à vérifier ».
   const employeeHint=p?.proposedEmployeeId&&!employeeId&&p.personSource
     ?{confidence:p.personSource==="FILENAME"?0.5:p.identity?.lastName?.confidence??0.5,source:p.personSource}:null
-  const defaults:Partial<Doc>={employeeId:proposedEmployee,category:p?.category?.value,period:p?.period?.value??periodFromDraft,title:p?.title??undefined}
+  const defaults:Partial<Doc>={employeeId:proposedEmployee,category:p?.category?.value,period:p?.period?.value??periodFromDraft,title:batch?file.name.replace(/\.[^.]+$/,"").slice(0,120):p?.title??undefined}
+  // Lot d'un dossier : destinataire fixé. La lecture ne sert qu'à alerter (autre salarié → blocage) ; le titre privé ne reprend
+  // jamais la proposition de la lecture, qui peut contenir un nom lu sur la pièce : nom du fichier, modifiable.
+  const recipient:BatchRecipient=batch&&employeeId?batchRecipientCheck(p,employeeId):"OK"
+  const blocked=recipient==="OTHER_EMPLOYEE"
   return <div className="mt-4 rounded-lg border p-3">
     <p className="break-all text-sm font-medium">{file.name}</p>
     {state.status==="loading"&&<p role="status" className="mt-2 text-sm text-slate-600">Lecture du document en cours…</p>}
     {state.status==="error"&&<p className="mt-2 text-sm text-amber-800">Le document n’a pas pu être lu automatiquement : renseignez les champs à la main.</p>}
     {p&&<ReadingNotice p={p}/>}
     {p&&!p.category&&<p className="mt-2 text-sm text-amber-800">Type non reconnu : choisissez la catégorie à la main.</p>}
-    {p&&strong.length>1&&<p className="mt-2 text-sm font-medium text-amber-800">Plusieurs salariés portent ce nom : choisissez explicitement le bon salarié.</p>}
-    {p&&!strong.length&&p.candidates.length>0&&<p className="mt-2 text-sm text-amber-800">Nom de famille seulement reconnu : vérifiez le salarié.</p>}
-    {state.status!=="loading"&&<form key={`${state.status}:${selected??""}:${employees.length}:${periodFromDraft??""}`} className="mt-3 grid gap-3 sm:grid-cols-2" onSubmit={e=>{
-      e.preventDefault();const f=new FormData(e.currentTarget);f.delete("checked");f.set("key",fileKey);f.set("file",file)
+    {!batch&&p&&strong.length>1&&<p className="mt-2 text-sm font-medium text-amber-800">Plusieurs salariés portent ce nom : choisissez explicitement le bon salarié.</p>}
+    {!batch&&p&&!strong.length&&p.candidates.length>0&&<p className="mt-2 text-sm text-amber-800">Nom de famille seulement reconnu : vérifiez le salarié.</p>}
+    {blocked&&<div role="alert" className="mt-2 rounded-md border border-red-200 bg-red-50 p-2 text-sm font-medium text-red-900">
+      <p>{p?.personSource==="FILENAME"?"Le nom de ce fichier désigne":"La lecture de cette pièce reconnaît"} un autre salarié que celui de ce dossier. Ce fichier ne peut pas être déposé ici et bloque le dépôt du lot : retirez-le, puis déposez-le depuis le dossier du bon salarié.</p>
+      {onRemove&&<button type="button" disabled={busy} className="mt-2 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-normal text-red-900 disabled:opacity-50" onClick={onRemove}>Retirer ce fichier du lot</button>}
+    </div>}
+    {recipient==="AMBIGUOUS"&&<p className="mt-2 text-sm font-medium text-amber-800">Plusieurs salariés portent le nom lu sur ce fichier. Le destinataire reste le salarié de ce dossier : vérifiez sur la pièce qu’elle le concerne avant de confirmer.</p>}
+    {recipient==="PARTIAL"&&<p className="mt-2 text-sm text-amber-800">Nom de famille seulement reconnu sur ce fichier. Le destinataire reste le salarié de ce dossier : vérifiez sur la pièce qu’elle le concerne avant de confirmer.</p>}
+    {state.status!=="loading"&&<form data-import-key={fileKey} data-import-blocked={blocked?"true":undefined} key={`${state.status}:${selected??""}:${employees.length}:${periodFromDraft??""}`} className="mt-3 grid gap-3 sm:grid-cols-2" onSubmit={e=>{
+      e.preventDefault();if(batch)return
+      const f=new FormData(e.currentTarget);f.delete("checked");f.set("key",fileKey);f.set("file",file)
       void run(()=>call("/api/hr-documents",{method:"POST",body:f}),"Document déposé en préparation. Vérification et publication restent nécessaires.")
-    }}><MetadataFields employees={employees} categories={categories} defaults={defaults} hints={p?{employee:employeeHint,category:p.category,period:p.period}:undefined}/>
+    }}>{batch ? <fieldset disabled={busy||attempted||blocked} className="grid min-w-0 gap-3 sm:col-span-2 sm:grid-cols-2">
+      <label className="text-sm">Période<input required type="month" name="period" className={control} defaultValue={defaults.period}/><HintLine hint={p?.period}/></label>
+      <label className="text-sm">Titre privé<input required maxLength={120} name="title" className={control} defaultValue={defaults.title}/></label>
+      {p?.category&&<p className="text-xs text-slate-600 sm:col-span-2">Type proposé : {categoryLabel(p.category.value)}</p>}
+      <label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" name="checked" required className="mt-1"/>J’ai vérifié le salarié, la catégorie et la période sur ce fichier.</label>
+    </fieldset> : <><MetadataFields employees={employees} categories={categories} defaults={defaults} hints={p?{employee:employeeHint,category:p.category,period:p.period}:undefined}/>
       {p&&<label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" name="checked" required className="mt-1"/>J’ai vérifié la proposition (type, salarié, période) sur le document.</label>}
-      <button disabled={busy} className="rounded-lg bg-blue-800 px-3 py-2 text-sm text-white disabled:opacity-50">Déposer ce document privé</button></form>}
+      <button disabled={busy} className="rounded-lg bg-blue-800 px-3 py-2 text-sm text-white disabled:opacity-50">Déposer ce document privé</button></>}</form>}
     {p?.canCreateDraft&&drafts&&!selected&&<DraftPanel file={file} proposal={p} categories={categories} busy={busy} run={run} onCreated={(e,expiry)=>{onDraft(e);setSelected(e.id);if(expiry)setPeriodFromDraft(expiry.slice(0,7))}}/>}
   </div>
 }

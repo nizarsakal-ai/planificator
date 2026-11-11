@@ -1,6 +1,7 @@
 "use client"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { DocumentFolders } from "./DocumentFolders"
 import { categoryDefinition, categoryLabel, type CategoryFamily } from "@/lib/hr-documents/catalog"
 import { fetchHrDocument } from "@/lib/hr-documents/download-client"
 import { DocumentPreview, saveBlob, type PreviewTarget } from "./DocumentPreview"
@@ -54,25 +55,12 @@ export function HrFolderView({ mode, docs, complete, family, query, view, canAcc
       <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5 shrink-0 fill-current text-blue-700"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
       <span className="min-w-0 flex-1 truncate">{label}</span><span className="text-xs text-slate-500">{count}{scope}</span>
     </button>
-  return <div className="space-y-4">
-    <div className="flex flex-wrap gap-2" role="group" aria-label="Dossiers">
-      {folder(null, "Tous les documents", docs.length)}
-      {FAMILY_ORDER.filter(f => counts.has(f)).map(f => folder(f, FAMILY_LABELS[f], counts.get(f)!))}
-    </div>
-    {!complete && <p className="text-xs text-slate-500">Compteurs limités aux documents chargés. Utilisez « Charger la suite » pour parcourir les autres.</p>}
-    <div className="flex flex-wrap items-end gap-3">
-      <label className="min-w-48 flex-1 text-sm">Rechercher dans le dossier<input type="search" value={query} onChange={e => onQuery(e.target.value)} placeholder="Titre, catégorie ou période" className="w-full rounded-lg border border-slate-300 bg-white p-2 text-sm"/></label>
-      <div className="flex gap-1" role="group" aria-label="Présentation">
-        {(["grid", "list"] as const).map(v => <button key={v} type="button" aria-pressed={view === v} onClick={() => onView(v)}
-          className={`rounded-lg border px-3 py-2 text-sm ${view === v ? "border-blue-300 bg-blue-50 text-blue-900" : "border-slate-200 text-slate-600"}`}>{v === "grid" ? "Grille" : "Liste"}</button>)}
-      </div>
-    </div>
-    {!shown.length && <p className="py-6 text-sm text-slate-600">{docs.length ? "Aucun document ne correspond à cette sélection." : "Aucun document dans ce dossier."}</p>}
-    <ul className={view === "grid" ? "grid gap-3 sm:grid-cols-2 lg:grid-cols-3" : "space-y-3"}>{shown.map(doc => {
+  const renderDoc = (doc: FolderDoc, month?: string) => {
       const viewable = VIEWABLE.includes(doc.status)
-      return <li key={doc.id} className="rounded-xl border border-slate-200 bg-white p-4">
+      return <li key={doc.id} className={view === "grid" ? "px-3 py-3" : "rounded-xl border border-slate-200 bg-white p-4"}>
         <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0">
-          <h3 className="break-words font-semibold text-slate-900">{doc.title}</h3>
+          <h3 className="break-words font-semibold text-slate-900">{month ?? doc.title}</h3>
+          {month && <p className="break-words text-xs text-slate-600">{doc.title}</p>}
           <p className="text-sm text-slate-600">{categoryLabel(doc.category)} · {doc.period}{date(doc.createdAt) ? ` · déposé le ${date(doc.createdAt)}` : ""}</p>
           {doc.fromEmployee && mode === "hr" && <p className="text-xs font-medium text-blue-950">Transmis par le salarié</p>}
           {mode === "hr" && doc.status === "PUBLISHED" && <p className="text-xs text-slate-600">{doc.openedAt ? `Ouvert par le salarié le ${date(doc.openedAt)}` : "Pas encore ouvert par le salarié"}</p>}
@@ -87,7 +75,22 @@ export function HrFolderView({ mode, docs, complete, family, query, view, canAcc
           <button type="button" className="mt-2 rounded-lg border border-blue-200 px-3 py-2 text-sm text-blue-900" onClick={() => onResume(doc)}>Reprendre l’envoi</button>
         </div>}
       </li>
-    })}</ul>
+  }
+  return <div className="space-y-4">
+    <div className="flex flex-wrap gap-2" role="group" aria-label="Dossiers">
+      {folder(null, "Tous les documents", docs.length)}
+      {FAMILY_ORDER.filter(f => counts.has(f)).map(f => folder(f, FAMILY_LABELS[f], counts.get(f)!))}
+    </div>
+    {!complete && <p className="text-xs text-slate-500">Compteurs limités aux documents chargés. Utilisez « Charger la suite » pour parcourir les autres.</p>}
+    <div className="flex flex-wrap items-end gap-3">
+      <label className="min-w-48 flex-1 text-sm">Rechercher dans le dossier<input type="search" value={query} onChange={e => onQuery(e.target.value)} placeholder="Titre, catégorie ou période" className="w-full rounded-lg border border-slate-300 bg-white p-2 text-sm"/></label>
+      <div className="flex gap-1" role="group" aria-label="Présentation">
+        {(["grid", "list"] as const).map(v => <button key={v} type="button" aria-pressed={view === v} onClick={() => onView(v)}
+          className={`rounded-lg border px-3 py-2 text-sm ${view === v ? "border-blue-300 bg-blue-50 text-blue-900" : "border-slate-200 text-slate-600"}`}>{v === "grid" ? "Grille" : "Liste"}</button>)}
+      </div>
+    </div>
+    {!shown.length && <p className="py-6 text-sm text-slate-600">{docs.length ? "Aucun document ne correspond à cette sélection." : "Aucun document dans ce dossier."}</p>}
+    {view === "grid" ? <DocumentFolders documents={shown} renderDocument={renderDoc}/> : <ul className="space-y-3">{shown.map(doc => renderDoc(doc))}</ul>}
   </div>
 }
 

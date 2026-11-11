@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { Loader2, Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { BillingWorksiteActions } from "@/components/chantiers/BillingWorksiteActions"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent } from "@/components/ui/card"
@@ -22,8 +23,8 @@ function emptyLine(): QuoteLineFormInput {
   return { articleId: null, designation: "", description: "", unit: "u", quantity: "1", unitPrice: "", discount: "", vatRate: "20" }
 }
 
-export function QuoteForm({ mode, quoteId, initial, worksites, articles }: {
-  mode: "create" | "edit"; quoteId?: string; initial?: QuoteFormInput; worksites: WorksiteOption[]; articles: ArticleOption[]
+export function QuoteForm({ mode, quoteId, initial, worksites, articles, clients }: {
+  mode: "create" | "edit"; quoteId?: string; initial?: QuoteFormInput; worksites: WorksiteOption[]; articles: ArticleOption[]; clients?: { id: string; name: string }[]
 }) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
@@ -68,9 +69,17 @@ export function QuoteForm({ mode, quoteId, initial, worksites, articles }: {
     <form onSubmit={submit} className="space-y-4">
       <Card><CardContent className="grid gap-3 p-4 sm:grid-cols-2">
         <div className="sm:col-span-2">
-          <Label htmlFor="worksite">Chantier *</Label>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Label htmlFor="worksite">Chantier *</Label>
+            {mode === "create" && clients && (
+              <BillingWorksiteActions clients={clients} onWorksiteCreated={(id) => {
+                setForm((current) => ({ ...current, worksiteId: id }))
+                router.refresh()
+              }} />
+            )}
+          </div>
           <select id="worksite" required value={form.worksiteId} onChange={(e) => setForm({ ...form, worksiteId: e.target.value })} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
-            <option value="">— Choisir —</option>
+            <option value="">{worksites.length === 0 ? "Créez un chantier pour continuer" : "— Choisir —"}</option>
             {worksites.map((w) => <option key={w.id} value={w.id}>{w.name} — {w.clientName}</option>)}
           </select>
           {worksite && <p className="mt-1 text-xs text-slate-500">Client : {worksite.clientName}{worksite.clientEmail ? ` · ${worksite.clientEmail}` : " · aucun e-mail (envoi impossible)"}</p>}
@@ -134,7 +143,7 @@ export function QuoteForm({ mode, quoteId, initial, worksites, articles }: {
 
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" onClick={() => router.back()}>Annuler</Button>
-        <Button type="submit" disabled={loading || !totals}>{loading && <Loader2 className="h-4 w-4 animate-spin" />} {mode === "create" ? "Créer le devis" : "Enregistrer"}</Button>
+        <Button type="submit" disabled={loading || !totals || (mode === "create" && !worksites.some((worksite) => worksite.id === form.worksiteId))}>{loading && <Loader2 className="h-4 w-4 animate-spin" />} {mode === "create" ? "Créer le devis" : "Enregistrer"}</Button>
       </div>
     </form>
   )

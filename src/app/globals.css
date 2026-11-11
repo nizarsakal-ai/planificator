@@ -281,3 +281,16 @@
     padding-right: env(safe-area-inset-right);
   }
 }
+
+/* Documents imprimables (contrat de location…) : seule la pièce est imprimée, sans le cadre de l'application. */
+@media print {
+  @page { size: A4; margin: 15mm; }
+  body:has([data-print-document]) { padding: 0; background: #fff; }
+  body:has([data-print-document]) [data-app-backdrop] { display: block; height: auto; overflow: visible; background: #fff; }
+  body:has([data-print-document]) [data-app-backdrop] > :not(:has([data-print-document])) { display: none !important; }
+  body:has([data-print-document]) [data-app-backdrop] > div > :not(main) { display: none !important; }
+  body:has([data-print-document]) [data-app-shell] { overflow: visible; padding: 0; }
+  body:has([data-print-document]) [data-app-shell] > :not(:has([data-print-document])):not([data-print-document]) { display: none !important; }
+  body:has([data-print-document]) [data-app-shell] > div > :not([data-print-document]) { display: none !important; }
+  body:has([data-print-document]) [data-app-backdrop] > div { overflow: visible; display: block; }
+}

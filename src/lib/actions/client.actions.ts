@@ -43,7 +43,7 @@ export async function createClient(formData: FormData) {
   const parsed = createClientSchema.safeParse(raw)
   if (!parsed.success) return { error: parsed.error.errors[0].message }
 
-  await prisma.client.create({
+  const client = await prisma.client.create({
     data: {
       name:      parsed.data.name,
       email:     parsed.data.email || null,
@@ -52,10 +52,12 @@ export async function createClient(formData: FormData) {
       notes:     parsed.data.notes || null,
       companyId: user.companyId!,
     },
+    select: { id: true, name: true },
   })
 
   revalidatePath("/clients")
-  return { success: true }
+  revalidatePath("/chantiers")
+  return { success: true, client }
 }
 
 // ─── Modifier un client ───────────────────────────────────────────────────────

@@ -24,14 +24,14 @@ interface NavCategoryDefinition {
 /** Cartographie validée (visuel « sidebar par catégories »), dans l'ordre d'affichage des catégories. */
 export const NAV_CATEGORY_DEFINITIONS: readonly NavCategoryDefinition[] = [
   { id: "pilotage", label: "Pilotage", icon: LayoutDashboard, hrefs: ["/dashboard", "/rapports"] },
-  { id: "terrain", label: "Chantiers & terrain", icon: HardHat, hrefs: ["/chantiers", "/photos-engins", "/vehicules", "/logements"] },
+  { id: "terrain", label: "Chantiers & terrain", icon: HardHat, hrefs: ["/chantiers", "/photos-engins", "/vehicules", "/stock", "/achats", "/materiel", "/logements"] },
   { id: "planning", label: "Planning", icon: CalendarDays, hrefs: ["/planning", "/planning/moi", "/planning/calendrier", "/planning/gantt", "/planning/personnel"] },
   {
     id: "rh", label: "Équipes & RH", icon: Users,
     hrefs: ["/mes-documents", "/rh/documents", "/employes", "/equipes", "/planning/equipe", "/absences", "/mes-absences", "/pointages", "/pointage", "/notes-de-frais", "/mes-notes-de-frais"],
   },
   { id: "commercial", label: "Commercial", icon: Handshake, hrefs: ["/clients", "/consultations", "/opportunites", "/articles"] },
-  { id: "finance", label: "Finance", icon: Calculator, hrefs: ["/devis", "/factures", "/comptabilite", "/factures-fournisseurs"] },
+  { id: "finance", label: "Finance", icon: Calculator, hrefs: ["/devis", "/factures", "/factures/avoirs", "/comptabilite", "/factures-fournisseurs"] },
   { id: "administration", label: "Administration", icon: Settings, hrefs: ["/super-admin/entreprises", "/parametres"] },
 ]
 

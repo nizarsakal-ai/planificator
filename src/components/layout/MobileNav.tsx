@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation"
 import { Menu, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PlanificatorLogo } from "@/components/brand/PlanificatorLogo"
-import { getActiveNavHref, getNavItems, withHrDocumentNavItems, withAccountingNavItem, withBillingNavItems, withSupplierIntakeNavItem, withWorksitePhotosNavItem, withProspectionNavItem } from "@/lib/navigation/nav-config"
+import { getActiveNavHref, getNavItems, withHrDocumentNavItems, withAccountingNavItem, withBillingNavItems, withSupplierIntakeNavItem, withWorksitePhotosNavItem, withProspectionNavItem, withStockPurchasingNavItems, withEquipmentNavItem } from "@/lib/navigation/nav-config"
 import { getActiveNavCategoryId, groupNavItems } from "@/lib/navigation/nav-categories"
 import { NavCategories } from "@/components/layout/NavCategories"
 import { NavFooter } from "@/components/layout/NavFooter"
@@ -26,6 +26,8 @@ interface MobileNavUser {
   supplierIntakeNavVisible?: boolean
   worksitePhotosNavVisible?: boolean
   prospectionNavVisible?: boolean
+  stockPurchasingNavVisible?: boolean
+  equipmentNavVisible?: boolean
 }
 
 /**
@@ -51,7 +53,7 @@ export function focusableIn(root: HTMLElement): HTMLElement[] {
 export function MobileNav({ user }: { user: MobileNavUser }) {
   const [open, setOpen] = useState(false)
   const pathname = usePathname()
-  const navItems = withProspectionNavItem(withHrDocumentNavItems(withWorksitePhotosNavItem(withSupplierIntakeNavItem(withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true), user.supplierIntakeNavVisible === true), user.worksitePhotosNavVisible === true), user.hrDocumentsNavVisible === true, user.hrDocumentsManageNavVisible === true), user.prospectionNavVisible === true)
+  const navItems = withStockPurchasingNavItems(withProspectionNavItem(withHrDocumentNavItems(withEquipmentNavItem(withWorksitePhotosNavItem(withSupplierIntakeNavItem(withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true), user.supplierIntakeNavVisible === true), user.worksitePhotosNavVisible === true), user.equipmentNavVisible === true), user.hrDocumentsNavVisible === true, user.hrDocumentsManageNavVisible === true), user.prospectionNavVisible === true), user.stockPurchasingNavVisible === true)
   const activeHref = getActiveNavHref(navItems, pathname)
   // Mêmes catégories que la Sidebar, regroupées APRÈS la composition des drapeaux.
   const grouped = groupNavItems(navItems)
