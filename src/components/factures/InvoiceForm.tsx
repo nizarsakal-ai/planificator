@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { Loader2, Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { BillingWorksiteActions } from "@/components/chantiers/BillingWorksiteActions"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent } from "@/components/ui/card"
@@ -18,7 +19,7 @@ import type { ArticleOption, WorksiteOption } from "@/components/devis/QuoteForm
 const VAT_OPTIONS = ["20", "10", "5.5", "2.1", "0"]
 const emptyLine = (): QuoteLineFormInput => ({ articleId: null, designation: "", description: "", unit: "u", quantity: "1", unitPrice: "", discount: "", vatRate: "20" })
 
-export function InvoiceForm({ mode, invoiceId, initial, worksites, articles }: { mode: "create" | "edit"; invoiceId?: string; initial?: InvoiceFormInput; worksites: WorksiteOption[]; articles: ArticleOption[] }) {
+export function InvoiceForm({ mode, invoiceId, initial, worksites, articles, clients }: { mode: "create" | "edit"; invoiceId?: string; initial?: InvoiceFormInput; worksites: WorksiteOption[]; articles: ArticleOption[]; clients?: { id: string; name: string }[] }) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [form, setForm] = useState<InvoiceFormInput>(initial ?? { worksiteId: worksites[0]?.id ?? "", quoteId: null, dueDate: "", subject: "", clientPurchaseOrderRef: "", notes: "", paymentTerms: "", globalDiscount: "", vatReverseCharge: false, lines: [emptyLine()] })
@@ -43,10 +44,20 @@ export function InvoiceForm({ mode, invoiceId, initial, worksites, articles }: {
   return (
     <form onSubmit={submit} className="space-y-4">
       <Card><CardContent className="grid gap-3 p-4 sm:grid-cols-2">
-        <div className="sm:col-span-2"><Label htmlFor="worksite">Chantier *</Label>
+        <div className="sm:col-span-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Label htmlFor="worksite">Chantier *</Label>
+            {mode === "create" && clients && (
+              <BillingWorksiteActions clients={clients} onWorksiteCreated={(id) => {
+                setForm((current) => ({ ...current, worksiteId: id }))
+                router.refresh()
+              }} />
+            )}
+          </div>
           <select id="worksite" required disabled={mode === "edit" && !!initial?.quoteId} value={form.worksiteId} onChange={(e) => setForm({ ...form, worksiteId: e.target.value })} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
-            <option value="">— Choisir —</option>{worksites.map((w) => <option key={w.id} value={w.id}>{w.name} — {w.clientName}</option>)}
-          </select></div>
+            <option value="">{worksites.length === 0 ? "Créez un chantier pour continuer" : "— Choisir —"}</option>{worksites.map((w) => <option key={w.id} value={w.id}>{w.name} — {w.clientName}</option>)}
+          </select>
+        </div>
         <div><Label htmlFor="dueDate">Échéance (vide = émission + délai)</Label><Input id="dueDate" type="date" value={form.dueDate ?? ""} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} /></div>
         <div><Label htmlFor="subject">Objet</Label><Input id="subject" maxLength={200} value={form.subject ?? ""} onChange={(e) => setForm({ ...form, subject: e.target.value })} /></div>
         <div><Label htmlFor="clientPurchaseOrderRef">N° de bon de commande du client (facultatif)</Label><Input id="clientPurchaseOrderRef" maxLength={64} autoComplete="off" value={form.clientPurchaseOrderRef ?? ""} onChange={(e) => setForm({ ...form, clientPurchaseOrderRef: e.target.value })} /></div>
@@ -87,7 +98,7 @@ export function InvoiceForm({ mode, invoiceId, initial, worksites, articles }: {
             <div className="flex justify-between border-t pt-1 text-base font-semibold"><dt>Total TTC</dt><dd>{formatEuro(totals.totalTTCCents)}</dd></div>
           </dl>) : <p className="text-red-600">Saisie invalide.</p>}</div>
       </CardContent></Card>
-      <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => router.back()}>Annuler</Button><Button type="submit" disabled={loading || !totals}>{loading && <Loader2 className="h-4 w-4 animate-spin" />} {mode === "create" ? "Créer le brouillon" : "Enregistrer"}</Button></div>
+      <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => router.back()}>Annuler</Button><Button type="submit" disabled={loading || !totals || (mode === "create" && !worksites.some((worksite) => worksite.id === form.worksiteId))}>{loading && <Loader2 className="h-4 w-4 animate-spin" />} {mode === "create" ? "Créer le brouillon" : "Enregistrer"}</Button></div>
     </form>
   )
 }

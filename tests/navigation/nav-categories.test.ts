@@ -64,14 +64,14 @@ describe("cartographie validée", () => {
       planning: ["Planning", "Calendrier", "Gantt", "Personnel"],
       rh: ["Employés", "Équipes", "Absences", "Pointages", "Notes de frais"],
       commercial: ["Clients", "Consultations", "Bibliothèque"],
-      finance: ["Devis", "Factures", "Comptabilité", "Factures fournisseurs & OCR"],
+      finance: ["Devis", "Factures", "Avoir", "Comptabilité", "Factures fournisseurs & OCR"],
       administration: ["Administration", "Paramètres"],
       footer: ["Mon profil"],
     })
   })
   it("ADMIN, tous drapeaux : Comptabilité dans Finance, pas d'Administration entreprises", () => {
     const s = shape("ADMIN", ALL_ON)
-    assert.deepEqual(s.finance, ["Devis", "Factures", "Comptabilité", "Factures fournisseurs & OCR"])
+    assert.deepEqual(s.finance, ["Devis", "Factures", "Avoir", "Comptabilité", "Factures fournisseurs & OCR"])
     assert.deepEqual(s.administration, ["Paramètres"])
   })
   it("TEAM_LEADER : Mes chantiers → Terrain, Mon planning → Planning, Mon équipe et entrées personnelles → RH", () => {
@@ -99,7 +99,7 @@ describe("cartographie validée", () => {
     assert.deepEqual(s.terrain, ["Chantiers", "Véhicules", "Logements"])
     for (const role of ROLES) {
       const hrefs = groupNavItems(compose(role, off)).categories.flatMap((c) => c.items.map((i) => i.href))
-      for (const hidden of ["/comptabilite", "/devis", "/factures-fournisseurs", "/photos-engins"]) assert.equal(hrefs.includes(hidden), false, `${role} ${hidden}`)
+      for (const hidden of ["/comptabilite", "/devis", "/factures/avoirs", "/factures-fournisseurs", "/photos-engins"]) assert.equal(hrefs.includes(hidden), false, `${role} ${hidden}`)
     }
   })
   it("Photos engins visible pour tous les rôles internes quand le drapeau est actif", () => {

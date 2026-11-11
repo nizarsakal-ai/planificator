@@ -57,7 +57,7 @@ describe("Sidebar", () => {
   it("drapeaux absents : aucun lien masqué rendu (Comptabilité, Devis, Fournisseurs, Photos)", () => {
     pathname = "/dashboard"
     const html = render(Sidebar, user("ADMIN"))
-    for (const href of ["/comptabilite", "/devis", "/factures-fournisseurs", "/photos-engins"]) assert.equal(html.includes(`href="${href}"`), false, href)
+    for (const href of ["/comptabilite", "/devis", "/factures/avoirs", "/factures-fournisseurs", "/photos-engins"]) assert.equal(html.includes(`href="${href}"`), false, href)
   })
 })
 

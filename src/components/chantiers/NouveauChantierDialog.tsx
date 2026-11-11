@@ -19,15 +19,17 @@ interface Client {
 
 interface NouveauChantierDialogProps {
   clients: Client[]
+  initialClientId?: string
+  onCreated?: (worksiteId: string) => void
 }
 
-export function NouveauChantierDialog({ clients }: NouveauChantierDialogProps) {
+export function NouveauChantierDialog({ clients, initialClientId, onCreated }: NouveauChantierDialogProps) {
   const [open, setOpen] = useState(false)
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="bg-[#0f3460] hover:bg-[#0a2540]">
+        <Button type="button" className="bg-[#0f3460] hover:bg-[#0a2540]">
           <Plus className="h-4 w-4 mr-2" />
           Nouveau chantier
         </Button>
@@ -36,7 +38,10 @@ export function NouveauChantierDialog({ clients }: NouveauChantierDialogProps) {
         <DialogHeader>
           <DialogTitle>Créer un chantier</DialogTitle>
         </DialogHeader>
-        <ChantierForm clients={clients} onSuccess={() => setOpen(false)} />
+        <ChantierForm clients={clients} initialClientId={initialClientId} onSuccess={(worksiteId) => {
+          setOpen(false)
+          onCreated?.(worksiteId)
+        }} />
       </DialogContent>
     </Dialog>
   )

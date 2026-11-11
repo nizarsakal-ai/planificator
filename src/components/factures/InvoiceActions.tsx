@@ -25,11 +25,23 @@ export function useBillingAction() {
   return { busy, act }
 }
 
-export function InvoiceActions({ id, status, kind, hasEmail, payable, hasQuote = false }: { id: string; status: string; kind: string; hasEmail: boolean; payable: boolean; hasQuote?: boolean }) {
+export function InvoiceActions({ id, status, kind, hasEmail, payable, hasQuote = false, creditOnly = false }: { id: string; status: string; kind: string; hasEmail: boolean; payable: boolean; hasQuote?: boolean; creditOnly?: boolean }) {
   const { busy, act } = useBillingAction()
   const B = (key: string, label: string, onClick: () => void, variant: "default" | "outline" | "destructive" = "outline") => (
     <Button key={key} size="sm" variant={variant} disabled={busy !== null} onClick={onClick}>{busy === key && <Loader2 className="h-4 w-4 animate-spin" />}{label}</Button>
   )
+  const canCredit = kind !== "CREDIT_NOTE" && ["SENT", "PARTIAL", "PAID"].includes(status)
+  const totalCreditButton = () => B("credit", "Avoir total (annulation)", () => {
+    const reason = window.prompt("Émettre un avoir TOTAL : la facture passera à « annulée » (impossible si des avoirs partiels existent). Motif (facultatif) :", "")
+    if (reason === null) return
+    void act("credit", async () => {
+      const result = await createCreditNote(id, reason)
+      if ("error" in result && result.error) return { ok: false, error: result.error }
+      return { ok: true, number: result.number, id: result.id }
+    }, (result) => `Avoir ${result.number} émis.`, creditOnly ? (result) => `/factures/${result.id}` : undefined)
+  })
+  if (creditOnly) return canCredit ? totalCreditButton() : null
+
   const buttons: React.ReactNode[] = []
   if (kind !== "CREDIT_NOTE") {
     if (status === "DRAFT") {
@@ -42,9 +54,7 @@ export function InvoiceActions({ id, status, kind, hasEmail, payable, hasQuote =
       buttons.push(B("send", "Envoyer au client", () => { if (!hasEmail) { toast.error("Le client n'a pas d'adresse e-mail."); return } void act("send", () => sendInvoiceAction(id), (r) => (r.status === "SENT" ? "Facture envoyée." : "Courrier journalisé (envoi désactivé).")) }))
     }
     if (payable) buttons.push(B("remind", "Relancer", () => { if (!hasEmail) { toast.error("Le client n'a pas d'adresse e-mail."); return } void act("remind", () => sendInvoiceReminderAction(id), (r) => (r.status === "SENT" ? "Relance envoyée." : "Relance journalisée (envoi désactivé).")) }))
-    if (status === "SENT" || status === "PARTIAL" || status === "PAID") {
-      buttons.push(B("credit", "Avoir total (annulation)", () => { const reason = window.prompt("Émettre un avoir TOTAL : la facture passera à « annulée » (impossible si des avoirs partiels existent). Motif (facultatif) :", ""); if (reason !== null) void act("credit", () => createCreditNote(id, reason).then((r) => ("error" in r && r.error ? { ok: false, error: r.error } : { ok: true, number: (r as { number?: string }).number })), (r) => `Avoir ${r.number} émis.`) }))
-    }
+    if (canCredit) buttons.push(totalCreditButton())
   }
   buttons.push(<Button key="pdf" size="sm" variant="outline" asChild><a href={`/api/pdf/facture/${id}`} target="_blank" rel="noopener">PDF</a></Button>)
   return <div className="flex flex-wrap gap-2">{buttons}</div>

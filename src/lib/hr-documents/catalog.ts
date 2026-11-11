@@ -24,6 +24,8 @@ const definitions: CategoryDefinition[] = [
   { code: "WORK_CERTIFICATE", label: "Certificat de travail", family: "CONTRACT", expires: false, extended: true },
   { code: "FINAL_SETTLEMENT", label: "Solde de tout compte", family: "PAY", expires: false, extended: true },
   { code: "MEDICAL_VISIT", label: "Visite médicale", family: "HEALTH", expires: true, extended: true },
+  { code: "LEAVE_DOCUMENT", label: "Document d’absence ou de congé", family: "OTHER", expires: false, extended: true },
+  { code: "HR_FOLLOWUP", label: "Document de suivi RH", family: "OTHER", expires: false, extended: true },
   { code: "QUALIFICATION", label: "Diplôme / habilitation (CACES…)", family: "QUALIFICATION", expires: true, extended: true },
 ]
 

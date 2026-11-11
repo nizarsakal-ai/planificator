@@ -165,6 +165,7 @@ describe("drapeaux, accès, navigation, courriers", () => {
     assert.deepEqual(resolveBillingAccessCore(true, { user: { id: "u", role: "TEAM_LEADER", companyId: "c" } }), { ok: false, reason: "FORBIDDEN" })
     assert.deepEqual(resolveBillingAccessCore(true, { user: { id: "u", role: "ADMIN", companyId: " " } }), { ok: false, reason: "NO_COMPANY" })
     assert.deepEqual(resolveBillingAccessCore(true, { user: { id: "u", role: "SUPER_ADMIN", companyId: "c" } }), { ok: true, context: { userId: "u", companyId: "c", role: "SUPER_ADMIN" } })
+    assert.deepEqual(resolveBillingAccessCore(true, { user: { id: "u", role: "ADMIN", companyId: "c" } }), { ok: true, context: { userId: "u", companyId: "c", role: "ADMIN" } })
   })
   it("navigation : menus existants inchangés ; « Devis » inséré avant « Factures » seulement si visible", () => {
     for (const role of ["ADMIN", "SUPER_ADMIN", "TEAM_LEADER", "EMPLOYEE", "CLIENT"] as const) {
@@ -173,7 +174,7 @@ describe("drapeaux, accès, navigation, courriers", () => {
     }
     const items = withBillingNavItems(withAccountingNavItem(getNavItems("ADMIN"), true), true)
     const i = items.findIndex((x) => x.href === "/devis")
-    assert.equal(items[i + 1]?.href, "/factures"); assert.equal(items[i + 2]?.href, "/comptabilite"); assert.equal(items.filter((x) => x.href === "/devis").length, 1)
+    assert.equal(items[i + 1]?.href, "/factures"); assert.equal(items[i + 2]?.href, "/factures/avoirs"); assert.equal(items[i + 3]?.href, "/comptabilite"); assert.equal(items.filter((x) => x.href === "/devis").length, 1)
     assert.equal(QUOTES_NAV_ITEM.label, "Devis")
     assert.equal(withBillingNavItems(getNavItems("EMPLOYEE"), true).some((x) => x.href === "/devis"), false)
   })

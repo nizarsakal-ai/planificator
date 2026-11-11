@@ -41,6 +41,11 @@ function coreErrorMessage(result: Extract<CoreResult<unknown>, { ok: false }>): 
 // ─── Créer un chantier ───────────────────────────────────────────────────────
 
 export async function createChantier(formData: FormData) {
+  const result = await createChantierWithId(formData)
+  return "error" in result ? result : { success: true }
+}
+
+export async function createChantierWithId(formData: FormData) {
   const user = await requireAdmin()
 
   const raw = {
@@ -66,7 +71,7 @@ export async function createChantier(formData: FormData) {
   if (!result.ok) return { error: coreErrorMessage(result) }
 
   revalidatePath("/chantiers")
-  return { success: true }
+  return { success: true, worksiteId: result.data.worksiteId }
 }
 
 // ─── Modifier un chantier ────────────────────────────────────────────────────

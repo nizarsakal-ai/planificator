@@ -1,5 +1,6 @@
 "use client"
 
+import { useId } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Loader2 } from "lucide-react"
@@ -12,12 +13,15 @@ import { createClient, updateClient } from "@/lib/actions/client.actions"
 
 export type EditableClient = { id: string; name: string; email: string | null; phone: string | null; address: string | null; notes: string | null }
 
+type ClientOption = Pick<EditableClient, "id" | "name">
+
 interface ClientFormProps {
   client?: EditableClient
-  onSuccess: () => void
+  onSuccess: (createdClient?: ClientOption) => void
 }
 
 export function ClientForm({ onSuccess, client }: ClientFormProps) {
+  const formId = useId()
   const {
     register,
     handleSubmit,
@@ -34,7 +38,7 @@ export function ClientForm({ onSuccess, client }: ClientFormProps) {
       if (v !== undefined && v !== null) formData.append(k, v)
     })
 
-    let result
+    let result: { error?: string; client?: ClientOption }
     try {
       result = client ? await updateClient(client.id, formData) : await createClient(formData)
     } catch {
@@ -49,16 +53,19 @@ export function ClientForm({ onSuccess, client }: ClientFormProps) {
 
     toast.success(client ? "Client modifié avec succès !" : "Client créé avec succès !")
     reset()
-    onSuccess()
+    onSuccess(result.client)
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+    <form onSubmit={(event) => {
+      event.stopPropagation()
+      void handleSubmit(onSubmit)(event)
+    }} className="space-y-4">
       {/* Nom */}
       <div className="space-y-1.5">
-        <Label htmlFor="name">Nom du client *</Label>
+        <Label htmlFor={`${formId}-name`}>Nom du client *</Label>
         <Input
-          id="name"
+          id={`${formId}-name`}
           placeholder="Entreprise Dupont, M. Martin..."
           {...register("name")}
           className={errors.name ? "border-red-400" : ""}
@@ -68,9 +75,9 @@ export function ClientForm({ onSuccess, client }: ClientFormProps) {
 
       {/* Email */}
       <div className="space-y-1.5">
-        <Label htmlFor="email">Email</Label>
+        <Label htmlFor={`${formId}-email`}>Email</Label>
         <Input
-          id="email"
+          id={`${formId}-email`}
           type="email"
           placeholder="contact@client.fr"
           {...register("email")}
@@ -81,9 +88,9 @@ export function ClientForm({ onSuccess, client }: ClientFormProps) {
 
       {/* Téléphone */}
       <div className="space-y-1.5">
-        <Label htmlFor="phone">Téléphone</Label>
+        <Label htmlFor={`${formId}-phone`}>Téléphone</Label>
         <Input
-          id="phone"
+          id={`${formId}-phone`}
           type="tel"
           placeholder="06 12 34 56 78"
           {...register("phone")}
@@ -92,9 +99,9 @@ export function ClientForm({ onSuccess, client }: ClientFormProps) {
 
       {/* Adresse */}
       <div className="space-y-1.5">
-        <Label htmlFor="address">Adresse</Label>
+        <Label htmlFor={`${formId}-address`}>Adresse</Label>
         <Input
-          id="address"
+          id={`${formId}-address`}
           placeholder="12 rue des Lilas, 75001 Paris"
           {...register("address")}
         />
@@ -102,9 +109,9 @@ export function ClientForm({ onSuccess, client }: ClientFormProps) {
 
       {/* Notes */}
       <div className="space-y-1.5">
-        <Label htmlFor="notes">Notes internes</Label>
+        <Label htmlFor={`${formId}-notes`}>Notes internes</Label>
         <textarea
-          id="notes"
+          id={`${formId}-notes`}
           rows={3}
           placeholder="Informations utiles sur ce client..."
           {...register("notes")}

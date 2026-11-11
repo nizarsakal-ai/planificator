@@ -154,7 +154,8 @@ describe("aperçu RH : fenêtre interne privée, téléchargement seulement sur 
     assert.match(preview,/useEffect\(\(\) => \(\) => session\.current\?\.close\(\), \[\]\)/)
     const page=readFileSync("src/components/hr-documents/Documents.tsx","utf8")
     // Visualiser n'apparaît que pour les statuts déjà téléchargeables et n'appelle aucune action métier.
-    assert.match(page,/\{\["READY","REVIEWED","PUBLISHED"\]\.includes\(doc\.status\)&&<button[^>]*aria-haspopup="dialog" onClick=\{e=>\{previewTrigger\.current=e\.currentTarget;setError\(""\);setPreview\(/)
+    assert.match(page,/const viewable = \["READY","REVIEWED","PUBLISHED"\]\.includes\(doc\.status\)/)
+    assert.match(page,/\{viewable&&<div[^>]*>\s*<button[^>]*aria-haspopup="dialog" onClick=\{e=>\{previewTrigger\.current=e\.currentTarget;setError\(""\);setPreview\(/)
     const route=readFileSync("src/app/api/hr-documents/[id]/download/route.ts","utf8")
     assert.match(route,/hrService\(\)\.download\(await hrIdentity\(\)/);assert.match(route,/attachment; filename=/)
   })
