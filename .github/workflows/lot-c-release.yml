@@ -61,7 +61,7 @@ jobs:
         run: |
           set -o pipefail
           node --import tsx --experimental-test-module-mocks --test tests/accounting/supplier-intake.test.ts tests/accounting/supplier-intake.actions.test.ts | tee ci-evidence/supplier-intake.log
-          for suite in test:accounting test:accounting:c5 test:billing test:billing:c1 test:billing:c2 test:billing:c3 test:billing:c4 test:billing:fix test:navigation test:database test:prospection; do
+          for suite in test:accounting test:accounting:c5 test:billing test:billing:c1 test:billing:c2 test:billing:c3 test:billing:c4 test:billing:fix test:invoiceimport test:navigation test:database test:prospection; do
             npm run -s "$suite" | tee "ci-evidence/${suite//:/_}.log"
           done
       - name: RH access gates and employee-scoped PostgreSQL
@@ -95,7 +95,7 @@ jobs:
           NODE_ENV: test
         run: |
           set -o pipefail
-          for suite in test:accounting:pg test:accounting:c5:pg test:billing:pg test:billing:c1:pg test:billing:c2:pg test:billing:c3:pg test:billing:c4:pg; do
+          for suite in test:accounting:pg test:accounting:c5:pg test:billing:pg test:billing:c1:pg test:billing:c2:pg test:billing:c3:pg test:billing:c4:pg test:invoiceimport:pg; do
             name="ci_${suite//:/_}"
             sh tests/billing/pg/with-disposable-db.sh "$name" npm run -s "$suite" | tee "ci-evidence/${name}.log"
           done

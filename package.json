@@ -47,6 +47,8 @@
     "test:billing:c4:pg": "node --import tsx --test --test-concurrency=1 tests/billing/c4/pg/credit-notes.pg.test.ts",
     "test:accounting:c5": "node --import tsx --test tests/accounting/c5/c5-unit.test.ts tests/accounting/c5/supplier-classification.test.ts tests/accounting/c5/supplier-file-race-unit.test.ts",
     "test:accounting:c5:pg": "node --import tsx --test --test-concurrency=1 tests/accounting/c5/pg/c5.pg.test.ts tests/accounting/c5/pg/supplier-file-race.pg.test.ts",
+    "test:invoiceimport": "node --import tsx --test tests/invoice-import/unit.test.ts tests/bank-verification/unit.test.ts",
+    "test:invoiceimport:pg": "node --import tsx --test --test-concurrency=1 tests/invoice-import/pg/import.pg.test.ts tests/bank-verification/pg/bank.pg.test.ts",
     "test:billing:fix": "node --import tsx --test tests/billing/fix/fix-unit.test.ts",
     "test:billing:fix:pg": "sh tests/billing/fix/pg/run-all.sh",
     "test:billing:fix:actions:pg": "node --import tsx --experimental-test-module-mocks --test --test-concurrency=1 tests/billing/fix/pg/fix-actions.pg.test.ts",

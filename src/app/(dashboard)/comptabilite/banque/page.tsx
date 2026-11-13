@@ -9,9 +9,22 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { BankImportDialog } from "@/components/comptabilite/BankImportDialog"
 import { AutoReconcileButton, CollisionButtons, MatchButtons } from "@/components/comptabilite/C5Actions"
+import { BankAccountCard, type BankAccountCardProps } from "@/components/comptabilite/BankAccountCard"
+import { isBankAccountVerificationEnabled } from "@/lib/invoice-import/invoice-import-feature-flag"
+import { bankFailureLabel, getBankAccountPanel } from "@/lib/bank-verification/bank-account.service"
+import { PROVIDER_BLOCKED_MESSAGE, resolveBankVerificationProvider } from "@/lib/bank-verification/provider"
 
 export const metadata: Metadata = { title: "Comptabilité — Banque et rapprochement" }
 const STATUS: Record<string, string> = { PENDING: "À rapprocher", MATCHED: "Rapprochée", IGNORED: "Ignorée" }
+// SPEC-BANK-VERIF-001 : message affiché au retour du parcours (le statut réel vient toujours de la base, jamais de ce paramètre).
+const VERIFICATION_NOTICE: Record<string, NonNullable<BankAccountCardProps["notice"]>> = {
+  ok: { tone: "ok", text: "Le prestataire a confirmé le compte." },
+  echec: { tone: "error", text: "La vérification n’a pas abouti." },
+  attente: { tone: "warn", text: "Le prestataire n’a pas encore répondu. Relancez la vérification plus tard." },
+  invalide: { tone: "error", text: "Lien de vérification invalide ou expiré : relancez la vérification." },
+  indisponible: { tone: "warn", text: "Vérification indisponible." },
+  erreur: { tone: "error", text: "Erreur pendant la vérification. Réessayez." },
+}
 
 export default async function BanquePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireAccountingPage()
@@ -20,8 +33,19 @@ export default async function BanquePage({ searchParams }: { searchParams: Promi
   const status = st === "PENDING" || st === "MATCHED" || st === "IGNORED" ? st : "PENDING"
   const list = await listBankTransactions(prisma, ctx, { status, page: Number(searchParam(sp.page) ?? 1) || 1 })
   const candidates = status === "PENDING" ? await Promise.all(list.rows.slice(0, 50).map((r) => matchCandidates(prisma, ctx, r.id))) : []
+  // SPEC-BANK-VERIF-001 : drapeau OFF ⇒ page strictement identique à avant.
+  let bankCard: BankAccountCardProps | null = null
+  if (isBankAccountVerificationEnabled()) {
+    const { account, companyName } = await getBankAccountPanel(prisma, ctx)
+    const provider = resolveBankVerificationProvider()
+    bankCard = {
+      account: account ? { ibanMasked: account.ibanMasked, holderName: account.holderName, status: account.status, provider: account.provider === "sandbox" ? "le simulateur d’essai (non probant)" : account.provider, verifiedAt: account.verifiedAt ? dateFr.format(account.verifiedAt) : null, verifiedHolderName: account.verifiedHolderName, failureLabel: bankFailureLabel(account.failureCode), version: account.version, differsFromInvoiceIban: account.differsFromInvoiceIban } : null,
+      defaultHolder: companyName, providerBlocked: provider.ok ? null : PROVIDER_BLOCKED_MESSAGE[provider.reason], notice: VERIFICATION_NOTICE[searchParam(sp.verification) ?? ""] ?? null,
+    }
+  }
   return (
     <div className="space-y-4">
+      {bankCard && <BankAccountCard {...bankCard} />}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-2 text-sm">{(["PENDING", "MATCHED", "IGNORED"] as const).map((s) => <Link key={s} href={`/comptabilite/banque?statut=${s}`} className={`rounded-md px-3 py-1.5 ${status === s ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"}`}>{STATUS[s]} ({list.counts[s] ?? 0})</Link>)}</div>
         <div className="flex gap-2"><BankImportDialog /><AutoReconcileButton /></div>

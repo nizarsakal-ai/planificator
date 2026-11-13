@@ -8,6 +8,9 @@ import { UserCheck, Mail, Phone, MapPin, FileText, HardHat } from "lucide-react"
 import { NouveauClientDialog } from "@/components/clients/NouveauClientDialog"
 import { ClientActions } from "@/components/clients/ClientActions"
 import { canDeleteClient } from "@/lib/clients/client-actions-view"
+import Link from "next/link"
+import { isBillingCompleteEnabled } from "@/lib/billing/billing-feature-flag"
+import { isInvoiceImportEnabled } from "@/lib/invoice-import/invoice-import-feature-flag"
 
 export const metadata: Metadata = { title: "Clients" }
 
@@ -25,6 +28,12 @@ export default async function ClientsPage() {
     },
     orderBy: { name: "asc" },
   })
+
+  // SPEC-INVOICE-IMPORT-001 : factures importées par client (lien affiché aux seuls rôles admis par la page cible, drapeaux actifs).
+  const showImported = isInvoiceImportEnabled() && isBillingCompleteEnabled() && ["ADMIN", "SUPER_ADMIN"].includes(session.user.role)
+  const importedCounts = showImported
+    ? new Map((await prisma.importedInvoice.groupBy({ by: ["clientId"], where: { companyId: session.user.companyId! }, _count: { _all: true } })).map((g) => [g.clientId, g._count._all]))
+    : new Map<string, number>()
 
   const actifs = clients.filter((c) => c.active).length
   // Affichage seulement : la garde réelle est requireDeleteAdmin dans deleteClient.
@@ -113,6 +122,12 @@ export default async function ClientsPage() {
                   )}
                   {!client.email && !client.phone && !client.address && (
                     <p className="text-xs text-slate-300 italic">Aucune information de contact.</p>
+                  )}
+                  {(importedCounts.get(client.id) ?? 0) > 0 && (
+                    <Link href={`/factures/importees?client=${client.id}`} className="flex items-center gap-2 text-xs text-[#0f3460] underline">
+                      <FileText className="h-3.5 w-3.5 shrink-0" />
+                      {importedCounts.get(client.id)} facture{(importedCounts.get(client.id) ?? 0) > 1 ? "s" : ""} importée{(importedCounts.get(client.id) ?? 0) > 1 ? "s" : ""}
+                    </Link>
                   )}
                 </div>
 
