@@ -1,6 +1,6 @@
 // Liste des factures — facturation complète (Lot C2). Rendue par src/app/(dashboard)/factures/page.tsx quand le drapeau est actif.
 import Link from "next/link"
-import { FileText, Plus, Settings } from "lucide-react"
+import { FileText, Plus, Settings, Upload } from "lucide-react"
 import { prisma } from "@/lib/prisma"
 import type { BillingContext } from "@/lib/billing/access"
 import { invoiceSummary, listInvoices } from "@/lib/billing/invoices/invoice-queries"
@@ -11,15 +11,18 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { InvoiceStatusBadge } from "@/components/factures/InvoiceStatusBadge"
+import { isInvoiceImportEnabled } from "@/lib/invoice-import/invoice-import-feature-flag"
 
 const dateFr = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" })
 const STATUSES = [["", "Tous les statuts"], ["DRAFT", "Brouillon"], ["SENT", "Émise"], ["PARTIAL", "Partiellement payée"], ["PAID", "Payée"], ["CANCELLED", "Annulée"]]
 
 export async function InvoicesPageC2({ ctx, searchParams }: { ctx: BillingContext; searchParams: Record<string, string | string[] | undefined> }) {
   const f = invoiceFiltersFromParams(searchParams)
-  const [list, summary, clients] = await Promise.all([
+  const importEnabled = isInvoiceImportEnabled() // SPEC-INVOICE-IMPORT-001 : OFF ⇒ page strictement identique à avant.
+  const [list, summary, clients, importedCount] = await Promise.all([
     listInvoices(prisma, ctx.companyId, f), invoiceSummary(prisma, ctx.companyId),
     prisma.client.findMany({ where: { companyId: ctx.companyId, active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    importEnabled ? prisma.importedInvoice.count({ where: { companyId: ctx.companyId } }) : Promise.resolve(0),
   ])
   const query = new URLSearchParams(Object.entries(f.raw).filter(([k, v]) => v && k !== "page")).toString()
   const pages = Math.max(1, Math.ceil(list.total / list.pageSize))
@@ -31,9 +34,11 @@ export async function InvoicesPageC2({ ctx, searchParams }: { ctx: BillingContex
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" asChild><Link href="/factures/parametres"><Settings className="h-4 w-4" /> Paramètres</Link></Button>
           <Button variant="outline" asChild><Link href="/devis">Devis</Link></Button>
+          {importEnabled && <Button variant="outline" asChild><Link href="/factures/import"><Upload className="h-4 w-4" /> Importer des factures</Link></Button>}
           <Button asChild><Link href="/factures/nouvelle"><Plus className="h-4 w-4" /> Nouvelle facture</Link></Button>
         </div>
       </div>
+      {importEnabled && importedCount > 0 && <p className="text-sm text-slate-600"><Link className="text-[#0f3460] underline" href="/factures/importees">{importedCount} facture{importedCount > 1 ? "s" : ""} importée{importedCount > 1 ? "s" : ""} d’un autre logiciel</Link> (hors totaux ci-dessous).</p>}
       <div className="grid gap-3 sm:grid-cols-3">
         <Card><CardContent className="p-4"><p className="text-xs uppercase text-slate-500">Total encaissé</p><p className="mt-1 text-2xl font-semibold text-green-700 tabular-nums">{formatEuro(summary.collectedCents)}</p></CardContent></Card>
         <Card><CardContent className="p-4"><p className="text-xs uppercase text-slate-500">Total dû</p><p className="mt-1 text-2xl font-semibold text-blue-700 tabular-nums">{formatEuro(summary.dueCents)}</p><p className="text-xs text-slate-500">{summary.openCount} facture{summary.openCount > 1 ? "s" : ""} en attente</p></CardContent></Card>

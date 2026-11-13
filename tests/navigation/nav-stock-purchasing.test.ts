@@ -171,7 +171,9 @@ describe("L1a : migration du lot A renumérotée après la production", () => {
   // L1b (10/11/2026, modification signalée et tracée) : les migrations du lot B sont renumérotées APRÈS celle du lot A, sur
   // consigne. Elles forment la seule exception, en liste FERMÉE, à « postérieure à toutes les autres » ; tout autre écart
   // reste refusé. L'ordre A < B < garde est vérifié par tests/navigation/nav-equipment.test.ts.
-  const LATER_V2_LOTS = new Set(["20261110130000_v2_lot_b_equipment_rental", "20261110140000_v2_lot_b_booking_overlap_guard"])
+  // 13/11/2026 (modification signalée) : la migration additive SPEC-INVOICE-IMPORT-001 est postérieure aux lots V2 ; elle rejoint
+  // la liste FERMÉE des migrations admises après le lot A. Tout autre écart reste refusé.
+  const LATER_V2_LOTS = new Set(["20261110130000_v2_lot_b_equipment_rental", "20261110140000_v2_lot_b_booking_overlap_guard", "20261113120000_invoice_import_bank_verification"])
   it("présente une seule fois, ancien nom absent, horodatage unique et postérieur à toutes les autres migrations (hors lot B, liste fermée)", () => {
     assert.ok(dirs.includes(LOT_A))
     assert.equal(dirs.some((d) => d.startsWith("20261104120000_v2_lot_a")), false, "ancien horodatage (collision avec prospect_opportunities) absent")

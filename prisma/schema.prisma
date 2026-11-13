@@ -373,6 +373,11 @@ model Company {
   articles                Article[]
   quotes                  Quote[]
   invoices                Invoice[]
+  importedInvoices        ImportedInvoice[]        // SPEC-INVOICE-IMPORT-001
+  importedDocumentFiles   ImportedDocumentFile[]
+  invoiceImportBatches    InvoiceImportBatch[]
+  bankAccount             CompanyBankAccount?      // SPEC-BANK-VERIF-001
+  bankVerificationSessions BankVerificationSession[]
   accountingAccounts      AccountingAccount[]
   accountingJournals      AccountingJournal[]
   fiscalYears             FiscalYear[]
@@ -649,6 +654,7 @@ model Invoice {
   documentSnapshots InvoiceDocumentSnapshot[] // Correctif P2-03 : données documentaires figées à l'émission (au plus une : invoiceId UNIQUE en base)
   creditedInvoice Invoice?  @relation("InvoiceCreditNote", fields: [creditedInvoiceId], references: [id], onDelete: Restrict)
   creditNotes     Invoice[] @relation("InvoiceCreditNote") // Lot C4 : plusieurs avoirs partiels ; un seul TOTAL (index partiel SQL)
+  importedCreditNotes ImportedInvoice[] @relation("ImportedCreditOfNative") // SPEC-INVOICE-IMPORT-001
 
   @@unique([companyId, number])
   @@unique([id, companyId])
@@ -1016,6 +1022,7 @@ model Client {
   clientProfile       ClientProfile?
   quotes              Quote[]
   invoices            Invoice[]
+  importedInvoices    ImportedInvoice[] // SPEC-INVOICE-IMPORT-001
   importDrafts        WorksiteImportDraft[]
   /// PLAN-ACQ-CONSULTATIONS-FIX-001 — partenaires liés (FK composite tenant-safe)
   acquisitionPartners AcquisitionPartner[]
@@ -1081,6 +1088,7 @@ model Worksite {
   dailyReports DailyReport[]
   quotes       Quote[]
   invoices     Invoice[]
+  importedInvoices ImportedInvoice[] // SPEC-INVOICE-IMPORT-001 (chantier facultatif)
   importDrafts WorksiteImportDraft[]
   mileageTrips MileageTrip[] @relation("MileageWorksite")
   tasks        Task[]
@@ -3959,4 +3967,189 @@ model EquipmentMaintenance {
 
   @@index([companyId, equipmentId])
   @@map("equipment_maintenances")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPEC-INVOICE-IMPORT-001 — Import de factures depuis Tiime ou un autre logiciel.
+// Factures clients et avoirs émis dans un autre logiciel : ARCHIVES (numérotation d'origine conservée, aucune relance, aucun
+// paiement, aucune écriture comptable). Ils ne vivent PAS dans `invoices` (numérotation légale Planificator, déclencheurs
+// d'immuabilité, relances J+30, auto-post). Les factures fournisseurs restent dans le parcours Comptabilité → Factures fournisseurs.
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum ImportedDocumentKind {
+  INVOICE
+  CREDIT_NOTE
+}
+
+/// Statut normalisé à partir du statut du logiciel source (le libellé source brut est conservé à côté).
+enum ImportedDocumentStatus {
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+  UNKNOWN
+}
+
+enum InvoiceImportBatchStatus {
+  PREVIEW
+  COMMITTED
+  CANCELLED
+}
+
+/// Pièce originale (PDF/image) d'un import, stockée en base, jamais exposée publiquement (route authentifiée, no-store).
+model ImportedDocumentFile {
+  id           String   @id @default(cuid())
+  companyId    String
+  sha256       String
+  mime         String
+  size         Int
+  data         Bytes
+  originalName String
+  createdAt    DateTime @default(now())
+
+  company  Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  invoices ImportedInvoice[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, sha256])
+  @@map("imported_document_files")
+}
+
+/// Lot d'import : aperçu modifiable (rows) puis validation unique (PREVIEW → COMMITTED), verrou optimiste par `version`.
+model InvoiceImportBatch {
+  id              String                   @id @default(cuid())
+  companyId       String
+  sourceSystem    String // "TIIME" | "OTHER" | "PDF"
+  sourceLabel     String? // nom du logiciel saisi pour "OTHER"
+  status          InvoiceImportBatchStatus @default(PREVIEW)
+  headerSignature String?
+  mapping         Json?
+  rows            Json // lignes d'aperçu (voir src/lib/invoice-import/types.ts)
+  summary         Json?
+  version         Int                      @default(0)
+  createdById     String
+  committedById   String?
+  committedAt     DateTime?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  importedInvoices ImportedInvoice[]
+
+  @@unique([companyId, id])
+  @@index([companyId, status])
+  @@index([companyId, sourceSystem, headerSignature])
+  @@map("invoice_import_batches")
+}
+
+/// Facture client ou avoir importé. Identité métier = (société, nature, numéro normalisé) : un réimport ne crée jamais de doublon.
+model ImportedInvoice {
+  id                        String                 @id @default(cuid())
+  companyId                 String
+  batchId                   String
+  kind                      ImportedDocumentKind
+  sourceSystem              String
+  sourceReference           String?
+  sourceStatus              String?
+  status                    ImportedDocumentStatus @default(UNKNOWN)
+  number                    String
+  numberKey                 String
+  clientId                  String
+  worksiteId                String?
+  issueDate                 DateTime               @db.Date
+  dueDate                   DateTime?              @db.Date
+  totalHTCents              BigInt
+  vatCents                  BigInt
+  totalTTCCents             BigInt
+  creditedNumber            String?
+  creditedImportedInvoiceId String?
+  creditedInvoiceId         String?
+  fileId                    String?
+  contentHash               String
+  notes                     String?
+  createdById               String
+  updatedById               String?
+  createdAt                 DateTime               @default(now())
+  updatedAt                 DateTime               @updatedAt
+
+  company                 Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  batch                   InvoiceImportBatch    @relation(fields: [companyId, batchId], references: [companyId, id], onDelete: Restrict)
+  client                  Client                @relation(fields: [clientId, companyId], references: [id, companyId], onDelete: Restrict)
+  worksite                Worksite?             @relation(fields: [worksiteId], references: [id], onDelete: Restrict)
+  file                    ImportedDocumentFile? @relation(fields: [companyId, fileId], references: [companyId, id], onDelete: Restrict)
+  creditedImportedInvoice ImportedInvoice?      @relation("ImportedCreditOfImported", fields: [companyId, creditedImportedInvoiceId], references: [companyId, id], onDelete: Restrict)
+  importedCreditNotes     ImportedInvoice[]     @relation("ImportedCreditOfImported")
+  creditedInvoice         Invoice?              @relation("ImportedCreditOfNative", fields: [creditedInvoiceId, companyId], references: [id, companyId], onDelete: Restrict)
+
+  @@unique([companyId, id])
+  @@unique([companyId, kind, numberKey])
+  @@index([companyId, clientId])
+  @@index([companyId, issueDate])
+  @@index([worksiteId])
+  @@map("imported_invoices")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPEC-BANK-VERIF-001 — Compte bancaire de la société et preuve de contrôle par un prestataire.
+// « VERIFIED » n'est posé QUE par le service après confirmation serveur-à-serveur du prestataire (contrainte SQL en filet).
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum BankAccountVerificationStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  FAILED
+}
+
+enum BankVerificationSessionStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  EXPIRED
+}
+
+model CompanyBankAccount {
+  id                 String                        @id @default(cuid())
+  companyId          String                        @unique
+  iban               String
+  holderName         String
+  status             BankAccountVerificationStatus @default(UNVERIFIED)
+  provider           String?
+  verifiedAt         DateTime?
+  verifiedHolderName String?
+  failureCode        String?
+  version            Int                           @default(0)
+  createdById        String
+  updatedById        String?
+  createdAt          DateTime                      @default(now())
+  updatedAt          DateTime                      @updatedAt
+
+  company  Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  sessions BankVerificationSession[]
+
+  @@unique([companyId, id])
+  @@map("company_bank_accounts")
+}
+
+model BankVerificationSession {
+  id          String                        @id @default(cuid())
+  companyId   String
+  accountId   String
+  provider    String
+  providerRef String?
+  stateHash   String                        @unique
+  iban        String
+  status      BankVerificationSessionStatus @default(PENDING)
+  expiresAt   DateTime
+  completedAt DateTime?
+  result      Json?
+  createdById String
+  createdAt   DateTime                      @default(now())
+
+  company Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  account CompanyBankAccount @relation(fields: [companyId, accountId], references: [companyId, id], onDelete: Restrict)
+
+  @@index([companyId, accountId])
+  @@map("bank_verification_sessions")
 }

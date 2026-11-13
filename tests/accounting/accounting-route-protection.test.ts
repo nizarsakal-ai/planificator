@@ -34,6 +34,8 @@ describe("/comptabilite (A2) — protection côté serveur de chaque écran (pas
       `${UI_DIR}/balance/export/route.ts`,
       `${UI_DIR}/balance/page.tsx`,
       `${UI_DIR}/banque/page.tsx`,
+      `${UI_DIR}/banque/verification/retour/route.ts`, // 13/11/2026 : SPEC-BANK-VERIF-001 (retour du parcours de vérification du compte)
+      `${UI_DIR}/banque/verification/sandbox/page.tsx`, // 13/11/2026 : simulateur d'essai (404 hors prestataire « sandbox »)
       `${UI_DIR}/ecritures/[id]/page.tsx`,
       `${UI_DIR}/ecritures/nouvelle/page.tsx`,
       `${UI_DIR}/ecritures/page.tsx`,
