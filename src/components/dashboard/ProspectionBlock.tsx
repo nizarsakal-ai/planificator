@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { ArrowRight, Briefcase, CalendarDays, ChevronRight, FileText, Radar } from "lucide-react"
+import { ArrowRight, ChevronRight } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { getDashboardProspection } from "@/lib/prospection/prospection-dashboard.repository"
 import {
@@ -13,17 +13,11 @@ import {
 import { BAND_LABELS, SOURCE_ATTRIBUTION, deadlineLabel, departmentsLabel, sentenceCase } from "@/lib/prospection/prospection-ui"
 import type { ProspectBand, ProspectKind, ProspectSource } from "@/lib/prospection/prospection.types"
 
-const KIND_ROWS: ReadonlyArray<{ kind: ProspectKind; icon: React.ElementType; tint: string; label: string; hint: string }> = [
-  { kind: "TENDER", icon: FileText, tint: "bg-blue-50 text-blue-600", label: "Appels d'offres", hint: "Marchés ouverts" },
-  { kind: "AWARD", icon: Briefcase, tint: "bg-purple-50 text-purple-600", label: "Sous-traitance", hint: "Titulaires à démarcher" },
-  { kind: "EVENT", icon: CalendarDays, tint: "bg-orange-50 text-orange-600", label: "Calendrier", hint: "Festivals récurrents" },
+const KIND_ROWS: ReadonlyArray<{ kind: ProspectKind; label: string; hint: string }> = [
+  { kind: "TENDER", label: "Appels d'offres", hint: "Marchés ouverts" },
+  { kind: "AWARD", label: "Sous-traitance", hint: "Titulaires à démarcher" },
+  { kind: "EVENT", label: "Calendrier", hint: "Festivals récurrents" },
 ]
-
-const KIND_CHIP: Readonly<Record<ProspectKind, string>> = {
-  TENDER: "bg-blue-50 text-blue-700",
-  AWARD: "bg-purple-50 text-purple-700",
-  EVENT: "bg-orange-50 text-orange-700",
-}
 
 const BAND_PILL: Readonly<Record<ProspectBand, string>> = {
   A_TRAITER: "bg-green-50 text-green-700",
@@ -60,49 +54,36 @@ export async function ProspectionBlock({ companyId }: { companyId: string }) {
   const sources = [...new Set(top.map((o) => o.source as ProspectSource))]
 
   return (
-    <Card className="overflow-hidden rounded-[22px]">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-blue-100/70 px-4 pb-3.5 pt-4 md:px-5 md:pt-[18px]">
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-slate-100 px-4 py-4 md:px-5">
         <div>
-          <h2 className="flex items-center gap-2.5 text-[15px] font-bold text-slate-900">
-            <span className="grid h-[30px] w-[30px] place-items-center rounded-[10px] bg-slate-100 text-[#0f3460]">
-              <Radar className="h-4 w-4" />
-            </span>
-            Opportunités prospection
-          </h2>
-          <p className="mt-1 text-xs text-slate-500">Veille sur sources publiques · les meilleures pistes à qualifier</p>
+          <h2 className="text-[15px] font-semibold text-slate-900">Opportunités de prospection</h2>
+          <p className="mt-0.5 text-sm text-slate-500">
+            {newSince24h > 0
+              ? `${newSince24h} nouvelle${newSince24h > 1 ? "s" : ""} piste${newSince24h > 1 ? "s" : ""} depuis hier`
+              : "Aucune nouvelle piste depuis hier"}
+            {" · "}
+            {collectedAtLabel(lastCollectedAt, now)}
+          </p>
         </div>
-        <span className="inline-flex items-center gap-2 rounded-full bg-green-50 px-2.5 py-1 text-[11.5px] font-semibold text-green-700">
-          <span className="relative flex h-[7px] w-[7px]">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-60 motion-reduce:animate-none" />
-            <span className="relative inline-flex h-[7px] w-[7px] rounded-full bg-green-600" />
-          </span>
-          Veille active · {collectedAtLabel(lastCollectedAt, now)}
-        </span>
       </div>
 
-      <div className="grid lg:grid-cols-[260px_1fr]">
-        <div className="grid grid-cols-3 content-start gap-1.5 border-b border-blue-100/70 bg-gradient-to-b from-[#0f3460]/[0.03] to-transparent p-3 lg:grid-cols-1 lg:gap-2 lg:border-b-0 lg:border-r lg:p-4">
-          {KIND_ROWS.map(({ kind, icon: Icon, tint, label, hint }) => (
+      <div className="grid lg:grid-cols-[220px_1fr]">
+        <nav aria-label="Types d'opportunités" className="grid grid-cols-3 border-b border-slate-100 lg:grid-cols-1 lg:content-start lg:border-b-0 lg:border-r">
+          {KIND_ROWS.map(({ kind, label, hint }) => (
             <Link
               key={kind}
               href={`/opportunites?onglet=${KIND_TAB_SLUGS[kind]}`}
-              className="flex flex-col items-start gap-1 rounded-[14px] border border-blue-100/70 bg-white px-2.5 py-2.5 outline-none transition-colors hover:border-blue-200 focus-visible:ring-2 focus-visible:ring-blue-500 lg:flex-row lg:items-center lg:gap-2.5 lg:px-3"
+              className="-ml-px -mt-px flex flex-col gap-1 border-l border-t border-slate-100 px-4 py-3 outline-none transition-colors hover:bg-slate-50 focus-visible:bg-slate-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0f3460] motion-reduce:transition-none lg:flex-row lg:items-baseline lg:justify-between"
             >
-              <span className={`hidden h-7 w-7 shrink-0 place-items-center rounded-[9px] lg:grid ${tint}`}>
-                <Icon className="h-3.5 w-3.5" />
-              </span>
-              <span className="text-[12.5px] font-semibold leading-tight text-slate-700">
+              <span className="text-[13px] leading-tight text-slate-600">
                 {label}
-                <span className="hidden text-[11px] font-medium text-slate-500 lg:block">{hint}</span>
+                <span className="hidden text-xs text-slate-400 lg:block">{hint}</span>
               </span>
-              <span className="text-xl font-bold tracking-tight text-slate-900 tabular-nums lg:ml-auto">{counts[kind]}</span>
+              <span className="text-xl font-semibold tracking-tight text-slate-900 tabular-nums">{counts[kind]}</span>
             </Link>
           ))}
-          <div className="col-span-3 flex items-center gap-2 rounded-[14px] bg-gradient-to-br from-[#0f3460] to-[#1e4f8f] px-3 py-2.5 text-[12.5px] text-white lg:col-span-1 lg:mt-1">
-            <span className="text-xl font-bold tabular-nums">{newSince24h}</span>
-            nouvelle{newSince24h > 1 ? "s" : ""} piste{newSince24h > 1 ? "s" : ""} depuis hier
-          </div>
-        </div>
+        </nav>
 
         <div className="p-1.5 md:p-2">
           {top.length === 0 ? (
@@ -123,13 +104,13 @@ export async function ProspectionBlock({ companyId }: { companyId: string }) {
                 <Link
                   key={o.id}
                   href={`/opportunites?onglet=${KIND_TAB_SLUGS[kind]}`}
-                  className="flex items-start gap-3 border-blue-100/70 px-2 py-3 outline-none transition-colors hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 md:items-center md:gap-3.5 md:px-3 [&+&]:border-t"
+                  className="flex items-start gap-3 border-slate-100 px-2 py-3 outline-none transition-colors hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-[#0f3460] md:items-center md:gap-3.5 md:px-3 [&+&]:border-t"
                 >
                   <ScoreRing score={o.score} />
                   <div className="min-w-0 flex-1">
                     <p className="text-[13.5px] font-semibold text-slate-900 md:truncate">{sentenceCase(o.title)}</p>
                     <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-500">
-                      <span className={`rounded-md px-1.5 py-0.5 text-[10.5px] font-bold uppercase tracking-wide ${KIND_CHIP[kind]}`}>
+                      <span className={`font-medium text-slate-700`}>
                         {KIND_SHORT_LABELS[kind]}
                       </span>
                       {who && <span>{who}</span>}
@@ -151,14 +132,14 @@ export async function ProspectionBlock({ companyId }: { companyId: string }) {
         </div>
       </div>
 
-      <div className="flex flex-col-reverse items-start justify-between gap-2 border-t border-blue-100/70 px-4 py-3 md:flex-row md:items-center md:px-5">
+      <div className="flex flex-col-reverse items-start justify-between gap-2 border-t border-slate-100 px-4 py-3 md:flex-row md:items-center md:px-5">
         <p className="text-[11.5px] text-slate-500">
           Sources : {sources.length > 0 ? sources.map((s) => SOURCE_ATTRIBUTION[s]).join(" · ") : "données publiques, Licence Ouverte 2.0"}.
           Rien n&apos;est envoyé automatiquement.
         </p>
         <Link
           href="/opportunites"
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-md text-[12.5px] font-semibold text-[#0f3460] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-blue-500"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md text-[12.5px] font-semibold text-[#0f3460] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[#0f3460]"
         >
           Voir toutes les opportunités <ArrowRight className="h-3.5 w-3.5" />
         </Link>
