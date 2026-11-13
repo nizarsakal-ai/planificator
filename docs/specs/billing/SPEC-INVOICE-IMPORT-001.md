@@ -53,7 +53,7 @@ Adaptateurs : `sandbox` (tests et préproduction, refusé si `NODE_ENV=productio
 
 Unitaires : ZIP (lecture, bornes, chiffré), tableurs, association de colonnes, normalisation (montants, dates, natures, statuts), analyse (doublons, conflits, ambiguïtés, pièces manquantes), IBAN (mod 97), service bancaire (succès, échec, état expiré/rejoué, titulaire discordant, IBAN modifié, prestataire absent/production).
 PostgreSQL : export synthétique « façon Tiime » CSV + ZIP, « autre logiciel » XLSX avec association mémorisée, PDF scanné via OCR simulé, PDF texte, réimport sans doublon, conflit signalé et jamais écrasé, validations concurrentes, isolation société, facture fournisseur orientée (aucune écriture), invariance des tables de facturation / règlements / numérotation / courriers / comptabilité / fournisseurs / banque, vérification bancaire réussie et échouée.
-Commandes : `npm run test:invoice-import` et `npm run test:invoice-import:pg` (base jetable migrée).
+Commandes : `npm run test:invoiceimport` et `npm run test:invoiceimport:pg` (base jetable migrée).
 
 ## 6. Hors périmètre
 
