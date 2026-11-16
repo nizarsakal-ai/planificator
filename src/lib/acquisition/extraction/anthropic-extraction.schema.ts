@@ -19,6 +19,17 @@ import {
 import { evidenceQuoteInHaystack } from "@/lib/acquisition/extraction/anthropic-extraction.prompt"
 import type { ExtractionProviderResult } from "@/lib/acquisition/extraction/extraction-provider.port"
 
+/**
+ * Tolérance de taille (incident 16/11/2026, PROVIDER_INVALID_OUTPUT « too_big ») :
+ * les maxLength / maxItems du JSON Schema de l'outil ne sont PAS garantis par l'API.
+ * Une citation de 121+ caractères rejetait toute l'extraction alors que la suite
+ * tronque de toute façon à MAX_EVIDENCE_QUOTE. On tronque ici aux mêmes bornes ;
+ * le contrôle « citation présente dans le texte source » reste appliqué (un préfixe
+ * d'une citation exacte reste une citation exacte).
+ */
+const truncateString = (max: number) => (v: unknown) =>
+  typeof v === "string" ? v.trim().slice(0, max) : v
+
 const finiteConf = z
   .number()
   .min(0)
@@ -28,15 +39,25 @@ const finiteConf = z
 const evidenceSchema = z
   .object({
     source: z.enum(EXTRACTION_EVIDENCE_SOURCES),
-    quote: z.string().min(1).max(MAX_EVIDENCE_QUOTE),
+    quote: z.preprocess(truncateString(MAX_EVIDENCE_QUOTE), z.string().min(1).max(MAX_EVIDENCE_QUOTE)),
   })
   .strict()
+
+/** Preuve à citation vide ⇒ preuve absente (au lieu de rejeter toute l'extraction). */
+const dropEmptyEvidence = (v: unknown) =>
+  v &&
+  typeof v === "object" &&
+  !Array.isArray(v) &&
+  (typeof (v as { quote?: unknown }).quote !== "string" ||
+    !(v as { quote: string }).quote.trim())
+    ? undefined
+    : v
 
 const fieldSchema = z
   .object({
     value: z.unknown(),
     confidence: finiteConf,
-    evidence: evidenceSchema.optional(),
+    evidence: z.preprocess(dropEmptyEvidence, evidenceSchema.optional()),
   })
   .strict()
 
@@ -74,15 +95,19 @@ export const anthropicExtractionRawSchema = z
       })
       .strict(),
     warnings: z
-      .array(
+      .preprocess(
+        (v) => (Array.isArray(v) ? v.slice(0, MAX_PROVIDER_WARNINGS) : v),
         z
-          .object({
-            code: z.string().min(1).max(64),
-            field: z.string().max(64).optional(),
-          })
-          .strict()
+          .array(
+            z
+              .object({
+                code: z.preprocess(truncateString(64), z.string().min(1).max(64)),
+                field: z.preprocess(truncateString(64), z.string().max(64).optional()),
+              })
+              .strict()
+          )
+          .max(MAX_PROVIDER_WARNINGS)
       )
-      .max(MAX_PROVIDER_WARNINGS)
       .default([]),
   })
   .strict()
@@ -226,9 +251,18 @@ export function mapAnthropicRawToProviderResult(input: {
   const parsed = anthropicExtractionRawSchema.safeParse(input.raw)
   if (!parsed.success) {
     // Issue codes only: paths, messages and values can contain untrusted data.
+    // Chemins limités aux clés du schéma fermé (jamais de valeur ni de message Zod).
+    const SAFE_PATH = /^[A-Za-z0-9_.]{1,120}$/
     console.info("ANTHROPIC_EXTRACT_SCHEMA_REJECTED", {
       codes: [...new Set(parsed.error.issues.map((issue) => issue.code))],
       issueCount: parsed.error.issues.length,
+      paths: [
+        ...new Set(
+          parsed.error.issues
+            .map((issue) => issue.path.map((p) => (typeof p === "number" ? "#" : String(p))).join("."))
+            .filter((p) => SAFE_PATH.test(p.replace(/#/g, "0")))
+        ),
+      ].slice(0, 10),
     })
     throw new Error("PROVIDER_INVALID_OUTPUT")
   }

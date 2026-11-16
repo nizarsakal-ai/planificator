@@ -798,7 +798,7 @@ describe("AnthropicExtractionAdapter", () => {
     )
   })
 
-  it("quote >120 rejetée", async () => {
+  it("quote >120 tronquée à 120 (incident 16/11 : plus de rejet de toute l'extraction)", async () => {
     const longQuote = "x".repeat(121)
     const client: AnthropicExtractionClient = {
       async messagesCreate() {
@@ -815,17 +815,15 @@ describe("AnthropicExtractionAdapter", () => {
       },
     }
     const adapter = new AnthropicExtractionAdapter({ client, config: baseConfig() })
-    await assert.rejects(
-      () =>
-        adapter.extract({
-          subject: null,
-          normalizedText: longQuote,
-          locale: "fr-FR",
-          attachmentMetadata: [],
-          extractionSchemaVersion: "1",
-        }),
-      (e: unknown) => e instanceof ExtractionProviderError && e.code === "PROVIDER_INVALID_OUTPUT"
-    )
+    const result = await adapter.extract({
+      subject: null,
+      normalizedText: longQuote,
+      locale: "fr-FR",
+      attachmentMetadata: [],
+      extractionSchemaVersion: "1",
+    })
+    assert.equal(result.fields.worksiteName?.value, "X")
+    assert.equal(result.fields.worksiteName?.evidence?.quote?.length, 120)
   })
 
   it("warning libre hostile non persisté", async () => {
