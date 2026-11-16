@@ -8,6 +8,8 @@ import { importDraftReadRepository } from "@/lib/acquisition/review/import-draft
 import { reviewStatusFilterSchema } from "@/lib/acquisition/review/import-draft-review.schema"
 import { ConsultationsList } from "@/components/consultations/ConsultationsList"
 import { Card, CardContent } from "@/components/ui/card"
+import { MailboxHealthBanner } from "@/components/consultations/MailboxHealthBanner"
+import { loadAcquisitionMailboxStatuses } from "@/lib/acquisition/connector/acquisition-mailbox-health.repository"
 
 export const metadata: Metadata = { title: "Consultations" }
 
@@ -41,11 +43,15 @@ export default async function ConsultationsPage({
     ? (statusParse.data as WorksiteImportDraftStatus)
     : undefined
 
-  const items = await importDraftReadRepository.listImportDraftsForReview({
-    companyId: session.user.companyId,
-    status: statusFilter,
-    limit: 50,
-  })
+  const [items, mailboxes] = await Promise.all([
+    importDraftReadRepository.listImportDraftsForReview({
+      companyId: session.user.companyId,
+      status: statusFilter,
+      limit: 50,
+    }),
+    // Une panne de lecture santé ne doit jamais masquer la liste des consultations.
+    loadAcquisitionMailboxStatuses(session.user.companyId).catch(() => []),
+  ])
 
   return (
     <div className="space-y-4 p-6">
@@ -55,6 +61,7 @@ export default async function ConsultationsPage({
           Revue humaine des brouillons d’import chantier (emails @lauralu.fr).
         </p>
       </div>
+      <MailboxHealthBanner mailboxes={mailboxes} />
       <Suspense fallback={<div className="text-sm text-muted-foreground">Chargement…</div>}>
         <ConsultationsList
           items={items}

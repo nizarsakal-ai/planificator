@@ -135,3 +135,21 @@ export function acquisitionGmailOAuthErrorMessage(reason: string | null | undefi
       return "Échec de la connexion Gmail Acquisition."
   }
 }
+
+/** Adresse proposée à Google (login_hint) — format borné, jamais réfléchie ailleurs. */
+const LOGIN_HINT_RE = /^[^\s@<>"']{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$/
+
+export function parseLoginHint(raw: string | null | undefined): string | null {
+  const value = raw?.trim().toLowerCase() ?? ""
+  return LOGIN_HINT_RE.test(value) ? value : null
+}
+
+/** URL du bouton « Reconnecter » d'une boîte. */
+export function acquisitionGmailReconnectUrl(gmailAddress: string): string {
+  return `/api/acquisition/gmail/connect?hint=${encodeURIComponent(gmailAddress)}`
+}
+
+/** Une boîte qui demande une action humaine (affichage bouton / bandeau). */
+export function mailboxNeedsReconnect(health: MailboxHealth): boolean {
+  return health.level === "error"
+}

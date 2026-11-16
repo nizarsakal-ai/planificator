@@ -338,3 +338,47 @@ export async function sendLogementCreatedEmail({
     </div>`,
   })
 }
+
+// ─── Boîte Gmail Consultations inaccessible → admins ─────────────────────────
+
+/**
+ * Alerte : Gmail refuse l'accès à une boîte Consultations (jeton révoqué/expiré
+ * ou accès Gmail non accordé). Aucune donnée d'e-mail, aucun jeton, aucun code HTTP.
+ * Lève une erreur si Resend refuse l'envoi (l'appelant journalise, best-effort).
+ */
+export async function sendAcquisitionMailboxAlertEmail({
+  to, gmailAddress, companyName, consecutiveFailures,
+}: {
+  to: string; gmailAddress: string; companyName: string; consecutiveFailures: number
+}) {
+  const url = `${APP_URL}/parametres`
+  const safeAddress = escapeHtml(gmailAddress)
+  const safeCompany = escapeHtml(companyName)
+  const { error } = await resend.emails.send({
+    from: FROM, to,
+    subject: `Action requise — reconnecter la boîte Gmail ${gmailAddress}`,
+    html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px;">
+      ${header()}
+      <h2 style="color:#1e293b;margin-bottom:8px;">Les consultations ne sont plus importées</h2>
+      <p style="color:#64748b;line-height:1.6;">
+        Gmail refuse l'accès à la boîte <strong>${safeAddress}</strong> (${safeCompany})
+        depuis ${consecutiveFailures} synchronisations consécutives.
+        Aucune nouvelle consultation n'est importée tant que la boîte n'est pas reconnectée.<br><br>
+        Dans Paramètres, cliquez sur <strong>Reconnecter</strong> à côté de la boîte,
+        puis sur l'écran Google <strong>cochez « Lire vos e-mails Gmail »</strong> avant de valider.
+      </p>
+      ${btn(url, "Reconnecter la boîte")}
+      ${footer()}
+    </div>`,
+  })
+  if (error) throw new Error(`RESEND_${error.name ?? "ERROR"}`)
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+}

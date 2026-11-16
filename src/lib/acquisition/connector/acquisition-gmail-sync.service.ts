@@ -29,15 +29,16 @@ async function recordFailureBestEffort(
     occurredAt: Date
     mailboxKey: string
   }
-): Promise<void> {
+): Promise<{ consecutiveFailures: number } | null> {
   try {
-    await cursorRepository.recordFailure(
+    const record = await cursorRepository.recordFailure(
       args.companyId,
       args.source,
       args.errorCode,
       args.occurredAt,
       args.mailboxKey
     )
+    return record ? { consecutiveFailures: record.consecutiveFailures } : null
   } catch (telemetryError) {
     console.warn("[acquisition-gmail-sync] RECORD_FAILURE_FAILED", {
       companyId: args.companyId,
@@ -45,6 +46,7 @@ async function recordFailureBestEffort(
       errorCode: args.errorCode,
       internalCode: safeInternalErrorCode(telemetryError),
     })
+    return null
   }
 }
 
@@ -143,6 +145,11 @@ export interface SyncAcquisitionMailForCompanyInput {
    * `false` désactive explicitement le shadow pour ce run.
    */
   mailShadow?: MailShadowRunContext | false
+  /**
+   * Appelé après chaque échec d'accès Gmail (listing refusé), avec le compteur
+   * d'échecs consécutifs à jour. Best-effort : une exception est absorbée.
+   */
+  onProviderAccessLost?: (info: { consecutiveFailures: number }) => Promise<unknown>
 }
 
 /**
@@ -292,13 +299,24 @@ export async function syncAcquisitionMailForCompany(
         }
       }
       const message = e instanceof Error ? e.message : "PROVIDER_LIST_FAILED"
-      await recordFailureBestEffort(cursorRepository, {
+      const failure = await recordFailureBestEffort(cursorRepository, {
         companyId,
         source: provider.source,
         errorCode: "PROVIDER_LIST_FAILED",
         occurredAt: now(),
         mailboxKey,
       })
+      if (failure && input.onProviderAccessLost) {
+        try {
+          await input.onProviderAccessLost({ consecutiveFailures: failure.consecutiveFailures })
+        } catch (hookError) {
+          console.warn("[acquisition-gmail-sync] ACCESS_LOST_HOOK_FAILED", {
+            companyId,
+            mailboxKey,
+            internalCode: safeInternalErrorCode(hookError),
+          })
+        }
+      }
       const gmailDiagnostics = safeGmailDiagnostics(e)
       return withShadow({
         ...base,

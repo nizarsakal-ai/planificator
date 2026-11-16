@@ -13,6 +13,7 @@ import { runAcquisitionAttachmentDownloadOrchestrator } from "@/lib/acquisition/
 import { getAttachmentRecoveryCronConfig } from "@/lib/acquisition/attachments/attachment-recovery-cron-feature-flag"
 import { runAcquisitionAttachmentRecoveryOrchestrator } from "@/lib/acquisition/attachments/attachment-recovery-orchestrator"
 import { syncAcquisitionMailForCompany } from "@/lib/acquisition/connector/acquisition-gmail-sync.service"
+import { notifyAcquisitionMailboxAccessLost } from "@/lib/acquisition/connector/acquisition-mailbox-alert"
 import {
   runAcquisitionGmailSyncDriver,
   type AcquisitionGmailCronRunResult,
@@ -231,6 +232,12 @@ async function runGmailSync(input: {
         cursorRepository: acquisitionScanCursorRepository,
         deadlineAtMs,
         shouldContinue,
+        onProviderAccessLost: ({ consecutiveFailures }) =>
+          notifyAcquisitionMailboxAccessLost({
+            companyId: connection.companyId,
+            gmailAddress: connection.gmailAddress,
+            consecutiveFailures,
+          }),
       }),
     log: (event, payload) => {
       console.log("[acquisition-orchestrator:gmail]", event, {

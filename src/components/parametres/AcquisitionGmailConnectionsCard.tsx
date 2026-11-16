@@ -2,9 +2,11 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { Mail, Plus, CheckCircle } from "lucide-react"
+import { Mail, Plus, CheckCircle, RefreshCw } from "lucide-react"
 import {
   acquisitionGmailOAuthErrorMessage,
+  acquisitionGmailReconnectUrl,
+  mailboxNeedsReconnect,
   type MailboxHealth,
   type MailboxHealthLevel,
 } from "@/lib/acquisition/connector/acquisition-mailbox-health"
@@ -42,9 +44,9 @@ export function AcquisitionGmailConnectionsCard({
   const router = useRouter()
   const [loading, setLoading] = useState(false)
 
-  function connect() {
+  function connect(url = "/api/acquisition/gmail/connect") {
     setLoading(true)
-    window.location.href = "/api/acquisition/gmail/connect"
+    window.location.href = url
   }
 
   return (
@@ -83,6 +85,17 @@ export function AcquisitionGmailConnectionsCard({
                 <span className={`shrink-0 ${LEVEL_CLASS[health.level]}`}>{health.label}</span>
               </div>
               {health.hint && <p className="text-xs text-slate-500">{health.hint}</p>}
+              {mailboxNeedsReconnect(health) && (
+                <button
+                  type="button"
+                  onClick={() => connect(acquisitionGmailReconnectUrl(c.gmailAddress))}
+                  disabled={loading}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-60"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Reconnecter {c.gmailAddress}
+                </button>
+              )}
             </li>
           )
         })}
@@ -90,7 +103,7 @@ export function AcquisitionGmailConnectionsCard({
 
       <button
         type="button"
-        onClick={connect}
+        onClick={() => connect()}
         disabled={loading}
         className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-60"
       >
