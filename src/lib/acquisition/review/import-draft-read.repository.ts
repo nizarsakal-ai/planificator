@@ -19,13 +19,40 @@ function clampLimit(limit?: number): number {
   return Math.min(Math.floor(limit), MAX_LIMIT)
 }
 
+/** Borne défensive : au-delà, la page est vide plutôt qu'un scan coûteux. */
+export const MAX_REVIEW_LIST_OFFSET = 10_000
+
+function clampOffset(offset?: number): number {
+  if (!Number.isFinite(offset) || !offset || offset <= 0) return 0
+  return Math.min(Math.floor(offset as number), MAX_REVIEW_LIST_OFFSET)
+}
+
 export class ImportDraftReadRepository {
   constructor(private readonly db: PrismaClient = prisma) {}
 
+  async countImportDraftsForReview(input: {
+    companyId: string
+    status?: WorksiteImportDraftStatus
+  }): Promise<number> {
+    if (!input.companyId) return 0
+    return this.db.worksiteImportDraft.count({
+      where: {
+        companyId: input.companyId,
+        ...(input.status ? { status: input.status } : {}),
+      },
+    })
+  }
+
+  /**
+   * Ordre métier : e-mail reçu le plus récent d'abord (et non `updatedAt` : une
+   * mise à jour technique — relance, marquage obsolète — ne doit pas faire
+   * remonter ou disparaître une consultation). Paginé par `offset`.
+   */
   async listImportDraftsForReview(input: {
     companyId: string
     status?: WorksiteImportDraftStatus
     limit?: number
+    offset?: number
   }): Promise<ImportDraftListItem[]> {
     if (!input.companyId) return []
     const rows = await this.db.worksiteImportDraft.findMany({
@@ -33,8 +60,9 @@ export class ImportDraftReadRepository {
         companyId: input.companyId,
         ...(input.status ? { status: input.status } : {}),
       },
-      orderBy: { updatedAt: "desc" },
+      orderBy: [{ acquisitionMessage: { receivedAt: "desc" } }, { id: "desc" }],
       take: clampLimit(input.limit),
+      skip: clampOffset(input.offset),
       select: {
         id: true,
         status: true,

@@ -10,13 +10,17 @@ import { ConsultationsList } from "@/components/consultations/ConsultationsList"
 import { Card, CardContent } from "@/components/ui/card"
 import { MailboxHealthBanner } from "@/components/consultations/MailboxHealthBanner"
 import { loadAcquisitionMailboxStatuses } from "@/lib/acquisition/connector/acquisition-mailbox-health.repository"
+import {
+  CONSULTATIONS_PAGE_SIZE,
+  parseConsultationsPage,
+} from "@/lib/acquisition/review/consultation-ui"
 
 export const metadata: Metadata = { title: "Consultations" }
 
 export default async function ConsultationsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>
+  searchParams: Promise<{ status?: string; page?: string }>
 }) {
   const session = await auth()
   if (!session?.user) redirect("/login")
@@ -43,14 +47,19 @@ export default async function ConsultationsPage({
     ? (statusParse.data as WorksiteImportDraftStatus)
     : undefined
 
-  const [items, mailboxes] = await Promise.all([
+  const page = parseConsultationsPage(sp.page)
+  const companyId = session.user.companyId
+
+  const [items, total, mailboxes] = await Promise.all([
     importDraftReadRepository.listImportDraftsForReview({
-      companyId: session.user.companyId,
+      companyId,
       status: statusFilter,
-      limit: 50,
+      limit: CONSULTATIONS_PAGE_SIZE,
+      offset: (page - 1) * CONSULTATIONS_PAGE_SIZE,
     }),
+    importDraftReadRepository.countImportDraftsForReview({ companyId, status: statusFilter }),
     // Une panne de lecture santé ne doit jamais masquer la liste des consultations.
-    loadAcquisitionMailboxStatuses(session.user.companyId).catch(() => []),
+    loadAcquisitionMailboxStatuses(companyId).catch(() => []),
   ])
 
   return (
@@ -58,7 +67,7 @@ export default async function ConsultationsPage({
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Consultations</h1>
         <p className="text-sm text-muted-foreground">
-          Revue humaine des brouillons d’import chantier (emails @lauralu.fr).
+          Revue humaine des brouillons d’import chantier, du plus récent au plus ancien.
         </p>
       </div>
       <MailboxHealthBanner mailboxes={mailboxes} />
@@ -66,6 +75,9 @@ export default async function ConsultationsPage({
         <ConsultationsList
           items={items}
           currentStatus={statusFilter ?? null}
+          page={page}
+          pageSize={CONSULTATIONS_PAGE_SIZE}
+          total={total}
         />
       </Suspense>
     </div>

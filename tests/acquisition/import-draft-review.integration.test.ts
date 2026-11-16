@@ -74,6 +74,7 @@ describe("acquisition review — intégration PostgreSQL 005C", RUN, () => {
     over: {
       status?: "PENDING_REVIEW" | "FAILED" | "PENDING_EXTRACTION"
       updatedAt?: Date
+      receivedAt?: Date
       warningData?: unknown
     } = {}
   ) {
@@ -84,7 +85,7 @@ describe("acquisition review — intégration PostgreSQL 005C", RUN, () => {
         externalMessageId: `ext-005c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         senderEmail: "carlene@lauralu.fr",
         subject: "Consultation test 005C",
-        receivedAt: new Date(),
+        receivedAt: over.receivedAt ?? new Date(),
         attachments: [],
       },
       db
@@ -121,9 +122,17 @@ describe("acquisition review — intégration PostgreSQL 005C", RUN, () => {
     }
   }
 
-  it("liste tenant A uniquement + filtre + tri updatedAt DESC", async () => {
-    const older = await seedDraft(companyA, { updatedAt: new Date("2026-01-01T00:00:00.000Z") })
-    const newer = await seedDraft(companyA, { updatedAt: new Date("2026-06-01T00:00:00.000Z") })
+  it("liste tenant A uniquement + filtre + tri e-mail reçu DESC (pas updatedAt)", async () => {
+    // `older` vient d'être mis à jour (relance…) mais l'e-mail est plus ancien :
+    // il doit rester derrière la consultation reçue plus récemment.
+    const older = await seedDraft(companyA, {
+      receivedAt: new Date("2026-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-06-02T00:00:00.000Z"),
+    })
+    const newer = await seedDraft(companyA, {
+      receivedAt: new Date("2026-06-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-01-02T00:00:00.000Z"),
+    })
     await seedDraft(companyB)
 
     const repo = new ImportDraftReadRepository(db)
@@ -165,6 +174,11 @@ describe("acquisition review — intégration PostgreSQL 005C", RUN, () => {
     }
     const list = await repo.listImportDraftsForReview({ companyId: companyA, limit: 999 })
     assert.equal(list.length, 50)
+    // Page 2 : les suivantes, sans recouvrement ; le total couvre toutes les pages.
+    const total = await repo.countImportDraftsForReview({ companyId: companyA })
+    const page2 = await repo.listImportDraftsForReview({ companyId: companyA, limit: 50, offset: 50 })
+    assert.equal(page2.length, total - 50)
+    assert.ok(page2.every((x) => !list.some((y) => y.draftId === x.draftId)))
   })
 
   it("bundle + status snapshot cross-tenant null ; pas de secrets", async () => {

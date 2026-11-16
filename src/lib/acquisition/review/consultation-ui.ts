@@ -288,3 +288,32 @@ export function mapAttachmentReadOutcomes(extractedData: unknown): AttachmentRea
   }
   return out
 }
+
+/** Pagination de la liste Consultations (50 par page, ordre : reçu le plus récent). */
+export const CONSULTATIONS_PAGE_SIZE = 50
+export const CONSULTATIONS_MAX_PAGE = 200
+
+export function parseConsultationsPage(raw: string | null | undefined): number {
+  if (!raw || !/^\d{1,4}$/.test(raw)) return 1
+  const n = Number(raw)
+  return n >= 1 ? Math.min(n, CONSULTATIONS_MAX_PAGE) : 1
+}
+
+export function consultationsPageHref(status: string | null, page: number): string {
+  const params = new URLSearchParams()
+  if (status) params.set("status", status)
+  if (page > 1) params.set("page", String(page))
+  const q = params.toString()
+  return q ? `/consultations?${q}` : "/consultations"
+}
+
+export function consultationsPageRange(
+  page: number,
+  pageSize: number,
+  shown: number,
+  total: number
+): { from: number; to: number; total: number; hasPrev: boolean; hasNext: boolean } {
+  const from = shown === 0 ? 0 : (page - 1) * pageSize + 1
+  const to = shown === 0 ? 0 : from + shown - 1
+  return { from, to, total, hasPrev: page > 1, hasNext: to < total && page < CONSULTATIONS_MAX_PAGE }
+}
