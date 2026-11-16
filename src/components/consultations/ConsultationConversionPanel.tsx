@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { AddressAutocomplete } from "@/components/ui/address-autocomplete"
 import { Label } from "@/components/ui/label"
 import { convertImportDraftAction } from "@/lib/actions/acquisition-conversion.actions"
 import { formatConversionSuccessMessage } from "@/lib/acquisition/conversion/conversion-success-message"
@@ -175,10 +176,10 @@ export function ConsultationConversionPanel({
           </div>
           <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="newClientAddress">Adresse (optionnel)</Label>
-            <Input
+            <AddressAutocomplete
               id="newClientAddress"
               value={newAddress}
-              onChange={(e) => setNewAddress(e.target.value)}
+              onValueChange={setNewAddress}
               disabled={pending}
             />
           </div>
