@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { Download, Eye, FileText, LockKeyhole } from "lucide-react"
 import { DocumentFolders } from "./DocumentFolders"
+import { documentPeriod } from "./space-client"
 import { availableCategories, categoryLabel, type CategoryDefinition } from "@/lib/hr-documents/catalog"
 import { fetchHrDocument } from "@/lib/hr-documents/download-client"
 import { DocumentPreview, saveBlob, type PreviewTarget } from "./DocumentPreview"
@@ -148,16 +149,6 @@ function hintText(h?:Hint|null){
   if(h.source==="FILENAME")return "Suggéré d’après le nom du fichier seulement (non lu sur la pièce) — à vérifier."
   const from={MRZ:"la bande MRZ",TEXT:"le texte de la pièce",EXTERNAL:"une lecture externe"}[h.source]??"le document"
   return h.confidence>=0.7?`Lu dans ${from}.`:`Lu dans ${from} — à vérifier.`
-}
-/**
- * Période technique (AAAA-MM) exigée par le serveur pour le classement et la détection de doublon, jamais saisie :
- * valeur proposée ou déjà enregistrée si valide, sinon le mois du dépôt. Remplace le champ `type="month"`,
- * rendu en texte libre par Safari et Firefox (« juin 2030 » envoyé tel quel → refus systématique du serveur).
- */
-function documentPeriod(proposed?:string|null){
-  if(proposed&&/^\d{4}-(0[1-9]|1[0-2])$/.test(proposed))return proposed
-  const now=new Date()
-  return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`
 }
 function HintLine({hint}:{hint?:Hint|null}){
   const text=hintText(hint);if(!text)return null

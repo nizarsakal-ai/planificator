@@ -1,6 +1,6 @@
 "use client"
 import { useRef, useState } from "react"
-import { callJson, type Category, type FolderDoc } from "./space-client"
+import { callJson, documentPeriod, type Category, type FolderDoc } from "./space-client"
 
 /**
  * Transmission d'une pièce par le salarié à ses RH : aucun choix de salarié (le serveur impose celui de la session),
@@ -11,11 +11,14 @@ export function EmployeeSubmission({ categories, images, requestId, onSubmitted,
 }) {
   const [sending, setSending] = useState(false), [error, setError] = useState(""), [formKey, setFormKey] = useState(0)
   const key = useRef<string | null>(null)
+  // Période figée avec la clé d'idempotence : une reprise après échec renvoie exactement la même intention.
+  const period = useRef<string | null>(null)
   const accept = images ? "application/pdf,.pdf,image/jpeg,.jpg,.jpeg,image/png,.png,image/heic,.heic" : "application/pdf,.pdf"
   return <form key={formKey} className="grid gap-3 rounded-xl border bg-white p-4 sm:grid-cols-2" onSubmit={async e => {
     e.preventDefault(); if (sending) return
     const form = new FormData(e.currentTarget)
-    key.current ??= crypto.randomUUID(); form.set("key", key.current)
+    if (!key.current) { key.current = crypto.randomUUID(); period.current = documentPeriod() }
+    form.set("key", key.current); form.set("period", period.current ?? documentPeriod())
     if (requestId) form.set("requestId", requestId)
     setSending(true); setError("")
     try {
@@ -28,7 +31,6 @@ export function EmployeeSubmission({ categories, images, requestId, onSubmitted,
       <button type="button" className="underline" onClick={onCancelRequest}>Ne pas lier à la demande</button></p>}
     <label className="text-sm">Type de pièce<select required name="category" defaultValue={categories.some(c => c.code === "OTHER") ? "OTHER" : ""} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm">
       <option value="">Choisir</option>{categories.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}</select></label>
-    <label className="text-sm">Période concernée<input required type="month" name="period" className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm"/></label>
     <label className="text-sm sm:col-span-2">Intitulé<input required maxLength={120} name="title" className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm"/></label>
     <label className="text-sm sm:col-span-2">Fichier ({images ? "PDF, JPG, PNG ou HEIC" : "PDF"}, 10 Mo au maximum)<input required type="file" name="file" accept={accept} disabled={sending} className="mt-1 block max-w-full text-sm"/></label>
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800 sm:col-span-2">{error}</p>}

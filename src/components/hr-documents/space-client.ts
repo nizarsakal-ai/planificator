@@ -7,6 +7,17 @@ export type FolderDoc = { id: string; employeeId: string; title: string; period:
   size: number; createdAt?: string; publishedAt?: string | null; openedAt?: string; fromEmployee?: boolean }
 export type Category = Pick<CategoryDefinition, "code" | "label" | "family">
 
+/**
+ * Période technique (AAAA-MM) exigée par le serveur pour le classement et la détection de doublon, jamais saisie :
+ * valeur proposée ou déjà enregistrée si valide, sinon le mois du dépôt. Remplace le champ `type="month"`,
+ * rendu en texte libre par Safari et Firefox (« juin 2030 » envoyé tel quel → refus systématique du serveur).
+ */
+export function documentPeriod(proposed?: string | null): string {
+  if (proposed && /^\d{4}-(0[1-9]|1[0-2])$/.test(proposed)) return proposed
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
+}
+
 /** Appel JSON : une page de connexion HTML ou une redirection n'est jamais lue comme une réponse valide. */
 export async function callJson<T>(url: string, init?: RequestInit, fetchImpl: typeof fetch = fetch): Promise<T> {
   let response: Response
