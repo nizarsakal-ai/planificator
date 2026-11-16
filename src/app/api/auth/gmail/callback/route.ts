@@ -100,6 +100,8 @@ export async function GET(req: NextRequest) {
       refreshToken: encrypt(tokenData.refresh_token),
       tokenExpiry:  expiry,
       connectedById: userId,
+      // Une reconnexion est une nouvelle connexion : la date affichée doit le refléter.
+      connectedAt:  new Date(),
     },
   })
 

@@ -11,6 +11,8 @@ import { AcquisitionGmailConnectionsCard } from "@/components/parametres/Acquisi
 import { loadAcquisitionMailboxStatuses } from "@/lib/acquisition/connector/acquisition-mailbox-health.repository"
 import { listConsultationSources } from "@/lib/acquisition/admin/partner-sources.repository"
 import { ConsultationSourcesCard } from "@/components/parametres/ConsultationSourcesCard"
+import { assessBookingGmailHealth } from "@/lib/booking/booking-gmail-health"
+import { isBookingGmailScanEnabled } from "@/lib/booking/booking-gmail-scan-flag"
 import { WorksitePhotosDriveCard } from "@/components/parametres/WorksitePhotosDriveCard"
 import { isWorksitePhotosEnabled } from "@/lib/worksite-photos/feature-flag"
 import { CompanyIdentityCard } from "@/components/parametres/CompanyIdentityCard"
@@ -63,7 +65,7 @@ export default async function ParametresPage({
       }),
       prisma.gmailConnection.findUnique({
         where: { companyId: company.id },
-        select: { gmailAddress: true, connectedAt: true },
+        select: { gmailAddress: true, connectedAt: true, tokenExpiry: true },
       }),
     ])
 
@@ -162,7 +164,21 @@ export default async function ParametresPage({
         </Card>
 
         {/* Connexion Gmail Booking (inchangé) */}
-        <GmailConnectionCard connection={gmailConnection} gmailParam={gmailParam} />
+        <GmailConnectionCard
+          connection={
+            gmailConnection
+              ? {
+                  gmailAddress: gmailConnection.gmailAddress,
+                  connectedAt: gmailConnection.connectedAt,
+                  health: assessBookingGmailHealth({
+                    tokenExpiry: gmailConnection.tokenExpiry,
+                    scanEnabled: isBookingGmailScanEnabled(),
+                  }),
+                }
+              : null
+          }
+          gmailParam={gmailParam}
+        />
 
         {/* Connexions Gmail Acquisition multi-compte */}
         <AcquisitionGmailConnectionsCard
