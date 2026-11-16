@@ -228,3 +228,13 @@ describe("mode history (legacy, sans port) : plus aucun e-mail écarté au-delà
     assert.equal(page.hasMore, false)
   })
 })
+
+describe("redactGmailQueryEmails (diagnostic réconciliation)", () => {
+  it("masque les adresses, garde les domaines partenaires", async () => {
+    const { redactGmailQueryEmails } = await import("@/lib/acquisition/connector/gmail-mail-provider.adapter")
+    assert.equal(
+      redactGmailQueryEmails('after:2026/10/17 (from:eric@ats67.com OR from:"a b@x.fr" OR from:@lauralu.fr)'),
+      "after:2026/10/17 (from:<email> OR from:<email> OR from:@lauralu.fr)"
+    )
+  })
+})

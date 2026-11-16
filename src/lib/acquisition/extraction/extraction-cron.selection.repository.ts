@@ -75,13 +75,28 @@ const DETECTION_PROOF_SQL = Prisma.sql`
 `
 
 /**
- * Miroir unitaire du prédicat FAILED selector (fail-closed sur NULL/false).
- * La sélection réelle reste en SQL.
+ * Codes d'échec relancés automatiquement malgré `extractionRetryable = false`
+ * (borné par `extractionAttemptCount < maxAttempts` + backoff).
+ *
+ * PROVIDER_INVALID_OUTPUT : la sortie du modèle n'est pas déterministe et le schéma
+ * de validation évolue (incident 16/11/2026 : citations > 120 caractères rejetées,
+ * corrigé depuis). Sans relance, la consultation restait bloquée jusqu'à une
+ * action manuelle « Relancer l'extraction ».
+ */
+export const AUTO_RETRIED_EXTRACTION_ERROR_CODES = ["PROVIDER_INVALID_OUTPUT"] as const
+
+/**
+ * Miroir unitaire du prédicat FAILED selector (fail-closed sur NULL/false, sauf
+ * codes relancés automatiquement). La sélection réelle reste en SQL.
  */
 export function isFailedDraftRetrySelectable(input: {
   extractionRetryable: boolean | null | undefined
+  lastExtractionErrorCode?: string | null
 }): boolean {
-  return input.extractionRetryable === true
+  if (input.extractionRetryable === true) return true
+  return (AUTO_RETRIED_EXTRACTION_ERROR_CODES as readonly string[]).includes(
+    input.lastExtractionErrorCode ?? ""
+  )
 }
 
 function eligibleWhereSql(input: {
@@ -120,7 +135,10 @@ function eligibleWhereSql(input: {
       d."status" = CAST('PENDING_EXTRACTION' AS "WorksiteImportDraftStatus")
       OR (
         d."status" = CAST('FAILED' AS "WorksiteImportDraftStatus")
-        AND d."extractionRetryable" = true
+        AND (
+          d."extractionRetryable" = true
+          OR d."lastExtractionErrorCode" IN (${Prisma.join([...AUTO_RETRIED_EXTRACTION_ERROR_CODES])})
+        )
         AND d."lastExtractionErrorAt" IS NOT NULL
         AND d."lastExtractionErrorAt" + ${BACKOFF_INTERVAL_SQL} <= ${input.now}
       )
