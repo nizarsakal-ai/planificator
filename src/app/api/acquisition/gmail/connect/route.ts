@@ -5,13 +5,15 @@ import {
   signGmailOAuthPayload,
 } from "@/lib/auth/gmail-oauth-state"
 import { resolveAcquisitionGmailOAuthRedirectUri } from "@/lib/acquisition/connector/acquisition-gmail-oauth-redirect"
+import { ACQUISITION_GMAIL_REQUIRED_SCOPE } from "@/lib/acquisition/connector/acquisition-gmail-oauth-callback"
+import { parseLoginHint } from "@/lib/acquisition/connector/acquisition-mailbox-health"
 
 /**
  * Initie OAuth Gmail Acquisition (multi-compte).
  * GET /api/acquisition/gmail/connect
  * Ne touche jamais gmail_connections (Booking).
  */
-export async function GET() {
+export async function GET(req: Request) {
   const session = await auth()
   if (!session?.user) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 })
@@ -47,12 +49,15 @@ export async function GET() {
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: "code",
-    scope:
-      "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.email",
+    scope: `${ACQUISITION_GMAIL_REQUIRED_SCOPE} https://www.googleapis.com/auth/userinfo.email`,
     access_type: "offline",
-    prompt: "consent",
+    // select_account : le bon compte est choisi explicitement ; consent : refresh_token garanti.
+    prompt: "select_account consent",
     state,
   })
+  // « Reconnecter » une boîte : Google présélectionne ce compte (simple indication, non contraignante).
+  const loginHint = parseLoginHint(new URL(req.url).searchParams.get("hint"))
+  if (loginHint) params.set("login_hint", loginHint)
 
   return NextResponse.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`)
 }
