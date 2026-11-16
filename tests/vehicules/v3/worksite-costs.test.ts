@@ -58,7 +58,7 @@ describe("coûts par chantier", () => {
   it("hors chantier en dernier ; totaux", () => {
     assert.equal(result.rows.at(-1)!.key, UNASSIGNED_KEY)
     assert.equal(result.rows.at(-1)!.expensesTotal, 300)
-    assert.deepEqual(result.totals, { km: 1780, estimatedFuelCost: 311.5, expensesTotal: 407.5 })
+    assert.deepEqual(result.totals, { km: 1780, estimatedFuelCost: 311.5, expensesTotal: 407.5, cardSpendTotal: 0 })
   })
   it("sans prix disponible : litres affichés, montant non calculé", () => {
     const r = computeWorksiteCosts({ tours: [tour("t1", "2026-11-20", "2026-11-20", 100, "alz")], expenses: [], assignments: [], worksiteNames: names, fuelPrice: null })
@@ -96,5 +96,23 @@ describe("prix moyen national du gazole", () => {
     const { nationalAveragePrice } = await import("@/lib/vehicules/v3/fuel-estimate-providers")
     const fetchFn = (async () => new Response(JSON.stringify({ results: [{ prix: 42 }] }))) as unknown as typeof fetch
     await assert.rejects(nationalAveragePrice("SP98", fetchFn))
+  })
+})
+
+describe("frais de la carte du camion par chantier", () => {
+  it("péages, repas, hôtels rattachés au chantier du jour", () => {
+    const r = computeWorksiteCosts({
+      tours: [tour("t1", "2026-11-20", "2026-11-27", 100, "alz")],
+      expenses: [],
+      assignments: [],
+      cardSpend: [{ day: "2026-11-20", kind: "TOLL", amount: 64.2 }, { day: "2026-11-21", kind: "MEAL", amount: 48 }, { day: "2026-11-21", kind: "HOTEL", amount: 89 }, { day: "2026-12-02", kind: "MEAL", amount: 15 }],
+      worksiteNames: names,
+      fuelPrice: null,
+    })
+    const alz = r.rows.find((x) => x.worksiteId === "alz")!
+    assert.deepEqual(alz.cardSpend, { TOLL: 64.2, MEAL: 48, HOTEL: 89 })
+    assert.equal(alz.cardSpendTotal, 201.2)
+    assert.equal(r.rows.find((x) => x.key === UNASSIGNED_KEY)!.cardSpendTotal, 15)
+    assert.equal(r.totals.cardSpendTotal, 216.2)
   })
 })

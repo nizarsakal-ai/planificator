@@ -13,6 +13,7 @@ import { MileageDomainError } from "../mileage-domain"
 import { requireMileageSession, type MileageSession } from "../mileage-access"
 import { authorizeVehicleLocked } from "../vehicle-authority"
 import { nationalAveragePrice } from "./fuel-estimate-providers"
+import { loadCompanyCardSpend } from "./bank-fuel-service"
 import {
   computeWorksiteCosts,
   truckAveragePrice,
@@ -118,7 +119,13 @@ export async function readWorksiteCosts(truckId: string, rawQuery: unknown, deps
     const worksites = worksiteIds.length
       ? await tx.worksite.findMany({ where: { companyId, id: { in: worksiteIds } }, select: { id: true, name: true } })
       : []
+    // Péages, repas, hôtels payés avec la carte de ce camion (relevés bancaires importés).
+    const { otherSpend } = await loadCompanyCardSpend(tx, companyId, timeZone, from, to)
+    const cardSpend = otherSpend
+      .filter((c) => c.truckId === truckId)
+      .map((c) => ({ day: c.day, kind: c.category, amount: -c.amountCents / 100 }))
     return {
+      cardSpend,
       costTours,
       costExpenses,
       costAssignments,
@@ -144,6 +151,7 @@ export async function readWorksiteCosts(truckId: string, rawQuery: unknown, deps
       tours: data.costTours,
       expenses: data.costExpenses,
       assignments: data.costAssignments,
+      cardSpend: data.cardSpend,
       worksiteNames: data.worksiteNames,
       fuelPrice,
     }),
