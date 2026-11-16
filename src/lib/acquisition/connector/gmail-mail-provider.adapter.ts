@@ -262,7 +262,15 @@ export class GmailMailProviderAdapter implements MailProviderPort {
       connectionId,
     })
 
-    if (paginationMode === "lookback" || !cursor) {
+    // Réconciliation (production, port knownMessageIds présent) : TOUJOURS la requête
+    // filtrée partenaires sur la fenêtre de lookback. Les ids déjà traités sont
+    // exclus avant lecture, donc le coût reste minimal. Garanties :
+    //  - aucun e-mail partenaire perdu (le mode history tronquait les pages > pageSize
+    //    et ne revenait jamais en arrière — e-mails lauralu manquants, 16/11/2026) ;
+    //  - un expéditeur ajouté au registre est rattrapé au run suivant, sans curseur.
+    // Sans port (tests, legacy) : comportement history/lookback historique.
+    const reconcile = this.knownMessageIds !== undefined
+    if (reconcile || paginationMode === "lookback" || !cursor) {
       return this.listViaQuery(
         accessToken,
         await this.resolveLookbackQuery(companyId),
@@ -309,12 +317,14 @@ export class GmailMailProviderAdapter implements MailProviderPort {
     )
 
     const messageIds = dedupeHistoryMessageIds(historyData.history ?? [])
-    const idsForPage = messageIds.slice(0, maxResults)
+    // Tous les ids de la page d'historique : la pagination suivante (pageToken) ne
+    // revient jamais sur ceux qu'on écarterait ici (perte silencieuse d'e-mails).
+    const idsForPage = messageIds
     const toFetch = await this.filterUnknownIds(scope.companyId, scope.connectionId, idsForPage)
     const messages = await this.fetchAndMapMessages(accessToken, toFetch)
 
     const nextPageToken = historyData.nextPageToken ?? null
-    const hasMore = Boolean(nextPageToken) || messageIds.length > maxResults
+    const hasMore = Boolean(nextPageToken)
 
     return {
       messages,
