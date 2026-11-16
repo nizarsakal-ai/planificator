@@ -86,6 +86,16 @@ export function assessAcquisitionMailboxHealth(input: {
       }
     }
 
+    if (cursor.lastErrorCode === "PROVIDER_RATE_LIMITED") {
+      return {
+        level: "warning",
+        label: "limite Gmail atteinte",
+        hint:
+          `Gmail limite temporairement le nombre de lectures${sinceLabel}. ` +
+          "Reprise automatique à la prochaine synchronisation, aucune action nécessaire.",
+      }
+    }
+
     if (cursor.lastErrorCode === "MESSAGE_INGESTION_FAILED") {
       return {
         level: "warning",
@@ -96,8 +106,9 @@ export function assessAcquisitionMailboxHealth(input: {
       }
     }
 
+    // Cause non liée à l'accès Gmail : pas de bouton « Reconnecter » trompeur.
     return {
-      level: failures >= 2 ? "error" : "warning",
+      level: "warning",
       label: "échec de synchronisation",
       hint: `${failures} échec(s) consécutif(s)${sinceLabel}. Nouvel essai automatique.`,
     }

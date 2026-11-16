@@ -183,13 +183,39 @@ export function safeGmailDiagnostics(error: unknown): GmailHttpDiagnostics | und
   return sanitizeGmailDiagnostics(error.diagnostics)
 }
 
+/**
+ * Google signale aussi les quotas par un 403 (et non 429) : ce n'est pas un refus
+ * d'accès. Le confondre avec GMAIL_UNAUTHORIZED fait croire qu'il faut reconnecter
+ * la boîte et arrête la synchro sans nouvel essai (incident 16/11/2026).
+ */
+export const GOOGLE_RATE_LIMIT_REASONS: ReadonlySet<string> = new Set([
+  "rateLimitExceeded",
+  "userRateLimitExceeded",
+  "dailyLimitExceeded",
+  "quotaExceeded",
+  "RATE_LIMIT_EXCEEDED",
+])
+
+export function isGoogleRateLimitReason(reason: string | null | undefined): boolean {
+  return typeof reason === "string" && GOOGLE_RATE_LIMIT_REASONS.has(reason)
+}
+
 export function mapHttpStatusToGmailError(
   status: number,
   context: "list" | "history" | "message" | "profile" | "token",
   messageId?: string,
   diagnostics?: GmailHttpDiagnostics
 ): GmailProviderError {
-  const error = mapHttpStatusToGmailErrorCore(status, context, messageId)
+  const error =
+    status === 403 && isGoogleRateLimitReason(diagnostics?.gmailErrorReason)
+      ? new GmailProviderError({
+          code: "GMAIL_RATE_LIMITED",
+          message: "Gmail API rate limit exceeded (403)",
+          retryable: true,
+          global: true,
+          messageId,
+        })
+      : mapHttpStatusToGmailErrorCore(status, context, messageId)
   return diagnostics
     ? new GmailProviderError({
         code: error.code,

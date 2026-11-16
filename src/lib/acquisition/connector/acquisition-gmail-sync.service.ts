@@ -299,14 +299,16 @@ export async function syncAcquisitionMailForCompany(
         }
       }
       const message = e instanceof Error ? e.message : "PROVIDER_LIST_FAILED"
+      // Limite de débit Gmail ≠ accès refusé : pas d'alerte « reconnexion requise ».
+      const rateLimited = code === "GMAIL_RATE_LIMITED"
       const failure = await recordFailureBestEffort(cursorRepository, {
         companyId,
         source: provider.source,
-        errorCode: "PROVIDER_LIST_FAILED",
+        errorCode: rateLimited ? "PROVIDER_RATE_LIMITED" : "PROVIDER_LIST_FAILED",
         occurredAt: now(),
         mailboxKey,
       })
-      if (failure && input.onProviderAccessLost) {
+      if (failure && !rateLimited && input.onProviderAccessLost) {
         try {
           await input.onProviderAccessLost({ consecutiveFailures: failure.consecutiveFailures })
         } catch (hookError) {

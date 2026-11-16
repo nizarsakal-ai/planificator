@@ -5,7 +5,7 @@
 import { AcquisitionSource } from "@prisma/client"
 import type { CanonicalMailMessage, MailPage } from "@/lib/acquisition/connector/connector.types"
 import type { GmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
-import { FetchGmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
+import { createDefaultGmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
 import type { AcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
 import { PrismaAcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
 import { GmailProviderError } from "@/lib/acquisition/connector/gmail.errors"
@@ -150,7 +150,7 @@ export class GmailMailProviderAdapter implements MailProviderPort {
   constructor(deps: GmailMailProviderAdapterDeps = {}) {
     this.connectionClient =
       deps.connectionClient ?? new PrismaAcquisitionGmailConnectionClient()
-    this.apiClient = deps.apiClient ?? new FetchGmailApiClient()
+    this.apiClient = deps.apiClient ?? createDefaultGmailApiClient()
     this.lookbackDays =
       deps.lookbackDays ??
       Number(process.env.ACQUISITION_GMAIL_LOOKBACK_DAYS ?? DEFAULT_LOOKBACK_DAYS)

@@ -114,6 +114,71 @@ export class FetchGmailApiClient implements GmailApiClient {
   }
 }
 
+export interface RateLimitRetryOptions {
+  /** Nouveaux essais après un GMAIL_RATE_LIMITED (défaut 3 → attentes 1 s, 2 s, 4 s). */
+  maxRetries?: number
+  baseDelayMs?: number
+  sleep?: (ms: number) => Promise<void>
+  random?: () => number
+}
+
+const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Décorateur : rejoue un appel Gmail limité en débit avec attente exponentielle + gigue.
+ * Toute autre erreur (accès refusé, 404, 5xx…) est propagée immédiatement.
+ */
+export class RateLimitRetryingGmailApiClient implements GmailApiClient {
+  private readonly maxRetries: number
+  private readonly baseDelayMs: number
+  private readonly sleep: (ms: number) => Promise<void>
+  private readonly random: () => number
+
+  constructor(
+    private readonly inner: GmailApiClient,
+    options: RateLimitRetryOptions = {}
+  ) {
+    this.maxRetries = Math.max(0, Math.min(options.maxRetries ?? 3, 6))
+    this.baseDelayMs = Math.max(0, options.baseDelayMs ?? 1_000)
+    this.sleep = options.sleep ?? defaultSleep
+    this.random = options.random ?? Math.random
+  }
+
+  private async withRetry<T>(call: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await call()
+      } catch (error) {
+        const rateLimited = error instanceof GmailProviderError && error.code === "GMAIL_RATE_LIMITED"
+        if (!rateLimited || attempt >= this.maxRetries) throw error
+        const delay = this.baseDelayMs * 2 ** attempt
+        await this.sleep(delay + Math.floor(this.random() * delay * 0.25))
+      }
+    }
+  }
+
+  getProfile(accessToken: string) {
+    return this.withRetry(() => this.inner.getProfile(accessToken))
+  }
+  listHistory(accessToken: string, startHistoryId: string, maxResults: number, pageToken?: string) {
+    return this.withRetry(() => this.inner.listHistory(accessToken, startHistoryId, maxResults, pageToken))
+  }
+  listMessages(accessToken: string, query: string, maxResults: number, pageToken?: string) {
+    return this.withRetry(() => this.inner.listMessages(accessToken, query, maxResults, pageToken))
+  }
+  getMessage(accessToken: string, messageId: string) {
+    return this.withRetry(() => this.inner.getMessage(accessToken, messageId))
+  }
+  getAttachment(accessToken: string, messageId: string, attachmentId: string) {
+    return this.withRetry(() => this.inner.getAttachment(accessToken, messageId, attachmentId))
+  }
+}
+
+/** Client Gmail de production : HTTP + nouvel essai sur limite de débit. */
+export function createDefaultGmailApiClient(): GmailApiClient {
+  return new RateLimitRetryingGmailApiClient(new FetchGmailApiClient())
+}
+
 export function isGmailProviderError(error: unknown): error is GmailProviderError {
   return error instanceof GmailProviderError
 }
