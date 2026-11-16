@@ -66,6 +66,8 @@ export interface MailSyncError {
 export type MailSyncPartialReason =
   | "PAGE_LIMIT_REACHED"
   | "MESSAGE_INGESTION_FAILED"
+  /** Message(s) ignoré(s) (erreur déterministe ou disjoncteur) ; curseur avancé. */
+  | "MESSAGE_QUARANTINED"
 
 /** Résultat d'une synchronisation pour un tenant. */
 export interface MailSyncResult {

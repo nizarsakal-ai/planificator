@@ -8,6 +8,7 @@ import { CompanyForm } from "@/components/parametres/CompanyForm"
 import { SettingsForm } from "@/components/parametres/SettingsForm"
 import { GmailConnectionCard } from "@/components/parametres/GmailConnectionCard"
 import { AcquisitionGmailConnectionsCard } from "@/components/parametres/AcquisitionGmailConnectionsCard"
+import { assessAcquisitionMailboxHealth } from "@/lib/acquisition/connector/acquisition-mailbox-health"
 import { WorksitePhotosDriveCard } from "@/components/parametres/WorksitePhotosDriveCard"
 import { isWorksitePhotosEnabled } from "@/lib/worksite-photos/feature-flag"
 import { CompanyIdentityCard } from "@/components/parametres/CompanyIdentityCard"
@@ -64,10 +65,40 @@ export default async function ParametresPage({
       }),
       prisma.acquisitionGmailConnection.findMany({
         where: { companyId: company.id },
-        select: { id: true, gmailAddress: true, tokenExpiry: true, active: true },
+        select: { id: true, gmailAddress: true, active: true, updatedAt: true },
         orderBy: { gmailAddress: "asc" },
       }),
     ])
+
+  // Santé des boîtes Acquisition : curseur de scan par connexion (mailboxKey = connectionId).
+  const acquisitionCursors = acquisitionGmailConnections.length
+    ? await prisma.acquisitionScanCursor.findMany({
+        where: {
+          companyId: company.id,
+          source: "GMAIL",
+          mailboxKey: { in: acquisitionGmailConnections.map((c) => c.id) },
+        },
+        select: {
+          mailboxKey: true,
+          lastSyncedAt: true,
+          consecutiveFailures: true,
+          lastErrorCode: true,
+          lastErrorAt: true,
+        },
+      })
+    : []
+  const cursorByConnection = new Map(acquisitionCursors.map((c) => [c.mailboxKey, c]))
+  const now = new Date()
+  const acquisitionMailboxes = acquisitionGmailConnections.map((c) => ({
+    id: c.id,
+    gmailAddress: c.gmailAddress,
+    health: assessAcquisitionMailboxHealth({
+      active: c.active,
+      cursor: cursorByConnection.get(c.id) ?? null,
+      connectionUpdatedAt: c.updatedAt,
+      now,
+    }),
+  }))
 
   return (
     <div className="space-y-6">
@@ -162,8 +193,9 @@ export default async function ParametresPage({
 
         {/* Connexions Gmail Acquisition multi-compte */}
         <AcquisitionGmailConnectionsCard
-          connections={acquisitionGmailConnections}
+          connections={acquisitionMailboxes}
           acquisitionGmailParam={acquisitionGmailParam}
+          reasonParam={acquisitionGmailParam === "error" ? reasonParam : null}
         />
 
         {/* Photos d'engins — connexion Google Drive (drapeau serveur) */}
