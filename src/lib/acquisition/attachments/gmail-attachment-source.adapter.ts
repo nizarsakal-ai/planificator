@@ -1,5 +1,5 @@
 import type { GmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
-import { FetchGmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
+import { createDefaultGmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
 import type { AcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
 import { PrismaAcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
 import { isGmailProviderError } from "@/lib/acquisition/connector/gmail-api.client"
@@ -18,7 +18,7 @@ export interface GmailAttachmentSourcePort {
 export class GmailAttachmentSourceAdapter implements GmailAttachmentSourcePort {
   constructor(
     private readonly connection: AcquisitionGmailConnectionClient = new PrismaAcquisitionGmailConnectionClient(),
-    private readonly gmail: GmailApiClient = new FetchGmailApiClient()
+    private readonly gmail: GmailApiClient = createDefaultGmailApiClient()
   ) {}
 
   async fetchAttachment(input: GmailAttachmentFetchInput): Promise<GmailAttachmentFetchResult> {

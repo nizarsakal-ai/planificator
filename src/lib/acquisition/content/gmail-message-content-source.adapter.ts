@@ -1,5 +1,5 @@
 import type { GmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
-import { FetchGmailApiClient, isGmailProviderError } from "@/lib/acquisition/connector/gmail-api.client"
+import { createDefaultGmailApiClient, isGmailProviderError } from "@/lib/acquisition/connector/gmail-api.client"
 import type { AcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
 import { PrismaAcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
 import { GmailProviderError } from "@/lib/acquisition/connector/gmail.errors"
@@ -17,7 +17,7 @@ import type {
 export class GmailMessageContentSourceAdapter implements AcquisitionMessageContentSourcePort {
   constructor(
     private readonly connection: AcquisitionGmailConnectionClient = new PrismaAcquisitionGmailConnectionClient(),
-    private readonly gmail: GmailApiClient = new FetchGmailApiClient()
+    private readonly gmail: GmailApiClient = createDefaultGmailApiClient()
   ) {}
 
   async fetchMessageBody(input: FetchMessageContentSourceInput): Promise<CanonicalMessageBodyParts> {

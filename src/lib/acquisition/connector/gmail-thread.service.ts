@@ -3,7 +3,7 @@
  */
 
 import type { GmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
-import { FetchGmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
+import { createDefaultGmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
 import type { AcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
 import { PrismaAcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
 
@@ -23,7 +23,7 @@ export async function listGmailThreadMessages(input: {
 }): Promise<GmailThreadMessageSummary[]> {
   if (!input.connectionId) throw new Error("connectionId requis")
   const connection = input.connectionClient ?? new PrismaAcquisitionGmailConnectionClient()
-  const api = input.apiClient ?? new FetchGmailApiClient()
+  const api = input.apiClient ?? createDefaultGmailApiClient()
   const token = await connection.getValidAccessToken({
     companyId: input.companyId,
     connectionId: input.connectionId,
