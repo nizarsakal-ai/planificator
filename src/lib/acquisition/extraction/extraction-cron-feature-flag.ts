@@ -1,7 +1,10 @@
 /** PLAN-ACQ-OPS-004 — Flag + bornes du cron extraction. */
 
+import { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
+import { isAcquisitionContentFetchEnabled } from "@/lib/acquisition/content/content-fetch-feature-flag"
 import {
   getExtractionMaxAttempts,
+  isAcquisitionExtractionEnabled,
   getExtractionReclaimTtlMs,
   getExtractionTimeoutMs,
 } from "@/lib/acquisition/extraction/extraction-feature-flag"
@@ -18,9 +21,20 @@ const MAX_PER_RUN_CAP = 1_000
 const MAX_COMPANIES_CAP = 200
 const MAX_DURATION_MS_CAP = 900_000
 
-/** Cron extraction inactif par défaut. */
+/**
+ * Extraction automatique (décision produit 16/11/2026 : chaque consultation ingérée
+ * doit être extraite sans action manuelle).
+ * - `true`  : actif ;
+ * - `false` : kill-switch explicite ;
+ * - non défini : actif dès que la chaîne est prête (master + content_fetch + capacité
+ *   extraction), inactif sinon — la matrice de flags reste cohérente partout.
+ */
 export function isAcquisitionExtractionCronEnabled(): boolean {
-  return process.env.ACQUISITION_EXTRACTION_CRON_ENABLED === "true"
+  const raw = process.env.ACQUISITION_EXTRACTION_CRON_ENABLED?.trim().toLowerCase()
+  if (raw === "true") return true
+  if (raw === "false") return false
+  if (raw) return false // valeur inattendue : prudence
+  return isAcquisitionEnabled() && isAcquisitionContentFetchEnabled() && isAcquisitionExtractionEnabled()
 }
 
 function parseBoundedInt(

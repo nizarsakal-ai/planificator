@@ -433,3 +433,61 @@ describe("santé d'une boîte Acquisition", () => {
     assert.equal(assessAcquisitionMailboxHealth({ active: false, cursor: null, now: NOW }).level, "inactive")
   })
 })
+
+describe("extraction automatique — activée par défaut quand la chaîne est prête", () => {
+  const KEYS = [
+    "ACQUISITION_EXTRACTION_CRON_ENABLED",
+    "PLANIFICATOR_ACQUISITION_ENABLED",
+    "ACQUISITION_CONTENT_FETCH_ENABLED",
+    "ACQUISITION_EXTRACTION_ENABLED",
+  ] as const
+
+  async function withEnv(env: Partial<Record<(typeof KEYS)[number], string>>, fn: () => Promise<void> | void) {
+    const backup = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]))
+    for (const k of KEYS) delete process.env[k]
+    Object.assign(process.env, env)
+    try {
+      await fn()
+    } finally {
+      for (const k of KEYS) {
+        if (backup[k] === undefined) delete process.env[k]
+        else process.env[k] = backup[k]
+      }
+    }
+  }
+
+  const READY = {
+    PLANIFICATOR_ACQUISITION_ENABLED: "true",
+    ACQUISITION_CONTENT_FETCH_ENABLED: "true",
+    ACQUISITION_EXTRACTION_ENABLED: "true",
+  }
+
+  it("non défini + chaîne prête → actif (gate autorisée)", async () => {
+    const { isAcquisitionExtractionCronEnabled } = await import("@/lib/acquisition/extraction/extraction-cron-feature-flag")
+    const { resolveAcquisitionExtractionCronGate } = await import("@/lib/acquisition/acquisition-flag-matrix")
+    await withEnv(READY, () => {
+      assert.equal(isAcquisitionExtractionCronEnabled(), true)
+      assert.deepEqual(resolveAcquisitionExtractionCronGate(), { allowed: true })
+    })
+  })
+
+  it("false explicite → kill-switch, même chaîne prête", async () => {
+    const { resolveAcquisitionExtractionCronGate } = await import("@/lib/acquisition/acquisition-flag-matrix")
+    await withEnv({ ...READY, ACQUISITION_EXTRACTION_CRON_ENABLED: "false" }, () => {
+      assert.deepEqual(resolveAcquisitionExtractionCronGate(), { allowed: false, skipReason: "CRON_DISABLED" })
+    })
+  })
+
+  it("non défini + capacité extraction OFF → inactif ; valeur inattendue → inactif", async () => {
+    const { isAcquisitionExtractionCronEnabled } = await import("@/lib/acquisition/extraction/extraction-cron-feature-flag")
+    await withEnv({ ...READY, ACQUISITION_EXTRACTION_ENABLED: "false" }, () => {
+      assert.equal(isAcquisitionExtractionCronEnabled(), false)
+    })
+    await withEnv({ ...READY, ACQUISITION_EXTRACTION_CRON_ENABLED: "yes" }, () => {
+      assert.equal(isAcquisitionExtractionCronEnabled(), false)
+    })
+    await withEnv({}, () => {
+      assert.equal(isAcquisitionExtractionCronEnabled(), false)
+    })
+  })
+})

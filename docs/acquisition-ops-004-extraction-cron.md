@@ -30,7 +30,11 @@ Route (maxDuration=300)
 5. `ACQUISITION_EXTRACTION_ENABLED` → capacité extraction
 6. orchestrateur
 
-Inactifs par défaut (`=== "true"` uniquement).
+Flags 3 à 5 : inactifs par défaut (`=== "true"` uniquement).
+
+**Depuis le 16/11/2026, `ACQUISITION_EXTRACTION_CRON_ENABLED` est actif par défaut** dès que
+les flags 3, 4 et 5 sont ON (variable non définie). `true` force l'activation, `false` est le
+kill-switch, toute autre valeur désactive par prudence.
 
 ## File d’extraction (sélection SQL — OPS-004-R1)
 
@@ -110,7 +114,7 @@ Compteurs : selected, extracted, alreadyExtracted, retryAllowed, failed, inProgr
 
 ## Rollback
 
-`ACQUISITION_EXTRACTION_CRON_ENABLED ≠ true` → route `SKIPPED` / no-op automatisation.
+`ACQUISITION_EXTRACTION_CRON_ENABLED=false` → route `SKIPPED` / no-op automatisation.
 Extraction manuelle UI reste possible si capacité extraction ON.
 Aucun drop de migration (lot sans migration).
 
