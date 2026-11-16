@@ -1,14 +1,14 @@
 /**
  * Estimation des kilomètres d'une tournée de chantier (règle pure, sans réseau ni base).
  *
- * Modèle d'un déplacement « dépôt → chantier → logement → … → dépôt » :
- *   - aller dépôt → chantier le premier jour, retour chantier → dépôt le dernier jour ;
- *   - chaque nuit au logement : soir chantier → logement + matin logement → chantier
+ * Modèle « dépôt → étapes de la tournée → dépôt », complété par la vie sur place :
+ *   - trajets routiers enchaînés : dépôt → étape 1 → … → étape n → dépôt ;
+ *   - chaque nuit au logement (Booking) : soir chantier → logement + matin logement → chantier
  *     (N jours de chantier = N − 1 nuits) ;
  *   - pause de midi : forfait par jour de chantier (restaurant non connu à l'avance).
  *
- * Les distances aller simple sont fournies par l'appelant (itinéraire IGN ou, à défaut,
- * vol d'oiseau majoré) ; la source est conservée pour être affichée.
+ * Les distances sont fournies par l'appelant (itinéraire IGN ou, à défaut, vol d'oiseau
+ * majoré) ; la source est conservée pour être affichée.
  */
 import type { DistanceSource } from "../planned-mileage-domain"
 
@@ -17,10 +17,18 @@ export const TOUR_LUNCH_KM_PER_DAY_DEFAULT = 10
 export const TOUR_LUNCH_KM_PER_DAY_MAX = 200
 /** Autonomie indicative d'un plein (retour terrain : ~500 km par plein). */
 export const TRUCK_TANK_RANGE_KM = 500
+/** Limite Google Maps (URL « dir ») : 9 étapes intermédiaires au plus. */
+export const GOOGLE_MAPS_MAX_WAYPOINTS = 9
+
+export interface TourKmLeg {
+  label: string
+  km: number
+  source: DistanceSource
+}
 
 export interface TourKmEstimateInput {
-  /** Dépôt → chantier, aller simple. */
-  depotToSite: { km: number; source: DistanceSource }
+  /** Trajets enchaînés de la tournée (dépôt → étapes → dépôt), dans l'ordre. */
+  legs: TourKmLeg[]
   /** Logement → chantier, aller simple ; null si aucun logement connu pour l'équipe sur ces dates. */
   lodgingToSite: { km: number; source: DistanceSource } | null
   /** Jours de travail sur le chantier pendant la tournée (≥ 1). */
@@ -29,7 +37,7 @@ export interface TourKmEstimateInput {
 }
 
 export interface TourKmEstimateLine {
-  key: "OUTBOUND" | "RETURN" | "LODGING" | "LUNCH"
+  key: "LEG" | "LODGING" | "LUNCH"
   label: string
   km: number
   detail: string
@@ -51,11 +59,13 @@ export function computeTourKmEstimate(input: TourKmEstimateInput): TourKmEstimat
   const workDays = Math.max(1, Math.floor(input.workDays))
   const nights = workDays - 1
   const lunch = Math.min(Math.max(0, input.lunchKmPerDay), TOUR_LUNCH_KM_PER_DAY_MAX)
-  const a = round1(input.depotToSite.km)
-  const lines: TourKmEstimateLine[] = [
-    { key: "OUTBOUND", label: "Aller dépôt → chantier", km: a, detail: sourceText(input.depotToSite.source), approximate: input.depotToSite.source !== "ROUTE" },
-    { key: "RETURN", label: "Retour chantier → dépôt", km: a, detail: sourceText(input.depotToSite.source), approximate: input.depotToSite.source !== "ROUTE" },
-  ]
+  const lines: TourKmEstimateLine[] = input.legs.map((leg) => ({
+    key: "LEG",
+    label: leg.label,
+    km: round1(leg.km),
+    detail: sourceText(leg.source),
+    approximate: leg.source !== "ROUTE",
+  }))
   if (input.lodgingToSite && nights > 0) {
     const l = round1(input.lodgingToSite.km)
     lines.push({
@@ -82,4 +92,24 @@ export function computeTourKmEstimate(input: TourKmEstimateInput): TourKmEstimat
     tanks: round1(totalKm / TRUCK_TANK_RANGE_KM),
     approximate: lines.some((l) => l.approximate && l.key !== "LUNCH"),
   }
+}
+
+/**
+ * Itinéraire Google Maps (sans clé API) : départ et retour au dépôt, étapes dans l'ordre.
+ * Les adresses partent du navigateur de l'utilisateur vers Google au clic, jamais du serveur.
+ */
+export function googleMapsDirectionsUrl(input: { depot: string; stops: string[] }): string {
+  const stops = input.stops.map((s) => s.trim()).filter(Boolean).slice(0, GOOGLE_MAPS_MAX_WAYPOINTS)
+  const url = new URL("https://www.google.com/maps/dir/")
+  url.searchParams.set("api", "1")
+  url.searchParams.set("origin", input.depot)
+  url.searchParams.set("destination", input.depot)
+  if (stops.length > 0) url.searchParams.set("waypoints", stops.join("|"))
+  url.searchParams.set("travelmode", "driving")
+  return url.href
+}
+
+/** Étapes « Départ dépôt » / « Retour dépôt » ajoutées par la préparation : déjà couvertes par le dépôt. */
+export function isDepotStopLabel(label: string): boolean {
+  return /^(départ|retour)\s+dépôt\b/i.test(label.trim())
 }
