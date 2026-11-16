@@ -82,3 +82,23 @@ export async function stationsInCorridor(samples: readonly Point[], radiusKm: nu
   }
   return { stations: out, truncated }
 }
+
+/**
+ * Prix moyen national du jour pour un carburant (flux instantané data.economie.gouv.fr), sans coordonnées ni
+ * aucune donnée de l'entreprise. Mis en cache une heure par instance : le flux n'évolue pas plus vite.
+ */
+const nationalPriceCache = new Map<FuelType, { price: number; at: number }>()
+export async function nationalAveragePrice(fuel: FuelType, fetchFn: typeof fetch = fetch, now: () => number = Date.now): Promise<number> {
+  const cached = nationalPriceCache.get(fuel)
+  if (cached && now() - cached.at < 3_600_000) return cached.price
+  const f = FIELD[fuel]
+  const url = new URL(PRICES_URL)
+  url.searchParams.set("select", `avg(${f}_prix) as prix`)
+  url.searchParams.set("where", `${f}_prix IS NOT NULL`)
+  const data = await getJson(url, fetchFn, "FUEL_PRICES_UNAVAILABLE", 20_000)
+  const price = Number(data?.results?.[0]?.prix)
+  if (!(price > 0.3 && price < 10)) throw new MileageDomainError("INVALID_FUEL_PRICES", 502)
+  const rounded = Math.round(price * 1000) / 1000
+  nationalPriceCache.set(fuel, { price: rounded, at: now() })
+  return rounded
+}

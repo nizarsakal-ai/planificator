@@ -99,7 +99,7 @@ describe("V3 UI — rendu statique", () => {
     assert.equal((navigation.match(/aria-current="page"/g) ?? []).length, 1)
     assert.match(navigation, /href="\/vehicules\/truck-a\/tournees"[^>]*>Tournées<\/a>/)
     assert.match(navigation, /href="\/vehicules\/truck-a\/couts"[^>]*>Carburant et coûts<\/a>/)
-    assert.match(navigation, /href="\/vehicules\/truck-a\/imports"[^>]*>Importer des adresses<\/a>/)
+    assert.doesNotMatch(navigation, /Importer des adresses/)
     assert.match(sheet, /Documents du véhicule/)
     assert.equal(resolveSheetTab("inconnu"), "documents")
     const truck = { id: "truck-a", matricule: "AB-123-CD", marque: null, modele: null, active: true, archivedAt: null, createdAt: "2026-01-01T00:00:00.000Z", team: null, chauffeur: null, history: [], historyTruncated: false }
