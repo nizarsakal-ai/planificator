@@ -59,11 +59,13 @@ type Data = {
 const statuses: Record<string, string> = { PLANNED: "Planifiée", IN_PROGRESS: "En cours", COMPLETED: "Terminée", CANCELLED: "Annulée" };
 function civilInput(value:string,timeZone:string){const parts=new Intl.DateTimeFormat("sv-SE",{timeZone,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(new Date(value));return parts.replace(" ","T")}
 function friendlyError(error: unknown) { const code = error instanceof Error ? error.message : ""; const messages: Record<string, string> = { V3_DISABLED: "Les tournées V3 ne sont pas activées.", FORBIDDEN: "Vous ne disposez pas des droits nécessaires.", UNAUTHENTICATED: "Veuillez vous reconnecter.", TOUR_RESOURCE_CONFLICT: "Le camion, l’équipe ou le chauffeur est déjà réservé sur ce créneau.", DAILY_TEAM_PLANNING_CONFLICT: "Cette tournée est incompatible avec le planning journalier de l’équipe.", DAILY_DRIVER_PLANNING_CONFLICT: "Cette tournée est incompatible avec le planning journalier du chauffeur.", TOUR_ASSIGNMENT_CHANGED: "L’affectation du camion a changé. Vérifiez la tournée.", TOUR_REVISION_CONFLICT: "La tournée a changé. Actualisez la page.", MILEAGE_REVISION_CONFLICT: "Le compteur a changé. Actualisez la page.", INVALID_PAYLOAD: "Vérifiez les dates et les adresses de la tournée.", TOUR_STOPS_PENDING: "Indiquez chaque étape effectuée ou non visitée avant de clôturer.", ARRIVAL_BELOW_DEPARTURE: "Le compteur d’arrivée doit être au moins égal à celui du départ.", TRUCK_ARCHIVED: "Ce véhicule est archivé.", TRIP_ALREADY_OPEN: "Un trajet est déjà en cours pour ce véhicule.", INVALID_CIVIL_TIME: "Vérifiez la date et l’heure saisies.", NONEXISTENT_CIVIL_TIME: "Cette heure n’existe pas dans le fuseau de l’entreprise à cause du changement d’heure. Choisissez un autre horaire.", AMBIGUOUS_CIVIL_TIME: "Cette heure se produit deux fois lors du changement d’heure. Choisissez un autre horaire non ambigu.", IMPORT_UNAVAILABLE: "L’import approuvé n’est plus disponible. Revenez aux imports et vérifiez sa validation." }; return messages[code] || "L’opération n’a pas abouti. Actualisez puis réessayez."; }
-export function TourPanel({ truckId, importId, importRevision, importRequested = false }: {
+export function TourPanel({ truckId, importId, importRevision, importRequested = false, prefill = null }: {
     truckId: string;
     importId?: string;
     importRevision?: number;
     importRequested?: boolean;
+    /** Pré-remplissage depuis la fiche chantier : chantier comme étape, jours d'affectation. */
+    prefill?: { worksiteId: string; start: string; end: string; site?: { id: string; name: string; address: string; clientId: string; latitude: number | null; longitude: number | null } | null } | null;
 }) {
     const [data, setData] = useState<Data | null>(null), [error, setError] = useState(""), [busy, setBusy] = useState(false), [show, setShow] = useState(importRequested);
     const [detailsEditing,setDetailsEditing]=useState<Tour|null>(null);
@@ -87,6 +89,23 @@ export function TourPanel({ truckId, importId, importRevision, importRequested =
         if (!cancelled)
             setImportError("Cet import approuvé et sa révision ne sont plus disponibles parmi les 30 derniers imports. Revenez aux imports pour vérifier et valider la source.");
     } })(); return () => { cancelled = true; }; }, [truckId, importId, importRevision, importRequested]);
+    const [prefillTitle, setPrefillTitle] = useState<string | undefined>(undefined), [prefillNotice, setPrefillNotice] = useState("");
+    const prefillApplied = useRef(false);
+    useEffect(() => {
+        if (!prefill || !data || prefillApplied.current || !data.canManage)
+            return;
+        prefillApplied.current = true;
+        const site = prefill.site ?? data.worksites.find(w => w.id === prefill.worksiteId);
+        if (!site) {
+            setPrefillNotice("Le chantier n’a pas d’adresse exploitable : ajoutez l’étape manuellement.");
+            setShow(true);
+            return;
+        }
+        setPrefillTitle(site.name);
+        setDraftStops([{ label: site.name, address: site.address, worksiteId: site.id, clientId: site.clientId, latitude: site.latitude, longitude: site.longitude }]);
+        setPrefillNotice("Tournée préparée depuis le chantier : vérifiez les horaires, l’adresse et l’ordre des étapes.");
+        setShow(true);
+    }, [prefill, data]);
     const pendingKeys = useRef(new Map<string, string>());
     const url = `/api/trucks/${encodeURIComponent(truckId)}/tours`;
     const load = useCallback(async () => {
@@ -153,7 +172,7 @@ export function TourPanel({ truckId, importId, importRevision, importRequested =
             return false;
         }
     }
-    return <main className="mx-auto max-w-4xl space-y-6 p-6"><VehicleWorkspaceNav truckId={truckId} active="tournees" canManage={data?.canManage ?? false} /><h1 className="text-2xl font-bold">Tournées {data?.matricule}</h1>{error && <p role="alert" className="text-red-700">{error}</p>}{!data && !error && <p>Chargement…</p>}{data?.canManage && <button disabled={busy} type="button" onClick={() => {setEditing(null);setDraftStops([]);setFreeAddress("");setShow(!show)}}>Préparer une tournée</button>}{show && data?.canManage && <form onKeyDown={preventImplicitEnter} key={editing?.id ?? "new"} onSubmit={event=>{if(!isExplicitSubmit(event))return;const form=event.currentTarget;void create(new FormData(form)).then(ok=>{if(ok)form.reset()})}} className="grid gap-3 rounded border p-4"><label>Nom<input className="block border" name="title" defaultValue={editing?.title} required maxLength={200}/></label><p>Horaires de l’entreprise : {data?.timezone}.</p><label>Début<input className="block border" name="start" type="datetime-local" defaultValue={editing ? civilInput(editing.startsAt, data!.timezone) : undefined} required/></label><label>Fin<input className="block border" name="end" type="datetime-local" defaultValue={editing ? civilInput(editing.endsAt, data!.timezone) : undefined} required/></label><p>Équipe et chauffeur : affectation actuelle du camion. Le départ vérifiera qu’elle est toujours identique.</p>{!editing && importRequested ? <section aria-label="Adresses importées approuvées"><h2>Adresses de l’import approuvé — lecture seule</h2>{importError ? <p role="alert">{importError}</p> : approvedImport ? <ol className="list-inside list-decimal">{approvedImport.candidates.map((s, i) => <li key={i}>{s.label} — {s.address}</li>)}</ol> : <p>Vérification de l’import…</p>}<Link href={`/vehicules/${encodeURIComponent(truckId)}/imports`}>Revenir aux imports</Link></section> : <><label>Ajouter un chantier existant (200 premiers)<select className="block border" value="" onChange={e => {
+    return <main className="mx-auto max-w-4xl space-y-6 p-6"><VehicleWorkspaceNav truckId={truckId} active="tournees" canManage={data?.canManage ?? false} /><h1 className="text-2xl font-bold">Tournées {data?.matricule}</h1>{error && <p role="alert" className="text-red-700">{error}</p>}{!data && !error && <p>Chargement…</p>}{data?.canManage && <button disabled={busy} type="button" onClick={() => {setEditing(null);setDraftStops([]);setFreeAddress("");setShow(!show)}}>Préparer une tournée</button>}{show && data?.canManage && <form onKeyDown={preventImplicitEnter} key={editing?.id ?? "new"} onSubmit={event=>{if(!isExplicitSubmit(event))return;const form=event.currentTarget;void create(new FormData(form)).then(ok=>{if(ok)form.reset()})}} className="grid gap-3 rounded border p-4"><label>Nom<input className="block border" name="title" defaultValue={editing?.title ?? prefillTitle} required maxLength={200}/></label><p>Horaires de l’entreprise : {data?.timezone}.</p><label>Début<input className="block border" name="start" type="datetime-local" defaultValue={editing ? civilInput(editing.startsAt, data!.timezone) : prefill ? `${prefill.start}T07:00` : undefined} required/></label><label>Fin<input className="block border" name="end" type="datetime-local" defaultValue={editing ? civilInput(editing.endsAt, data!.timezone) : prefill ? `${prefill.end}T19:00` : undefined} required/></label>{!editing && prefillNotice && <p role="status" className="text-sm text-blue-800">{prefillNotice}</p>}<p>Équipe et chauffeur : affectation actuelle du camion. Le départ vérifiera qu’elle est toujours identique.</p>{!editing && importRequested ? <section aria-label="Adresses importées approuvées"><h2>Adresses de l’import approuvé — lecture seule</h2>{importError ? <p role="alert">{importError}</p> : approvedImport ? <ol className="list-inside list-decimal">{approvedImport.candidates.map((s, i) => <li key={i}>{s.label} — {s.address}</li>)}</ol> : <p>Vérification de l’import…</p>}<Link href={`/vehicules/${encodeURIComponent(truckId)}/imports`}>Revenir aux imports</Link></section> : <><label>Ajouter un chantier existant (200 premiers)<select className="block border" value="" onChange={e => {
                     const s = data?.worksites.find(s => s.id === e.target.value);
                     if (s)
                         setDraftStops([...draftStops, { label: s.name, address: s.address, worksiteId: s.id, clientId: s.clientId, latitude: s.latitude, longitude: s.longitude }]);
