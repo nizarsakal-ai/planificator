@@ -46,6 +46,9 @@ export default async function Page({ params, searchParams }: {
         where: { id: parsed.worksiteId, companyId, archivedAt: null, address: { not: null } },
         select: { id: true, name: true, address: true, clientId: true, latitude: true, longitude: true },
     }) : null;
-    const prefill = parsed ? { ...parsed, site: site && site.address ? { ...site, address: site.address } : null } : null;
+    // Dépôt de l'entreprise (adresse société) : départ et retour de la tournée, proposés pré-remplis.
+    const company = parsed ? await prisma.company.findUnique({ where: { id: companyId }, select: { address: true } }) : null;
+    const depotAddress = company?.address?.trim() && company.address.trim().length >= 5 ? company.address.trim() : null;
+    const prefill = parsed ? { ...parsed, site: site && site.address ? { ...site, address: site.address } : null, depotAddress } : null;
     return <TourPanel truckId={id} importId={importId} importRevision={revision} importRequested={importRequested} {...(prefill ? { prefill } : {})}/>;
 }

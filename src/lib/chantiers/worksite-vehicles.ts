@@ -7,8 +7,13 @@
  * reprend l'équipe et le chauffeur actuels du camion, avec le chantier comme étape.
  */
 
-/** Une tournée couvre au plus 7 jours (contrainte `createTourSchema`). */
-export const TOUR_MAX_DAYS = 7
+import { TOUR_MAX_DURATION_DAYS } from "@/lib/vehicules/v3/tour-domain"
+
+/**
+ * Jours civils proposés pour une tournée (07:00 le premier jour → 19:00 le dernier) :
+ * N jours = (N − 1) j + 12 h ≤ durée maximale, donc N = durée maximale en jours.
+ */
+export const TOUR_MAX_DAYS = TOUR_MAX_DURATION_DAYS
 
 export interface WorksiteAssignmentDay {
   teamId: string
@@ -39,7 +44,7 @@ export interface WorksiteTeamVehicle {
     label: string
     chauffeurName: string | null
   } | null
-  /** Fenêtre proposée pour la tournée (≤ 7 jours), au format YYYY-MM-DD. */
+  /** Fenêtre proposée pour la tournée (≤ TOUR_MAX_DAYS jours), au format YYYY-MM-DD. */
   tourStart: string
   tourEnd: string
 }

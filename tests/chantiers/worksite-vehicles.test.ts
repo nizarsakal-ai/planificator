@@ -35,15 +35,15 @@ describe("worksiteTeamVehicles", () => {
     })
     assert.equal(rows[0].truck, null)
   })
-  it("fenêtre de tournée bornée à 7 jours ; chantier passé marqué non à venir", () => {
-    const days = Array.from({ length: 12 }, (_, i) => d(`2026-12-${String(i + 1).padStart(2, "0")}`))
+  it("fenêtre de tournée bornée à 14 jours ; chantier passé marqué non à venir", () => {
+    const days = Array.from({ length: 20 }, (_, i) => d(`2026-12-${String(i + 1).padStart(2, "0")}`))
     const [future] = worksiteTeamVehicles({
       today: "2026-11-17",
       assignments: days.map((date) => ({ teamId: "t1", teamName: "A", date })),
       trucks: [],
     })
     assert.equal(future.tourStart, "2026-12-01")
-    assert.equal(future.tourEnd, "2026-12-07")
+    assert.equal(future.tourEnd, "2026-12-14")
     const [past] = worksiteTeamVehicles({
       today: "2027-01-01",
       assignments: [{ teamId: "t1", teamName: "A", date: d("2026-12-01") }],
@@ -64,7 +64,23 @@ describe("lien et paramètres de tournée", () => {
     assert.equal(parseTourPrefill({}), null)
     assert.equal(parseTourPrefill({ worksiteId: "ws1", start: "2026-11-19", end: "2026-11-18" }), null)
     assert.equal(parseTourPrefill({ worksiteId: "ws1", start: "2026-11-01", end: "2026-11-30" }), null)
+    // Cas réel : déplacement Alzone du 20 au 27 novembre (8 jours) accepté.
+    assert.deepEqual(parseTourPrefill({ worksiteId: "ws1", start: "2026-11-20", end: "2026-11-27" }), { worksiteId: "ws1", start: "2026-11-20", end: "2026-11-27" })
     assert.equal(parseTourPrefill({ worksiteId: ["a", "b"], start: "2026-11-01", end: "2026-11-02" }), null)
     assert.equal(parseTourPrefill({ worksiteId: "ws1", start: "x", end: "2026-11-02" }), null)
+  })
+})
+
+describe("durée maximale d'une tournée (tour-domain)", () => {
+  it("20/11 07:00 → 27/11 19:00 accepté ; au-delà de 14 jours refusé", async () => {
+    process.env.VEHICLES_V3_ENABLED ??= "true"
+    const { createTourSchema, TOUR_MAX_DURATION_DAYS } = await import("@/lib/vehicules/v3/tour-domain")
+    assert.equal(TOUR_MAX_DURATION_DAYS, 14)
+    const base = {
+      title: "Alzone", teamId: null, chauffeurId: null,
+      stops: [{ label: "Dépôt", address: "1 rue de Paris, 93100 Montreuil", addressValidated: true as const }],
+    }
+    assert.equal(createTourSchema.safeParse({ ...base, startsAt: "2026-11-20T07:00:00+01:00", endsAt: "2026-11-27T19:00:00+01:00" }).success, true)
+    assert.equal(createTourSchema.safeParse({ ...base, startsAt: "2026-11-20T07:00:00+01:00", endsAt: "2026-12-05T19:00:00+01:00" }).success, false)
   })
 })

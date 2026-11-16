@@ -65,7 +65,7 @@ export function TourPanel({ truckId, importId, importRevision, importRequested =
     importRevision?: number;
     importRequested?: boolean;
     /** Pré-remplissage depuis la fiche chantier : chantier comme étape, jours d'affectation. */
-    prefill?: { worksiteId: string; start: string; end: string; site?: { id: string; name: string; address: string; clientId: string; latitude: number | null; longitude: number | null } | null } | null;
+    prefill?: { worksiteId: string; start: string; end: string; site?: { id: string; name: string; address: string; clientId: string; latitude: number | null; longitude: number | null } | null; depotAddress?: string | null } | null;
 }) {
     const [data, setData] = useState<Data | null>(null), [error, setError] = useState(""), [busy, setBusy] = useState(false), [show, setShow] = useState(importRequested);
     const [detailsEditing,setDetailsEditing]=useState<Tour|null>(null);
@@ -102,8 +102,13 @@ export function TourPanel({ truckId, importId, importRevision, importRequested =
             return;
         }
         setPrefillTitle(site.name);
-        setDraftStops([{ label: site.name, address: site.address, worksiteId: site.id, clientId: site.clientId, latitude: site.latitude, longitude: site.longitude }]);
-        setPrefillNotice("Tournée préparée depuis le chantier : vérifiez les horaires, l’adresse et l’ordre des étapes.");
+        const depot = prefill.depotAddress;
+        const siteStop = { label: site.name, address: site.address, worksiteId: site.id, clientId: site.clientId, latitude: site.latitude, longitude: site.longitude };
+        // Aller-retour depuis le dépôt de l'entreprise quand son adresse est connue (Paramètres → Informations de l'entreprise).
+        setDraftStops(depot ? [{ label: "Départ dépôt", address: depot }, siteStop, { label: "Retour dépôt", address: depot }] : [siteStop]);
+        setPrefillNotice(depot
+            ? "Tournée préparée depuis le chantier (aller-retour depuis le dépôt) : vérifiez les horaires, les adresses et l’ordre des étapes. Une tournée dure 14 jours au plus."
+            : "Tournée préparée depuis le chantier : vérifiez les horaires, l’adresse et l’ordre des étapes. Renseignez l’adresse de l’entreprise dans Paramètres pour ajouter automatiquement le départ et le retour au dépôt. Une tournée dure 14 jours au plus.");
         setShow(true);
     }, [prefill, data]);
     const pendingKeys = useRef(new Map<string, string>());
