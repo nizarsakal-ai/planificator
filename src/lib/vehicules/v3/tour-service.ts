@@ -6,7 +6,7 @@ import { authorizeVehicleLocked } from "../vehicle-authority";
 import { requireMileageSession } from "../mileage-access";
 import { MileageDomainError, parseMileageCommand, resolveMileageHistory, getMileageTripDistance } from "../mileage-domain";
 import { executeMileageCommandInTransaction, normalizeMileageFailure, type MileageServiceDeps } from "../mileage-service";
-import { createTourSchema, tourStopSchema, tourCommandSchema, tourFlag, tourParse } from "./tour-domain";
+import { createTourSchema, tourStopSchema, tourCommandSchema, tourFlag, tourParse, TOUR_MAX_DURATION_MS } from "./tour-domain";
 export interface TourServiceDeps extends MileageServiceDeps {
     consumeApprovedImport?: (tx: Prisma.TransactionClient, scope: {
         companyId: string;
@@ -142,7 +142,7 @@ export async function commandTour(truckId: string, tourId: string, body: unknown
             else if (command.type === "EDIT") {
                 if (tour.status !== "PLANNED") fail("TOUR_NOT_PLANNED");
                 const startsAt = new Date(command.startsAt), endsAt = new Date(command.endsAt);
-                if (endsAt <= startsAt || endsAt.getTime() - startsAt.getTime() > 7 * 86400000) fail("INVALID_PAYLOAD", 400);
+                if (endsAt <= startsAt || endsAt.getTime() - startsAt.getTime() > TOUR_MAX_DURATION_MS) fail("INVALID_PAYLOAD", 400);
                 for (const stop of command.stops) {
                     if (stop.worksiteId) {
                         const site = await tx.worksite.findFirst({ where: { id: stop.worksiteId, companyId: session.companyId, archivedAt: null } });
