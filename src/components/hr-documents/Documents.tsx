@@ -20,8 +20,30 @@ async function call(url:string,init?:RequestInit){
   let response:Response
   try{response=await fetch(url,{...init,cache:"no-store"})}catch{throw new Error("Connexion au serveur impossible. Réessayez.")}
   const data=await response.json().catch(()=>null)
-  if(!response.ok||response.redirected||!data)throw new Error(typeof data?.error==="string"&&data.error?data.error:"Opération indisponible.")
+  if(!response.ok||response.redirected||!data)throw new ApiError(typeof data?.error==="string"&&data.error?data.error:"Opération indisponible.",typeof data?.code==="string"?data.code:undefined)
   return data
+}
+/** Erreur d'API : message lisible et code fixe renvoyé par le serveur (jamais de détail technique). */
+class ApiError extends Error{constructor(message:string,readonly code?:string){super(message)}}
+const errorCode=(e:unknown)=>e instanceof ApiError?e.code:undefined
+/**
+ * Stockage RH à remettre en état après une (re)connexion Google Drive : réassociation au même compte (nouveau jeton),
+ * sinon initialisation si aucune racine n'existe. Le serveur garde tous ses contrôles (compte attendu, droits privés).
+ */
+async function repairStorage(){
+  try{await call("/api/hr-documents/storage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"REASSOCIATE"})})}
+  catch(e){if(errorCode(e)!=="STORAGE_NOT_READY")throw e;await call("/api/hr-documents/storage",{method:"POST"})}
+}
+/** Signature des champs envoyés pour un fichier du lot (le serveur compare le titre après suppression des espaces). */
+export function depositSignature(fields:{category:string;period:string;title:string}){
+  return JSON.stringify([fields.category,fields.period,fields.title.trim()])
+}
+/**
+ * Clé d'idempotence d'un fichier du lot. Nouvel essai avec les mêmes champs : même clé, le serveur reconnaît un envoi
+ * déjà reçu sans le dupliquer. Champs modifiés : nouvelle clé, car une clé déjà reçue avec d'autres champs est refusée.
+ */
+export function depositKey(previous:{key:string;signature:string}|undefined,signature:string,newKey:()=>string){
+  return previous&&previous.signature===signature?previous.key:newKey()
 }
 /** Téléchargement par fetch : seule une réponse document validée est enregistrée ; sinon le message s'affiche dans la page. */
 async function downloadDocument(id:string){
@@ -111,7 +133,7 @@ export function Documents({manage=false,configure=false,canImport=false,canPubli
     {error&&<p role="alert" className="rounded-lg bg-red-50 p-3 text-red-800">{error} <button type="button" className="underline" onClick={()=>void load()}>Actualiser</button></p>}
     {message&&<p role="status" className="rounded-lg bg-green-50 p-3 text-green-900">{message}</p>}
     {manage&&configure&&<details className="rounded-xl border bg-white p-4"><summary className="cursor-pointer text-sm font-medium text-slate-600">Stockage privé dédié</summary><p className="my-2 text-sm text-slate-600">L’initialisation crée uniquement la racine RH privée dans le compte explicitement configuré. Elle ne déplace aucun document et ne change aucun partage existant.</p><div className="flex flex-wrap gap-3"><button disabled={busy} type="button" className="rounded-lg bg-slate-800 px-4 py-2 text-white disabled:opacity-50" onClick={()=>void action(()=>call("/api/hr-documents/storage",{method:"POST"}),"Racine privée vérifiée.")}>Initialiser ou vérifier le stockage RH</button><button disabled={busy} type="button" className="rounded-lg border px-4 py-2 text-sm" onClick={()=>void action(()=>call("/api/hr-documents/storage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"REASSOCIATE"})}),"Racine réassociée après contrôle du même compte et des droits privés.")}>Réassocier après reconnexion du même compte</button></div></details>}
-    {manage&&canImport&&importOpen&&<ImportPanel employees={employees} employeeId={employeeId} employeeName={selectedEmployee?`${selectedEmployee.firstName} ${selectedEmployee.lastName}`.trim():undefined} busy={busy} run={action} categories={categories} recognition={recognition} images={images} drafts={drafts} onDraft={e=>setEmployees(list=>[...list,e])}/>}
+    {manage&&canImport&&importOpen&&<ImportPanel configure={configure} employees={employees} employeeId={employeeId} employeeName={selectedEmployee?`${selectedEmployee.firstName} ${selectedEmployee.lastName}`.trim():undefined} busy={busy} run={action} categories={categories} recognition={recognition} images={images} drafts={drafts} onDraft={e=>setEmployees(list=>[...list,e])}/>}
     <div className="rounded-xl border bg-white p-4">
       <div className="flex flex-wrap items-end gap-3"><label className="min-w-32 text-sm">Année chargée<input className={control} inputMode="numeric" maxLength={4} placeholder="Toutes" value={year} onChange={e=>setYear(e.target.value.replace(/\D/g,""))}/></label>
         <label className="min-w-48 text-sm">Catégorie<select className={control} value={kind} onChange={e=>setKind(e.target.value)}><option value="">Toutes</option>{categories.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}</select></label>
@@ -209,9 +231,9 @@ export function batchRecipientCheck(p:Pick<Proposal,"candidates"|"proposedEmploy
   if(p.candidates.filter(c=>c.level==="STRONG").length>1)return "AMBIGUOUS"
   return p.candidates.length?"PARTIAL":"OK"
 }
-type ImportProps={employees:Employee[];employeeId?:string;employeeName?:string;busy:boolean;run:Runner;categories:Category[];recognition:boolean;images:boolean;drafts:boolean;onDraft:(e:Employee)=>void}
+type ImportProps={configure?:boolean;employees:Employee[];employeeId?:string;employeeName?:string;busy:boolean;run:Runner;categories:Category[];recognition:boolean;images:boolean;drafts:boolean;onDraft:(e:Employee)=>void}
 type ImportFile = { file: File; key: string }
-type DepositResult = { state: "done" | "error"; message: string }
+type DepositResult = { state: "done" | "error"; message: string; code?: string }
 
 function ImportPanel(props:ImportProps){
   const {busy,images,recognition,employeeId,run,categories}=props
@@ -222,11 +244,13 @@ function ImportPanel(props:ImportProps){
   const [sending,setSending]=useState(false)
   const active=useRef(false)
   const inputs=useRef<HTMLDivElement>(null)
-  const attempts=useRef(new Map<string,FormData>())
+  // Dernier envoi tenté par fichier : clé d'idempotence et signature des champs. Les champs restent modifiables après un échec.
+  const attempts=useRef(new Map<string,{key:string;signature:string}>())
   const accept=images?"application/pdf,.pdf,image/jpeg,.jpg,.jpeg,image/png,.png,image/heic,.heic":"application/pdf,.pdf"
   const batch=!!employeeId
   const pending=files.filter(({key})=>results[key]?.state!=="done")
   const locked=busy||sending
+  const storageBlocked=Object.values(results).some(r=>r.state==="error"&&r.code==="STORAGE_NOT_READY")
 
   async function deposit(){
     if(active.current||busy||!employeeId||!sharedCategory||!pending.length)return
@@ -234,35 +258,36 @@ function ImportPanel(props:ImportProps){
     const forms=new Map(Array.from(inputs.current?.querySelectorAll<HTMLFormElement>("form[data-import-key]")??[])
       .map(form=>[form.dataset.importKey,form]))
     // Avant toute requête : un seul fichier désignant un autre salarié bloque tout le lot (aucun envoi, même des fichiers confirmés).
-    if(pending.some(({key})=>!attempts.current.has(key)&&forms.get(key)?.dataset.importBlocked==="true")){
+    if(pending.some(({key})=>forms.get(key)?.dataset.importBlocked==="true")){
       setSelectionError("Dépôt du lot bloqué : un fichier semble concerner un autre salarié que celui de ce dossier. Retirez-le avant de déposer. Aucun fichier n’a été envoyé.");return
     }
-    const requests:{key:string;body:FormData}[]=[]
+    const requests:{key:string;body:FormData;attempt:{key:string;signature:string}}[]=[]
     for(const {key,file} of pending){
-      const previous=attempts.current.get(key)
-      if(previous){requests.push({key,body:previous});continue}
       const form=forms.get(key)
       if(!form){setSelectionError("Attendez la fin de la lecture de tous les fichiers.");return}
       if(!form.reportValidity())return
+      // Toujours les valeurs affichées : une correction après un échec est bien celle qui part.
       const body=new FormData(form)
       body.delete("checked")
       body.set("employeeId",employeeId)
       body.set("category",sharedCategory)
-      body.set("key",key)
+      const signature=depositSignature({category:sharedCategory,period:String(body.get("period")??""),title:String(body.get("title")??"")})
+      const attempt={key:depositKey(attempts.current.get(key),signature,()=>crypto.randomUUID()),signature}
+      body.set("key",attempt.key)
       body.set("file",file)
-      requests.push({key,body})
+      requests.push({key,body,attempt})
     }
     active.current=true
     setSending(true)
     try {
       await run(async()=>{
-        for(const {key,body} of requests){
-          attempts.current.set(key,body)
+        for(const {key,body,attempt} of requests){
+          attempts.current.set(key,attempt)
           try{
             await call("/api/hr-documents",{method:"POST",body})
             setResults(old=>({...old,[key]:{state:"done",message:"Déposé · À vérifier"}}))
           }catch(e){
-            setResults(old=>({...old,[key]:{state:"error",message:e instanceof Error?e.message:"Dépôt indisponible."}}))
+            setResults(old=>({...old,[key]:{state:"error",message:e instanceof Error?e.message:"Dépôt indisponible.",code:errorCode(e)}}))
           }
         }
       },"Traitement du lot terminé. Consultez le résultat de chaque fichier. Les dépôts restent à vérifier.")
@@ -276,7 +301,7 @@ function ImportPanel(props:ImportProps){
     <p className="my-2 text-sm text-slate-600">10 fichiers au maximum par sélection, 10 Mo par {images?"fichier (PDF, JPG, PNG ou HEIC)":"PDF"}. {batch?"Choisissez la catégorie une fois, puis vérifiez l’affectation de chaque fichier. Aucun document n’est publié lors du dépôt.":recognition?"Vérifiez chaque proposition de classement avant de déposer le fichier.":"Chaque affectation est vérifiée séparément."}</p>
     {batch&&<div className="mb-3 grid gap-3 sm:grid-cols-2">
       <p className="text-sm">Salarié <strong className="block">{props.employeeName||"Salarié de ce dossier"}</strong></p>
-      <label className="text-sm">Catégorie du lot<select className={control} value={sharedCategory} disabled={locked||attempts.current.size>0} onChange={e=>{
+      <label className="text-sm">Catégorie du lot<select className={control} value={sharedCategory} disabled={locked} onChange={e=>{
         setSharedCategory(e.target.value)
         inputs.current?.querySelectorAll<HTMLInputElement>('input[name="checked"]').forEach(box=>{box.checked=false})
       }}>
@@ -295,16 +320,26 @@ function ImportPanel(props:ImportProps){
     <div ref={inputs} className="space-y-4">{files.map(({file,key})=><div key={key}>
       {results[key]?.state==="done"
         ?<p className="mt-3 rounded-lg bg-green-50 p-3 text-sm text-green-900">{file.name} · {results[key].message}</p>
-        :<><ImportItem file={file} fileKey={key} {...props} busy={locked} batch={batch} attempted={attempts.current.has(key)} onRemove={()=>{setSelectionError("");setFiles(list=>list.filter(f=>f.key!==key))}}/>
+        :<><ImportItem file={file} fileKey={key} {...props} busy={locked} batch={batch} onRemove={()=>{setSelectionError("");setFiles(list=>list.filter(f=>f.key!==key))}}/>
           {results[key]?.state==="error"&&<p role="alert" className="mt-1 text-sm text-red-800">{results[key].message}</p>}
         </>}
     </div>)}</div>
+    {storageBlocked&&<div role="alert" className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+      <p>Le stockage RH doit être remis en état, souvent après une reconnexion de Google Drive. Les fichiers et leurs champs restent en place.</p>
+      {props.configure
+        ?<button type="button" disabled={locked} className="mt-2 rounded-lg bg-amber-800 px-3 py-2 text-white disabled:opacity-50" onClick={()=>void run(async()=>{
+          await repairStorage()
+          setResults(old=>Object.fromEntries(Object.entries(old).filter(([,r])=>r.code!=="STORAGE_NOT_READY")))
+        },"Stockage RH remis en état. Relancez le dépôt.")}>Remettre en état le stockage RH</button>
+        :<p className="mt-1 font-medium">Demandez à une personne habilitée à configurer les Documents RH de remettre en état le stockage.</p>}
+      <p className="mt-2 text-xs">Si le problème persiste, reconnectez Google Drive dans Paramètres avec le compte prévu pour les RH.</p>
+    </div>}
     {batch&&pending.length>0&&<button type="button" disabled={locked||!sharedCategory} className="mt-4 rounded-lg bg-blue-900 px-4 py-2 text-sm text-white disabled:opacity-50" onClick={()=>void deposit()}>
       {sending?"Dépôt en cours…":attempts.current.size?"Reprendre les dépôts en échec":`Déposer ${pending.length} fichier${pending.length===1?"":"s"}`}
     </button>}
   </div>
 }
-function ImportItem({file,fileKey,employees,employeeId,busy,run,categories,recognition,drafts,onDraft,batch=false,attempted=false,onRemove}:ImportProps&{file:File;fileKey:string;batch?:boolean;attempted?:boolean;onRemove?:()=>void}){
+function ImportItem({file,fileKey,employees,employeeId,busy,run,categories,recognition,drafts,onDraft,batch=false,onRemove}:ImportProps&{file:File;fileKey:string;batch?:boolean;onRemove?:()=>void}){
   const [state,setState]=useState<{status:"idle"|"loading"|"done"|"error";proposal?:Proposal}>(recognition?{status:"loading"}:{status:"idle"})
   const [selected,setSelected]=useState<string|undefined>(employeeId)
   // Fin de validité saisie dans la fiche : reprise comme période du document si aucune n'a été proposée.
@@ -344,7 +379,7 @@ function ImportItem({file,fileKey,employees,employeeId,busy,run,categories,recog
       e.preventDefault();if(batch)return
       const f=new FormData(e.currentTarget);f.delete("checked");f.set("key",fileKey);f.set("file",file)
       void run(()=>call("/api/hr-documents",{method:"POST",body:f}),"Document déposé en préparation. Vérification et publication restent nécessaires.")
-    }}>{batch ? <fieldset disabled={busy||attempted||blocked} className="grid min-w-0 gap-3 sm:col-span-2 sm:grid-cols-2">
+    }}>{batch ? <fieldset disabled={busy||blocked} className="grid min-w-0 gap-3 sm:col-span-2 sm:grid-cols-2">
       <input type="hidden" name="period" value={documentPeriod(defaults.period)} readOnly/>
       <label className="text-sm">Titre privé<input required maxLength={120} name="title" className={control} defaultValue={defaults.title}/></label>
       {p?.category&&<p className="text-xs text-slate-600 sm:col-span-2">Type proposé : {categoryLabel(p.category.value)}</p>}

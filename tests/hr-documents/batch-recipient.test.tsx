@@ -23,16 +23,16 @@ describe("dépôt groupé : un fichier lu comme concernant un autre salarié blo
     assert.equal(batchRecipientCheck(undefined,"e-dossier"),"OK")
     assert.equal(batchRecipientCheck(proposal({}),"e-dossier"),"OK")
   })
-  it("le blocage est testé avant la construction de toute requête, et seulement pour les fichiers non encore tentés",()=>{
-    const s=src(),guard=s.indexOf('dataset.importBlocked==="true"'),requests=s.indexOf("const requests:{key:string;body:FormData}[]=[]"),post=s.indexOf('await call("/api/hr-documents",{method:"POST",body})')
+  it("le blocage est testé avant la construction de toute requête, pour chaque fichier restant à déposer",()=>{
+    const s=src(),guard=s.indexOf('dataset.importBlocked==="true"'),requests=s.indexOf("const requests:{key:string;body:FormData;attempt:{key:string;signature:string}}[]=[]"),post=s.indexOf('await call("/api/hr-documents",{method:"POST",body})')
     assert.ok(guard>0&&guard<requests&&requests<post,"garde avant les requêtes et le premier POST")
-    assert.match(s,/pending\.some\(\(\{key\}\)=>!attempts\.current\.has\(key\)&&forms\.get\(key\)\?\.dataset\.importBlocked==="true"\)/)
+    assert.match(s,/pending\.some\(\(\{key\}\)=>forms\.get\(key\)\?\.dataset\.importBlocked==="true"\)/)
     assert.match(s,/Aucun fichier n’a été envoyé\./)
   })
   it("fichier bloqué : avertissement par fichier, champs gelés, retrait possible ; attribut posé sur le formulaire du fichier",()=>{
     const s=src()
     assert.match(s,/data-import-blocked=\{blocked\?"true":undefined\}/)
-    assert.match(s,/<fieldset disabled=\{busy\|\|attempted\|\|blocked\}/)
+    assert.match(s,/<fieldset disabled=\{busy\|\|blocked\}/)
     assert.match(s,/un autre salarié que celui de ce dossier\. Ce fichier ne peut pas être déposé ici et bloque le dépôt du lot/)
     assert.match(s,/Retirer ce fichier du lot/)
   })
