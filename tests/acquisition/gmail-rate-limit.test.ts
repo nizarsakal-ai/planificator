@@ -137,3 +137,49 @@ describe("synchro : limite de débit ≠ accès refusé", () => {
     assert.equal(mailboxNeedsReconnect(h), false)
   })
 })
+
+describe("rattrapage : les e-mails déjà traités ne sont pas relus", () => {
+  async function run(knownMessageIds?: (input: { externalMessageIds: string[]; connectionId: string; companyId: string }) => Promise<Set<string>>) {
+    const { GmailMailProviderAdapter } = await import("@/lib/acquisition/connector/gmail-mail-provider.adapter")
+    const fetched: string[] = []
+    const apiClient = {
+      listHistory: async () => ({
+        history: ["a", "b", "c"].map((id) => ({ messagesAdded: [{ message: { id } }] })),
+        historyId: "h-next",
+      }),
+      getMessage: async (_t: string, id: string) => {
+        fetched.push(id)
+        return {
+          id, threadId: "t", labelIds: [], snippet: "", internalDate: "1720000000000",
+          payload: { headers: [{ name: "From", value: "x@lauralu.fr" }, { name: "Subject", value: "s" }], mimeType: "text/plain" },
+        }
+      },
+    } as unknown as GmailApiClient
+    const adapter = new GmailMailProviderAdapter({
+      connectionClient: { getValidAccessToken: async () => "tok" } as never,
+      apiClient,
+      knownMessageIds,
+    })
+    const page = await adapter.listMessagesPage({ companyId: "co", connectionId: "conn", cursor: "h0", pageSize: 50, paginationMode: "history" })
+    return { fetched, page }
+  }
+
+  it("seuls les ids inconnus sont lus ; le curseur suivant est conservé", async () => {
+    let seen: unknown
+    const { fetched, page } = await run(async (input) => { seen = input; return new Set(["a", "c"]) })
+    assert.deepEqual(fetched, ["b"])
+    assert.deepEqual(page.messages.map((m) => m.externalMessageId), ["b"])
+    assert.equal(page.nextHistoryId, "h-next")
+    assert.deepEqual(seen, { companyId: "co", connectionId: "conn", externalMessageIds: ["a", "b", "c"] })
+  })
+
+  it("panne de la lecture des ids connus → aucun filtrage (jamais de perte)", async () => {
+    const { fetched } = await run(async () => { throw new Error("db down") })
+    assert.deepEqual(fetched, ["a", "b", "c"])
+  })
+
+  it("sans port (tests/legacy) → comportement historique", async () => {
+    const { fetched } = await run(undefined)
+    assert.deepEqual(fetched, ["a", "b", "c"])
+  })
+})
