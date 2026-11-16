@@ -762,6 +762,19 @@ describe("PLAN-ACQ-DETECTION-001 FAILED selector retryable", () => {
     )
     assert.equal(isFailedDraftRetrySelectable({ extractionRetryable: true }), true)
   })
+  it("15b. FAILED PROVIDER_INVALID_OUTPUT (retryable false) → relancé automatiquement", async () => {
+    const { isFailedDraftRetrySelectable } = await import(
+      "@/lib/acquisition/extraction/extraction-cron.selection.repository"
+    )
+    assert.equal(
+      isFailedDraftRetrySelectable({ extractionRetryable: false, lastExtractionErrorCode: "PROVIDER_INVALID_OUTPUT" }),
+      true
+    )
+    assert.equal(
+      isFailedDraftRetrySelectable({ extractionRetryable: false, lastExtractionErrorCode: "CONTENT_INSUFFICIENT" }),
+      false
+    )
+  })
 })
 
 describe("PLAN-ACQ-DETECTION-001 conversion UI signals", () => {

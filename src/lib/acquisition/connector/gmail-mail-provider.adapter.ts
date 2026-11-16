@@ -78,11 +78,25 @@ export const prismaKnownGmailMessageIds: KnownGmailMessageIdsPort = async ({
   const identities = rejectedNotEligible
     ? await activePartnerDomainListing.listActiveIdentities(companyId)
     : null
-  return new Set(
-    rows
-      .filter((r) => !(identities && isNowEligibleRejection(r, identities)))
-      .map((r) => r.externalMessageId)
-  )
+  const known = rows.filter((r) => !(identities && isNowEligibleRejection(r, identities)))
+  // Diagnostic (comptes uniquement, aucune adresse) : pourquoi des e-mails partenaires
+  // listés par Gmail ne sont pas relus (déjà traités, et dans quel état).
+  if (rows.length > 0) {
+    const byState: Record<string, number> = {}
+    for (const r of rows) {
+      const key = `${r.status}${r.lastErrorCode ? `:${r.lastErrorCode}` : ""}`
+      byState[key] = (byState[key] ?? 0) + 1
+    }
+    console.info("[acquisition-gmail-reconcile] KNOWN_IDS", {
+      companyId,
+      connectionId,
+      listed: externalMessageIds.length,
+      known: known.length,
+      promotable: rows.length - known.length,
+      byState,
+    })
+  }
+  return new Set(known.map((r) => r.externalMessageId))
 }
 
 /** Rejet « expéditeur non partenaire » levé depuis par le registre. */
@@ -97,6 +111,11 @@ export function isNowEligibleRejection(
     (domain !== "" && identities.domains.some((d) => d.toLowerCase() === domain)) ||
     identities.emails.some((e) => e.toLowerCase() === email)
   )
+}
+
+/** Masque les adresses e-mail d'une requête Gmail (garde les `from:@domaine`). */
+export function redactGmailQueryEmails(query: string): string {
+  return query.replace(/from:(?:"[^"]*@[^"]*"|[^\s"()@]+@[^\s"()]+)/gi, "from:<email>")
 }
 
 function formatGmailAfterDate(days: number): string {
@@ -350,6 +369,19 @@ export class GmailMailProviderAdapter implements MailProviderPort {
     )
     const ids = (listData.messages ?? []).map((m) => m.id)
     const toFetch = await this.filterUnknownIds(scope.companyId, scope.connectionId, ids)
+    if (this.knownMessageIds) {
+      // Diagnostic réconciliation : la requête (domaines partenaires = données métier,
+      // pas d'adresse personnelle) et le volume listé / relu par page.
+      console.info("[acquisition-gmail-reconcile] QUERY_PAGE", {
+        companyId: scope.companyId,
+        connectionId: scope.connectionId,
+        query: redactGmailQueryEmails(query),
+        firstPage: pageToken === undefined,
+        listed: ids.length,
+        toFetch: toFetch.length,
+        hasMore: Boolean(listData.nextPageToken),
+      })
+    }
     const messages = await this.fetchAndMapMessages(accessToken, toFetch)
 
     let nextHistoryId: string | null = null
