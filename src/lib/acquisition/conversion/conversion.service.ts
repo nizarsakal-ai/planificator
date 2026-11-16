@@ -4,6 +4,7 @@
  * Géocodage Nominatim : post-conversion hors TX (Lot G), non bloquant.
  */
 
+import { consultationPhotoRecipients } from "@/lib/acquisition/conversion/consultation-photo-recipients"
 import type {
   PrismaClient,
   Role,
@@ -237,6 +238,8 @@ export class ImportDraftConversionService {
             proposedCity: true,
             proposedStartDate: true,
             proposedEndDate: true,
+            proposedContactName: true,
+            proposedContactEmail: true,
           },
         })
 
@@ -379,6 +382,35 @@ export class ImportDraftConversionService {
           },
           select: { id: true },
         })
+
+        // Destinataires des photos : contact de la consultation + expéditeur de l'e-mail
+        // (aucun envoi automatique ; modifiables ensuite par un Super Admin).
+        const sourceMessage = await tx.acquisitionMessage.findFirst({
+          where: { id: draft.acquisitionMessageId, companyId: ctx.companyId },
+          select: { senderEmail: true },
+        })
+        const photoRecipients = consultationPhotoRecipients({
+          contactName: draft.proposedContactName,
+          contactEmail: draft.proposedContactEmail,
+          senderEmail: sourceMessage?.senderEmail ?? null,
+        })
+        if (photoRecipients.length > 0) {
+          await tx.worksitePhotoRecipient.createMany({
+            data: photoRecipients.map((r, position) => ({
+              companyId: ctx.companyId,
+              worksiteId: worksite.id,
+              label: r.label,
+              email: r.email,
+              emailKey: r.email.toLowerCase(),
+              active: r.active,
+              position,
+              createdById: ctx.actorUserId,
+              updatedById: ctx.actorUserId,
+            })),
+          })
+          await tx.$executeRaw`UPDATE "worksites" SET "photoRecipientsConfiguredAt" = clock_timestamp()
+            WHERE "id" = ${worksite.id} AND "companyId" = ${ctx.companyId} AND "photoRecipientsConfiguredAt" IS NULL`
+        }
 
         const attachments = await tx.acquisitionAttachment.findMany({
           where: {

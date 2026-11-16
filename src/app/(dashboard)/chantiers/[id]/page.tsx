@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { MapPin, Calendar, Clock, Users, HardHat, FileText, Download, Mail } from "lucide-react"
 import { initialRecipientState } from "@/lib/chantiers/photo-recipients"
 import { canReadPhotoRecipients } from "@/lib/chantiers/photo-recipients-access"
+import { consultationPhotoRecipients } from "@/lib/acquisition/conversion/consultation-photo-recipients"
 import { ChantierStatusActions } from "@/components/chantiers/ChantierStatusActions"
 import { ChantierEditForm } from "@/components/chantiers/ChantierEditForm"
 import { AffecterEquipeForm } from "@/components/chantiers/AffecterEquipeForm"
@@ -128,8 +129,19 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
         select: { label: true, email: true, active: true },
       })
     : []
+  // Chantier issu d'une consultation, liste jamais configurée et sans adresse historique : le contact de la
+  // consultation est SUGGÉRÉ (bouton explicite « Ajouter comme destinataire »), jamais enregistré d'office ici.
+  // Les chantiers convertis depuis le 16/11/2026 reçoivent ces destinataires dès la conversion.
+  const consultationSuggestion =
+    isSuperAdmin && chantier.photoRecipientsConfiguredAt === null && !chantier.clientContact
+      ? await loadConsultationRecipientSuggestion(chantier.id, session.user.companyId!)
+      : null
   const photoRecipientState = isSuperAdmin
-    ? initialRecipientState({ recipients: photoRecipientRows, configuredAt: chantier.photoRecipientsConfiguredAt, clientContact: chantier.clientContact })
+    ? initialRecipientState({
+        recipients: photoRecipientRows,
+        configuredAt: chantier.photoRecipientsConfiguredAt,
+        clientContact: chantier.clientContact ?? consultationSuggestion,
+      })
     : null
 
   const status = statusLabels[chantier.status] ?? { label: chantier.status, variant: "secondary" as const }
@@ -237,7 +249,9 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
                       </ul>
                     )}
                     {photoRecipientState.historicSuggestion && (
-                      <p className="text-xs text-amber-700 break-all">Adresse historique (non utilisée) : {photoRecipientState.historicSuggestion}</p>
+                      <p className="text-xs text-amber-700 break-all">
+                        {consultationSuggestion ? "Contact de la consultation (à ajouter via Modifier)" : "Adresse historique (non utilisée)"} : {photoRecipientState.historicSuggestion}
+                      </p>
                     )}
                   </div>
                 </div>
@@ -488,4 +502,29 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
       </div>
     </div>
   )
+}
+
+/** Contact de la consultation ayant créé ce chantier (première adresse utilisable), sinon null. */
+async function loadConsultationRecipientSuggestion(worksiteId: string, companyId: string): Promise<string | null> {
+  try {
+    const draft = await prisma.worksiteImportDraft.findFirst({
+      where: { createdWorksiteId: worksiteId, companyId },
+      select: {
+        proposedContactName: true,
+        proposedContactEmail: true,
+        acquisitionMessage: { select: { senderEmail: true } },
+      },
+    })
+    if (!draft) return null
+    return (
+      consultationPhotoRecipients({
+        contactName: draft.proposedContactName,
+        contactEmail: draft.proposedContactEmail,
+        senderEmail: draft.acquisitionMessage.senderEmail,
+      })[0]?.email ?? null
+    )
+  } catch {
+    // Suggestion de confort : une panne de lecture ne doit jamais casser la fiche chantier.
+    return null
+  }
 }
