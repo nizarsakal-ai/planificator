@@ -56,6 +56,53 @@ function withShadow<T extends object>(
   return { ...result, shadowStats: mailShadowCtx.stats }
 }
 
+/**
+ * Disjoncteur anti-message empoisonné : après N runs consécutifs bloqués sur
+ * l'ingestion d'un message (erreur jugée transitoire), le message fautif est mis
+ * en quarantaine pour garantir la progression de la boîte (cadence horaire → ~6 h).
+ */
+export const MESSAGE_INGESTION_CIRCUIT_BREAKER_THRESHOLD = 6
+
+const PRISMA_DETERMINISTIC_CODES = new Set([
+  "P2000", // valeur trop longue pour la colonne
+  "P2005", // valeur invalide pour le type
+  "P2006", // valeur invalide
+  "P2007", // erreur de validation de données
+  "P2009", // requête invalide
+  "P2011", // contrainte NOT NULL
+  "P2012", // valeur requise manquante
+  "P2019", // erreur d'entrée
+  "P2020", // valeur hors limites
+  "P2023", // donnée de colonne incohérente
+])
+
+/**
+ * Une erreur déterministe se reproduira à l'identique à chaque run : la rejouer
+ * bloquerait la boîte indéfiniment. Tout le reste est présumé transitoire.
+ */
+export function isDeterministicIngestionError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false
+  const name = (error as { name?: unknown }).name
+  if (name === "ZodError" || name === "PrismaClientValidationError") return true
+  const code = (error as { code?: unknown }).code
+  return typeof code === "string" && PRISMA_DETERMINISTIC_CODES.has(code)
+}
+
+/** Chemins Zod en échec (jamais les valeurs) — diagnostic sans fuite de contenu. */
+function safeValidationPaths(error: unknown): string[] | undefined {
+  if (!error || typeof error !== "object") return undefined
+  const issues = (error as { issues?: unknown }).issues
+  if (!Array.isArray(issues)) return undefined
+  return issues
+    .slice(0, 10)
+    .map((issue) => {
+      const path = (issue as { path?: unknown }).path
+      const code = (issue as { code?: unknown }).code
+      const p = Array.isArray(path) ? path.map((x) => String(x)).join(".") : "?"
+      return typeof code === "string" ? `${p}:${code}` : p
+    })
+}
+
 /** Taille de page Gmail par appel list/history (max API messages.list : 500). */
 export const DEFAULT_GMAIL_PAGE_SIZE = 50
 export const MAX_GMAIL_PAGE_SIZE = 500
@@ -162,6 +209,12 @@ export async function syncAcquisitionMailForCompany(
   let pagesProcessed = 0
   const deadlineAtMs = input.deadlineAtMs
   const shouldContinue = input.shouldContinue
+  let quarantined = 0
+  // Le curseur porte les échecs des runs précédents : s'ils sont tous dus à
+  // l'ingestion, la boîte est bloquée sur un message → quarantaine forcée.
+  const circuitOpen =
+    cursorRecord.lastErrorCode === "MESSAGE_INGESTION_FAILED" &&
+    cursorRecord.consecutiveFailures >= MESSAGE_INGESTION_CIRCUIT_BREAKER_THRESHOLD
 
   let mailShadowCtx: MailShadowRunContext | null = null
   if (input.mailShadow === false) {
@@ -292,8 +345,39 @@ export async function syncAcquisitionMailForCompany(
         if (mailShadowCtx) {
           await projectMailShadowAfterLegacy(message, companyId, mailShadowCtx)
         }
-      } catch {
+      } catch (e) {
         base.stats.failed++
+        const deterministic = isDeterministicIngestionError(e)
+        const diagnostic = {
+          companyId,
+          mailboxKey,
+          externalMessageId: message.externalMessageId,
+          internalCode: safeInternalErrorCode(e),
+          validationPaths: safeValidationPaths(e),
+        }
+
+        if (deterministic || circuitOpen) {
+          // Quarantaine : le message est journalisé puis ignoré ; la boîte continue.
+          quarantined++
+          console.error("[acquisition-gmail-sync] MESSAGE_QUARANTINED", {
+            ...diagnostic,
+            reason: deterministic ? "DETERMINISTIC_ERROR" : "CIRCUIT_BREAKER",
+            consecutiveFailures: cursorRecord.consecutiveFailures,
+          })
+          continue
+        }
+
+        console.warn("[acquisition-gmail-sync] MESSAGE_INGESTION_FAILED", {
+          ...diagnostic,
+          consecutiveFailures: cursorRecord.consecutiveFailures,
+        })
+        await recordFailureBestEffort(cursorRepository, {
+          companyId,
+          source: provider.source,
+          errorCode: "MESSAGE_INGESTION_FAILED",
+          occurredAt: now(),
+          mailboxKey,
+        })
         return withShadow({
           ...base,
           status: "PARTIAL",
@@ -302,6 +386,7 @@ export async function syncAcquisitionMailForCompany(
             code: "MESSAGE_INGESTION_FAILED",
             message: "Au moins un message n'a pas pu être persisté",
             retryable: true,
+            internalCode: safeInternalErrorCode(e),
           },
         }, mailShadowCtx)
       }
@@ -309,14 +394,26 @@ export async function syncAcquisitionMailForCompany(
 
     const hasNextPage = page.hasMore && page.nextPageToken
     if (!hasNextPage) {
-      if (finalHistoryId !== cursorRecord.lastHistoryId) {
-        await cursorRepository.saveSuccessfulPage(
-          companyId,
-          provider.source,
-          finalHistoryId,
-          now(),
-          mailboxKey
-        )
+      // Toujours persister : rafraîchit lastSyncedAt (santé visible dans Paramètres)
+      // et remet à zéro les échecs consécutifs. nextHistoryId null = inchangé.
+      await cursorRepository.saveSuccessfulPage(
+        companyId,
+        provider.source,
+        finalHistoryId ?? cursorRecord.lastHistoryId,
+        now(),
+        mailboxKey
+      )
+      if (quarantined > 0) {
+        return withShadow({
+          ...base,
+          status: "PARTIAL",
+          partialReason: "MESSAGE_QUARANTINED",
+          error: {
+            code: "MESSAGE_QUARANTINED",
+            message: `${quarantined} message(s) ignoré(s) car impossibles à enregistrer`,
+            retryable: false,
+          },
+        }, mailShadowCtx)
       }
       return withShadow({ ...base, status: "SUCCESS" }, mailShadowCtx)
     }

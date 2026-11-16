@@ -13,6 +13,20 @@ import {
 } from "@/lib/auth/gmail-oauth-state"
 import { resolveAcquisitionGmailOAuthRedirectUri } from "@/lib/acquisition/connector/acquisition-gmail-oauth-redirect"
 
+/** Scope indispensable au scan Acquisition (messages.list / history.list / messages.get). */
+export const ACQUISITION_GMAIL_REQUIRED_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+
+/**
+ * Google applique le consentement granulaire : l'utilisateur peut décocher l'accès Gmail
+ * sur l'écran de consentement tout en validant. Le jeton obtenu est alors valide mais
+ * chaque appel Gmail répond 403 insufficientPermissions. Le champ `scope` de la réponse
+ * token fait foi sur ce qui a réellement été accordé.
+ */
+export function hasGrantedAcquisitionGmailScope(scope: unknown): boolean {
+  if (typeof scope !== "string") return false
+  return scope.split(/\s+/).includes(ACQUISITION_GMAIL_REQUIRED_SCOPE)
+}
+
 export type AcquisitionGmailCallbackDeps = {
   auth: () => Promise<{
     user?: { id: string; companyId?: string | null; role: string } | null
@@ -115,10 +129,18 @@ export async function handleAcquisitionGmailCallback(
     access_token?: string
     refresh_token?: string
     expires_in?: number
+    scope?: string
   }
 
   if (!tokenData.access_token || !tokenData.refresh_token) {
     return redirectError("no_tokens")
+  }
+
+  // Jamais de connexion "active" inutilisable : sans gmail.readonly, on n'écrase pas
+  // un jeton existant éventuellement sain et on demande une nouvelle autorisation.
+  if (!hasGrantedAcquisitionGmailScope(tokenData.scope)) {
+    console.warn("[acquisition-gmail-oauth] MISSING_GMAIL_SCOPE", { companyId })
+    return redirectError("missing_gmail_scope")
   }
 
   const profileRes = await deps.fetch("https://www.googleapis.com/oauth2/v1/userinfo", {

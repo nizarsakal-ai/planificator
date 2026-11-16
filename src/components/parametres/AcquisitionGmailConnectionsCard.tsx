@@ -3,17 +3,31 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Mail, Plus, CheckCircle } from "lucide-react"
+import {
+  acquisitionGmailOAuthErrorMessage,
+  type MailboxHealth,
+  type MailboxHealthLevel,
+} from "@/lib/acquisition/connector/acquisition-mailbox-health"
 
 type Connection = {
   id: string
   gmailAddress: string
-  tokenExpiry: Date | string
-  active: boolean
+  /** Santé calculée côté serveur (évite un écart d'hydratation sur « il y a X min »). */
+  health: MailboxHealth
 }
 
 type Props = {
   connections: Connection[]
   acquisitionGmailParam?: string | null
+  reasonParam?: string | null
+}
+
+const LEVEL_CLASS: Record<MailboxHealthLevel, string> = {
+  ok: "text-emerald-700",
+  pending: "text-slate-500",
+  warning: "text-amber-600",
+  error: "text-red-600",
+  inactive: "text-slate-400",
 }
 
 /**
@@ -23,6 +37,7 @@ type Props = {
 export function AcquisitionGmailConnectionsCard({
   connections,
   acquisitionGmailParam,
+  reasonParam,
 }: Props) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
@@ -49,7 +64,7 @@ export function AcquisitionGmailConnectionsCard({
         </div>
       )}
       {acquisitionGmailParam === "error" && (
-        <p className="text-sm text-red-600">Échec de la connexion Gmail Acquisition.</p>
+        <p className="text-sm text-red-600">{acquisitionGmailOAuthErrorMessage(reasonParam)}</p>
       )}
 
       <ul className="space-y-2">
@@ -57,16 +72,17 @@ export function AcquisitionGmailConnectionsCard({
           <li className="text-sm text-slate-500">Aucune boîte Acquisition connectée.</li>
         )}
         {connections.map((c) => {
-          const expired = new Date(c.tokenExpiry).getTime() < Date.now()
+          const { health } = c
           return (
             <li
               key={c.id}
-              className="flex items-center justify-between text-sm border border-slate-100 rounded px-3 py-2"
+              className="text-sm border border-slate-100 rounded px-3 py-2 space-y-1"
             >
-              <span className="font-mono text-slate-800">{c.gmailAddress}</span>
-              <span className={expired ? "text-amber-600" : "text-emerald-700"}>
-                {!c.active ? "inactive" : expired ? "token expiré" : "active"}
-              </span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-slate-800 truncate">{c.gmailAddress}</span>
+                <span className={`shrink-0 ${LEVEL_CLASS[health.level]}`}>{health.label}</span>
+              </div>
+              {health.hint && <p className="text-xs text-slate-500">{health.hint}</p>}
             </li>
           )
         })}

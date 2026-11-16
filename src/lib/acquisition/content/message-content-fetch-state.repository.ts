@@ -127,6 +127,8 @@ async function atomicIncrementAttempt(
 
 /**
  * Pose nextRetryAt / terminalAt sans jamais effacer un terminalAt déjà posé.
+ * Casts explicites obligatoires : dans un CASE dont les autres branches valent NULL,
+ * PostgreSQL type le paramètre en `text` (erreur 42804 sur une colonne timestamp).
  * Filtre explicite companyId + acquisitionMessageId.
  */
 async function applyRetryableScheduleSql(
@@ -144,12 +146,12 @@ async function applyRetryableScheduleSql(
     SET
       "nextRetryAt" = CASE
         WHEN "terminalAt" IS NOT NULL THEN NULL
-        WHEN ${input.shouldTerminal} THEN NULL
-        ELSE ${input.nextRetryAt}
+        WHEN ${input.shouldTerminal}::boolean THEN NULL
+        ELSE ${input.nextRetryAt}::timestamp(3)
       END,
       "terminalAt" = CASE
         WHEN "terminalAt" IS NOT NULL THEN "terminalAt"
-        WHEN ${input.shouldTerminal} THEN ${input.now}
+        WHEN ${input.shouldTerminal}::boolean THEN ${input.now}::timestamp(3)
         ELSE NULL
       END,
       "updatedAt" = ${input.now}
@@ -172,7 +174,7 @@ async function applyPermanentScheduleSql(
     UPDATE "acquisition_content_fetch_states"
     SET
       "nextRetryAt" = NULL,
-      "terminalAt" = COALESCE("terminalAt", ${input.now}),
+      "terminalAt" = COALESCE("terminalAt", ${input.now}::timestamp(3)),
       "updatedAt" = ${input.now}
     WHERE "companyId" = ${input.companyId}
       AND "acquisitionMessageId" = ${input.acquisitionMessageId}
