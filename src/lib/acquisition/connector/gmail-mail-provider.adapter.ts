@@ -50,7 +50,12 @@ export interface GmailMailProviderAdapterDeps {
   knownMessageIds?: KnownGmailMessageIdsPort
 }
 
-/** Implémentation Prisma : même boîte + curseur legacy "" (anti-doublon historique). */
+/**
+ * Implémentation Prisma : même boîte + curseur legacy "" (anti-doublon historique).
+ * Exception : un message rejeté faute d'expéditeur partenaire dont l'expéditeur
+ * est AUJOURD'HUI partenaire (domaine/e-mail ajouté au registre) n'est pas « connu » :
+ * il est relu pour être promu en consultation.
+ */
 export const prismaKnownGmailMessageIds: KnownGmailMessageIdsPort = async ({
   companyId,
   connectionId,
@@ -65,9 +70,33 @@ export const prismaKnownGmailMessageIds: KnownGmailMessageIdsPort = async ({
       sourceMailboxKey: { in: [connectionId, ""] },
       externalMessageId: { in: externalMessageIds },
     },
-    select: { externalMessageId: true },
+    select: { externalMessageId: true, status: true, lastErrorCode: true, senderEmail: true, senderDomain: true },
   })
-  return new Set(rows.map((r) => r.externalMessageId))
+  const rejectedNotEligible = rows.some(
+    (r) => r.status === "REJECTED" && r.lastErrorCode === "SENDER_NOT_ELIGIBLE"
+  )
+  const identities = rejectedNotEligible
+    ? await activePartnerDomainListing.listActiveIdentities(companyId)
+    : null
+  return new Set(
+    rows
+      .filter((r) => !(identities && isNowEligibleRejection(r, identities)))
+      .map((r) => r.externalMessageId)
+  )
+}
+
+/** Rejet « expéditeur non partenaire » levé depuis par le registre. */
+export function isNowEligibleRejection(
+  row: { status: string; lastErrorCode: string | null; senderEmail: string; senderDomain: string },
+  identities: ActivePartnerIdentities
+): boolean {
+  if (row.status !== "REJECTED" || row.lastErrorCode !== "SENDER_NOT_ELIGIBLE") return false
+  const domain = row.senderDomain.trim().toLowerCase()
+  const email = row.senderEmail.trim().toLowerCase()
+  return (
+    (domain !== "" && identities.domains.some((d) => d.toLowerCase() === domain)) ||
+    identities.emails.some((e) => e.toLowerCase() === email)
+  )
 }
 
 function formatGmailAfterDate(days: number): string {
