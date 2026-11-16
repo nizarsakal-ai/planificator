@@ -20,7 +20,7 @@ interface VercelJson {
 
 const BOOKING_ONLY: Record<string, string> = {
   "/api/cron/chantiers": "0 5 * * *",
-  "/api/cron/gmail-scan": "0 8 * * *",
+  "/api/cron/gmail-scan": "30 * * * *",
 }
 
 const ACQUISITION_PATHS = [

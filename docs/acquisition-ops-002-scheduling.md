@@ -44,7 +44,7 @@ Préférer l’orchestrateur V2 en staging Agent 2 (voir `docs/acquisition-ops-v
 | Path | Schedule |
 |------|----------|
 | `/api/cron/chantiers` | `0 5 * * *` |
-| `/api/cron/gmail-scan` | `0 8 * * *` |
+| `/api/cron/gmail-scan` | `30 * * * *` (horaire, décalé de l’orchestrateur Acquisition) |
 
 ## Justification
 
