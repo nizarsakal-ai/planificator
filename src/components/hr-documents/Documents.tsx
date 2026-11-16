@@ -137,7 +137,7 @@ function ReviewForm({doc,employees,categories,busy,run}:{doc:Doc;employees:Emplo
     void run(()=>call(`/api/hr-documents/${doc.id}/review`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)}),"Affectation et version vérifiées. Publication séparée requise.")
   }}>
     <MetadataFields employees={employees} categories={categories} defaults={doc}/>
-    <label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" required className="mt-1"/>J’ai vérifié le contenu du PDF, le salarié, la période et la catégorie de cette version.</label>
+    <label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" required className="mt-1"/>J’ai vérifié le contenu du PDF, le salarié et la catégorie de cette version.</label>
     <button disabled={busy} className="rounded-lg border border-blue-300 px-4 py-2 text-sm text-blue-900 disabled:opacity-50">Valider cette affectation</button>
   </form>
 }
@@ -149,18 +149,28 @@ function hintText(h?:Hint|null){
   const from={MRZ:"la bande MRZ",TEXT:"le texte de la pièce",EXTERNAL:"une lecture externe"}[h.source]??"le document"
   return h.confidence>=0.7?`Lu dans ${from}.`:`Lu dans ${from} — à vérifier.`
 }
+/**
+ * Période technique (AAAA-MM) exigée par le serveur pour le classement et la détection de doublon, jamais saisie :
+ * valeur proposée ou déjà enregistrée si valide, sinon le mois du dépôt. Remplace le champ `type="month"`,
+ * rendu en texte libre par Safari et Firefox (« juin 2030 » envoyé tel quel → refus systématique du serveur).
+ */
+function documentPeriod(proposed?:string|null){
+  if(proposed&&/^\d{4}-(0[1-9]|1[0-2])$/.test(proposed))return proposed
+  const now=new Date()
+  return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`
+}
 function HintLine({hint}:{hint?:Hint|null}){
   const text=hintText(hint);if(!text)return null
   return <span className={`mt-1 block text-xs ${hint!.confidence>=0.7?"text-slate-600":"font-medium text-amber-800"}`}>{text}</span>
 }
-function MetadataFields({employees,categories,defaults,hints}:{employees:Employee[];categories:Category[];defaults?:Partial<Doc>;hints?:{employee?:Hint|null;category?:Hint|null;period?:Hint|null}}){
+function MetadataFields({employees,categories,defaults,hints}:{employees:Employee[];categories:Category[];defaults?:Partial<Doc>;hints?:{employee?:Hint|null;category?:Hint|null}}){
   const legacyOnly=categories.every(c=>["PAYSLIP","CONTRACT","AMENDMENT","OTHER"].includes(c.code))
   // Options vides sélectionnables (pas `disabled`) : si la valeur proposée est absente, le navigateur retombe sur
   // « Choisir explicitement » (refusé par `required`) et jamais sur le premier salarié ou la première catégorie.
   const employee=employees.some(e=>e.id===defaults?.employeeId)?defaults!.employeeId!:""
   return <><label className="text-sm">Salarié<select required name="employeeId" className={control} defaultValue={employee}><option value="">Choisir explicitement</option>{employees.map(e=><option key={e.id} value={e.id}>{e.lastName} {e.firstName}{e.draft?" (fiche à compléter)":""}</option>)}</select><HintLine hint={hints?.employee}/></label>
     <label className="text-sm">Catégorie<select required name="category" className={control} defaultValue={defaults?.category??(legacyOnly?"PAYSLIP":"")}>{!legacyOnly&&<option value="">À reconnaître — choisir</option>}{categories.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}</select><HintLine hint={hints?.category}/></label>
-    <label className="text-sm">Période<input required type="month" name="period" className={control} defaultValue={defaults?.period}/><HintLine hint={hints?.period}/></label>
+    <input type="hidden" name="period" value={documentPeriod(defaults?.period)} readOnly/>
     <label className="text-sm">Titre privé<input required maxLength={120} name="title" className={control} defaultValue={defaults?.title}/></label></>
 }
 function RecoveryForm({doc,action,busy,run}:{doc:Doc;action:"RESUME"|"RESTORE";busy:boolean;run:Runner}){
@@ -272,7 +282,7 @@ function ImportPanel(props:ImportProps){
   }
 
   return <div className="rounded-xl border bg-white p-4"><h2 className="font-semibold">{batch?"Ajouter plusieurs fichiers":images?"Dépôt de documents — unitaire ou lot":"Dépôt PDF — unitaire ou lot"}</h2>
-    <p className="my-2 text-sm text-slate-600">10 fichiers au maximum par sélection, 10 Mo par {images?"fichier (PDF, JPG, PNG ou HEIC)":"PDF"}. {batch?"Choisissez la catégorie une fois, puis vérifiez la période et l’affectation de chaque fichier. Aucun document n’est publié lors du dépôt.":recognition?"Vérifiez chaque proposition de classement avant de déposer le fichier.":"Chaque affectation est vérifiée séparément."}</p>
+    <p className="my-2 text-sm text-slate-600">10 fichiers au maximum par sélection, 10 Mo par {images?"fichier (PDF, JPG, PNG ou HEIC)":"PDF"}. {batch?"Choisissez la catégorie une fois, puis vérifiez l’affectation de chaque fichier. Aucun document n’est publié lors du dépôt.":recognition?"Vérifiez chaque proposition de classement avant de déposer le fichier.":"Chaque affectation est vérifiée séparément."}</p>
     {batch&&<div className="mb-3 grid gap-3 sm:grid-cols-2">
       <p className="text-sm">Salarié <strong className="block">{props.employeeName||"Salarié de ce dossier"}</strong></p>
       <label className="text-sm">Catégorie du lot<select className={control} value={sharedCategory} disabled={locked||attempts.current.size>0} onChange={e=>{
@@ -344,12 +354,12 @@ function ImportItem({file,fileKey,employees,employeeId,busy,run,categories,recog
       const f=new FormData(e.currentTarget);f.delete("checked");f.set("key",fileKey);f.set("file",file)
       void run(()=>call("/api/hr-documents",{method:"POST",body:f}),"Document déposé en préparation. Vérification et publication restent nécessaires.")
     }}>{batch ? <fieldset disabled={busy||attempted||blocked} className="grid min-w-0 gap-3 sm:col-span-2 sm:grid-cols-2">
-      <label className="text-sm">Période<input required type="month" name="period" className={control} defaultValue={defaults.period}/><HintLine hint={p?.period}/></label>
+      <input type="hidden" name="period" value={documentPeriod(defaults.period)} readOnly/>
       <label className="text-sm">Titre privé<input required maxLength={120} name="title" className={control} defaultValue={defaults.title}/></label>
       {p?.category&&<p className="text-xs text-slate-600 sm:col-span-2">Type proposé : {categoryLabel(p.category.value)}</p>}
-      <label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" name="checked" required className="mt-1"/>J’ai vérifié le salarié, la catégorie et la période sur ce fichier.</label>
-    </fieldset> : <><MetadataFields employees={employees} categories={categories} defaults={defaults} hints={p?{employee:employeeHint,category:p.category,period:p.period}:undefined}/>
-      {p&&<label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" name="checked" required className="mt-1"/>J’ai vérifié la proposition (type, salarié, période) sur le document.</label>}
+      <label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" name="checked" required className="mt-1"/>J’ai vérifié le salarié et la catégorie sur ce fichier.</label>
+    </fieldset> : <><MetadataFields employees={employees} categories={categories} defaults={defaults} hints={p?{employee:employeeHint,category:p.category}:undefined}/>
+      {p&&<label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" name="checked" required className="mt-1"/>J’ai vérifié la proposition (type, salarié) sur le document.</label>}
       <button disabled={busy} className="rounded-lg bg-blue-800 px-3 py-2 text-sm text-white disabled:opacity-50">Déposer ce document privé</button></>}</form>}
     {p?.canCreateDraft&&drafts&&!selected&&<DraftPanel file={file} proposal={p} categories={categories} busy={busy} run={run} onCreated={(e,expiry)=>{onDraft(e);setSelected(e.id);if(expiry)setPeriodFromDraft(expiry.slice(0,7))}}/>}
   </div>
