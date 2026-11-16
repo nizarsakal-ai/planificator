@@ -2,13 +2,14 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { Mail, Wifi, WifiOff, CheckCircle, Loader2 } from "lucide-react"
+import { Mail, Wifi, WifiOff, CheckCircle, Loader2, AlertTriangle } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { disconnectGmail } from "@/lib/actions/gmail.actions"
+import type { BookingGmailHealth } from "@/lib/booking/booking-gmail-health"
 
 interface Props {
-  connection: { gmailAddress: string; connectedAt: Date } | null
+  connection: { gmailAddress: string; connectedAt: Date; health?: BookingGmailHealth } | null
   gmailParam?: string | null
 }
 
@@ -25,6 +26,8 @@ export function GmailConnectionCard({ connection, gmailParam }: Props) {
       setLoading(false)
     }
   }
+
+  const needsReconnect = connection?.health?.level === "error"
 
   const fmtDate = (d: Date) =>
     new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long", year: "numeric" }).format(new Date(d))
@@ -50,16 +53,23 @@ export function GmailConnectionCard({ connection, gmailParam }: Props) {
         )}
 
         <div className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 border border-slate-100">
-          <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${connection ? "bg-green-100" : "bg-slate-200"}`}>
-            {connection
-              ? <Wifi className="h-4 w-4 text-green-600" />
-              : <WifiOff className="h-4 w-4 text-slate-400" />}
+          <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${needsReconnect ? "bg-red-100" : connection ? "bg-green-100" : "bg-slate-200"}`}>
+            {needsReconnect
+              ? <AlertTriangle className="h-4 w-4 text-red-600" />
+              : connection
+                ? <Wifi className="h-4 w-4 text-green-600" />
+                : <WifiOff className="h-4 w-4 text-slate-400" />}
           </div>
           <div className="flex-1 min-w-0">
             {connection ? (
               <>
                 <p className="text-sm font-medium text-slate-800 truncate">{connection.gmailAddress}</p>
                 <p className="text-xs text-slate-500">Connecté le {fmtDate(connection.connectedAt)}</p>
+                {connection.health && connection.health.level !== "ok" && (
+                  <p className={`text-xs font-medium ${needsReconnect ? "text-red-600" : "text-slate-500"}`}>
+                    {connection.health.label}
+                  </p>
+                )}
               </>
             ) : (
               <>
@@ -72,6 +82,21 @@ export function GmailConnectionCard({ connection, gmailParam }: Props) {
           </div>
         </div>
 
+        {needsReconnect && connection?.health?.hint && (
+          <div role="alert" className="text-sm text-red-700 bg-red-50 px-3 py-2 rounded-lg border border-red-100">
+            {connection.health.hint}
+          </div>
+        )}
+        {needsReconnect && (
+          <Button
+            size="sm"
+            className="w-full bg-[#0f3460] hover:bg-[#0f3460]/90"
+            onClick={() => { window.location.href = "/api/auth/gmail" }}
+          >
+            <Mail className="h-4 w-4 mr-2" />
+            Reconnecter Gmail
+          </Button>
+        )}
         {connection ? (
           <Button
             variant="outline"
