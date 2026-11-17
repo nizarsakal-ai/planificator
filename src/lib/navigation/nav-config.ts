@@ -37,6 +37,7 @@ import {
   Boxes,
   ShoppingCart,
   Wrench,
+  Fuel,
 } from "lucide-react"
 
 export interface NavItem {
@@ -215,6 +216,15 @@ export function withWorksitePhotosNavItem(items: readonly NavItem[], visible: bo
   if (visible !== true || result.some(i => i.href === "/photos-engins")) return result
   const chantiers = result.findIndex(i => i.href === "/chantiers")
   result.splice(chantiers < 0 ? result.length : chantiers + 1, 0, { label: "Photos engins", href: "/photos-engins", icon: Camera })
+  return result
+}
+
+/** Ticket carburant : chauffeur attitré d'un camion (résolu côté serveur) ; affichage seulement, l'API vérifie le droit. */
+export function withFuelTicketNavItem(items: readonly NavItem[], visible: boolean): NavItem[] {
+  const result = [...items]
+  if (visible !== true || result.some(i => i.href === "/ticket-carburant")) return result
+  const expenses = result.findIndex(i => i.href === "/mes-notes-de-frais")
+  result.splice(expenses < 0 ? result.length : expenses + 1, 0, { label: "Ticket carburant", href: "/ticket-carburant", icon: Fuel })
   return result
 }
 
