@@ -6,8 +6,16 @@ import { authorizeVehicleLocked } from "../vehicle-authority";
 import { requireMileageSession } from "../mileage-access";
 import { MileageDomainError, parseMileageCommand, resolveMileageHistory, getMileageTripDistance } from "../mileage-domain";
 import { executeMileageCommandInTransaction, normalizeMileageFailure, type MileageServiceDeps } from "../mileage-service";
-import { createTourSchema, tourStopSchema, tourCommandSchema, tourFlag, tourParse, TOUR_MAX_DURATION_MS } from "./tour-domain";
+import { createTourSchema, tourStopSchema, tourCommandSchema, tourFlag, tourParse, resolveEstimatedKm, TOUR_MAX_DURATION_MS } from "./tour-domain";
+import { compareTourKm, tourFuelPurchases, ticketMileagePlausible } from "./fuel-consumption-domain";
+import { loadFuelFills, odometerPointsFromHistory } from "./fuel-consumption-service";
+import type { AutoKmDetail } from "./tour-km-auto-service";
+/** Résultat d'une commande ; `refreshAutoKm` (interne, jamais renvoyé au client) déclenche le calcul automatique des km. */
+export interface TourCommandResult { id: string; revision: number; replayed: boolean; refreshAutoKm?: boolean }
 export interface TourServiceDeps extends MileageServiceDeps {
+    /** Planifie une tâche après l'envoi de la réponse (`after` de Next en production ; absent en test). */
+    afterResponse?: (task: () => Promise<void>) => void;
+    fetchFn?: typeof fetch;
     consumeApprovedImport?: (tx: Prisma.TransactionClient, scope: {
         companyId: string;
         truckId: string;
@@ -65,7 +73,7 @@ async function resourceCheck(tx: Prisma.TransactionClient, companyId: string, tr
             fail("DAILY_DRIVER_PLANNING_CONFLICT");
     }
 }
-export async function createTour(truckId: string, body: unknown, key: string | null, deps: TourServiceDeps) {
+export async function createTour(truckId: string, body: unknown, key: string | null, deps: TourServiceDeps): Promise<TourCommandResult> {
     tourFlag();
     const input = tourParse(createTourSchema, body), k = keyParse(key), session = requireMileageSession(await deps.auth());
     const requestHash = hash(["tour-create-v1", session, truckId, input]);
@@ -103,16 +111,17 @@ export async function createTour(truckId: string, body: unknown, key: string | n
                     fail("CLIENT_NOT_FOUND", 404);
             }
             const team = input.teamId ? await tx.team.findUnique({ where: { id: input.teamId } }) : null, driver = input.chauffeurId ? await tx.employee.findUnique({ where: { id: input.chauffeurId } }) : null;
-            const tour = await tx.vehicleTour.create({ data: { id: tourId, companyId: session.companyId, truckId, title: input.title, teamId: input.teamId, chauffeurId: input.chauffeurId, teamNameSnapshot: team?.name, chauffeurNameSnapshot: driver ? `${driver.firstName} ${driver.lastName}` : null, startsAt: parsed.startsAt, endsAt: parsed.endsAt, estimatedKm: input.estimatedKm, createdById: actor.id, stops: { create: stops.map(({ addressValidated, ...stop }, position) => ({ ...stop, position, validatedById: actor.id })) } } });
+            const km = resolveEstimatedKm(input, null);
+            const tour = await tx.vehicleTour.create({ data: { id: tourId, companyId: session.companyId, truckId, title: input.title, teamId: input.teamId, chauffeurId: input.chauffeurId, teamNameSnapshot: team?.name, chauffeurNameSnapshot: driver ? `${driver.firstName} ${driver.lastName}` : null, startsAt: parsed.startsAt, endsAt: parsed.endsAt, estimatedKm: km.estimatedKm, estimatedKmSource: km.source, createdById: actor.id, stops: { create: stops.map(({ addressValidated, ...stop }, position) => ({ ...stop, position, validatedById: actor.id })) } } });
             await tx.vehicleTourCommand.create({ data: { tourId: tour.id, companyId: session.companyId, truckId, key: k, requestHash, acceptedRevision: 1 } });
-            return { id: tour.id, revision: 1, replayed: false };
+            return { id: tour.id, revision: 1, replayed: false, refreshAutoKm: km.source === "AUTO" };
         }, options);
     }
     catch (e) {
         return normalizeMileageFailure(e);
     }
 }
-export async function commandTour(truckId: string, tourId: string, body: unknown, key: string | null, deps: TourServiceDeps) {
+export async function commandTour(truckId: string, tourId: string, body: unknown, key: string | null, deps: TourServiceDeps): Promise<TourCommandResult> {
     tourFlag();
     const command = tourParse(tourCommandSchema, body), k = keyParse(key), session = requireMileageSession(await deps.auth()), requestHash = hash(["tour-command-v1", session, truckId, tourId, command]);
     try {
@@ -135,9 +144,14 @@ export async function commandTour(truckId: string, tourId: string, body: unknown
             if (!truck.active)
                 fail("TRUCK_ARCHIVED");
             let data: Prisma.VehicleTourUncheckedUpdateInput = { revision: { increment: 1 } };
+            let refreshAutoKm = false;
             if (command.type === "DETAILS") {
-                await writeVehicleAudit(tx,{companyId:session.companyId,truckId,actorId:session.userId,actorNameSnapshot:actor.name?.trim()||actor.id,action:"TOUR_DETAILS_EDIT",entityType:"VehicleTour",entityId:tour.id,outcome:"DONE",detail:{reason:command.reason,previousRevision:tour.revision,before:JSON.stringify({title:tour.title,estimatedKm:tour.estimatedKm}),after:JSON.stringify({title:command.title,estimatedKm:command.estimatedKm})}});
-                data={...data,title:command.title,estimatedKm:command.estimatedKm};
+                // Tournée terminée ou annulée : jamais recalculée (l'estimation sert de référence à l'écart réel).
+                const active = tour.status === "PLANNED" || tour.status === "IN_PROGRESS";
+                const km = resolveEstimatedKm(command, tour);
+                await writeVehicleAudit(tx,{companyId:session.companyId,truckId,actorId:session.userId,actorNameSnapshot:actor.name?.trim()||actor.id,action:"TOUR_DETAILS_EDIT",entityType:"VehicleTour",entityId:tour.id,outcome:"DONE",detail:{reason:command.reason,previousRevision:tour.revision,before:JSON.stringify({title:tour.title,estimatedKm:tour.estimatedKm,estimatedKmSource:tour.estimatedKmSource}),after:JSON.stringify({title:command.title,estimatedKm:km.estimatedKm,estimatedKmSource:km.source})}});
+                data={...data,title:command.title,estimatedKm:km.estimatedKm,estimatedKmSource:km.source,...(km.source==="AUTO"&&tour.estimatedKmSource!=="AUTO"?{estimatedKmInputHash:null}:{})};
+                refreshAutoKm = active && km.source === "AUTO" && tour.estimatedKmSource !== "AUTO";
             }
             else if (command.type === "EDIT") {
                 if (tour.status !== "PLANNED") fail("TOUR_NOT_PLANNED");
@@ -152,9 +166,12 @@ export async function commandTour(truckId: string, tourId: string, body: unknown
                     if (stop.clientId && !await tx.client.findFirst({where:{id:stop.clientId, companyId:session.companyId,active:true}})) fail("CLIENT_NOT_FOUND",404);
                 }
                 await resourceCheck(tx, session.companyId, truckId, {teamId:tour.teamId,chauffeurId:tour.chauffeurId,startsAt,endsAt,stops:command.stops}, tour.id);
-                await writeVehicleAudit(tx,{companyId:session.companyId,truckId,actorId:session.userId,actorNameSnapshot:actor.name?.trim()||actor.id,action:"TOUR_EDIT",entityType:"VehicleTour",entityId:tour.id,outcome:"DONE",detail:{reason:command.reason,previousRevision:tour.revision,before:JSON.stringify({title:tour.title,startsAt:tour.startsAt,endsAt:tour.endsAt,estimatedKm:tour.estimatedKm,stops:tour.stops}),after:JSON.stringify(command)}});
+                const km = resolveEstimatedKm(command, tour);
+                await writeVehicleAudit(tx,{companyId:session.companyId,truckId,actorId:session.userId,actorNameSnapshot:actor.name?.trim()||actor.id,action:"TOUR_EDIT",entityType:"VehicleTour",entityId:tour.id,outcome:"DONE",detail:{reason:command.reason,previousRevision:tour.revision,before:JSON.stringify({title:tour.title,startsAt:tour.startsAt,endsAt:tour.endsAt,estimatedKm:tour.estimatedKm,estimatedKmSource:tour.estimatedKmSource,stops:tour.stops}),after:JSON.stringify({...command,estimatedKm:km.estimatedKm,estimatedKmSource:km.source})}});
                 await tx.vehicleTourStop.deleteMany({where:{tourId:tour.id,companyId:session.companyId}});
-                data = {...data,title:command.title,startsAt,endsAt,estimatedKm:command.estimatedKm,stops:{create:command.stops.map(({addressValidated,...stop},position)=>({...stop,position,validatedById:session.userId}))}};
+                // Les étapes ou les dates ont pu changer : une estimation automatique est recalculée après l'enregistrement.
+                refreshAutoKm = km.source === "AUTO";
+                data = {...data,title:command.title,startsAt,endsAt,estimatedKm:km.estimatedKm,estimatedKmSource:km.source,...(km.source==="AUTO"&&tour.estimatedKmSource!=="AUTO"?{estimatedKmInputHash:null}:{}),stops:{create:command.stops.map(({addressValidated,...stop},position)=>({...stop,position,validatedById:session.userId}))}};
             }
             else if (command.type === "START") {
                 if (tour.status !== "PLANNED")
@@ -189,11 +206,46 @@ export async function commandTour(truckId: string, tourId: string, body: unknown
             }
             await tx.vehicleTour.update({ where: { id: tour.id }, data });
             await tx.vehicleTourCommand.create({ data: { tourId, companyId: session.companyId, truckId, key: k, requestHash, acceptedRevision: tour.revision + 1 } });
-            return { id: tour.id, revision: tour.revision + 1, replayed: false };
+            return { id: tour.id, revision: tour.revision + 1, replayed: false, refreshAutoKm };
         }, options);
     }
     catch (e) {
         return normalizeMileageFailure(e);
     }
 }
-export async function readTours(truckId: string, deps: TourServiceDeps) { tourFlag(); const session = requireMileageSession(await deps.auth()); return deps.db.$transaction(async (tx) => { const { truck } = await authorizeVehicleLocked(tx, truckId, session, "READ"); const tours = await tx.vehicleTour.findMany({ where: { companyId: session.companyId, truckId }, include: { stops: { orderBy: { position: "asc" } }, mileageTrip: true }, orderBy: { startsAt: "desc" }, take: 100 }); const entries = await tx.mileageEntry.findMany({ where: { companyId: session.companyId, truckId }, orderBy: { revision: "asc" } }), history = resolveMileageHistory(entries); const canManage=["ADMIN","SUPER_ADMIN"].includes(session.role); const worksites = canManage ? await tx.worksite.findMany({ where: { companyId: session.companyId, archivedAt: null, address: { not: null } }, select: { id: true, name: true, address: true, clientId: true, latitude: true, longitude: true }, orderBy: { name: "asc" }, take: 200 }) : []; const clients = canManage ? await tx.client.findMany({ where: { companyId: session.companyId, active: true, address: { not: null } }, select: { id: true, name: true, address: true }, orderBy: { name: "asc" }, take: 200 }) : []; const settings = await tx.companySettings.findUnique({where:{companyId:session.companyId}}); return { timezone:settings?.timezone || "Europe/Paris", worksites, clients, truckId, matricule: truck.matricule, mileageRevision: truck.mileageRevision, currentMileage: truck.currentMileage, teamId: truck.teamId, chauffeurId: truck.chauffeurId, canManage, tours: tours.map(t => ({ ...t, actualKm: t.mileageTrip ? getMileageTripDistance(history, t.mileageTrip) : null, estimatedKmSource: t.estimatedKm === null ? null : "MANUAL" })) }; }, options); }
+export async function readTours(truckId: string, deps: TourServiceDeps) {
+    tourFlag();
+    const session = requireMileageSession(await deps.auth());
+    return deps.db.$transaction(async (tx) => {
+        const { truck } = await authorizeVehicleLocked(tx, truckId, session, "READ");
+        const tours = await tx.vehicleTour.findMany({ where: { companyId: session.companyId, truckId }, include: { stops: { orderBy: { position: "asc" } }, mileageTrip: true }, orderBy: { startsAt: "desc" }, take: 100 });
+        const entries = await tx.mileageEntry.findMany({ where: { companyId: session.companyId, truckId }, orderBy: { revision: "asc" } }), history = resolveMileageHistory(entries);
+        const canManage = ["ADMIN", "SUPER_ADMIN"].includes(session.role);
+        const worksites = canManage ? await tx.worksite.findMany({ where: { companyId: session.companyId, archivedAt: null, address: { not: null } }, select: { id: true, name: true, address: true, clientId: true, latitude: true, longitude: true }, orderBy: { name: "asc" }, take: 200 }) : [];
+        const clients = canManage ? await tx.client.findMany({ where: { companyId: session.companyId, active: true, address: { not: null } }, select: { id: true, name: true, address: true }, orderBy: { name: "asc" }, take: 200 }) : [];
+        const settings = await tx.companySettings.findUnique({ where: { companyId: session.companyId } });
+        const points = odometerPointsFromHistory(history);
+        // Pleins pendant les tournées (gestionnaires seulement : les montants et litres restent du bureau).
+        const span = tours.length ? { from: new Date(Math.min(...tours.map(t => t.startsAt.getTime()))), to: new Date(Math.max(...tours.map(t => Math.max(t.endsAt.getTime(), t.completedAt?.getTime() ?? 0)))) } : null;
+        const fills = canManage && span ? await loadFuelFills(tx, session.companyId, truckId, span.from, span.to) : [];
+        // Dernier compteur lu sur un ticket : simple aide à la saisie du départ ou de l'arrivée, jamais imposé.
+        const lastTicket = await tx.vehicleExpense.findFirst({ where: { companyId: session.companyId, truckId, category: "FUEL", status: { in: ["PENDING", "APPROVED"] }, mileageObservation: { not: null } }, orderBy: { occurredAt: "desc" }, select: { occurredAt: true, mileageObservation: true } });
+        const lastTicketMileage = lastTicket?.mileageObservation && ticketMileagePlausible(points, lastTicket.occurredAt.getTime(), lastTicket.mileageObservation) ? { mileage: lastTicket.mileageObservation, at: lastTicket.occurredAt } : null;
+        return {
+            timezone: settings?.timezone || "Europe/Paris", worksites, clients, truckId, matricule: truck.matricule, mileageRevision: truck.mileageRevision, currentMileage: truck.currentMileage, teamId: truck.teamId, chauffeurId: truck.chauffeurId, canManage, lastTicketMileage,
+            tours: tours.map(({ estimatedKmInputHash: _hash, estimatedKmDetail, ...t }) => {
+                const actualKm = t.mileageTrip ? getMileageTripDistance(history, t.mileageTrip) : null;
+                const detail = canManage ? (estimatedKmDetail as AutoKmDetail | null) : null;
+                return {
+                    ...t,
+                    actualKm,
+                    // Tournée antérieure à la source : une valeur saisie est manuelle.
+                    estimatedKmSource: t.estimatedKmSource ?? (t.estimatedKm === null ? null : "MANUAL"),
+                    estimatedKmDetail: detail,
+                    kmComparison: t.status === "COMPLETED" ? compareTourKm(t.estimatedKm, actualKm) : null,
+                    fuel: canManage && t.status === "COMPLETED" ? tourFuelPurchases({ startsAt: t.startsAt.getTime(), endsAt: Math.max(t.endsAt.getTime(), t.completedAt?.getTime() ?? 0), actualKm }, fills) : null,
+                };
+            }),
+        };
+    }, options);
+}

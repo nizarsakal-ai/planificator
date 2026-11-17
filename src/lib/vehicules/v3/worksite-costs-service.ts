@@ -14,6 +14,7 @@ import { requireMileageSession, type MileageSession } from "../mileage-access"
 import { authorizeVehicleLocked } from "../vehicle-authority"
 import { nationalAveragePrice } from "./fuel-estimate-providers"
 import { loadCompanyCardSpend } from "./bank-fuel-service"
+import { loadTruckConsumption, type TruckConsumption } from "./fuel-consumption-service"
 import {
   computeWorksiteCosts,
   truckAveragePrice,
@@ -41,6 +42,10 @@ export interface WorksiteCostsResult extends WorksiteCostBreakdown {
   currency: "EUR"
   /** Dépenses dans une autre devise : non additionnées. */
   otherCurrencyExpenses: number
+  /** Consommation mesurée du camion (90 jours glissants jusqu'à la fin de la période). */
+  consumption: TruckConsumption
+  /** MEASURED : consommation mesurée du camion utilisée ; DEFAULT : forfait (données insuffisantes). */
+  consumptionSource: "MEASURED" | "DEFAULT"
 }
 
 const txOptions = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 5_000, timeout: 15_000 }
@@ -124,7 +129,10 @@ export async function readWorksiteCosts(truckId: string, rawQuery: unknown, deps
     const cardSpend = otherSpend
       .filter((c) => c.truckId === truckId)
       .map((c) => ({ day: c.day, kind: c.category, amount: -c.amountCents / 100 }))
+    // Consommation réelle du camion (plein à plein), à la place du forfait quand elle est fiable.
+    const consumption = await loadTruckConsumption(tx, companyId, truckId, widen(to, 1))
     return {
+      consumption,
       cardSpend,
       costTours,
       costExpenses,
@@ -146,6 +154,7 @@ export async function readWorksiteCosts(truckId: string, rawQuery: unknown, deps
     }
   }
 
+  const measured = data.consumption.current.status === "OK" ? data.consumption.current.lPer100Km : null
   return {
     ...computeWorksiteCosts({
       tours: data.costTours,
@@ -154,7 +163,10 @@ export async function readWorksiteCosts(truckId: string, rawQuery: unknown, deps
       cardSpend: data.cardSpend,
       worksiteNames: data.worksiteNames,
       fuelPrice,
+      ...(measured ? { consumptionLPer100Km: measured } : {}),
     }),
+    consumption: data.consumption,
+    consumptionSource: measured ? "MEASURED" : "DEFAULT",
     from,
     to,
     currency: "EUR",

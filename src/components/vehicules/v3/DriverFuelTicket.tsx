@@ -17,6 +17,7 @@ type Proposal = {
   litres: { value: string; sure: boolean } | null
   day: { value: string; sure: boolean } | null
   station: { value: string; sure: boolean } | null
+  mileage?: { value: number; sure: boolean } | null
 }
 type Pending = { key: string; blob: Blob; previewUrl: string }
 
@@ -47,6 +48,7 @@ export function DriverFuelTicket() {
   const [litres, setLitres] = useState("")
   const [day, setDay] = useState(today())
   const [station, setStation] = useState("")
+  const [mileage, setMileage] = useState("")
 
   useEffect(() => {
     fetch("/api/me/trucks", { cache: "no-store" })
@@ -57,7 +59,7 @@ export function DriverFuelTicket() {
 
   function reset() {
     if (pending) URL.revokeObjectURL(pending.previewUrl)
-    setPending(null); setAmount(""); setLitres(""); setDay(today()); setStation(""); setReadNote(""); setError(""); setDone(null)
+    setPending(null); setAmount(""); setLitres(""); setDay(today()); setStation(""); setMileage(""); setReadNote(""); setError(""); setDone(null)
   }
 
   async function onPhoto(e: React.ChangeEvent<HTMLInputElement>) {
@@ -92,7 +94,8 @@ export function DriverFuelTicket() {
       if (body.litres) setLitres(body.litres.value.replace(".", ","))
       if (body.day && body.day.value <= today()) setDay(body.day.value)
       if (body.station) setStation(body.station.value)
-      const found = [body.amount && "montant", body.litres && "litres", body.day && "date", body.station && "station"].filter(Boolean)
+      if (body.mileage) setMileage(String(body.mileage.value))
+      const found = [body.amount && "montant", body.litres && "litres", body.day && "date", body.station && "station", body.mileage && "compteur"].filter(Boolean)
       setReadNote(found.length ? `Lu automatiquement : ${found.join(", ")}. Vérifiez avant d’envoyer.` : "Rien n’a pu être lu : saisissez les montants.")
     } catch {
       setReadNote("Lecture automatique indisponible : saisissez les montants.")
@@ -107,7 +110,7 @@ export function DriverFuelTicket() {
     try {
       const form = new FormData()
       form.append("file", pending.blob, "ticket.jpg")
-      form.append("payload", JSON.stringify({ truckId, amount: amount.trim(), litres: litres.trim() || null, day, station: station.trim() || null }))
+      form.append("payload", JSON.stringify({ truckId, amount: amount.trim(), litres: litres.trim() || null, day, station: station.trim() || null, mileage: mileage.trim() || null }))
       const r = await fetch("/api/me/fuel-ticket", { method: "POST", headers: { "Idempotency-Key": pending.key }, body: form })
       const body = (await r.json().catch(() => ({}))) as { outcome?: string; code?: string }
       if (!r.ok) { setError(ERRORS[body.code ?? ""] ?? "Envoi impossible, réessayez (le même ticket ne sera pas enregistré deux fois)."); return }
@@ -165,6 +168,10 @@ export function DriverFuelTicket() {
             <label className="text-sm font-medium">Litres<input className={input} inputMode="decimal" value={litres} onChange={(e) => setLitres(e.target.value)} placeholder="52,3" aria-invalid={!litresOk} /></label>
           </div>
           <label className="block text-sm font-medium">Date<input type="date" className={input} value={day} max={today()} onChange={(e) => setDay(e.target.value)} /></label>
+          <label className="block text-sm font-medium">Compteur du camion (km), facultatif
+            <input className={input} inputMode="numeric" value={mileage} onChange={(e) => setMileage(e.target.value.replace(/[^\d\s]/g, ""))} placeholder="Si vous l’avez noté" maxLength={9} />
+            <span className="mt-1 block text-xs font-normal text-slate-500">Pas obligatoire : le ticket s’enregistre aussi sans.</span>
+          </label>
           <label className="block text-sm font-medium">Station<input className={input} value={station} onChange={(e) => setStation(e.target.value)} placeholder="TotalEnergies Carcassonne" maxLength={200} /></label>
           <button className="w-full rounded-xl bg-emerald-600 px-4 py-3 text-base font-semibold text-white disabled:opacity-50" disabled={!amountOk || !litresOk || !day || !!busy} onClick={() => void send()}>
             {busy === "send" ? "Envoi…" : "Envoyer le ticket"}

@@ -38,6 +38,16 @@ export function VehicleWorksiteCosts({ truckId, timeZone }: { truckId: string; t
   const priceNote = data?.fuelPrice
     ? `${num.format(data.consumptionLPer100Km)} L/100 km × ${data.fuelPrice.pricePerLitre.toFixed(3).replace(".", ",")} €/L (${data.fuelPrice.source === "TRUCK_HISTORY" ? "prix moyen des tickets de ce camion" : "prix moyen du gazole en France aujourd’hui"})`
     : `${num.format(data?.consumptionLPer100Km ?? 10)} L/100 km (prix du carburant indisponible : montant non calculé)`
+  const c = data?.consumption?.current
+  const consumptionNote = !data?.consumption || !c ? null
+    : data.consumptionSource === "MEASURED"
+      ? `Consommation mesurée de ce camion : ${num.format(c.lPer100Km ?? 0)} L/100 km sur les ${data.consumption.windowDays} derniers jours (${c.fills} pleins, ${num.format(c.km)} km${c.litresFromAmount > 0 ? `, ${c.litresFromAmount} plein${c.litresFromAmount > 1 ? "s" : ""} sans ticket estimé${c.litresFromAmount > 1 ? "s" : ""} au prix moyen` : ""}).`
+      : c.status === "IMPLAUSIBLE"
+        ? `Consommation mesurée incohérente (${num.format(c.lPer100Km ?? 0)} L/100 km) : un ticket ou un relevé du compteur est probablement faux. Forfait de ${num.format(data.consumptionLPer100Km)} L/100 km utilisé.`
+        : `Pas encore assez de données pour mesurer la consommation (il faut au moins 3 pleins et 3 000 km avec le compteur) : forfait de ${num.format(data.consumptionLPer100Km)} L/100 km utilisé.`
+  const riseNote = data?.consumption?.riseRatio
+    ? `Hausse de consommation de ${Math.round(data.consumption.riseRatio * 100)} % par rapport aux 90 jours précédents (${num.format(data.consumption.previous.lPer100Km ?? 0)} → ${num.format(c?.lPer100Km ?? 0)} L/100 km) : vérifiez le véhicule et les tickets.`
+    : null
 
   return (
     <section aria-labelledby="worksite-costs" className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -52,6 +62,8 @@ export function VehicleWorksiteCosts({ truckId, timeZone }: { truckId: string; t
         </div>
       </div>
 
+      {state === "ready" && consumptionNote && <p className="text-sm text-slate-700">{consumptionNote}</p>}
+      {state === "ready" && riseNote && <p role="alert" className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">{riseNote}</p>}
       {state === "loading" && <p role="status" className="text-sm text-slate-500">Calcul en cours…</p>}
       {state === "error" && <p role="alert" className="text-sm text-red-700">Coûts par chantier indisponibles pour le moment. Réessayez dans un instant.</p>}
 
