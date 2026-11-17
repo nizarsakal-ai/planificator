@@ -13,6 +13,10 @@ import { DocumentIntegrityError } from "@/lib/billing/document-integrity"
 import { declareVat } from "@/lib/accounting/c5/vat-declaration"
 import { autoReconcile, importBankStatement, matchTransaction, resolveBankCollision, resolveImportCollisions } from "@/lib/accounting/c5/bank.service"
 import { guessBankMapping, previewCsv } from "@/lib/accounting/c5/bank-import"
+import { autoRecordBankFuel } from "@/lib/vehicules/v3/bank-fuel-service"
+import { executeExpenseCommand } from "@/lib/vehicules/v3/expense-service"
+import { expenseEnabled } from "@/lib/vehicules/v3/expense-domain"
+import { auth } from "@/auth"
 import { withLifecycleAbort } from "@/lib/billing/lifecycle-abort"
 import { createSupplierInvoice, extractSupplierInvoice, rejectSupplierInvoice, storeSupplierFile, updateSupplierInvoice, validateSupplierInvoice, SUPPLIER_CATEGORIES } from "@/lib/accounting/c5/supplier-invoice.service"
 
@@ -62,12 +66,19 @@ export async function previewBankCsvAction(text: unknown): Promise<Result<{ head
 
 const mappingSchema = z.object({ date: z.number().int().min(0).max(100), label: z.number().int().min(0).max(100), amount: z.number().int().min(0).max(100).optional(), debit: z.number().int().min(0).max(100).optional(), credit: z.number().int().min(0).max(100).optional(), reference: z.number().int().min(0).max(100).optional(), bankId: z.number().int().min(0).max(100).optional(), headerRows: z.number().int().min(0).max(10) }).strict()
 
-export async function importBankStatementAction(raw: unknown): Promise<Result<{ importId: string; imported: number; duplicates: number; ambiguous: number; collisions: number; invalid: { row: number; error: string }[] }>> {
+export async function importBankStatementAction(raw: unknown): Promise<Result<{ importId: string; imported: number; duplicates: number; ambiguous: number; collisions: number; invalid: { row: number; error: string }[]; fuelRecorded: number }>> {
   const p = z.object({ text: z.string().max(2_100_000), fileName: z.string().max(200), mapping: mappingSchema }).strict().safeParse(raw)
   if (!p.success) return { ok: false, error: "Import invalide (mapping ou fichier)." }
   if (p.data.mapping.amount === undefined && (p.data.mapping.debit === undefined || p.data.mapping.credit === undefined)) return { ok: false, error: "Indiquez la colonne montant, ou les colonnes débit et crédit." }
   const r = await run((ctx) => importBankStatement(prisma, ctx, p.data.text, p.data.fileName, p.data.mapping))
-  return r.ok ? { ok: true, importId: r.value.importId, imported: r.value.imported, duplicates: r.value.duplicates, ambiguous: r.value.ambiguous, collisions: r.value.collisions, invalid: r.value.invalid } : r
+  if (!r.ok) return r
+  // Pleins des cartes d'entreprise reconnues : dépenses « à valider » créées sur le bon camion. Jamais bloquant.
+  let fuelRecorded = 0
+  if (expenseEnabled() && r.value.imported > 0) {
+    try { fuelRecorded = (await autoRecordBankFuel({ auth, db: prisma, execute: (truckId, body, key, deps) => executeExpenseCommand(truckId, body, key, deps) })).created }
+    catch (error) { console.error("[bank-fuel] enregistrement automatique impossible", error instanceof Error ? error.name : "unknown") }
+  }
+  return { ok: true, importId: r.value.importId, imported: r.value.imported, duplicates: r.value.duplicates, ambiguous: r.value.ambiguous, collisions: r.value.collisions, invalid: r.value.invalid, fuelRecorded }
 }
 
 // R4 : résolution explicite d'une collision d'identité inter-fichiers (par opération, ou en bloc pour un relevé).
