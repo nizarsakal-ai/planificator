@@ -71,6 +71,7 @@ export async function recognizeDriverTicket(truckId: string, file: DocumentFileI
     litres: pick(e?.litres),
     day: pick(e?.date),
     station: pick(e?.supplier),
+    mileage: pick(e?.mileage),
   }
 }
 

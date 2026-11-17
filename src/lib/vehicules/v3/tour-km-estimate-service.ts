@@ -10,6 +10,7 @@
  * Lecture seule : aucune écriture métier (seul le quota horaire des fournisseurs est compté).
  * Aucune donnée personnelle envoyée à l'IGN : uniquement des adresses (chantiers, logement, dépôt).
  */
+import { createHash } from "node:crypto"
 import { Prisma, type PrismaClient } from "@prisma/client"
 import { z } from "zod"
 import { MileageDomainError } from "../mileage-domain"
@@ -73,72 +74,104 @@ function calendarDays(start: string, end: string): number {
 
 interface StopInput { label: string; address: string; worksiteId: string | null; latitude: number | null; longitude: number | null }
 
-export async function estimateTourKm(truckId: string, rawInput: unknown, deps: TourKmEstimateDeps): Promise<TourKmEstimateResult> {
-  tourFlag()
-  const session = requireMileageSession(await deps.auth())
-  if (!["ADMIN", "SUPER_ADMIN"].includes(session.role)) throw new MileageDomainError("FORBIDDEN", 403)
-  const parsed = tourKmEstimateInputSchema.safeParse(rawInput)
-  if (!parsed.success) throw new MileageDomainError("INVALID_PAYLOAD", 400)
-  const input = parsed.data
-  const fetchFn = deps.fetchFn ?? fetch
-  const companyId = session.companyId
+/** Données lues en base pour une estimation (aucun appel réseau). */
+export interface TourKmData {
+  start: string
+  end: string
+  stops: StopInput[]
+  /** Jours distincts du planning de l'équipe sur les chantiers de la tournée (0 = aucun). */
+  workDays: number
+  lodging: { address: string; zipCode: string | null; city: string | null; startDate: Date; endDate: Date } | null
+  companyAddress: string | null
+}
 
-  // 1. Lecture sous l'autorité du camion (tenant + rôle relus en base).
-  const data = await deps.db.$transaction(async (tx) => {
-    const { truck } = await authorizeVehicleLocked(tx, truckId, session, "READ")
-    const settings = await tx.companySettings.findUnique({ where: { companyId }, select: { timezone: true } })
-    const timeZone = settings?.timezone || "Europe/Paris"
-    let start: string, end: string, teamId: string | null, stops: StopInput[]
-    if ("tourId" in input) {
-      const tour = await tx.vehicleTour.findFirst({
-        where: { id: input.tourId, companyId, truckId },
-        include: { stops: { orderBy: { position: "asc" } } },
-      })
-      if (!tour) throw new MileageDomainError("TOUR_NOT_FOUND", 404)
-      start = civilDay(tour.startsAt, timeZone)
-      end = civilDay(tour.endsAt, timeZone)
-      teamId = tour.teamId ?? truck.teamId
-      stops = tour.stops
-        .filter((s) => !isDepotStopLabel(s.label))
-        .map((s) => ({ label: s.label, address: s.address, worksiteId: s.worksiteId, latitude: s.latitude, longitude: s.longitude }))
-    } else {
-      const worksite = await tx.worksite.findFirst({
-        where: { id: input.worksiteId, companyId, archivedAt: null },
-        select: { id: true, name: true, address: true, latitude: true, longitude: true },
-      })
-      if (!worksite) throw new MileageDomainError("WORKSITE_NOT_FOUND", 404)
-      start = input.start
-      end = input.end
-      teamId = truck.teamId
-      stops = [{ label: worksite.name, address: worksite.address ?? "", worksiteId: worksite.id, latitude: worksite.latitude, longitude: worksite.longitude }]
-    }
-    if (calendarDays(start, end) > TOUR_MAX_DURATION_DAYS + 1) throw new MileageDomainError("INVALID_PAYLOAD", 400)
-    const worksiteIds = [...new Set(stops.flatMap((s) => (s.worksiteId ? [s.worksiteId] : [])))]
-    const window = { gte: utcDay(start), lte: utcDay(end) }
-    // Jours de chantier distincts de l'équipe sur les chantiers de la tournée.
-    const assignmentDays = teamId && worksiteIds.length > 0
-      ? await tx.assignment.findMany({ where: { teamId, worksiteId: { in: worksiteIds }, date: window }, select: { date: true } })
-      : []
-    const workDays = new Set(assignmentDays.map((a) => iso(a.date))).size
-    // Logement Booking de l'équipe qui chevauche la période (le plus long recouvrement).
-    const lodgings = teamId
-      ? await tx.accommodation.findMany({
-          where: { companyId, teamId, status: { not: "CANCELLED" }, startDate: { lte: utcDay(end) }, endDate: { gte: utcDay(start) } },
-          select: { address: true, zipCode: true, city: true, startDate: true, endDate: true },
-          take: 20,
-        })
-      : []
-    const overlap = (l: { startDate: Date; endDate: Date }) =>
-      Math.min(l.endDate.getTime(), utcDay(end).getTime()) - Math.max(l.startDate.getTime(), utcDay(start).getTime())
-    const lodging = lodgings.sort((a, b) => overlap(b) - overlap(a))[0] ?? null
-    const company = await tx.company.findUnique({ where: { id: companyId }, select: { address: true } })
-    return { start, end, stops, workDays, lodging, companyAddress: company?.address?.trim() || null }
-  }, txOptions)
+export type TourKmSource = { tourId: string } | { worksiteId: string; start: string; end: string }
 
+/**
+ * Lecture des données d'estimation dans la transaction de l'appelant. L'autorité (session ou tâche
+ * planifiée) est vérifiée par l'appelant ; ici tout est borné à `companyId` et au camion.
+ */
+export async function loadTourKmData(
+  tx: Prisma.TransactionClient,
+  companyId: string,
+  truck: { id: string; teamId: string | null },
+  source: TourKmSource,
+): Promise<TourKmData> {
+  const settings = await tx.companySettings.findUnique({ where: { companyId }, select: { timezone: true } })
+  const timeZone = settings?.timezone || "Europe/Paris"
+  let start: string, end: string, teamId: string | null, stops: StopInput[]
+  if ("tourId" in source) {
+    const tour = await tx.vehicleTour.findFirst({
+      where: { id: source.tourId, companyId, truckId: truck.id },
+      include: { stops: { orderBy: { position: "asc" } } },
+    })
+    if (!tour) throw new MileageDomainError("TOUR_NOT_FOUND", 404)
+    start = civilDay(tour.startsAt, timeZone)
+    end = civilDay(tour.endsAt, timeZone)
+    teamId = tour.teamId ?? truck.teamId
+    stops = tour.stops
+      .filter((s) => !isDepotStopLabel(s.label))
+      .map((s) => ({ label: s.label, address: s.address, worksiteId: s.worksiteId, latitude: s.latitude, longitude: s.longitude }))
+  } else {
+    const worksite = await tx.worksite.findFirst({
+      where: { id: source.worksiteId, companyId, archivedAt: null },
+      select: { id: true, name: true, address: true, latitude: true, longitude: true },
+    })
+    if (!worksite) throw new MileageDomainError("WORKSITE_NOT_FOUND", 404)
+    start = source.start
+    end = source.end
+    teamId = truck.teamId
+    stops = [{ label: worksite.name, address: worksite.address ?? "", worksiteId: worksite.id, latitude: worksite.latitude, longitude: worksite.longitude }]
+  }
+  if (calendarDays(start, end) > TOUR_MAX_DURATION_DAYS + 1) throw new MileageDomainError("INVALID_PAYLOAD", 400)
+  const worksiteIds = [...new Set(stops.flatMap((s) => (s.worksiteId ? [s.worksiteId] : [])))]
+  const window = { gte: utcDay(start), lte: utcDay(end) }
+  // Jours de chantier distincts de l'équipe sur les chantiers de la tournée.
+  const assignmentDays = teamId && worksiteIds.length > 0
+    ? await tx.assignment.findMany({ where: { teamId, worksiteId: { in: worksiteIds }, date: window }, select: { date: true } })
+    : []
+  const workDays = new Set(assignmentDays.map((a) => iso(a.date))).size
+  // Logement Booking de l'équipe qui chevauche la période (le plus long recouvrement).
+  const lodgings = teamId
+    ? await tx.accommodation.findMany({
+        where: { companyId, teamId, status: { not: "CANCELLED" }, startDate: { lte: utcDay(end) }, endDate: { gte: utcDay(start) } },
+        select: { address: true, zipCode: true, city: true, startDate: true, endDate: true },
+        take: 20,
+      })
+    : []
+  const overlap = (l: { startDate: Date; endDate: Date }) =>
+    Math.min(l.endDate.getTime(), utcDay(end).getTime()) - Math.max(l.startDate.getTime(), utcDay(start).getTime())
+  // Départage stable (même recouvrement) : l'empreinte des données ne doit pas dépendre de l'ordre SQL.
+  const lodging = lodgings.sort((a, b) => overlap(b) - overlap(a) || a.startDate.getTime() - b.startDate.getTime() || a.address.localeCompare(b.address))[0] ?? null
+  const company = await tx.company.findUnique({ where: { id: companyId }, select: { address: true } })
+  return { start, end, stops, workDays, lodging, companyAddress: company?.address?.trim() || null }
+}
+
+/**
+ * Empreinte des données d'entrée (jamais des distances) : un recalcul automatique n'a lieu que si
+ * les étapes, les dates, le planning, le logement, le dépôt ou le forfait de midi changent.
+ */
+export function tourKmInputsHash(data: TourKmData, lunchKmPerDay: number): string {
+  return createHash("sha256").update(JSON.stringify([
+    "tour-km-v1",
+    data.start, data.end, data.workDays, data.companyAddress, lunchKmPerDay,
+    data.stops.map((s) => [s.label, s.address, s.worksiteId, s.latitude, s.longitude]),
+    data.lodging ? [data.lodging.address, data.lodging.zipCode, data.lodging.city, iso(data.lodging.startDate), iso(data.lodging.endDate)] : null,
+  ])).digest("hex")
+}
+
+/** Distances (IGN, repli vol d'oiseau majoré) et lignes de l'estimation à partir des données lues. */
+export async function resolveTourKmEstimate(
+  db: Pick<PrismaClient, "$transaction">,
+  companyId: string,
+  data: TourKmData,
+  lunchKmPerDay: number,
+  fetchFn: typeof fetch,
+): Promise<TourKmEstimateResult> {
   // 2. Points : dépôt, étapes, logement.
   const geocode = async (address: string): Promise<Point | null> => {
     if (address.trim().length < 3) return null
-    await deps.db.$transaction((tx) => reserveImportProvider(tx, companyId, "GEOCODING"), txOptions)
+    await db.$transaction((tx) => reserveImportProvider(tx, companyId, "GEOCODING"), txOptions)
     return ignGeocode(address, fetchFn)
   }
   let depot: Point | null = null
@@ -175,7 +208,7 @@ export async function estimateTourKm(truckId: string, rawInput: unknown, deps: T
   // 3. Distances routières (repli : vol d'oiseau majoré, signalé comme approximatif).
   const distance = async (from: Point, to: Point): Promise<{ km: number; source: DistanceSource }> => {
     try {
-      await deps.db.$transaction((tx) => reserveImportProvider(tx, companyId, "ROUTING"), txOptions)
+      await db.$transaction((tx) => reserveImportProvider(tx, companyId, "ROUTING"), txOptions)
       return { km: await ignRouteKm(from, to, fetchFn), source: "ROUTE" }
     } catch (error) {
       if (!(error instanceof MileageDomainError)) throw error
@@ -192,12 +225,7 @@ export async function estimateTourKm(truckId: string, rawInput: unknown, deps: T
 
   const workDaysSource = data.workDays > 0 ? "PLANNING" : "CALENDAR"
   const workDays = data.workDays > 0 ? data.workDays : calendarDays(data.start, data.end)
-  const estimate = computeTourKmEstimate({
-    legs,
-    lodgingToSite,
-    workDays,
-    lunchKmPerDay: input.lunchKmPerDay ?? TOUR_LUNCH_KM_PER_DAY_DEFAULT,
-  })
+  const estimate = computeTourKmEstimate({ legs, lodgingToSite, workDays, lunchKmPerDay })
   // Itinéraire Google Maps : étapes dans l'ordre, logement juste après le chantier principal.
   const mapsStops = resolved.flatMap((s) => (s === mainSite && lodgingAddress ? [s.address, lodgingAddress] : [s.address]))
   return {
@@ -211,6 +239,24 @@ export async function estimateTourKm(truckId: string, rawInput: unknown, deps: T
       ? { address: lodgingAddress, startDate: iso(data.lodging.startDate), endDate: iso(data.lodging.endDate), resolved: lodgingToSite !== null }
       : null,
   }
+}
+
+export async function estimateTourKm(truckId: string, rawInput: unknown, deps: TourKmEstimateDeps): Promise<TourKmEstimateResult> {
+  tourFlag()
+  const session = requireMileageSession(await deps.auth())
+  if (!["ADMIN", "SUPER_ADMIN"].includes(session.role)) throw new MileageDomainError("FORBIDDEN", 403)
+  const parsed = tourKmEstimateInputSchema.safeParse(rawInput)
+  if (!parsed.success) throw new MileageDomainError("INVALID_PAYLOAD", 400)
+  const input = parsed.data
+  const companyId = session.companyId
+
+  // 1. Lecture sous l'autorité du camion (tenant + rôle relus en base).
+  const data = await deps.db.$transaction(async (tx) => {
+    const { truck } = await authorizeVehicleLocked(tx, truckId, session, "READ")
+    const source: TourKmSource = "tourId" in input ? { tourId: input.tourId } : { worksiteId: input.worksiteId, start: input.start, end: input.end }
+    return loadTourKmData(tx, companyId, { id: truckId, teamId: truck.teamId }, source)
+  }, txOptions)
+  return resolveTourKmEstimate(deps.db, companyId, data, input.lunchKmPerDay ?? TOUR_LUNCH_KM_PER_DAY_DEFAULT, deps.fetchFn ?? fetch)
 }
 
 /** Compatibilité : préparation depuis une fiche chantier. */

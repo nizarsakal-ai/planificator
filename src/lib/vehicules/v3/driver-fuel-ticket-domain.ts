@@ -18,15 +18,25 @@ const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const money = z.string().trim().regex(/^(?:0|[1-9]\d{0,7})(?:[.,]\d{1,2})?$/)
 const litres = z.string().trim().regex(/^(?:0|[1-9]\d{0,4})(?:[.,]\d{1,3})?$/)
 
+/**
+ * Compteur du camion lu sur le ticket ou saisi par le chauffeur : facultatif et JAMAIS bloquant. Une
+ * valeur absente, illisible ou hors bornes est simplement ignorée (le ticket est enregistré sans).
+ */
+export function optionalTicketMileage(value: unknown): number | null {
+  const n = typeof value === "number" ? value : typeof value === "string" && /^\s*\d[\d\s.]*\s*$/.test(value) ? Number(value.replace(/[\s.]/g, "")) : NaN
+  return Number.isInteger(n) && n > 0 && n <= 9_999_999 ? n : null
+}
+
 export const driverTicketSchema = z.object({
   truckId: z.string().trim().min(1).max(200),
   amount: money,
   litres: litres.nullable().optional(),
   day,
   station: z.string().trim().max(200).nullable().optional(),
+  mileage: z.unknown().optional().transform(optionalTicketMileage),
 }).strict()
 
-export type DriverTicketInput = z.infer<typeof driverTicketSchema>
+export type DriverTicketInput = Omit<z.infer<typeof driverTicketSchema>, "mileage"> & { mileage?: number | null }
 
 export function normalizeDecimal(v: string): string { return v.trim().replace(",", ".") }
 export const toCents = (amount: string) => Math.round(Number(normalizeDecimal(amount)) * 100)
@@ -80,7 +90,7 @@ export function receiptDocumentBody(input: DriverTicketInput, driverName: string
     title: `Ticket carburant du ${input.day.split("-").reverse().join("/")}`.slice(0, 200),
     issuedOn: input.day,
     issuerName: input.station?.trim() || null,
-    observations: `Photographié par ${driverName}. Montant ${normalizeDecimal(input.amount)} €${input.litres ? `, ${normalizeDecimal(input.litres)} L` : ""}.`.slice(0, 2000),
+    observations: `Photographié par ${driverName}. Montant ${normalizeDecimal(input.amount)} €${input.litres ? `, ${normalizeDecimal(input.litres)} L` : ""}${input.mileage ? `, compteur ${input.mileage} km` : ""}.`.slice(0, 2000),
   }
 }
 
@@ -94,6 +104,7 @@ export function ticketCreateCommand(input: DriverTicketInput, documentVersionId:
       amount: normalizeDecimal(input.amount),
       currency: "EUR",
       litres: input.litres ? normalizeDecimal(input.litres) : null,
+      mileageObservation: input.mileage ?? null,
       supplier: input.station?.trim() || null,
       documentVersionId,
       notes: `Ticket photographié par ${driverName}.`,
@@ -115,7 +126,7 @@ export function ticketCorrectCommand(expense: CandidateExpense, input: DriverTic
       amount,
       currency: "EUR",
       litres: input.litres ? normalizeDecimal(input.litres) : expense.litres,
-      mileageObservation: expense.mileageObservation,
+      mileageObservation: input.mileage ?? expense.mileageObservation,
       supplier: expense.supplier,
       reference: expense.reference,
       documentVersionId,

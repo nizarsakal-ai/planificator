@@ -185,7 +185,7 @@ test("Tour details can be amended in every state without rewriting actual events
    const entries=await client.mileageEntry.findMany({where:{truckId:f.truck.id}}),key=randomUUID(),command={type:"DETAILS",expectedRevision:revision,title:"Nom corrigé",estimatedKm:30,reason:"Référence documentaire corrigée"};
    const result=await commandTour(f.truck.id,created.id,command,key,deps);assert.equal(result.revision,revision+1);
    const after=await client.vehicleTour.findUniqueOrThrow({where:{id:created.id},include:{stops:{orderBy:{position:"asc"}},mileageTrip:true}});
-   assert.deepEqual(after,{...before,title:"Nom corrigé",estimatedKm:30,revision:revision+1});assert.deepEqual(await client.mileageEntry.findMany({where:{truckId:f.truck.id}}),entries);
+   assert.equal(before.estimatedKmSource,"AUTO");assert.deepEqual(after,{...before,title:"Nom corrigé",estimatedKm:30,estimatedKmSource:"MANUAL",revision:revision+1});assert.deepEqual(await client.mileageEntry.findMany({where:{truckId:f.truck.id}}),entries);
    assert.equal((await commandTour(f.truck.id,created.id,command,key,deps)).replayed,true);
    await assert.rejects(commandTour(f.truck.id,created.id,command,randomUUID(),deps),/TOUR_REVISION_CONFLICT/);
    assert.equal(await client.vehicleAuditLog.count({where:{entityId:created.id,action:"TOUR_DETAILS_EDIT"}}),1);
