@@ -53,9 +53,20 @@ export interface GroupedNav {
   footer: NavItem[]
 }
 
-const CATEGORY_BY_HREF: ReadonlyMap<string, { id: NavCategoryId; rank: number }> = new Map(
-  NAV_CATEGORY_DEFINITIONS.flatMap((category) => category.hrefs.map((href, rank) => [href, { id: category.id, rank }] as const)),
-)
+/**
+ * Lot E Planificator V2 : rattachements ajoutés SANS modifier les listes ci-dessus (la liste « commercial » est figée par
+ * les tests de Prospection). Rang fractionnaire : « Pipeline commercial » juste après « Opportunités » (Prospection,
+ * rang 2) ; « Automatisations » après « Paramètres » (rang 1). Chaque entrée n'apparaît que si son drapeau la compose.
+ */
+export const NAV_CATEGORY_EXTENSIONS: readonly { href: string; id: NavCategoryId; rank: number }[] = [
+  { href: "/crm/opportunites", id: "commercial", rank: 2.5 },
+  { href: "/automatisations", id: "administration", rank: 1.5 },
+]
+
+const CATEGORY_BY_HREF: ReadonlyMap<string, { id: NavCategoryId; rank: number }> = new Map([
+  ...NAV_CATEGORY_DEFINITIONS.flatMap((category) => category.hrefs.map((href, rank) => [href, { id: category.id, rank }] as const)),
+  ...NAV_CATEGORY_EXTENSIONS.map((e) => [e.href, { id: e.id, rank: e.rank }] as const),
+])
 
 /** Catégorie d'un href (cartographie exacte) ; `null` pour une entrée du pied ; « autres » si inconnu. */
 export function navCategoryOf(href: string): NavCategoryId | null {

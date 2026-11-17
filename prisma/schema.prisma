@@ -122,6 +122,9 @@ enum NotificationType {
 
   // SPEC-WORKSITE-PHOTOS-001 — Photos d'engins.
   WORKSITE_PHOTO_UNSENT // Photo d'engin non envoyée au client à J+7 (alerte administrateurs, jamais de purge)
+
+  // Lot E Planificator V2 — automatisations internes (notification des administrateurs, jamais d'envoi externe).
+  AUTOMATION
 }
 
 enum AccommodationStatus {
@@ -433,6 +436,11 @@ model Company {
   equipmentMaintenances           EquipmentMaintenance[]
   goodsReceipts                   GoodsReceipt[]
 
+  opportunities Opportunity[] // Lot E V2
+  opportunityEvents OpportunityEvent[]
+  automationRules AutomationRule[]
+  automationRuns AutomationRun[]
+
   // Véhicules V3 — ajouts des lots isolés.
   vehicleCartographyCache        VehicleCartographyCache[]
   vehicleImportProviderWindows   VehicleImportProviderWindow[]
@@ -564,6 +572,7 @@ model Quote {
   lines    QuoteLine[]
   invoices Invoice[] // factures issues de ce devis
 
+  opportunities Opportunity[] // Lot E V2 : opportunités liées
   @@unique([companyId, number])
   @@unique([id, companyId])
   @@unique([companyId, importRef])
@@ -940,6 +949,8 @@ model Employee {
   assignedTasks       Task[]               @relation("TaskAssignee")
   equipmentBookings   EquipmentBooking[]   @relation("EquipmentBookingResponsible")
 
+  ownedOpportunities  Opportunity[]        @relation("OpportunityOwner") // Lot E V2
+  automationTaskRules AutomationRule[]     @relation("AutomationTaskAssignee")
   @@unique([id, companyId])
   @@unique([userId, companyId])
   @@index([companyId])
@@ -1027,6 +1038,7 @@ model Client {
   /// PLAN-ACQ-CONSULTATIONS-FIX-001 — partenaires liés (FK composite tenant-safe)
   acquisitionPartners AcquisitionPartner[]
 
+  opportunities       Opportunity[] // Lot E V2
   // Cible FK composite AcquisitionPartner.(clientId, companyId)
   @@unique([id, companyId])
   @@index([companyId])
@@ -1098,6 +1110,7 @@ model Worksite {
   equipmentBookings EquipmentBooking[]
   equipmentRentals  EquipmentRentalContract[]
 
+  opportunities     Opportunity[] // Lot E V2
   @@unique([id, companyId])
   @@index([companyId])
   @@index([clientId])
@@ -4165,4 +4178,159 @@ model BankVerificationSession {
 
   @@index([companyId, accountId])
   @@map("bank_verification_sessions")
+}
+// ═══════════════════════════════════════════════════════════════════════════
+// Lot E Planificator V2 (04/11/2026, reporté sur main 12debffa le 15/11/2026 ; déclencheur réserve retiré) : opportunités commerciales (évolution 5) et automatisations bornées (6).
+// Opportunité : étape, probabilité, montant, relance ; liens facultatifs vers un client, un chantier, un devis (clés
+// composites) et une consultation (identifiant contrôlé par le service ET par un déclencheur : la table des
+// consultations n'a pas de clé composite et n'est pas modifiée). Historique append-only (OpportunityEvent).
+// Automatisation : déclencheurs internes en liste fermée, actions limitées (tâche interne, notification interne des
+// administrateurs), approbation explicite avant activation, journal avec clé d'événement unique (une exécution par
+// événement et par règle), jamais d'envoi externe. Modules désactivés par défaut (CRM_OPPORTUNITIES_ENABLED,
+// AUTOMATIONS_ENABLED).
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum OpportunityStage {
+  LEAD
+  QUALIFIED
+  PROPOSAL
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum OpportunityEventType {
+  CREATED
+  STAGE_CHANGED
+  UPDATED
+  FOLLOW_UP_DONE
+  NOTE
+}
+
+enum AutomationTrigger {
+  OPPORTUNITY_STAGE_CHANGED
+  OPPORTUNITY_FOLLOW_UP_DUE
+  QUOTE_ACCEPTED
+}
+
+enum AutomationAction {
+  CREATE_TASK
+  NOTIFY_ADMINS
+}
+
+enum AutomationRuleStatus {
+  DRAFT
+  ACTIVE
+  DISABLED
+}
+
+enum AutomationRunStatus {
+  DONE
+  SKIPPED
+}
+
+model Opportunity {
+  id                  String           @id @default(cuid())
+  companyId           String
+  number              String
+  title               String
+  clientId            String?
+  prospectName        String?
+  worksiteId          String?
+  quoteId             String?
+  consultationDraftId String?
+  stage               OpportunityStage @default(LEAD)
+  probabilityBp       Int
+  amountCents         BigInt           @default(0)
+  expectedCloseDate   DateTime?        @db.Date
+  ownerEmployeeId     String?
+  nextFollowUpDate    DateTime?        @db.Date
+  followUpNote        String?
+  lostReason          String?
+  closedAt            DateTime?
+  createdById         String
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  company  Company            @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  client   Client?            @relation(fields: [clientId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  worksite Worksite?          @relation(fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  quote    Quote?             @relation(fields: [quoteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  owner    Employee?          @relation("OpportunityOwner", fields: [ownerEmployeeId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  events   OpportunityEvent[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, number])
+  @@index([companyId, stage])
+  @@index([companyId, nextFollowUpDate])
+  @@map("opportunities")
+}
+
+model OpportunityEvent {
+  id            String               @id @default(cuid())
+  companyId     String
+  opportunityId String
+  type          OpportunityEventType
+  fromStage     OpportunityStage?
+  toStage       OpportunityStage?
+  note          String?
+  actorId       String
+  createdAt     DateTime             @default(now())
+
+  company     Company     @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  opportunity Opportunity @relation(fields: [companyId, opportunityId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([companyId, id])
+  @@index([companyId, opportunityId, createdAt])
+  @@index([companyId, type, createdAt])
+  @@map("opportunity_events")
+}
+
+model AutomationRule {
+  id                   String               @id @default(cuid())
+  companyId            String
+  name                 String
+  trigger              AutomationTrigger
+  stageFilter          OpportunityStage?
+  action               AutomationAction
+  taskTitle            String?
+  taskAssigneeId       String?
+  taskDueInDays        Int?
+  message              String?
+  status               AutomationRuleStatus @default(DRAFT)
+  approvedById         String?
+  approvedAt           DateTime?
+  activatedAt          DateTime?
+  disabledAt           DateTime?
+  createdById          String
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  company      Company         @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  taskAssignee Employee?       @relation("AutomationTaskAssignee", fields: [taskAssigneeId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  runs         AutomationRun[]
+
+  @@unique([companyId, id])
+  @@index([companyId, status])
+  @@map("automation_rules")
+}
+
+model AutomationRun {
+  id          String              @id @default(cuid())
+  companyId   String
+  ruleId      String
+  eventKey    String
+  status      AutomationRunStatus
+  detail      String
+  taskId      String?
+  notified    Int                 @default(0)
+  createdAt   DateTime            @default(now())
+
+  company Company        @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  rule    AutomationRule @relation(fields: [companyId, ruleId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([companyId, id])
+  @@unique([companyId, ruleId, eventKey]) // idempotence atomique : une exécution par (société, règle, événement)
+  @@index([companyId, createdAt])
+  @@map("automation_runs")
 }

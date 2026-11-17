@@ -16,6 +16,8 @@ import { isProspectionNavVisible, isProspectionWatchEnabled } from "@/lib/prospe
 import { isStockPurchasingEnabled } from "@/lib/stock/stock-feature-flag"
 import { isEquipmentRentalEnabled } from "@/lib/equipment/equipment-feature-flag"
 import { isVehiclesV3Enabled } from "@/lib/vehicules/v3/v3-feature-flag"
+import { isCrmEnabled } from "@/lib/crm/crm-feature-flag"
+import { isAutomationsEnabled } from "@/lib/automation/automation-feature-flag"
 import type { Role } from "@prisma/client"
 
 export default async function DashboardLayout({
@@ -53,12 +55,15 @@ export default async function DashboardLayout({
   // Ticket carburant : chauffeur attitré d'un camion actif de la société ; affichage seulement.
   const fuelTicketNavVisible = isVehiclesV3Enabled() && !!companyId && ["EMPLOYEE", "TEAM_LEADER", "ADMIN", "SUPER_ADMIN"].includes(role)
     && (await prisma.truck.count({ where: { companyId, active: true, archivedAt: null, chauffeur: { userId: session.user.id, companyId, active: true } } }).catch(() => 0)) > 0
+  // Lot E V2 : opportunités CRM et automatisations ; même règle d'affichage, drapeaux distincts.
+  const crmNavVisible = isCrmEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
+  const automationNavVisible = isAutomationsEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
   const company = companyId ? await prisma.company.findUnique({
     where: { id: companyId }, select: { name: true, logoUrl: true },
   }) : null
   const companyLogo = logoForPdf(company?.logoUrl)
   const hrNavigation = await resolveHrDocumentNavigation()
-  const user = { ...hrNavigation, ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, worksitePhotosNavVisible, prospectionNavVisible, stockPurchasingNavVisible, equipmentNavVisible, fuelTicketNavVisible, companyLogo, companyName: company?.name }
+  const user = { ...hrNavigation, ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, worksitePhotosNavVisible, prospectionNavVisible, stockPurchasingNavVisible, equipmentNavVisible, fuelTicketNavVisible, companyLogo, companyName: company?.name, crmNavVisible, automationNavVisible }
 
   return (
     <div data-app-backdrop="" className="flex h-screen overflow-hidden bg-[#f6f1e7] bg-[radial-gradient(45%_55%_at_4%_0%,rgba(120,160,255,0.65)_0,transparent_70%),radial-gradient(40%_45%_at_100%_100%,rgba(70,120,250,0.45)_0,transparent_70%),radial-gradient(28%_34%_at_100%_8%,rgba(140,175,255,0.4)_0,transparent_70%),radial-gradient(30%_36%_at_55%_45%,rgba(255,250,240,0.85)_0,transparent_70%)]">
