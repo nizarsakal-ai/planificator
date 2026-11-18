@@ -9,6 +9,7 @@
  * (`http(s)`) restent affichables mais ne sont ni téléchargeables ni embarquées par cette voie.
  */
 
+import { createHash } from "node:crypto"
 import sharp from "sharp"
 
 export const LOGO_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 // 2 Mio
@@ -73,4 +74,31 @@ export function isManagedLogo(logoUrl: string | null | undefined): boolean {
 /** Valeur embarquable dans un PDF (data URL PNG gérée) ; les URL externes ne sont pas embarquées (pas d'accès réseau au rendu). */
 export function logoForPdf(logoUrl: string | null | undefined): string | null {
   return isManagedLogo(logoUrl) ? (logoUrl as string) : null
+}
+
+/** Route d'affichage du logo géré dans la coquille du tableau de bord (voir `companyLogoDisplaySrc`). */
+export const COMPANY_LOGO_DISPLAY_PATH = "/api/company/logo/affichage"
+
+/**
+ * Adresse d'AFFICHAGE du logo géré dans la coquille (avatar de la barre supérieure, bandeau société) : adresse courte
+ * versionnée par l'empreinte du logo, au lieu de la data URL elle-même.
+ *
+ * Correctif #418 (18/11/2026) : la data URL (jusqu'à ~800 Ko) passait dans la charge RSC de la coquille (props de
+ * `Sidebar`, `MobileNav`, `AvatarImage`, `CompanyBrand`). Le serveur Flight de React 19.2 compte la longueur de chaque
+ * chaîne et DIFFÈRE tout élément rencontré au-delà de 3 200 caractères (`deferTask`, « $L ») : la colonne de la coquille
+ * devenait un nœud paresseux, servi derrière plusieurs centaines de Ko. Lorsque l'hydratation (scripts en cache) atteignait
+ * le `div[data-app-backdrop]` avant ce morceau, le div se suspendait puis était rejoué sans restauration du curseur
+ * d'hydratation (`replaySuspendedUnitOfWork`) : erreur #418. Le rendu visuel est inchangé ; la data URL reste la source
+ * des PDF (`logoForPdf`). `null` dans les mêmes cas que `logoForPdf` (aucun logo géré : rien n'est affiché).
+ */
+export function companyLogoDisplaySrc(logoUrl: string | null | undefined): string | null {
+  const version = companyLogoVersion(logoUrl)
+  return version === null ? null : `${COMPANY_LOGO_DISPLAY_PATH}?v=${version}`
+}
+
+/** Version d'affichage du logo géré : 16 premiers caractères hexadécimaux du sha256 de la data URL ; `null` sans logo géré.
+ *  La route d'affichage ne sert le logo de la société de session que si la version demandée est exactement celle-ci. */
+export function companyLogoVersion(logoUrl: string | null | undefined): string | null {
+  if (!isManagedLogo(logoUrl)) return null
+  return createHash("sha256").update(logoUrl as string).digest("hex").slice(0, 16)
 }

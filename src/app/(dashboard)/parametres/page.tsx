@@ -128,7 +128,9 @@ export default async function ParametresPage({
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <CompanyForm company={company} />
+            {/* Correctif #418 : seuls les 5 champs du formulaire sont transmis au composant client (l'objet Prisma complet
+                portait la data URL du logo dans la charge RSC, et le serveur Flight différait les éléments suivants). */}
+            <CompanyForm company={{ name: company.name, email: company.email, phone: company.phone, address: company.address, siret: company.siret }} />
           </CardContent>
         </Card>
 

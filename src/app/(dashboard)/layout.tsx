@@ -2,7 +2,7 @@ import { resolveHrDocumentNavigation } from "@/lib/hr-documents/navigation"
 import { resolveSupplierIntakeAccess } from "@/lib/supplier-intake/access"
 import { CompanyBrand } from "@/components/company/CompanyBrand"
 import { prisma } from "@/lib/prisma"
-import { logoForPdf } from "@/lib/company-logo"
+import { companyLogoDisplaySrc } from "@/lib/company-logo"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { Sidebar } from "@/components/layout/Sidebar"
@@ -61,7 +61,8 @@ export default async function DashboardLayout({
   const company = companyId ? await prisma.company.findUnique({
     where: { id: companyId }, select: { name: true, logoUrl: true },
   }) : null
-  const companyLogo = logoForPdf(company?.logoUrl)
+  // Correctif #418 : adresse courte d'affichage, jamais la data URL dans la charge RSC de la coquille (voir companyLogoDisplaySrc).
+  const companyLogo = companyLogoDisplaySrc(company?.logoUrl)
   const hrNavigation = await resolveHrDocumentNavigation()
   const user = { ...hrNavigation, ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, worksitePhotosNavVisible, prospectionNavVisible, stockPurchasingNavVisible, equipmentNavVisible, fuelTicketNavVisible, companyLogo, companyName: company?.name, crmNavVisible, automationNavVisible }
 
