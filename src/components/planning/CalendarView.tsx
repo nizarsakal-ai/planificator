@@ -10,6 +10,8 @@ interface Assignment {
   status: string
   worksite: { id: string; name: string }
   team: { id: string; name: string; color: string | null }
+  /** Faux : chantier hors du périmètre de l'utilisateur (affiché sans lien plutôt qu'une page introuvable). */
+  canOpen?: boolean
 }
 
 interface CalendarViewProps {
@@ -118,6 +120,20 @@ export function CalendarView({ assignments, month, year }: CalendarViewProps) {
                 </div>
                 <div className="space-y-0.5">
                   {(byDay[day] ?? []).slice(0, 3).map(a => (
+                    a.canOpen === false ? (
+                      <span
+                        key={a.id}
+                        className={`block truncate text-[10px] font-medium px-1.5 py-0.5 rounded ${STATUS_OPACITY[a.status] ?? "opacity-100"}`}
+                        style={{
+                          backgroundColor: (a.team.color ?? "#0f3460") + "25",
+                          color: a.team.color ?? "#0f3460",
+                          borderLeft: `2px solid ${a.team.color ?? "#0f3460"}`,
+                        }}
+                        title={`${a.team.name} — ${a.worksite.name}`}
+                      >
+                        {a.team.name}
+                      </span>
+                    ) : (
                     <Link
                       key={a.id}
                       href={`/chantiers/${a.worksite.id}`}
@@ -131,6 +147,7 @@ export function CalendarView({ assignments, month, year }: CalendarViewProps) {
                     >
                       {a.team.name}
                     </Link>
+                    )
                   ))}
                   {(byDay[day]?.length ?? 0) > 3 && (
                     <p className="text-[9px] text-slate-400 pl-1">+{byDay[day].length - 3} autres</p>

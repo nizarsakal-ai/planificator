@@ -32,6 +32,12 @@ export interface AccessAcquisitionAttachmentInput {
   context: AttachmentAccessContext
   attachmentId: string
   mode: AttachmentAccessMode
+  /**
+   * Pièce jointe versée dans un chantier, demandée depuis ce chantier : l'appelant a déjà vérifié que l'utilisateur
+   * peut ouvrir le chantier (règle de src/lib/chantiers/worksite-access.ts). La liste de rôles du back-office
+   * (consultations) ne s'applique pas ; entreprise, statut STORED et audit restent exigés.
+   */
+  authorizedByWorksite?: boolean
 }
 
 function defaultLog(event: string, payload?: Record<string, unknown>): void {
@@ -109,7 +115,7 @@ export async function accessAcquisitionAttachment(
     return failure("UNAUTHORIZED", "ATTACHMENT_ACCESS_UNAUTHENTICATED")
   }
 
-  if (!isRoleAllowed(input.context)) {
+  if (input.authorizedByWorksite ? !input.context.companyId : !isRoleAllowed(input.context)) {
     return failure("FORBIDDEN", "ATTACHMENT_ACCESS_FORBIDDEN")
   }
 

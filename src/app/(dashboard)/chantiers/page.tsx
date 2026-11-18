@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
+import { resolveWorksiteViewer, worksiteAccessWhere } from "@/lib/chantiers/worksite-access"
 import { Card, CardContent } from "@/components/ui/card"
 import { HardHat } from "lucide-react"
 import { NouveauChantierDialog } from "@/components/chantiers/NouveauChantierDialog"
@@ -20,20 +21,11 @@ export default async function ChantiersPage() {
 
   const companyId = session.user.companyId!
 
-  // EMPLOYEE : filtrer aux chantiers où il est affecté
-  let employeeId: string | undefined
-  if (isEmployee) {
-    const emp = await prisma.employee.findFirst({
-      where: { userId: session.user.id!, companyId },
-      select: { id: true },
-    })
-    employeeId = emp?.id
-    if (!employeeId) redirect("/dashboard")
-  }
-
-  const worksiteWhere = isEmployee
-    ? { companyId, assignments: { some: { employeeAssignments: { some: { employeeId } } } } }
-    : { companyId }
+  // Même périmètre que la fiche chantier (src/lib/chantiers/worksite-access.ts) : un chantier listé s'ouvre toujours.
+  // Chef d'équipe : chantiers de ses équipes et ceux où il est affecté ; salarié : ceux où il est affecté.
+  const scope = worksiteAccessWhere(await resolveWorksiteViewer(prisma, session.user))
+  if (!scope) redirect("/dashboard")
+  const worksiteWhere = { companyId, ...scope }
 
   const [chantiers, clients, employeeAssignmentRows] = await Promise.all([
     prisma.worksite.findMany({

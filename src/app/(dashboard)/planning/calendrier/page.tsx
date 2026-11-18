@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { CalendarView } from "@/components/planning/CalendarView"
+import { resolveWorksiteViewer, worksiteAccessWhere } from "@/lib/chantiers/worksite-access"
 
 export const metadata: Metadata = { title: "Calendrier" }
 
@@ -30,6 +31,14 @@ export default async function CalendrierPage({ searchParams }: { searchParams: P
     },
     orderBy: { date: "asc" },
   })
+  // Lien vers la fiche seulement si elle s'ouvre pour cet utilisateur (même règle que la fiche chantier).
+  const scope = worksiteAccessWhere(await resolveWorksiteViewer(prisma, session.user))
+  const worksiteIds = [...new Set(assignments.map((a) => a.worksite.id))]
+  const openable = !scope ? new Set<string>() : new Set((await prisma.worksite.findMany({
+    where: { id: { in: worksiteIds }, companyId: session.user.companyId!, ...scope },
+    select: { id: true },
+  })).map((w) => w.id))
+  const entries = assignments.map((a) => ({ ...a, canOpen: openable.has(a.worksite.id) }))
 
   return (
     <div className="space-y-6">
@@ -37,7 +46,7 @@ export default async function CalendrierPage({ searchParams }: { searchParams: P
         <h1 className="text-2xl font-bold text-slate-900">Calendrier</h1>
         <p className="text-sm text-slate-500 mt-1">Vue mensuelle de toutes les affectations</p>
       </div>
-      <CalendarView assignments={assignments} month={month} year={year} />
+      <CalendarView assignments={entries} month={month} year={year} />
     </div>
   )
 }
