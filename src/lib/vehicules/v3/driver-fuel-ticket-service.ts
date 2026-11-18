@@ -11,6 +11,7 @@ import { isVehicleDocumentRecognitionEnabled } from "./document-recognition-doma
 import { executeExpenseCommand } from "./expense-service"
 import { validateVehicleExpenseDocument } from "./integration-bridges"
 import { expenseEnabled } from "./expense-domain"
+import { createInvoiceFromDriverTicket } from "./driver-ticket-supplier-invoice"
 import { authorizeDriverReceipt, driverSessionFrom, findDriverTrucks, type DriverSession } from "./driver-receipt-authority"
 import {
   derivedKey,
@@ -33,6 +34,8 @@ export interface DriverTicketDeps {
   env?: NodeJS.ProcessEnv
   /** Injection pour les tests (lecteur de ticket). */
   read?: DocumentRecognitionDeps["read"]
+  /** Tâche après la réponse (`after` de Next) : facture fournisseur « à valider » créée depuis le ticket. */
+  afterResponse?: (task: () => Promise<void>) => void
 }
 
 const txOptions = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 5_000, timeout: 15_000 }
@@ -88,10 +91,10 @@ export async function submitDriverTicket(rawInput: unknown, file: DocumentFileIn
 
   // 1. Autorité, date et nom du chauffeur relus avant tout dépôt (aucun octet stocké si refus).
   const ctx = await deps.db.$transaction(async (tx) => {
-    const { actor } = await authorizeDriverReceipt(tx, truckId, session)
+    const { actor, truck } = await authorizeDriverReceipt(tx, truckId, session)
     const settings = await tx.companySettings.findUnique({ where: { companyId: session.companyId }, select: { timezone: true } })
     const timeZone = settings?.timezone || "Europe/Paris"
-    return { driverName: actor.name?.trim() || "le chauffeur", timeZone, today: civilDay(new Date(), timeZone) }
+    return { driverName: actor.name?.trim() || "le chauffeur", matricule: truck.matricule, timeZone, today: civilDay(new Date(), timeZone) }
   }, txOptions)
   if (!ticketDayAllowed(input.day, ctx.today)) throw new MileageDomainError("TICKET_DATE_INVALID", 400)
 
@@ -155,5 +158,21 @@ export async function submitDriverTicket(rawInput: unknown, file: DocumentFileIn
     },
   )
   const expense = result.expense as { id?: string } | null
+  // Comptabilité : la même pièce devient une facture fournisseur « à valider » (après la réponse, jamais bloquant).
+  if (!result.replayed && deps.afterResponse) {
+    const invoiceInput = {
+      companyId: session.companyId, userId: session.userId, driverName: ctx.driverName, matricule: ctx.matricule,
+      kind: input.kind ?? "FUEL", day: input.day, amountCents, station: input.station?.trim() || null,
+      submissionKey: key, file: { bytes: file.bytes, filename: file.filename },
+    } as const
+    deps.afterResponse(async () => {
+      try {
+        const r = await createInvoiceFromDriverTicket(invoiceInput, { db: deps.db, env: deps.env })
+        console.info("[vehicle-fuel-ticket] supplier invoice", { outcome: r.outcome, ...(r.outcome === "SKIPPED" ? { reason: r.reason } : {}) })
+      } catch (error) {
+        console.error("[vehicle-fuel-ticket] supplier invoice failed", { name: error instanceof Error ? error.name : typeof error })
+      }
+    })
+  }
   return { outcome: bank ? "COMPLETED_BANK_EXPENSE" : "CREATED", expenseId: expense?.id ?? bank?.id ?? "", replayed: result.replayed }
 }
