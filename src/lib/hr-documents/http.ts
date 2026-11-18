@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client"
 import { ZodError } from "zod"
 import { assertMutationOrigin } from "@/lib/http/request-origin"
 import { HttpGuardError } from "@/lib/http/guard-error"
@@ -13,7 +14,10 @@ export async function hrHttp(fn:()=>Promise<Response>){
     if(error instanceof HrError&&error.code==="STORAGE_NOT_READY")console.warn("[hr-documents] STORAGE_NOT_READY",{reason:error.reason??"non_precise"})
     if(error instanceof HrError)return hrJson({error:messages[error.code]??"Opération indisponible.",code:error.code},error.status)
     if(error instanceof HttpGuardError)return hrJson({error:"Accès non autorisé."},403)
-    // No raw Prisma/provider exception, filename, body, token or employee data is logged or returned.
+    // No raw Prisma/provider exception, filename, body, token or employee data is logged or returned:
+    // only the error class and the fixed Prisma code (e.g. P2021), enough to diagnose without leaking data.
+    console.error("[hr-documents] UNAVAILABLE",{kind:error instanceof Error?error.name:typeof error,
+      code:error instanceof Prisma.PrismaClientKnownRequestError?error.code:undefined})
     return hrJson({error:"Le service est indisponible. Réessayez sans changer la même opération.",code:"UNAVAILABLE"},503)
   }
 }
