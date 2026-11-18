@@ -1,6 +1,8 @@
 "use client"
 import { useRef, useState } from "react"
 import { callJson, documentPeriod, type Category, type FolderDoc } from "./space-client"
+import { prepareUpload } from "./upload-prepare"
+import { MAX_UPLOAD_LABEL } from "@/lib/hr-documents/upload-limit"
 
 /**
  * Transmission d'une pièce par le salarié à ses RH : aucun choix de salarié (le serveur impose celui de la session),
@@ -22,6 +24,9 @@ export function EmployeeSubmission({ categories, images, requestId, onSubmitted,
     if (requestId) form.set("requestId", requestId)
     setSending(true); setError("")
     try {
+      // Photo trop lourde réduite avant envoi ; un fichier qui reste trop lourd est refusé sans requête.
+      const chosen = form.get("file")
+      if (chosen instanceof File) { const prepared = await prepareUpload(chosen); if (!prepared.ok) throw new Error(prepared.error); form.set("file", prepared.file) }
       await callJson("/api/hr-documents/submissions", { method: "POST", body: form })
       key.current = null; setFormKey(k => k + 1); onSubmitted()
     } catch (err) { setError(err instanceof Error ? err.message : "Transmission impossible.") } finally { setSending(false) }
@@ -32,7 +37,7 @@ export function EmployeeSubmission({ categories, images, requestId, onSubmitted,
     <label className="text-sm">Type de pièce<select required name="category" defaultValue={categories.some(c => c.code === "OTHER") ? "OTHER" : ""} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm">
       <option value="">Choisir</option>{categories.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}</select></label>
     <label className="text-sm sm:col-span-2">Intitulé<input required maxLength={120} name="title" className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm"/></label>
-    <label className="text-sm sm:col-span-2">Fichier ({images ? "PDF, JPG, PNG ou HEIC" : "PDF"}, 10 Mo au maximum)<input required type="file" name="file" accept={accept} disabled={sending} className="mt-1 block max-w-full text-sm"/></label>
+    <label className="text-sm sm:col-span-2">Fichier ({images ? "PDF, JPG, PNG ou HEIC" : "PDF"}, {MAX_UPLOAD_LABEL} au maximum{images ? " ; les photos plus lourdes sont réduites automatiquement" : ""})<input required type="file" name="file" accept={accept} disabled={sending} className="mt-1 block max-w-full text-sm"/></label>
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800 sm:col-span-2">{error}</p>}
     <p className="text-xs text-slate-500 sm:col-span-2">La pièce sera vérifiée par les RH avant toute utilisation. Elle n’est visible que par vous et les RH habilités.</p>
     <button disabled={sending} className="w-fit rounded-lg bg-blue-800 px-4 py-2 text-sm text-white disabled:opacity-50">{sending ? "Transmission…" : "Transmettre aux RH"}</button>
@@ -49,7 +54,11 @@ export function ResumeSubmission({ doc, onResumed, onCancel }: { doc: FolderDoc;
     e.preventDefault(); if (sending) return
     const form = new FormData(e.currentTarget); form.set("expectedVersion", String(doc.version))
     setSending(true); setError("")
-    try { await callJson(`/api/hr-documents/submissions/${encodeURIComponent(doc.id)}/resume`, { method: "POST", body: form }); onResumed() }
+    try {
+      // Même préparation qu'au premier envoi : le serveur compare ensuite le contenu avec le dépôt réservé.
+      const chosen = form.get("file")
+      if (chosen instanceof File) { const prepared = await prepareUpload(chosen); if (!prepared.ok) throw new Error(prepared.error); form.set("file", prepared.file) }
+      await callJson(`/api/hr-documents/submissions/${encodeURIComponent(doc.id)}/resume`, { method: "POST", body: form }); onResumed() }
     catch (err) { setError(err instanceof Error ? err.message : "Reprise impossible.") } finally { setSending(false) }
   }}>
     <h2 className="font-semibold text-slate-900">Reprendre l’envoi : {doc.title}</h2>

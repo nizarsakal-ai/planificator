@@ -1,5 +1,6 @@
 import { HR_DOWNLOAD_MESSAGES } from "@/lib/hr-documents/download-client"
 import type { CategoryDefinition } from "@/lib/hr-documents/catalog"
+import { MAX_UPLOAD_LABEL } from "@/lib/hr-documents/upload-limit"
 
 /** Types et appel réseau partagés par l'espace privé RH ↔ salarié (aucune logique d'accès : tout est filtré côté serveur). */
 export type SpaceMode = "hr" | "employee"
@@ -22,6 +23,8 @@ export function documentPeriod(proposed?: string | null): string {
 export async function callJson<T>(url: string, init?: RequestInit, fetchImpl: typeof fetch = fetch): Promise<T> {
   let response: Response
   try { response = await fetchImpl(url, { ...init, cache: "no-store", credentials: "same-origin" }) } catch { throw new Error(HR_DOWNLOAD_MESSAGES.network) }
+  // 413 de l'hébergeur (page non JSON, avant même le serveur) : fichier au-delà de la limite d'envoi.
+  if (response.status === 413) throw new Error(`Fichier trop lourd pour l’envoi : ${MAX_UPLOAD_LABEL} au maximum. Réduisez-le puis recommencez.`)
   if (response.redirected || response.type === "opaqueredirect" || !(response.headers.get("content-type") ?? "").includes("application/json")) throw new Error(HR_DOWNLOAD_MESSAGES.session)
   const data = await response.json().catch(() => ({})) as { error?: unknown }
   if (!response.ok) throw new Error(typeof data.error === "string" && data.error ? data.error : "Opération indisponible.")

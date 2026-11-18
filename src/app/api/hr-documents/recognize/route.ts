@@ -1,6 +1,7 @@
+import { MAX_UPLOAD_BYTES } from "@/lib/hr-documents/upload-limit"
 import { hrIdentity,hrOperator,hrService } from "@/lib/hr-documents/runtime"
 import { boundedForm,hrHttp,hrJson } from "@/lib/hr-documents/http"
-import { HrError,MAX_PDF_BYTES,recognitionEnabled } from "@/lib/hr-documents/domain"
+import { HrError,recognitionEnabled } from "@/lib/hr-documents/domain"
 import { assertMutationOrigin } from "@/lib/http/request-origin"
 export const runtime="nodejs"
 export const dynamic="force-dynamic"
@@ -12,6 +13,6 @@ export async function POST(request:Request){return hrHttp(async()=>{
   const form=await boundedForm(request)
   for(const [key] of form)if(key!=="file"||form.getAll(key).length!==1)throw new HrError("INVALID_INPUT")
   const file=form.get("file")
-  if(!(file instanceof File)||file.size>MAX_PDF_BYTES)throw new HrError("INVALID_FILE")
+  if(!(file instanceof File)||file.size>MAX_UPLOAD_BYTES)throw new HrError("INVALID_FILE")
   return hrJson({proposal:await hrService().recognize(identity,new Uint8Array(await file.arrayBuffer()),file.name)})
 })}

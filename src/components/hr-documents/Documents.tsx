@@ -4,6 +4,8 @@ import Link from "next/link"
 import { Download, Eye, FileText, LockKeyhole } from "lucide-react"
 import { DocumentFolders } from "./DocumentFolders"
 import { documentPeriod } from "./space-client"
+import { prepareUpload } from "./upload-prepare"
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL, tooLargeMessage } from "@/lib/hr-documents/upload-limit"
 import { availableCategories, categoryLabel, type CategoryDefinition } from "@/lib/hr-documents/catalog"
 import { fetchHrDocument } from "@/lib/hr-documents/download-client"
 import { DocumentPreview, saveBlob, type PreviewTarget } from "./DocumentPreview"
@@ -19,6 +21,8 @@ async function call(url:string,init?:RequestInit){
   // Coupure réseau ou réponse non JSON (page de connexion, erreur d'un proxy) : message lisible, jamais l'erreur brute du navigateur.
   let response:Response
   try{response=await fetch(url,{...init,cache:"no-store"})}catch{throw new Error("Connexion au serveur impossible. Réessayez.")}
+  // 413 de l'hébergeur (page non JSON) : corps de requête au-delà de sa limite.
+  if(response.status===413)throw new ApiError(`Fichier trop lourd pour l’envoi : ${MAX_UPLOAD_LABEL} au maximum. Réduisez-le puis recommencez.`,"TOO_LARGE")
   const data=await response.json().catch(()=>null)
   if(!response.ok||response.redirected||!data)throw new ApiError(typeof data?.error==="string"&&data.error?data.error:"Opération indisponible.",typeof data?.code==="string"?data.code:undefined)
   return data
@@ -274,6 +278,9 @@ function MetadataFields({employees,categories,defaults,hints}:{employees:Employe
 function RecoveryForm({doc,action,busy,run}:{doc:Doc;action:"RESUME"|"RESTORE";busy:boolean;run:Runner}){
   return <form className="mt-3 flex flex-wrap items-end gap-3 rounded-lg bg-slate-50 p-3" onSubmit={e=>{
     e.preventDefault();const form=new FormData(e.currentTarget);form.set("action",action);form.set("expectedVersion",String(doc.version))
+    // Le PDF original exact est exigé : jamais réécrit, seulement refusé avant envoi s'il dépasse la limite.
+    const chosen=form.get("file")
+    if(chosen instanceof File&&chosen.size>MAX_UPLOAD_BYTES){void run(async()=>{throw new ApiError(tooLargeMessage(chosen.name,chosen.size),"TOO_LARGE")},"");return}
     void run(()=>call(`/api/hr-documents/${doc.id}/recover`,{method:"POST",body:form}),"PDF original vérifié. Revue et publication restent nécessaires.")
   }}><label className="min-w-0 text-sm">{action==="RESUME"?"Reprendre avec exactement le PDF réservé":"Restaurer le PDF original, sans changer son destinataire"}<input className="mt-2 block max-w-full" type="file" name="file" accept="application/pdf,.pdf" required disabled={busy}/></label><button disabled={busy} className="rounded-lg border px-3 py-2 text-sm">{action==="RESUME"?"Reprendre ce dépôt":"Restaurer une copie privée"}</button></form>
 }
@@ -331,6 +338,7 @@ function ImportPanel(props:ImportProps){
   const inputs=useRef<HTMLDivElement>(null)
   // Dernier envoi tenté par fichier : clé d'idempotence et signature des champs. Les champs restent modifiables après un échec.
   const attempts=useRef(new Map<string,{key:string;signature:string}>())
+  const [preparing,setPreparing]=useState(false)
   const accept=images?"application/pdf,.pdf,image/jpeg,.jpg,.jpeg,image/png,.png,image/heic,.heic":"application/pdf,.pdf"
   const batch=!!employeeId
   const pending=files.filter(({key})=>results[key]?.state!=="done")
@@ -383,7 +391,7 @@ function ImportPanel(props:ImportProps){
   }
 
   return <div className="rounded-xl border bg-white p-4"><h2 className="font-semibold">{batch?"Ajouter plusieurs fichiers":images?"Dépôt de documents — unitaire ou lot":"Dépôt PDF — unitaire ou lot"}</h2>
-    <p className="my-2 text-sm text-slate-600">10 fichiers au maximum par sélection, 10 Mo par {images?"fichier (PDF, JPG, PNG ou HEIC)":"PDF"}. {batch?"Choisissez la catégorie une fois, puis vérifiez l’affectation de chaque fichier. Aucun document n’est publié lors du dépôt.":recognition?"Vérifiez chaque proposition de classement avant de déposer le fichier.":"Chaque affectation est vérifiée séparément."}</p>
+    <p className="my-2 text-sm text-slate-600">10 fichiers au maximum par sélection, {MAX_UPLOAD_LABEL} par {images?"fichier (PDF, JPG, PNG ou HEIC ; les photos plus lourdes sont réduites automatiquement)":"PDF"}. {batch?"Choisissez la catégorie une fois, puis vérifiez l’affectation de chaque fichier. Aucun document n’est publié lors du dépôt.":recognition?"Vérifiez chaque proposition de classement avant de déposer le fichier.":"Chaque affectation est vérifiée séparément."}</p>
     {batch&&<div className="mb-3 grid gap-3 sm:grid-cols-2">
       <p className="text-sm">Salarié <strong className="block">{props.employeeName||"Salarié de ce dossier"}</strong></p>
       <label className="text-sm">Catégorie du lot<select className={control} value={sharedCategory} disabled={locked} onChange={e=>{
@@ -393,14 +401,21 @@ function ImportPanel(props:ImportProps){
         <option value="">Choisir une catégorie</option>{categories.map(c=><option key={c.code} value={c.code}>{c.label}</option>)}
       </select></label>
     </div>}
-    <label className="block text-sm">{images?"Choisir les documents":"Choisir les PDF"}<input type="file" accept={accept} multiple disabled={locked} className="mt-2 block max-w-full text-sm" onChange={e=>{
+    <label className="block text-sm">{images?"Choisir les documents":"Choisir les PDF"}<input type="file" accept={accept} multiple disabled={locked||preparing} className="mt-2 block max-w-full text-sm" onChange={e=>{
       const selection=Array.from(e.target.files??[])
       e.target.value=""
       if(!selection.length)return
       if(selection.length>10){setSelectionError("Sélectionnez 10 fichiers au maximum.");return}
-      setSelectionError("");setResults({});attempts.current.clear()
-      setFiles(selection.map(file=>({file,key:crypto.randomUUID()})))
+      setSelectionError("");setResults({});attempts.current.clear();setFiles([]);setPreparing(true)
+      // Avant toute requête (lecture comprise) : photo trop lourde réduite, fichier qui reste trop lourd écarté avec la marche à suivre.
+      void Promise.all(selection.map(file=>prepareUpload(file))).then(prepared=>{
+        const kept=prepared.flatMap(r=>r.ok?[r.file]:[]),refused=prepared.flatMap(r=>r.ok?[]:[r.error])
+        const reduced=prepared.filter(r=>r.ok&&r.reduced).length
+        setSelectionError([...refused,reduced?`${reduced} photo${reduced>1?"s":""} réduite${reduced>1?"s":""} automatiquement pour respecter la limite de ${MAX_UPLOAD_LABEL}.`:""].filter(Boolean).join(" "))
+        setFiles(kept.map(file=>({file,key:crypto.randomUUID()})))
+      }).finally(()=>setPreparing(false))
     }}/></label>
+    {preparing&&<p role="status" className="mt-2 text-sm text-slate-600">Préparation des fichiers…</p>}
     {selectionError&&<p role="alert" className="mt-2 text-sm text-red-800">{selectionError}</p>}
     <div ref={inputs} className="space-y-4">{files.map(({file,key})=><div key={key}>
       {results[key]?.state==="done"
