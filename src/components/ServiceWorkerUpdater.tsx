@@ -3,6 +3,19 @@
 import { useEffect } from "react"
 
 /**
+ * Caches des anciennes versions du service worker qui contenaient des pages, flux RSC ou réponses d'API privés
+ * (dont des réponses redirigées, refusées par WebKit : « ERR_FAILED » sur iPhone). Ils ne sont plus alimentés ;
+ * on les supprime pour qu'aucun appareil ne garde ni ne resserve ces réponses.
+ */
+export const LEGACY_PRIVATE_CACHES = ["pages", "pages-rsc", "pages-rsc-prefetch", "start-url", "apis", "cross-origin",
+  "next-data", "static-data-assets"] as const
+
+export async function purgeLegacyPrivateCaches(storage: Pick<CacheStorage, "delete"> | undefined = globalThis.caches) {
+  if (!storage) return
+  await Promise.all(LEGACY_PRIVATE_CACHES.map(name => storage.delete(name).catch(() => false)))
+}
+
+/**
  * Force la PWA à se mettre à jour sans intervention de l'utilisateur.
  *
  * - Vérifie régulièrement (au montage, toutes les 60 s et à chaque retour
@@ -14,7 +27,9 @@ import { useEffect } from "react"
  */
 export function ServiceWorkerUpdater() {
   useEffect(() => {
-    if (typeof window === "undefined" || !("serviceWorker" in navigator)) return
+    if (typeof window === "undefined") return
+    void purgeLegacyPrivateCaches().catch(() => {})
+    if (!("serviceWorker" in navigator)) return
 
     let refreshing = false
     const hadController = Boolean(navigator.serviceWorker.controller)

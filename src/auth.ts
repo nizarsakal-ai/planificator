@@ -6,6 +6,16 @@ import { z } from "zod"
 import { prisma } from "@/lib/prisma"
 import { authConfig, edgeSessionCallback } from "@/auth.config"
 
+/**
+ * Motif d'un refus de connexion, journalisé côté serveur uniquement (jamais renvoyé au navigateur, qui reçoit toujours
+ * le même message générique) : aucune adresse, aucun identifiant, aucune valeur saisie. Permet de distinguer un compte
+ * jamais activé (invitation non acceptée, fiche RH à compléter) d'un mot de passe erroné.
+ */
+export type LoginRefusal = "INVALID_INPUT" | "USER_NOT_FOUND" | "USER_INACTIVE" | "BAD_PASSWORD" | "NO_ACTIVE_COMPANY_ACCESS"
+export function logLoginRefusal(reason: LoginRefusal, log: (msg: string, data: { reason: LoginRefusal }) => void = console.warn) {
+  log("[auth] LOGIN_REFUSED", { reason })
+}
+
 // Schéma de validation des credentials
 const credentialsSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
@@ -23,7 +33,7 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
       async authorize(credentials) {
         // Validation stricte des entrées
         const parsed = credentialsSchema.safeParse(credentials)
-        if (!parsed.success) return null
+        if (!parsed.success) { logLoginRefusal("INVALID_INPUT"); return null }
 
         const { email, password } = parsed.data
 
@@ -37,10 +47,11 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
         })
 
         // Vérifications de sécurité
-        if (!user || !user.active) return null
+        if (!user) { logLoginRefusal("USER_NOT_FOUND"); return null }
+        if (!user.active) { logLoginRefusal("USER_INACTIVE"); return null }
 
         const isValid = await bcrypt.compare(password, user.password)
-        if (!isValid) return null
+        if (!isValid) { logLoginRefusal("BAD_PASSWORD"); return null }
 
         // Mise à jour de la date de dernière connexion
         await prisma.user.update({
@@ -49,7 +60,7 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
         })
 
         const access = resolveCompanyAccess(user, user.companyId)
-        if (!access) return null
+        if (!access) { logLoginRefusal("NO_ACTIVE_COMPANY_ACCESS"); return null }
         const profile = user.employeeProfiles.find(p => p.companyId === access.companyId)
         const displayName = profile ? `${profile.firstName} ${profile.lastName}` : user.email
 
