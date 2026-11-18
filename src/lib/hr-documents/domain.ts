@@ -126,8 +126,8 @@ export function assertContent(bytes: Uint8Array, expectedHash: string, expectedS
 export const messages: Record<string,string> = {
   FORBIDDEN: "Accès non autorisé.", NOT_FOUND: "Document indisponible.", DISABLED: "Fonction non disponible.",
   CONFLICT: "La version a changé. Rechargez et vérifiez le document.", CONTENT_CHANGED: "Le fichier a changé. Une nouvelle vérification RH est nécessaire.",
-  INVALID_PDF: "PDF invalide ou supérieur à 10 Mo.", INVALID_INPUT: "Vérifiez les champs du formulaire.",
-  INVALID_FILE: "Fichier invalide : PDF, JPG, PNG ou HEIC de 10 Mo au maximum.",
+  INVALID_PDF: "PDF invalide ou trop lourd (4 Mo au maximum à l’envoi).", INVALID_INPUT: "Vérifiez les champs du formulaire.",
+  INVALID_FILE: "Fichier invalide : PDF, JPG, PNG ou HEIC de 4 Mo au maximum.",
   DRIVE_PRIVATE_REQUIRED: "Le dossier Drive doit être privé et appartenir au compte configuré.",
   DRIVE_UNAVAILABLE: "Drive est indisponible. Réessayez avec la même opération.", STORAGE_NOT_READY: "Le stockage RH n’est pas encore configuré.",
   DUPLICATE: "Un document identique existe déjà pour ce salarié et cette période.",
