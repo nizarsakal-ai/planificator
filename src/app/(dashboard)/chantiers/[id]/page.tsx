@@ -1,6 +1,7 @@
 import type { Metadata } from "next"
 import { auth } from "@/auth"
 import { redirect, notFound } from "next/navigation"
+import { resolveWorksiteViewer, worksiteAccessWhere } from "@/lib/chantiers/worksite-access"
 import { prisma } from "@/lib/prisma"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -58,33 +59,17 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
   const isEmployee   = session.user.role === "EMPLOYEE"
   if (!isAdmin && !isTeamLeader && !isEmployee) redirect("/dashboard")
 
-  let leaderTeamId: string | undefined
-  if (isTeamLeader) {
-    const leaderEmployee = await prisma.employee.findFirst({
-      where: { userId: session.user.id!, companyId: session.user.companyId! },
-      select: { ledTeams: { where: { active: true }, select: { id: true }, take: 1 } },
-    })
-    leaderTeamId = leaderEmployee?.ledTeams[0]?.id
-    if (!leaderTeamId) redirect("/dashboard")
-  }
-
-  let currentEmployeeId: string | undefined
-  if (isEmployee) {
-    const emp = await prisma.employee.findFirst({
-      where: { userId: session.user.id!, companyId: session.user.companyId! },
-      select: { id: true },
-    })
-    currentEmployeeId = emp?.id
-    if (!currentEmployeeId) redirect("/dashboard")
-  }
+  // Règle d'accès partagée avec la liste, le calendrier et les documents (src/lib/chantiers/worksite-access.ts).
+  const viewer = await resolveWorksiteViewer(prisma, session.user)
+  const scope = worksiteAccessWhere(viewer)
+  if (!scope) redirect("/dashboard")
 
   const [chantier, teams, clients, allEmployees] = await Promise.all([
     prisma.worksite.findFirst({
       where: {
         id,
         companyId: session.user.companyId!,
-        ...(isTeamLeader ? { assignments: { some: { teamId: leaderTeamId } } } : {}),
-        ...(isEmployee ? { assignments: { some: { employeeAssignments: { some: { employeeId: currentEmployeeId } } } } } : {}),
+        ...scope,
       },
       include: {
         client: { select: { name: true } },

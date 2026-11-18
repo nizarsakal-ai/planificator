@@ -2,6 +2,9 @@ import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { v2 as cloudinary } from "cloudinary"
+import { resolveWorksiteViewer, worksiteAccessWhere } from "@/lib/chantiers/worksite-access"
+import { accessAcquisitionAttachment } from "@/lib/acquisition/access/attachment-access.service"
+import { attachmentAccessResponse } from "@/lib/acquisition/access/attachment-access.handler"
 
 /**
  * Parse une URL Cloudinary pour extraire resourceType, publicId et format.
@@ -62,8 +65,12 @@ export async function GET(
   const { id } = await params
   const forceDownload = new URL(req.url).searchParams.get("dl") === "1"
 
+  // Même règle que la fiche chantier : un document ne s'ouvre que si son chantier s'ouvre pour cet utilisateur.
+  const scope = worksiteAccessWhere(await resolveWorksiteViewer(prisma, session.user))
+  if (!scope) return new NextResponse("Document introuvable", { status: 404 })
+
   const doc = await prisma.document.findFirst({
-    where: { id, worksite: { companyId: session.user.companyId! } },
+    where: { id, worksite: { companyId: session.user.companyId!, ...scope } },
     select: {
       url: true,
       name: true,
@@ -77,11 +84,15 @@ export async function GET(
   }
 
   // PLAN-ACQ-005D — bridge : accès via route attachments (pas d’URL stockée)
+  // Servi ici (et non par redirection vers la route des consultations, réservée au back-office) : l'accès au
+  // chantier vient d'être vérifié ; l'entreprise, le statut et l'audit restent contrôlés par le service.
   if (doc.sourceAcquisitionAttachmentId) {
-    const dl = forceDownload ? "?dl=1" : ""
-    return NextResponse.redirect(
-      new URL(`/api/acquisition/attachments/${doc.sourceAcquisitionAttachmentId}${dl}`, req.url)
-    )
+    return attachmentAccessResponse(await accessAcquisitionAttachment({
+      context: { userId: session.user.id!, role: session.user.role, companyId: session.user.companyId },
+      attachmentId: doc.sourceAcquisitionAttachmentId,
+      mode: forceDownload ? "DOWNLOAD" : "VIEW",
+      authorizedByWorksite: true,
+    }))
   }
 
   if (!doc.url) {

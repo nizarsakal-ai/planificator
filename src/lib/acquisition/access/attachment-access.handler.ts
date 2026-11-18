@@ -41,7 +41,11 @@ export async function handleAcquisitionAttachmentAccess(
     { context, attachmentId, mode },
     deps
   )
+  return attachmentAccessResponse(result)
+}
 
+/** Réponse HTTP d'un résultat d'accès (route des pièces jointes et documents de chantier). */
+export function attachmentAccessResponse(result: Awaited<ReturnType<typeof accessAcquisitionAttachment>>): Response {
   if (result.kind !== "OK") {
     return new NextResponse(mapAccessResultToPublicMessage(result), {
       status: mapAccessResultToStatus(result),
