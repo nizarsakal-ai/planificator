@@ -9,6 +9,10 @@ import { SettingsForm } from "@/components/parametres/SettingsForm"
 import { GmailConnectionCard } from "@/components/parametres/GmailConnectionCard"
 import { AcquisitionGmailConnectionsCard } from "@/components/parametres/AcquisitionGmailConnectionsCard"
 import { loadAcquisitionMailboxStatuses } from "@/lib/acquisition/connector/acquisition-mailbox-health.repository"
+import { listConsultationSources } from "@/lib/acquisition/admin/partner-sources.repository"
+import { ConsultationSourcesCard } from "@/components/parametres/ConsultationSourcesCard"
+import { assessBookingGmailHealth } from "@/lib/booking/booking-gmail-health"
+import { isBookingGmailScanEnabled } from "@/lib/booking/booking-gmail-scan-flag"
 import { WorksitePhotosDriveCard } from "@/components/parametres/WorksitePhotosDriveCard"
 import { isWorksitePhotosEnabled } from "@/lib/worksite-photos/feature-flag"
 import { CompanyIdentityCard } from "@/components/parametres/CompanyIdentityCard"
@@ -61,12 +65,15 @@ export default async function ParametresPage({
       }),
       prisma.gmailConnection.findUnique({
         where: { companyId: company.id },
-        select: { gmailAddress: true, connectedAt: true },
+        select: { gmailAddress: true, connectedAt: true, tokenExpiry: true },
       }),
     ])
 
   // Santé des boîtes Acquisition (connexion + curseur de scan), calculée côté serveur.
-  const acquisitionMailboxes = await loadAcquisitionMailboxStatuses(company.id)
+  const [acquisitionMailboxes, consultationSources] = await Promise.all([
+    loadAcquisitionMailboxStatuses(company.id),
+    listConsultationSources(company.id),
+  ])
 
   return (
     <div className="space-y-6">
@@ -157,7 +164,21 @@ export default async function ParametresPage({
         </Card>
 
         {/* Connexion Gmail Booking (inchangé) */}
-        <GmailConnectionCard connection={gmailConnection} gmailParam={gmailParam} />
+        <GmailConnectionCard
+          connection={
+            gmailConnection
+              ? {
+                  gmailAddress: gmailConnection.gmailAddress,
+                  connectedAt: gmailConnection.connectedAt,
+                  health: assessBookingGmailHealth({
+                    tokenExpiry: gmailConnection.tokenExpiry,
+                    scanEnabled: isBookingGmailScanEnabled(),
+                  }),
+                }
+              : null
+          }
+          gmailParam={gmailParam}
+        />
 
         {/* Connexions Gmail Acquisition multi-compte */}
         <AcquisitionGmailConnectionsCard
@@ -165,6 +186,9 @@ export default async function ParametresPage({
           acquisitionGmailParam={acquisitionGmailParam}
           reasonParam={acquisitionGmailParam === "error" ? reasonParam : null}
         />
+
+        {/* Expéditeurs dont les e-mails deviennent des consultations (registre partenaires) */}
+        <ConsultationSourcesCard sources={consultationSources} />
 
         {/* Photos d'engins — connexion Google Drive (drapeau serveur) */}
         {worksitePhotosEnabled && (

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { ClientForm } from "@/components/clients/ClientForm"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { AddressAutocomplete } from "@/components/ui/address-autocomplete"
 import { Label } from "@/components/ui/label"
 import { createChantierSchema, type CreateChantierInput } from "@/lib/validations/chantier"
 import { createChantierWithId } from "@/lib/actions/chantier.actions"
@@ -111,10 +112,20 @@ export function ChantierForm({ clients, initialClientId = "", onSuccess }: Chant
         {/* Adresse */}
         <div className="space-y-1.5">
           <Label htmlFor="address">Adresse du chantier</Label>
-          <Input
-            id="address"
-            placeholder="15 rue du Chantier, 75001 Paris"
-            {...register("address")}
+          <Controller
+            name="address"
+            control={control}
+            render={({ field }) => (
+              <AddressAutocomplete
+                id="address"
+                name={field.name}
+                ref={field.ref}
+                placeholder="15 rue du Chantier, 75001 Paris"
+                value={field.value ?? ""}
+                onValueChange={field.onChange}
+                onBlur={field.onBlur}
+              />
+            )}
           />
         </div>
 

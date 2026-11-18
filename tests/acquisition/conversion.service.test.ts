@@ -18,6 +18,8 @@ type Draft = {
   proposedCity: string | null
   proposedStartDate: Date | null
   proposedEndDate: Date | null
+  proposedContactName?: string | null
+  proposedContactEmail?: string | null
   createdWorksiteId: string | null
 }
 
@@ -74,6 +76,14 @@ type FakeDb = {
       where: { companyId: string; acquisitionMessageId: string }
     }) => Promise<unknown[]>
   }
+  acquisitionMessage: {
+    findFirst: (args: { where: { id: string; companyId: string } }) => Promise<{ senderEmail: string } | null>
+  }
+  worksitePhotoRecipient: {
+    createMany: (args: { data: Array<Record<string, unknown>> }) => Promise<{ count: number }>
+  }
+  $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<number>
+  readonly photoRecipients: Array<Record<string, unknown>>
   document: {
     create: (args: {
       data: {
@@ -114,8 +124,10 @@ function createFakeDb(seed: {
     status: string
     storagePublicId: string | null
   }>
+  senderEmail?: string
 }): FakeDb {
   let draft = { ...seed.draft }
+  const photoRecipients: Array<Record<string, unknown>> = []
   const clients = [...(seed.clients ?? [])]
   const attachments = [...(seed.attachments ?? [])]
   const existingWorksites = [...(seed.existingWorksites ?? [])]
@@ -252,6 +264,22 @@ function createFakeDb(seed: {
         return { id }
       },
     },
+    acquisitionMessage: {
+      async findFirst(args: { where: { id: string; companyId: string } }) {
+        if (args.where.id !== draft.acquisitionMessageId || args.where.companyId !== draft.companyId) return null
+        return { senderEmail: seed.senderEmail ?? "prunille@lauralu.fr" }
+      },
+    },
+    worksitePhotoRecipient: {
+      async createMany(args: { data: Array<Record<string, unknown>> }) {
+        photoRecipients.push(...args.data)
+        return { count: args.data.length }
+      },
+    },
+    async $executeRaw() {
+      return 1
+    },
+    photoRecipients,
     acquisitionAttachment: {
       async findMany(args: {
         where: { companyId: string; acquisitionMessageId: string }
@@ -301,6 +329,7 @@ function createFakeDb(seed: {
         clientsLen: clients.length,
         worksitesLen: worksites.length,
         documentsLen: documents.length,
+        photoRecipientsLen: photoRecipients.length,
       }
       try {
         return await fn(api)
@@ -309,6 +338,7 @@ function createFakeDb(seed: {
         clients.length = snap.clientsLen
         worksites.length = snap.worksitesLen
         documents.length = snap.documentsLen
+        photoRecipients.length = snap.photoRecipientsLen
         throw e
       }
     },
@@ -352,6 +382,39 @@ describe("ImportDraftConversionService", () => {
 
   afterEach(() => {
     process.env = { ...env }
+  })
+
+  it("destinataires des photos : contact de la consultation + expéditeur (no-reply exclu)", async () => {
+    const db = createFakeDb({
+      draft: baseDraft({ proposedContactName: "Prunille Martin", proposedContactEmail: "p.martin@lauralu.fr" }),
+      clients: [{ id: "c1", companyId: "co1" }],
+      senderEmail: "Prunille@lauralu.fr",
+    })
+    const svc = new ImportDraftConversionService({ db: db as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
+    const r = await svc.convertImportDraft(admin, {
+      draftId: "d1",
+      expectedVersion: 2,
+      clientMode: "EXISTING",
+      existingClientId: "c1",
+    })
+    assert.equal(r.ok, true)
+    assert.deepEqual(
+      db.photoRecipients.map((x) => [x.email, x.emailKey, x.label, x.position, x.active]),
+      [
+        ["p.martin@lauralu.fr", "p.martin@lauralu.fr", "Prunille Martin", 0, true],
+        ["Prunille@lauralu.fr", "prunille@lauralu.fr", "Expéditeur de la consultation", 1, true],
+      ]
+    )
+    assert.ok(db.photoRecipients.every((x) => x.worksiteId === "ws-1" && x.companyId === "co1"))
+
+    const db2 = createFakeDb({
+      draft: baseDraft(),
+      clients: [{ id: "c1", companyId: "co1" }],
+      senderEmail: "no-reply@plateforme.fr",
+    })
+    const svc2 = new ImportDraftConversionService({ db: db2 as never, now: () => new Date("2026-10-01T00:00:00.000Z") })
+    await svc2.convertImportDraft(admin, { draftId: "d1", expectedVersion: 2, clientMode: "EXISTING", existingClientId: "c1" })
+    assert.equal(db2.photoRecipients.length, 0)
   })
 
   it("EXISTING → CONVERTED + documents STORED seulement", async () => {

@@ -1,5 +1,6 @@
 "use client"
 
+import type React from "react"
 import { useEffect, useId, useLayoutEffect, useReducer, useRef, useState } from "react"
 import Link from "next/link"
 import { ChevronRight } from "lucide-react"
@@ -7,6 +8,12 @@ import { cn } from "@/lib/utils"
 import { SHADOW_RAISED, SHADOW_SLIDER } from "@/components/ui/shadows"
 import type { NavItem } from "@/lib/navigation/nav-config"
 import type { NavCategory, NavCategoryId } from "@/lib/navigation/nav-categories"
+
+/** Lien d'une entrée : `next/link` (transition du routeur client) par défaut ; <a> ordinaire, mêmes attributs et classes, pour une
+ * entrée `documentNavigation` (correctif E4 : navigation native du document, aucune transition client ni préchargement). */
+function EntreeLien({ item, ...props }: { item: NavItem } & Omit<React.ComponentProps<"a">, "href">) {
+  return item.documentNavigation ? <a href={item.href} {...props} /> : <Link href={item.href} {...props} />
+}
 
 /**
  * Catégories repliables partagées par la Sidebar et le MobileNav (rendu seulement : les entrées viennent de la
@@ -21,8 +28,8 @@ import type { NavCategory, NavCategoryId } from "@/lib/navigation/nav-categories
  */
 export function NavItemLink({ item, active, onNavigate, touch = false }: { item: NavItem; active: boolean; onNavigate?: () => void; touch?: boolean }) {
   return (
-    <Link
-      href={item.href}
+    <EntreeLien
+      item={item}
       onClick={onNavigate}
       aria-current={active ? "page" : undefined}
       className={cn(
@@ -47,7 +54,7 @@ export function NavItemLink({ item, active, onNavigate, touch = false }: { item:
       <span className="flex-1 truncate">{item.label}</span>
       {item.badge && <span className={cn("rounded px-1.5 py-0.5 text-[10px]", active ? "bg-[#0f3460]/[0.06] text-[#0f3460] dark:bg-blue-400/15 dark:text-blue-200" : "bg-slate-100 text-slate-500")}>{item.badge}</span>}
       {active && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden="true" />}
-    </Link>
+    </EntreeLien>
   )
 }
 
@@ -62,8 +69,8 @@ function SliderNavLink({ item, active, onSlider, sliderReady, onNavigate, onHove
 }) {
   const raised = onSlider || (active && !sliderReady)
   return (
-    <Link
-      href={item.href}
+    <EntreeLien
+      item={item}
       onClick={onNavigate}
       onPointerEnter={() => onHover(item.href)}
       onFocus={() => onHover(item.href)}
@@ -89,7 +96,7 @@ function SliderNavLink({ item, active, onSlider, sliderReady, onNavigate, onHove
       <span className="flex-1 truncate">{item.label}</span>
       {item.badge && <span className={cn("rounded px-1.5 py-0.5 text-[10px]", raised ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500")}>{item.badge}</span>}
       {raised && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-white/80" aria-hidden="true" />}
-    </Link>
+    </EntreeLien>
   )
 }
 

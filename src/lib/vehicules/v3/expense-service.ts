@@ -3,7 +3,7 @@ import { MileageDomainError } from "../mileage-domain"
 import { requireMileageSession } from "../mileage-access"
 import { authorizeVehicleLocked } from "../vehicle-authority"
 import { normalizeMileageFailure, type MileageServiceDeps } from "../mileage-service"
-import { assertAllocationTotal, expenseEnabled, expenseHash, parseExpenseCommand } from "./expense-domain"
+import { assertAllocationTotal, expenseEnabled, expenseHash, parseExpenseCommand, type ExpenseCommand } from "./expense-domain"
 export type ExpenseDeps = MileageServiceDeps & {
   validateDocumentVersion?: (tx: Prisma.TransactionClient, scope: { companyId: string; truckId: string; versionId: string }) => Promise<boolean>
 }
@@ -35,13 +35,31 @@ export async function preauthorizeExpenseWrite(truckId:string,deps:ExpenseDeps){
  expenseGate();const session=requireMileageSession(await deps.auth())
  await deps.db.$transaction(tx=>authorizeVehicleLocked(tx,truckId,session,"START"),options)
 }
-export async function executeExpenseCommand(truckId: string, body: unknown, key: string | null, deps: ExpenseDeps) {
+/**
+ * Autorité d'écriture d'une dépense : par défaut l'autorité V2 (création : START ; autres actions :
+ * administrateurs). Le ticket du chauffeur injecte la sienne, limitée à CREATE/CORRECT d'un plein.
+ */
+export interface ExpenseWriteAuthority {
+  session: { userId: string; companyId: string }
+  authorize: (tx: Prisma.TransactionClient, action: ExpenseCommand["action"]) => Promise<{ truck: { active: boolean }; actor: { id: string } }>
+}
+
+export async function executeExpenseCommand(truckId: string, body: unknown, key: string | null, deps: ExpenseDeps, authority?: ExpenseWriteAuthority) {
   expenseGate()
-  const session = requireMileageSession(await deps.auth())
   const { command, key: normalizedKey } = parseExpenseCommand(body, key)
+  let session: { userId: string; companyId: string }
+  let authorize: ExpenseWriteAuthority["authorize"]
+  if (authority) {
+    session = authority.session
+    authorize = authority.authorize
+  } else {
+    const v2 = requireMileageSession(await deps.auth())
+    session = v2
+    authorize = (tx, action) => authorizeVehicleLocked(tx, truckId, v2, action === "CREATE" ? "START" : "READING")
+  }
   const hash = expenseHash(command, session.companyId, truckId, session.userId)
   try { return await deps.db.$transaction(async tx => {
-    const { truck, actor } = await authorizeVehicleLocked(tx, truckId, session, command.action === "CREATE" ? "START" : "READING")
+    const { truck, actor } = await authorize(tx, command.action)
     const scope = { companyId: session.companyId, truckId }
     const prior = await tx.vehicleExpenseCommand.findFirst({ where: { ...scope, idempotencyKey: normalizedKey } })
     if (prior) {

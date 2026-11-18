@@ -9,7 +9,7 @@
     },
     {
       "path": "/api/cron/gmail-scan",
-      "schedule": "0 8 * * *"
+      "schedule": "30 * * * *"
     },
     {
       "path": "/api/cron/acquisition-orchestrator",
@@ -18,6 +18,10 @@
     {
       "path": "/api/cron/vehicle-document-reminders",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/vehicle-tour-km",
+      "schedule": "30 4 * * *"
     },
     {
       "path": "/api/cron/billing-quote-reminders",

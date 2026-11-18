@@ -125,8 +125,19 @@ export async function registerIncomingMessage(
     },
     include: includeDraft,
   })
-  if (existing)
+  if (existing) {
+    // Expéditeur devenu partenaire depuis le rejet (ex. domaine ajouté au registre) :
+    // le message est promu en brouillon au lieu de rester rejeté à vie (idempotence).
+    if (
+      existing.status === "REJECTED" &&
+      existing.lastErrorCode === "SENDER_NOT_ELIGIBLE" &&
+      !existing.draft
+    ) {
+      const promoted = await promoteRejectedMessageIfNowEligible(db, data, existing.id, deps)
+      if (promoted) return promoted
+    }
     return toResult(existing.id, existing.draft?.id ?? null, existing.status, false, existing.lastErrorCode)
+  }
 
   // Anti-doublon legacy↔moderne hors TX (chemin chaud) — TX revalide sous verrou.
   if (data.source === "GMAIL") {
@@ -319,6 +330,84 @@ export async function registerIncomingMessage(
     }
     throw e
   }
+}
+
+
+/**
+ * Promotion REJECTED(SENDER_NOT_ELIGIBLE) → DRAFT_CREATED quand l'expéditeur est
+ * désormais admissible. Même verrou d'identité que la création ; relecture sous
+ * verrou (une promotion concurrente ne crée jamais deux brouillons).
+ * Retourne null si l'expéditeur n'est toujours pas admissible.
+ */
+async function promoteRejectedMessageIfNowEligible(
+  db: PrismaClient,
+  data: ReturnType<typeof registerIncomingMessageSchema.parse>,
+  messageId: string,
+  deps: RegisterIncomingMessageDeps
+): Promise<RegisterIncomingMessageResult | null> {
+  const normalized = normalizeSenderAddress(data.senderEmail)
+  if (!normalized) return null
+  const eligibilityResolver =
+    deps.eligibilityResolver ??
+    new PartnerEligibilityResolver(new PartnerRegistryRepository(db))
+  const resolved = await eligibilityResolver.resolveEligibleSender(
+    data.companyId,
+    normalized.email,
+    normalized.domain
+  )
+  if (!resolved) return null
+
+  return db.$transaction(async (tx) => {
+    await acquireAcquisitionMessageIdentityAdvisoryXactLock(tx, {
+      companyId: data.companyId,
+      source: data.source,
+      externalMessageId: data.externalMessageId,
+    })
+    const current = await tx.acquisitionMessage.findFirst({
+      where: { id: messageId, companyId: data.companyId },
+      include: { draft: { select: { id: true } } },
+    })
+    if (!current) return null
+    if (current.draft || current.status !== "REJECTED") {
+      return toResult(current.id, current.draft?.id ?? null, current.status, false, current.lastErrorCode)
+    }
+
+    await tx.acquisitionMessage.update({
+      where: { id: current.id },
+      data: {
+        status: "DRAFT_CREATED",
+        resolvedPartnerId: resolved.partner.id,
+        senderEmail: normalized.email,
+        senderDomain: normalized.domain,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+      },
+    })
+    if (data.attachments.length > 0) {
+      await tx.acquisitionAttachment.createMany({
+        data: data.attachments.map((a, index) => ({
+          companyId: data.companyId,
+          acquisitionMessageId: current.id,
+          attachmentKey: buildAttachmentKey(a, index),
+          externalAttachmentId: a.externalAttachmentId ?? null,
+          filename: a.filename,
+          mimeType: a.mimeType,
+          sizeBytes: a.sizeBytes,
+          category: categorizeAttachment(a.mimeType, a.filename),
+          status: "DISCOVERED" as const,
+        })),
+        skipDuplicates: true,
+      })
+    }
+    const draft = await tx.worksiteImportDraft.create({
+      data: {
+        companyId: data.companyId,
+        acquisitionMessageId: current.id,
+        status: "PENDING_EXTRACTION",
+      },
+    })
+    return toResult(current.id, draft.id, "DRAFT_CREATED", true, null)
+  })
 }
 
 type LegacyMessageRow = {

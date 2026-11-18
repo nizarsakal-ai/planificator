@@ -7,6 +7,8 @@ import type { ImportDraftListItem } from "@/lib/acquisition/review/import-draft-
 import {
   CONSULTATION_STATUS_BADGE_CLASS,
   CONSULTATION_STATUS_LABELS,
+  consultationsPageHref,
+  consultationsPageRange,
   truncateSubject,
 } from "@/lib/acquisition/review/consultation-ui"
 import { REVIEW_STATUSES } from "@/lib/acquisition/review/import-draft-review.schema"
@@ -25,10 +27,18 @@ function fmt(d: Date | string) {
 export function ConsultationsList({
   items,
   currentStatus,
+  page = 1,
+  pageSize = 50,
+  total,
 }: {
   items: ImportDraftListItem[]
   currentStatus: string | null
+  page?: number
+  pageSize?: number
+  /** Nombre total de consultations du filtre (toutes pages). */
+  total?: number
 }) {
+  const range = consultationsPageRange(page, pageSize, items.length, total ?? items.length)
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -36,6 +46,7 @@ export function ConsultationsList({
     const params = new URLSearchParams(searchParams.toString())
     if (!value || value === "ALL") params.delete("status")
     else params.set("status", value)
+    params.delete("page")
     const q = params.toString()
     router.push(q ? `/consultations?${q}` : "/consultations")
   }
@@ -59,7 +70,9 @@ export function ConsultationsList({
             </option>
           ))}
         </select>
-        <span className="text-xs text-muted-foreground">{items.length} résultat(s) · max 50</span>
+        <span className="text-xs text-muted-foreground">
+          {range.total === 0 ? "0 consultation" : `${range.from}–${range.to} sur ${range.total}`}
+        </span>
       </div>
 
       {items.length === 0 ? (
@@ -118,6 +131,32 @@ export function ConsultationsList({
           </table>
         </div>
       )}
+
+      {range.hasPrev || range.hasNext ? (
+        <nav className="flex items-center justify-between text-sm" aria-label="Pagination des consultations">
+          {range.hasPrev ? (
+            <Link
+              href={consultationsPageHref(currentStatus, page - 1)}
+              className="rounded-md border px-3 py-1.5 hover:bg-muted/50"
+            >
+              ← Plus récentes
+            </Link>
+          ) : (
+            <span />
+          )}
+          <span className="text-xs text-muted-foreground">Page {page}</span>
+          {range.hasNext ? (
+            <Link
+              href={consultationsPageHref(currentStatus, page + 1)}
+              className="rounded-md border px-3 py-1.5 hover:bg-muted/50"
+            >
+              Plus anciennes →
+            </Link>
+          ) : (
+            <span />
+          )}
+        </nav>
+      ) : null}
     </div>
   )
 }

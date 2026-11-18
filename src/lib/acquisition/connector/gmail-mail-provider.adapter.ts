@@ -29,11 +29,93 @@ import {
 
 const DEFAULT_LOOKBACK_DAYS = 30
 
+/**
+ * Identifiants Gmail déjà enregistrés pour cette boîte (ingérés OU rejetés).
+ * Permet de ne pas relire (messages.get) ce qui a déjà été traité : sans cela,
+ * un run interrompu (limite de débit, budget) rejoue toute la page au run suivant
+ * et une boîte en retard ne rattrape jamais (incident 16/11/2026).
+ */
+export type KnownGmailMessageIdsPort = (input: {
+  companyId: string
+  connectionId: string
+  externalMessageIds: string[]
+}) => Promise<Set<string>>
+
 export interface GmailMailProviderAdapterDeps {
   connectionClient?: AcquisitionGmailConnectionClient
   apiClient?: GmailApiClient
   lookbackDays?: number
   domainListing?: ActivePartnerIdentityListingPort
+  /** Absent → aucun filtrage (comportement historique, tests). */
+  knownMessageIds?: KnownGmailMessageIdsPort
+}
+
+/**
+ * Implémentation Prisma : même boîte + curseur legacy "" (anti-doublon historique).
+ * Exception : un message rejeté faute d'expéditeur partenaire dont l'expéditeur
+ * est AUJOURD'HUI partenaire (domaine/e-mail ajouté au registre) n'est pas « connu » :
+ * il est relu pour être promu en consultation.
+ */
+export const prismaKnownGmailMessageIds: KnownGmailMessageIdsPort = async ({
+  companyId,
+  connectionId,
+  externalMessageIds,
+}) => {
+  if (externalMessageIds.length === 0) return new Set()
+  const { prisma } = await import("@/lib/prisma")
+  const rows = await prisma.acquisitionMessage.findMany({
+    where: {
+      companyId,
+      source: AcquisitionSource.GMAIL,
+      sourceMailboxKey: { in: [connectionId, ""] },
+      externalMessageId: { in: externalMessageIds },
+    },
+    select: { externalMessageId: true, status: true, lastErrorCode: true, senderEmail: true, senderDomain: true },
+  })
+  const rejectedNotEligible = rows.some(
+    (r) => r.status === "REJECTED" && r.lastErrorCode === "SENDER_NOT_ELIGIBLE"
+  )
+  const identities = rejectedNotEligible
+    ? await activePartnerDomainListing.listActiveIdentities(companyId)
+    : null
+  const known = rows.filter((r) => !(identities && isNowEligibleRejection(r, identities)))
+  // Diagnostic (comptes uniquement, aucune adresse) : pourquoi des e-mails partenaires
+  // listés par Gmail ne sont pas relus (déjà traités, et dans quel état).
+  if (rows.length > 0) {
+    const byState: Record<string, number> = {}
+    for (const r of rows) {
+      const key = `${r.status}${r.lastErrorCode ? `:${r.lastErrorCode}` : ""}`
+      byState[key] = (byState[key] ?? 0) + 1
+    }
+    console.info("[acquisition-gmail-reconcile] KNOWN_IDS", {
+      companyId,
+      connectionId,
+      listed: externalMessageIds.length,
+      known: known.length,
+      promotable: rows.length - known.length,
+      byState,
+    })
+  }
+  return new Set(known.map((r) => r.externalMessageId))
+}
+
+/** Rejet « expéditeur non partenaire » levé depuis par le registre. */
+export function isNowEligibleRejection(
+  row: { status: string; lastErrorCode: string | null; senderEmail: string; senderDomain: string },
+  identities: ActivePartnerIdentities
+): boolean {
+  if (row.status !== "REJECTED" || row.lastErrorCode !== "SENDER_NOT_ELIGIBLE") return false
+  const domain = row.senderDomain.trim().toLowerCase()
+  const email = row.senderEmail.trim().toLowerCase()
+  return (
+    (domain !== "" && identities.domains.some((d) => d.toLowerCase() === domain)) ||
+    identities.emails.some((e) => e.toLowerCase() === email)
+  )
+}
+
+/** Masque les adresses e-mail d'une requête Gmail (garde les `from:@domaine`). */
+export function redactGmailQueryEmails(query: string): string {
+  return query.replace(/from:(?:"[^"]*@[^"]*"|[^\s"()@]+@[^\s"()]+)/gi, "from:<email>")
 }
 
 function formatGmailAfterDate(days: number): string {
@@ -146,6 +228,7 @@ export class GmailMailProviderAdapter implements MailProviderPort {
   private readonly apiClient: GmailApiClient
   private readonly lookbackDays: number
   private readonly domainListing: ActivePartnerIdentityListingPort
+  private readonly knownMessageIds?: KnownGmailMessageIdsPort
 
   constructor(deps: GmailMailProviderAdapterDeps = {}) {
     this.connectionClient =
@@ -155,6 +238,18 @@ export class GmailMailProviderAdapter implements MailProviderPort {
       deps.lookbackDays ??
       Number(process.env.ACQUISITION_GMAIL_LOOKBACK_DAYS ?? DEFAULT_LOOKBACK_DAYS)
     this.domainListing = deps.domainListing ?? emptyIdentityListing
+    this.knownMessageIds = deps.knownMessageIds
+  }
+
+  /** Retire les ids déjà traités ; une panne de lecture n'empêche jamais la synchro. */
+  private async filterUnknownIds(companyId: string, connectionId: string, ids: string[]): Promise<string[]> {
+    if (!this.knownMessageIds || ids.length === 0) return ids
+    try {
+      const known = await this.knownMessageIds({ companyId, connectionId, externalMessageIds: ids })
+      return known.size === 0 ? ids : ids.filter((id) => !known.has(id))
+    } catch {
+      return ids
+    }
   }
 
   private async resolveLookbackQuery(companyId: string): Promise<string> {
@@ -186,12 +281,21 @@ export class GmailMailProviderAdapter implements MailProviderPort {
       connectionId,
     })
 
-    if (paginationMode === "lookback" || !cursor) {
+    // Réconciliation (production, port knownMessageIds présent) : TOUJOURS la requête
+    // filtrée partenaires sur la fenêtre de lookback. Les ids déjà traités sont
+    // exclus avant lecture, donc le coût reste minimal. Garanties :
+    //  - aucun e-mail partenaire perdu (le mode history tronquait les pages > pageSize
+    //    et ne revenait jamais en arrière — e-mails lauralu manquants, 16/11/2026) ;
+    //  - un expéditeur ajouté au registre est rattrapé au run suivant, sans curseur.
+    // Sans port (tests, legacy) : comportement history/lookback historique.
+    const reconcile = this.knownMessageIds !== undefined
+    if (reconcile || paginationMode === "lookback" || !cursor) {
       return this.listViaQuery(
         accessToken,
         await this.resolveLookbackQuery(companyId),
         pageSize,
-        pageToken ?? undefined
+        pageToken ?? undefined,
+        { companyId, connectionId }
       )
     }
 
@@ -200,7 +304,8 @@ export class GmailMailProviderAdapter implements MailProviderPort {
         accessToken,
         cursor,
         pageSize,
-        pageToken ?? undefined
+        pageToken ?? undefined,
+        { companyId, connectionId }
       )
     } catch (error) {
       if (error instanceof GmailProviderError && error.code === "GMAIL_HISTORY_EXPIRED") {
@@ -208,7 +313,8 @@ export class GmailMailProviderAdapter implements MailProviderPort {
           accessToken,
           await this.resolveLookbackQuery(companyId),
           pageSize,
-          pageToken ?? undefined
+          pageToken ?? undefined,
+          { companyId, connectionId }
         )
       }
       throw error
@@ -219,7 +325,8 @@ export class GmailMailProviderAdapter implements MailProviderPort {
     accessToken: string,
     startHistoryId: string,
     maxResults: number,
-    pageToken?: string
+    pageToken: string | undefined,
+    scope: { companyId: string; connectionId: string }
   ): Promise<MailPage> {
     const historyData = await this.apiClient.listHistory(
       accessToken,
@@ -229,11 +336,14 @@ export class GmailMailProviderAdapter implements MailProviderPort {
     )
 
     const messageIds = dedupeHistoryMessageIds(historyData.history ?? [])
-    const idsForPage = messageIds.slice(0, maxResults)
-    const messages = await this.fetchAndMapMessages(accessToken, idsForPage)
+    // Tous les ids de la page d'historique : la pagination suivante (pageToken) ne
+    // revient jamais sur ceux qu'on écarterait ici (perte silencieuse d'e-mails).
+    const idsForPage = messageIds
+    const toFetch = await this.filterUnknownIds(scope.companyId, scope.connectionId, idsForPage)
+    const messages = await this.fetchAndMapMessages(accessToken, toFetch)
 
     const nextPageToken = historyData.nextPageToken ?? null
-    const hasMore = Boolean(nextPageToken) || messageIds.length > maxResults
+    const hasMore = Boolean(nextPageToken)
 
     return {
       messages,
@@ -248,7 +358,8 @@ export class GmailMailProviderAdapter implements MailProviderPort {
     accessToken: string,
     query: string,
     maxResults: number,
-    pageToken?: string
+    pageToken: string | undefined,
+    scope: { companyId: string; connectionId: string }
   ): Promise<MailPage> {
     const listData = await this.apiClient.listMessages(
       accessToken,
@@ -257,7 +368,21 @@ export class GmailMailProviderAdapter implements MailProviderPort {
       pageToken
     )
     const ids = (listData.messages ?? []).map((m) => m.id)
-    const messages = await this.fetchAndMapMessages(accessToken, ids)
+    const toFetch = await this.filterUnknownIds(scope.companyId, scope.connectionId, ids)
+    if (this.knownMessageIds) {
+      // Diagnostic réconciliation : la requête (domaines partenaires = données métier,
+      // pas d'adresse personnelle) et le volume listé / relu par page.
+      console.info("[acquisition-gmail-reconcile] QUERY_PAGE", {
+        companyId: scope.companyId,
+        connectionId: scope.connectionId,
+        query: redactGmailQueryEmails(query),
+        firstPage: pageToken === undefined,
+        listed: ids.length,
+        toFetch: toFetch.length,
+        hasMore: Boolean(listData.nextPageToken),
+      })
+    }
+    const messages = await this.fetchAndMapMessages(accessToken, toFetch)
 
     let nextHistoryId: string | null = null
     try {
@@ -338,6 +463,7 @@ export function createGmailMailProviderAdapter(
 ): MailProviderPort {
   return new GmailMailProviderAdapter({
     domainListing: activePartnerDomainListing,
+    knownMessageIds: prismaKnownGmailMessageIds,
     ...deps,
   })
 }

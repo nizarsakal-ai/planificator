@@ -23,6 +23,7 @@ import { readDocument, type Reading } from "@/lib/hr-documents/recognition/ocr"
 import type { DocumentKind } from "@/lib/hr-documents/domain"
 import { MileageDomainError } from "../mileage-domain"
 import { requireMileageSession } from "../mileage-access"
+import type { Prisma } from "@prisma/client"
 import { authorizeVehicleV3 } from "./v3-access"
 import { getVehicleDocumentMaxBytes, validateDocumentFile, VEHICLE_DOCUMENT_CATEGORIES } from "./document-domain"
 import { extractVehicleDocumentFields, isVehicleDocumentRecognitionEnabled, type RecognitionProposal } from "./document-recognition-domain"
@@ -79,15 +80,25 @@ export function assertRecognitionEnabled(env: NodeJS.ProcessEnv = process.env) {
   if (!isVehicleDocumentRecognitionEnabled(env)) throw new MileageDomainError("RECOGNITION_DISABLED", 404)
 }
 
-export async function recognizeVehicleDocument(truckId: string, body: unknown, file: DocumentFileInput, deps: DocumentRecognitionDeps): Promise<RecognitionProposal> {
+/** Autorité de lecture d'un document : par défaut DOCUMENT_WRITE (administrateurs) ; injectée pour le ticket du chauffeur. */
+export interface RecognitionAuthority {
+  authorize: (tx: Prisma.TransactionClient) => Promise<{ truck: { active: boolean; matricule: string; marque: string | null }; categories: readonly string[] }>
+}
+
+export async function recognizeVehicleDocument(truckId: string, body: unknown, file: DocumentFileInput, deps: DocumentRecognitionDeps, authority?: RecognitionAuthority): Promise<RecognitionProposal> {
   const env = deps.env ?? process.env
   assertRecognitionEnabled(env)
-  const session = requireMileageSession(await deps.auth())
+  let authorize: RecognitionAuthority["authorize"]
+  if (authority) authorize = authority.authorize
+  else {
+    const session = requireMileageSession(await deps.auth())
+    authorize = (tx) => authorizeVehicleV3(tx, truckId, session, "DOCUMENT_WRITE")
+  }
   const parsed = commandSchema.safeParse(body)
   if (!parsed.success) throw new MileageDomainError("INVALID_PAYLOAD", 400)
   const { category } = parsed.data
   const truck = await deps.db.$transaction(async (tx) => {
-    const { truck, categories } = await authorizeVehicleV3(tx, truckId, session, "DOCUMENT_WRITE")
+    const { truck, categories } = await authorize(tx)
     if (!truck.active) throw new MileageDomainError("TRUCK_ARCHIVED", 409)
     if (!categories.includes(category)) throw new MileageDomainError("FORBIDDEN", 403)
     return { matricule: truck.matricule, marque: truck.marque }

@@ -5,6 +5,7 @@ import { authorizeVehicleLocked } from "../vehicle-authority";
 import { tourFlag } from "./tour-domain";
 import type { TourServiceDeps } from "./tour-service";
 import { commandTour, createTour, readTours } from "./tour-service";
+import { refreshTourAutoKm } from "./tour-km-auto-service";
 const headers = { "Cache-Control": "private, no-store" };
 export async function handleTours(request: Request, truckId: string, tourId: string | undefined, deps: TourServiceDeps) {
     try {
@@ -24,7 +25,16 @@ export async function handleTours(request: Request, truckId: string, tourId: str
         catch {
             throw new MileageDomainError("INVALID_JSON", 400);
         }
-        const result = tourId ? await commandTour(truckId, tourId, body, request.headers.get("Idempotency-Key"), deps) : await createTour(truckId, body, request.headers.get("Idempotency-Key"), deps);
+        const { refreshAutoKm, ...result } = tourId ? await commandTour(truckId, tourId, body, request.headers.get("Idempotency-Key"), deps) : await createTour(truckId, body, request.headers.get("Idempotency-Key"), deps);
+        // Km automatiques calculés après la réponse : l'enregistrement n'attend jamais l'IGN. En cas d'échec,
+        // le passage de nuit reprend la tournée.
+        if (refreshAutoKm && deps.afterResponse) {
+            const ref = { companyId: session.companyId, tourId: result.id };
+            deps.afterResponse(async () => {
+                try { await refreshTourAutoKm(ref, { db: deps.db, fetchFn: deps.fetchFn }); }
+                catch (error) { console.error("[vehicle-tours][auto-km] post-save refresh failed", { tourId: ref.tourId, name: error instanceof Error ? error.name : typeof error }); }
+            });
+        }
         return Response.json(result, { status: tourId ? 200 : 201, headers: { ...headers, "Idempotency-Replayed": String(result.replayed) } });
     }
     catch (e) {

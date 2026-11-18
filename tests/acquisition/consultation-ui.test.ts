@@ -160,3 +160,27 @@ describe("consultation-ui helpers", () => {
     assert.equal(json.includes("anthropic"), false)
   })
 })
+
+describe("pagination Consultations", () => {
+  it("parseConsultationsPage : borne et rejette les valeurs invalides", async () => {
+    const { parseConsultationsPage, CONSULTATIONS_MAX_PAGE } = await import("@/lib/acquisition/review/consultation-ui")
+    assert.equal(parseConsultationsPage(undefined), 1)
+    assert.equal(parseConsultationsPage("0"), 1)
+    assert.equal(parseConsultationsPage("-2"), 1)
+    assert.equal(parseConsultationsPage("abc"), 1)
+    assert.equal(parseConsultationsPage("3"), 3)
+    assert.equal(parseConsultationsPage("9999"), CONSULTATIONS_MAX_PAGE)
+  })
+  it("consultationsPageHref conserve le filtre et omet page=1", async () => {
+    const { consultationsPageHref } = await import("@/lib/acquisition/review/consultation-ui")
+    assert.equal(consultationsPageHref(null, 1), "/consultations")
+    assert.equal(consultationsPageHref("FAILED", 1), "/consultations?status=FAILED")
+    assert.equal(consultationsPageHref("FAILED", 2), "/consultations?status=FAILED&page=2")
+  })
+  it("consultationsPageRange : bornes et navigation", async () => {
+    const { consultationsPageRange } = await import("@/lib/acquisition/review/consultation-ui")
+    assert.deepEqual(consultationsPageRange(1, 50, 50, 120), { from: 1, to: 50, total: 120, hasPrev: false, hasNext: true })
+    assert.deepEqual(consultationsPageRange(3, 50, 20, 120), { from: 101, to: 120, total: 120, hasPrev: true, hasNext: false })
+    assert.deepEqual(consultationsPageRange(1, 50, 0, 0), { from: 0, to: 0, total: 0, hasPrev: false, hasNext: false })
+  })
+})

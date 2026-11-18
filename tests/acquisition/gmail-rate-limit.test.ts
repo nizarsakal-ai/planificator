@@ -137,3 +137,104 @@ describe("synchro : limite de débit ≠ accès refusé", () => {
     assert.equal(mailboxNeedsReconnect(h), false)
   })
 })
+
+describe("réconciliation Gmail : requête partenaires + ids déjà traités exclus", () => {
+  const resource = (id: string) => ({
+    id, threadId: "t", labelIds: [], snippet: "", internalDate: "1720000000000",
+    payload: { headers: [{ name: "From", value: "x@lauralu.fr" }, { name: "Subject", value: "s" }], mimeType: "text/plain" },
+  })
+
+  async function run(
+    knownMessageIds?: (input: { externalMessageIds: string[]; connectionId: string; companyId: string }) => Promise<Set<string>>,
+    domains: string[] = ["lauralu.fr"]
+  ) {
+    const { GmailMailProviderAdapter } = await import("@/lib/acquisition/connector/gmail-mail-provider.adapter")
+    const fetched: string[] = []
+    const queries: string[] = []
+    let historyCalls = 0
+    const apiClient = {
+      listHistory: async () => {
+        historyCalls++
+        return { history: [], historyId: "h-next" }
+      },
+      listMessages: async (_t: string, query: string) => {
+        queries.push(query)
+        return { messages: [{ id: "a" }, { id: "b" }, { id: "c" }] }
+      },
+      getProfile: async () => ({ historyId: "h-profile" }),
+      getMessage: async (_t: string, id: string) => {
+        fetched.push(id)
+        return resource(id)
+      },
+    } as unknown as GmailApiClient
+    const adapter = new GmailMailProviderAdapter({
+      connectionClient: { getValidAccessToken: async () => "tok" } as never,
+      apiClient,
+      knownMessageIds,
+      domainListing: {
+        listActiveIdentities: async () => ({ domains, emails: [] }),
+        listActiveDomains: async () => domains,
+      },
+    })
+    // Curseur history présent : la réconciliation l'ignore volontairement.
+    const page = await adapter.listMessagesPage({ companyId: "co", connectionId: "conn", cursor: "h0", pageSize: 50, paginationMode: "history" })
+    return { fetched, page, queries, historyCalls }
+  }
+
+  it("requête filtrée partenaires même avec un curseur ; seuls les ids inconnus sont lus", async () => {
+    let seen: unknown
+    const { fetched, page, queries, historyCalls } = await run(async (input) => { seen = input; return new Set(["a", "c"]) })
+    assert.equal(historyCalls, 0)
+    assert.equal(queries.length, 1)
+    assert.match(queries[0], /lauralu\.fr/)
+    assert.deepEqual(fetched, ["b"])
+    assert.deepEqual(page.messages.map((m) => m.externalMessageId), ["b"])
+    assert.equal(page.nextHistoryId, "h-profile")
+    assert.deepEqual(seen, { companyId: "co", connectionId: "conn", externalMessageIds: ["a", "b", "c"] })
+  })
+
+  it("un domaine ajouté au registre est inclus dans la requête au run suivant", async () => {
+    const { queries } = await run(async () => new Set(), ["lauralu.fr", "ats67.com"])
+    assert.match(queries[0], /ats67\.com/)
+  })
+
+  it("panne de la lecture des ids connus → aucun filtrage (jamais de perte)", async () => {
+    const { fetched } = await run(async () => { throw new Error("db down") })
+    assert.deepEqual(fetched, ["a", "b", "c"])
+  })
+})
+
+describe("mode history (legacy, sans port) : plus aucun e-mail écarté au-delà de pageSize", () => {
+  it("une page d'historique de 120 messages pour pageSize 50 → 120 lus", async () => {
+    const { GmailMailProviderAdapter } = await import("@/lib/acquisition/connector/gmail-mail-provider.adapter")
+    const ids = Array.from({ length: 120 }, (_, i) => `m${i}`)
+    const fetched: string[] = []
+    const adapter = new GmailMailProviderAdapter({
+      connectionClient: { getValidAccessToken: async () => "tok" } as never,
+      apiClient: {
+        listHistory: async () => ({ history: ids.map((id) => ({ messagesAdded: [{ message: { id } }] })), historyId: "h1" }),
+        getMessage: async (_t: string, id: string) => {
+          fetched.push(id)
+          return {
+            id, threadId: "t", labelIds: [], snippet: "", internalDate: "1720000000000",
+            payload: { headers: [{ name: "From", value: "x@lauralu.fr" }], mimeType: "text/plain" },
+          }
+        },
+      } as unknown as GmailApiClient,
+    })
+    const page = await adapter.listMessagesPage({ companyId: "co", connectionId: "conn", cursor: "h0", pageSize: 50, paginationMode: "history" })
+    assert.equal(fetched.length, 120)
+    assert.equal(page.messages.length, 120)
+    assert.equal(page.hasMore, false)
+  })
+})
+
+describe("redactGmailQueryEmails (diagnostic réconciliation)", () => {
+  it("masque les adresses, garde les domaines partenaires", async () => {
+    const { redactGmailQueryEmails } = await import("@/lib/acquisition/connector/gmail-mail-provider.adapter")
+    assert.equal(
+      redactGmailQueryEmails('after:2026/10/17 (from:eric@ats67.com OR from:"a b@x.fr" OR from:@lauralu.fr)'),
+      "after:2026/10/17 (from:<email> OR from:<email> OR from:@lauralu.fr)"
+    )
+  })
+})

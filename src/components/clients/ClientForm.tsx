@@ -1,12 +1,13 @@
 "use client"
 
 import { useId } from "react"
-import { useForm } from "react-hook-form"
+import { Controller, useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { AddressAutocomplete } from "@/components/ui/address-autocomplete"
 import { Label } from "@/components/ui/label"
 import { createClientSchema, type CreateClientInput } from "@/lib/validations/client"
 import { createClient, updateClient } from "@/lib/actions/client.actions"
@@ -24,6 +25,7 @@ export function ClientForm({ onSuccess, client }: ClientFormProps) {
   const formId = useId()
   const {
     register,
+    control,
     handleSubmit,
     formState: { errors, isSubmitting },
     reset,
@@ -100,10 +102,20 @@ export function ClientForm({ onSuccess, client }: ClientFormProps) {
       {/* Adresse */}
       <div className="space-y-1.5">
         <Label htmlFor={`${formId}-address`}>Adresse</Label>
-        <Input
-          id={`${formId}-address`}
-          placeholder="12 rue des Lilas, 75001 Paris"
-          {...register("address")}
+        <Controller
+          name="address"
+          control={control}
+          render={({ field }) => (
+            <AddressAutocomplete
+              id={`${formId}-address`}
+              name={field.name}
+              ref={field.ref}
+              placeholder="12 rue des Lilas, 75001 Paris"
+              value={field.value ?? ""}
+              onValueChange={field.onChange}
+              onBlur={field.onBlur}
+            />
+          )}
         />
       </div>
 

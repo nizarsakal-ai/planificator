@@ -37,6 +37,9 @@ import {
   Boxes,
   ShoppingCart,
   Wrench,
+  Fuel,
+  Target,
+  Workflow,
 } from "lucide-react"
 
 export interface NavItem {
@@ -44,6 +47,9 @@ export interface NavItem {
   href: string
   icon: ElementType
   badge?: string // ex: "Bientôt"
+  /** Correctif E4 (preuves e3y) : ouvrir par une navigation NATIVE du document (lien <a> ordinaire) plutôt que par une transition
+   * du routeur client. Réservé aux entrées dont la transition est restée suspendue en recette (« Pipeline commercial »). */
+  documentNavigation?: true
 }
 
 const NAV_ITEMS_BY_ROLE: Partial<Record<Role, readonly NavItem[]>> = {
@@ -218,6 +224,15 @@ export function withWorksitePhotosNavItem(items: readonly NavItem[], visible: bo
   return result
 }
 
+/** Ticket carburant : chauffeur attitré d'un camion (résolu côté serveur) ; affichage seulement, l'API vérifie le droit. */
+export function withFuelTicketNavItem(items: readonly NavItem[], visible: boolean): NavItem[] {
+  const result = [...items]
+  if (visible !== true || result.some(i => i.href === "/ticket-carburant")) return result
+  const expenses = result.findIndex(i => i.href === "/mes-notes-de-frais")
+  result.splice(expenses < 0 ? result.length : expenses + 1, 0, { label: "Ticket carburant", href: "/ticket-carburant", icon: Fuel })
+  return result
+}
+
 /** Supplemental, server-resolved intake capability. Visibility never authorizes an action. */
 export function withSupplierIntakeNavItem(items: readonly NavItem[], visible: boolean): NavItem[] {
   const result = [...items]
@@ -280,5 +295,23 @@ export function withEquipmentNavItem(items: readonly NavItem[], visible: boolean
   const profile = result.findIndex(i => i.href === "/profil")
   const at = achats >= 0 ? achats + 1 : profile < 0 ? result.length : profile
   result.splice(at, 0, { label: "Matériel", href: "/materiel", icon: Wrench })
+  return result
+}
+
+/**
+ * Lot E Planificator V2 : entrées « Pipeline commercial » (CRM_OPPORTUNITIES_ENABLED, catégorie Commercial, route
+ * `/crm/opportunites`, distincte de la veille Prospection `/opportunites`) et « Automatisations » (AUTOMATIONS_ENABLED,
+ * catégorie Administration), ADMIN et SUPER_ADMIN avec société ; insérées avant « Profil ». Affichage seulement : chaque
+ * page et action du module refuse côté serveur.
+ */
+export const CRM_NAV_ITEM: NavItem = { label: "Pipeline commercial", href: "/crm/opportunites", icon: Target, documentNavigation: true }
+export const AUTOMATION_NAV_ITEM: NavItem = { label: "Automatisations", href: "/automatisations", icon: Workflow }
+
+export function withCrmAutomationNavItems(items: readonly NavItem[], crmVisible: boolean, automationVisible: boolean): NavItem[] {
+  const result = [...items]
+  const add = [...(crmVisible === true ? [CRM_NAV_ITEM] : []), ...(automationVisible === true ? [AUTOMATION_NAV_ITEM] : [])]
+    .filter((entry) => !result.some((i) => i.href === entry.href))
+  const profile = result.findIndex((i) => i.href === "/profil")
+  result.splice(profile < 0 ? result.length : profile, 0, ...add)
   return result
 }

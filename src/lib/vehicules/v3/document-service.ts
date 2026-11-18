@@ -187,10 +187,29 @@ async function closeReminderNotifications(tx: Tx, companyId: string, versionIds:
   if (notificationIds.length) await tx.notification.updateMany({ where: { id: { in: notificationIds }, companyId, read: false }, data: { read: true, readAt: now } })
 }
 
+/**
+ * Autorité de publication : par défaut, session V2 et droit DOCUMENT_WRITE (administrateurs). Le parcours
+ * « ticket du chauffeur » injecte sa propre autorité, limitée aux justificatifs de dépense.
+ */
+export interface DocumentWriteAuthority {
+  session: { userId: string; companyId: string }
+  authorize: (tx: Prisma.TransactionClient) => Promise<{ truck: { active: boolean }; actor: { id: string; name: string | null }; categories?: readonly string[] }>
+}
+
 async function publish(
   truckId: string, kind: "UPLOAD" | "REPLACE", documentId: string | null, body: unknown, file: DocumentFileInput, key: string | null, deps: DocumentServiceDeps,
+  authority?: DocumentWriteAuthority,
 ): Promise<{ receipt: Receipt; replayed: boolean }> {
-  const session = requireMileageSession(await deps.auth())
+  let session: { userId: string; companyId: string }
+  let authorize: DocumentWriteAuthority["authorize"]
+  if (authority) {
+    session = authority.session
+    authorize = authority.authorize
+  } else {
+    const v2 = requireMileageSession(await deps.auth())
+    session = v2
+    authorize = (tx) => authorizeVehicleV3(tx, truckId, v2, "DOCUMENT_WRITE")
+  }
   const validated = validateDocumentFile(file, getVehicleDocumentMaxBytes(deps.env))
   const upload = kind === "UPLOAD" ? parseDocumentUpload(body, key) : null
   const replace = kind === "REPLACE" ? parseDocumentReplace(body, key) : null
@@ -203,7 +222,7 @@ async function publish(
   try {
     // 1. Contrôle préalable sous verrou : droit, camion actif, dossier, idempotence. Aucun octet téléversé si refus.
     const pre = await deps.db.$transaction(async (tx) => {
-      const { truck, actor } = await authorizeVehicleV3(tx, truckId, session, "DOCUMENT_WRITE")
+      const { truck, actor, categories } = await authorize(tx)
       const replayed = await replayFor(tx, scope, plan)
       if (replayed) return { replayed, category: null, actor }
       if (!truck.active) throw new MileageDomainError("TRUCK_ARCHIVED", 409)
@@ -215,6 +234,7 @@ async function publish(
         if (document.revision !== replace.expectedRevision) throw new MileageDomainError("DOCUMENT_REVISION_CONFLICT", 409)
         category = document.category
       }
+      if (authority && categories && !categories.includes(category!)) throw new MileageDomainError("FORBIDDEN", 403)
       assertMetadataForCategory(category!, command)
       await assertMaintenanceLink(tx, scope, command.maintenanceEntryId)
       return { replayed: null, category, actor }
@@ -227,7 +247,7 @@ async function publish(
     // 3. Rattachement : droits et idempotence relus ; version publiée uniquement ici.
     try {
       const result = await deps.db.$transaction(async (tx) => {
-        const { truck, actor } = await authorizeVehicleV3(tx, truckId, session, "DOCUMENT_WRITE")
+        const { truck, actor } = await authorize(tx)
         const replayed = await replayFor(tx, scope, plan)
         if (replayed) {
           // Compensation réseau seulement après commit, jamais sous les verrous.
@@ -314,6 +334,11 @@ export function normalizeDocumentFailure(error: unknown): never {
 
 export function uploadVehicleDocument(truckId: string, body: unknown, file: DocumentFileInput, key: string | null, deps: DocumentServiceDeps) {
   return publish(truckId, "UPLOAD", null, body, file, key, deps)
+}
+
+/** Dépôt d'un justificatif avec une autorité injectée (ticket du chauffeur). */
+export function uploadVehicleDocumentAs(truckId: string, body: unknown, file: DocumentFileInput, key: string | null, deps: DocumentServiceDeps, authority: DocumentWriteAuthority) {
+  return publish(truckId, "UPLOAD", null, body, file, key, deps, authority)
 }
 
 export function replaceVehicleDocument(truckId: string, documentId: string, body: unknown, file: DocumentFileInput, key: string | null, deps: DocumentServiceDeps) {

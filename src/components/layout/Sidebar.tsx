@@ -6,7 +6,7 @@ import {
   getNavItems,
   getActiveNavHref,
   withHrDocumentNavItems, withAccountingNavItem,
-  withBillingNavItems, withSupplierIntakeNavItem, withWorksitePhotosNavItem, withProspectionNavItem, withStockPurchasingNavItems, withEquipmentNavItem,
+  withBillingNavItems, withSupplierIntakeNavItem, withWorksitePhotosNavItem, withProspectionNavItem, withStockPurchasingNavItems, withEquipmentNavItem, withFuelTicketNavItem, withCrmAutomationNavItems,
 } from "@/lib/navigation/nav-config"
 import { getActiveNavCategoryId, groupNavItems } from "@/lib/navigation/nav-categories"
 import { NavCategories } from "@/components/layout/NavCategories"
@@ -31,11 +31,14 @@ interface SidebarUser {
   supplierIntakeNavVisible?: boolean
   /** Photos d'engins (SPEC-WORKSITE-PHOTOS-001) : drapeau serveur + rôle interne ; affichage seulement. */
   worksitePhotosNavVisible?: boolean
+  fuelTicketNavVisible?: boolean
   prospectionNavVisible?: boolean
   /** Lot A V2 : « Stock » et « Achats » (drapeau STOCK_PURCHASING_ENABLED + ADMIN/SUPER_ADMIN + société) ; affichage seulement. */
   stockPurchasingNavVisible?: boolean
   /** Lot B V2 : « Matériel » (drapeau EQUIPMENT_RENTAL_ENABLED + ADMIN/SUPER_ADMIN + société) ; affichage seulement. */
   equipmentNavVisible?: boolean
+  crmNavVisible?: boolean // Lot E V2
+  automationNavVisible?: boolean // Lot E V2
 }
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
@@ -43,7 +46,7 @@ interface SidebarUser {
 /** Barre latérale « verre givré » : carte flottante translucide (thème clair ou sombre selon Apparence), catégories, pied commun. */
 export function Sidebar({ user }: { user: SidebarUser }) {
   const pathname = usePathname()
-  const navItems = withStockPurchasingNavItems(withProspectionNavItem(withHrDocumentNavItems(withEquipmentNavItem(withWorksitePhotosNavItem(withSupplierIntakeNavItem(withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true), user.supplierIntakeNavVisible === true), user.worksitePhotosNavVisible === true), user.equipmentNavVisible === true), user.hrDocumentsNavVisible === true, user.hrDocumentsManageNavVisible === true), user.prospectionNavVisible === true), user.stockPurchasingNavVisible === true)
+  const navItems = withFuelTicketNavItem(withStockPurchasingNavItems(withProspectionNavItem(withHrDocumentNavItems(withEquipmentNavItem(withWorksitePhotosNavItem(withSupplierIntakeNavItem(withCrmAutomationNavItems(withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true), user.crmNavVisible === true, user.automationNavVisible === true), user.supplierIntakeNavVisible === true), user.worksitePhotosNavVisible === true), user.equipmentNavVisible === true), user.hrDocumentsNavVisible === true, user.hrDocumentsManageNavVisible === true), user.prospectionNavVisible === true), user.stockPurchasingNavVisible === true), user.fuelTicketNavVisible === true)
   const activeHref = getActiveNavHref(navItems, pathname)
   // Regroupement par catégories APRÈS la composition des drapeaux : aucune entrée ajoutée, perdue ou dupliquée.
   const grouped = groupNavItems(navItems)

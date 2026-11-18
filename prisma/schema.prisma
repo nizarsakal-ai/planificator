@@ -16,59 +16,59 @@ datasource db {
 // ═══════════════════════════════════════════════════════════════════════════
 
 enum Role {
-  SUPER_ADMIN  // Accès global, gère toutes les entreprises
-  ADMIN        // Gère son entreprise uniquement
-  TEAM_LEADER  // Consulte et confirme/refuse les affectations de son équipe
-  EMPLOYEE     // Consulte son propre planning
-  CLIENT       // Consulte ses chantiers et le planning associé
+  SUPER_ADMIN // Accès global, gère toutes les entreprises
+  ADMIN // Gère son entreprise uniquement
+  TEAM_LEADER // Consulte et confirme/refuse les affectations de son équipe
+  EMPLOYEE // Consulte son propre planning
+  CLIENT // Consulte ses chantiers et le planning associé
 }
 
 enum WorksiteStatus {
-  PLANNED      // Planifié, pas encore commencé
-  IN_PROGRESS  // En cours
-  COMPLETED    // Terminé — archivage automatique après 48h
-  ARCHIVED     // Archivé définitivement
-  EXTENDED     // Prolongé au-delà de la date de fin initiale
-  DELAYED      // Décalé — démarrage repoussé à une date ultérieure
+  PLANNED // Planifié, pas encore commencé
+  IN_PROGRESS // En cours
+  COMPLETED // Terminé — archivage automatique après 48h
+  ARCHIVED // Archivé définitivement
+  EXTENDED // Prolongé au-delà de la date de fin initiale
+  DELAYED // Décalé — démarrage repoussé à une date ultérieure
 }
 
 enum AssignmentStatus {
-  PENDING    // En attente de confirmation par le chef d'équipe
-  CONFIRMED  // Confirmé
-  REFUSED    // Refusé avec raison obligatoire
+  PENDING // En attente de confirmation par le chef d'équipe
+  CONFIRMED // Confirmé
+  REFUSED // Refusé avec raison obligatoire
 }
 
 enum DocumentType {
-  PLAN      // Plan de chantier
-  PHOTO     // Photo de chantier
-  DOCUMENT  // Document administratif ou technique
+  PLAN // Plan de chantier
+  PHOTO // Photo de chantier
+  DOCUMENT // Document administratif ou technique
 }
 
 enum InvitationStatus {
-  PENDING    // Invitation envoyée, non encore acceptée
-  ACCEPTED   // Compte créé via le lien d'invitation
-  EXPIRED    // Délai d'expiration dépassé
-  CANCELLED  // Annulée manuellement par un admin
+  PENDING // Invitation envoyée, non encore acceptée
+  ACCEPTED // Compte créé via le lien d'invitation
+  EXPIRED // Délai d'expiration dépassé
+  CANCELLED // Annulée manuellement par un admin
 }
 
 enum AbsenceType {
-  VACATION  // Congés payés
-  SICK      // Arrêt maladie
-  UNPAID    // Congé sans solde
-  TRAINING  // Formation
-  OTHER     // Autre motif
+  VACATION // Congés payés
+  SICK // Arrêt maladie
+  UNPAID // Congé sans solde
+  TRAINING // Formation
+  OTHER // Autre motif
 }
 
 enum AbsenceStatus {
-  PENDING   // En attente de validation
-  APPROVED  // Validée
-  REJECTED  // Refusée
+  PENDING // En attente de validation
+  APPROVED // Validée
+  REJECTED // Refusée
 }
 
 enum PendingAccommodationStatus {
-  PENDING    // En attente de validation admin
-  CONFIRMED  // Admin a confirmé → Accommodation créé
-  DISMISSED  // Admin a ignoré
+  PENDING // En attente de validation admin
+  CONFIRMED // Admin a confirmé → Accommodation créé
+  DISMISSED // Admin a ignoré
 }
 
 /// Canal d'origine d'un PendingAccommodation (PLAN-BOOKING-FINAL-2).
@@ -97,63 +97,66 @@ enum BookingGmailResultType {
 }
 
 enum NotificationType {
-  ASSIGNMENT_CREATED      // Nouvelle affectation créée
-  ASSIGNMENT_CONFIRMED    // Affectation confirmée
-  ASSIGNMENT_REFUSED      // Affectation refusée
-  WORKSITE_UPDATED        // Chantier modifié
-  WORKSITE_ARCHIVED       // Chantier archivé
-  WORKSITE_EXTENDED       // Chantier prolongé
-  INVITATION_SENT         // Invitation envoyée
-  ABSENCE_REQUESTED       // Absence soumise
-  ABSENCE_APPROVED        // Absence validée
-  ABSENCE_REJECTED        // Absence refusée
-  EXPENSE_SUBMITTED       // Note de frais soumise
-  EXPENSE_APPROVED        // Note de frais approuvée
-  EXPENSE_REJECTED        // Note de frais refusée
-  TIMECLOCK_IN            // Pointage arrivée
-  TIMECLOCK_OUT           // Pointage départ
-  ACCOMMODATION_CREATED   // Logement réservé
+  ASSIGNMENT_CREATED // Nouvelle affectation créée
+  ASSIGNMENT_CONFIRMED // Affectation confirmée
+  ASSIGNMENT_REFUSED // Affectation refusée
+  WORKSITE_UPDATED // Chantier modifié
+  WORKSITE_ARCHIVED // Chantier archivé
+  WORKSITE_EXTENDED // Chantier prolongé
+  INVITATION_SENT // Invitation envoyée
+  ABSENCE_REQUESTED // Absence soumise
+  ABSENCE_APPROVED // Absence validée
+  ABSENCE_REJECTED // Absence refusée
+  EXPENSE_SUBMITTED // Note de frais soumise
+  EXPENSE_APPROVED // Note de frais approuvée
+  EXPENSE_REJECTED // Note de frais refusée
+  TIMECLOCK_IN // Pointage arrivée
+  TIMECLOCK_OUT // Pointage départ
+  ACCOMMODATION_CREATED // Logement réservé
   ACCOMMODATION_CANCELLED // Logement annulé
-  BOOKING_DETECTED        // Email Booking.com détecté, en attente de validation
+  BOOKING_DETECTED // Email Booking.com détecté, en attente de validation
 
   // Véhicules V3 — ajouts des lots isolés.
   VEHICLE_DOCUMENT_EXPIRING // V3 : document véhicule bientôt échu (rappel interne)
-  VEHICLE_DOCUMENT_EXPIRED  // V3 : document véhicule expiré (rappel interne)
+  VEHICLE_DOCUMENT_EXPIRED // V3 : document véhicule expiré (rappel interne)
 
   // SPEC-WORKSITE-PHOTOS-001 — Photos d'engins.
-  WORKSITE_PHOTO_UNSENT     // Photo d'engin non envoyée au client à J+7 (alerte administrateurs, jamais de purge)
+  WORKSITE_PHOTO_UNSENT // Photo d'engin non envoyée au client à J+7 (alerte administrateurs, jamais de purge)
+
+  // Lot E Planificator V2 — automatisations internes (notification des administrateurs, jamais d'envoi externe).
+  AUTOMATION
 }
 
 enum AccommodationStatus {
-  UPCOMING   // Réservation future
-  ACTIVE     // Séjour en cours
-  COMPLETED  // Terminé
-  CANCELLED  // Annulé
+  UPCOMING // Réservation future
+  ACTIVE // Séjour en cours
+  COMPLETED // Terminé
+  CANCELLED // Annulé
 }
 
 enum ExpenseCategory {
-  TRANSPORT     // Transport / carburant / péage
-  REPAS         // Repas / restauration
-  HEBERGEMENT   // Hébergement
-  MATERIEL      // Matériel / fournitures
-  OTHER         // Autre
+  TRANSPORT // Transport / carburant / péage
+  REPAS // Repas / restauration
+  HEBERGEMENT // Hébergement
+  MATERIEL // Matériel / fournitures
+  OTHER // Autre
 }
 
 enum QuoteStatus {
-  DRAFT     // Brouillon (préparé à la main ou par l'agent IA)
-  SENT      // Envoyé au client
-  ACCEPTED  // Accepté par le client
-  REFUSED   // Refusé
-  EXPIRED   // Expiré (au-delà de validUntil)
+  DRAFT // Brouillon (préparé à la main ou par l'agent IA)
+  SENT // Envoyé au client
+  ACCEPTED // Accepté par le client
+  REFUSED // Refusé
+  EXPIRED // Expiré (au-delà de validUntil)
   CONVERTED // Converti en facture (Lot C1)
 }
 
 enum InvoiceStatus {
-  DRAFT      // Brouillon (modifiable, non émis)
-  SENT       // Émise / envoyée au client (immuable)
-  PAID       // Payée (immuable)
-  CANCELLED  // Brouillon abandonné, ou facture émise annulée PAR AVOIR (jamais de retour arrière)
-  PARTIAL    // Lot C2 : partiellement payée (Σ paiements entre 0 et TTC, exclus)
+  DRAFT // Brouillon (modifiable, non émis)
+  SENT // Émise / envoyée au client (immuable)
+  PAID // Payée (immuable)
+  CANCELLED // Brouillon abandonné, ou facture émise annulée PAR AVOIR (jamais de retour arrière)
+  PARTIAL // Lot C2 : partiellement payée (Σ paiements entre 0 et TTC, exclus)
 }
 
 /// Lot C2 — mode de règlement d'un paiement.
@@ -168,15 +171,15 @@ enum PaymentMethod {
 
 /// Lot B minimal (ADR-PLAN-003) : une facture émise ne s'annule que par un avoir référencé.
 enum InvoiceKind {
-  INVOICE      // Facture
-  CREDIT_NOTE  // Avoir total émis sur une facture SENT/PAID
-  DEPOSIT      // Lot C3 : facture d'acompte (vraie facture, déduite sur la facture de solde)
+  INVOICE // Facture
+  CREDIT_NOTE // Avoir total émis sur une facture SENT/PAID
+  DEPOSIT // Lot C3 : facture d'acompte (vraie facture, déduite sur la facture de solde)
 }
 
 enum ExpenseStatus {
-  PENDING   // En attente de validation
-  APPROVED  // Validée
-  REJECTED  // Refusée
+  PENDING // En attente de validation
+  APPROVED // Validée
+  REJECTED // Refusée
 }
 
 enum WeatherCondition {
@@ -251,19 +254,19 @@ enum AcquisitionAttachmentCategory {
 }
 
 enum HistoryAction {
-  CREATED        // Entité créée
-  UPDATED        // Entité modifiée
-  DELETED        // Entité supprimée
-  ASSIGNED       // Équipe ou employé affecté
-  UNASSIGNED     // Affectation supprimée
-  CONFIRMED      // Affectation confirmée
-  REFUSED        // Affectation refusée
-  EXTENDED       // Chantier prolongé
-  ARCHIVED       // Chantier archivé
-  COMPLETED      // Chantier marqué terminé
-  INVITED        // Invitation envoyée
+  CREATED // Entité créée
+  UPDATED // Entité modifiée
+  DELETED // Entité supprimée
+  ASSIGNED // Équipe ou employé affecté
+  UNASSIGNED // Affectation supprimée
+  CONFIRMED // Affectation confirmée
+  REFUSED // Affectation refusée
+  EXTENDED // Chantier prolongé
+  ARCHIVED // Chantier archivé
+  COMPLETED // Chantier marqué terminé
+  INVITED // Invitation envoyée
   STATUS_CHANGED // Changement de statut
-  MEMBER_ADDED   // Membre ajouté à une équipe
+  MEMBER_ADDED // Membre ajouté à une équipe
   MEMBER_REMOVED // Membre retiré d'une équipe
   LEADER_CHANGED // Chef d'équipe changé
 }
@@ -323,15 +326,15 @@ enum InboundFamily {
 // ─── Module Tâches (V1) ───────────────────────────────────────────────────────
 
 enum TaskStatus {
-  TODO         // À faire
-  IN_PROGRESS  // En cours
-  DONE         // Terminée
+  TODO // À faire
+  IN_PROGRESS // En cours
+  DONE // Terminée
 }
 
 enum TaskPriority {
-  LOW     // Basse
-  MEDIUM  // Moyenne
-  HIGH    // Haute
+  LOW // Basse
+  MEDIUM // Moyenne
+  HIGH // Haute
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -353,96 +356,99 @@ model Company {
   updatedAt DateTime @updatedAt
 
   // Relations
-  hrDocumentStore         HrDocumentStore?
-  users                   User[]
-  employees               Employee[]
-  teams                   Team[]
-  clients                 Client[]
-  worksites               Worksite[]
-  invitations             Invitation[]
-  notifications           Notification[]
-  historyLogs             HistoryLog[]
-  absences                Absence[]
-  expenseReports          ExpenseReport[]
-  timeclocks              Timeclock[]
-  settings                CompanySettings?
-  accommodations          Accommodation[]
-  gmailConnection         GmailConnection?
-  processedGmailMessages  ProcessedGmailMessage[]
-  pendingAccommodations   PendingAccommodation[]
-  articles                Article[]
-  quotes                  Quote[]
-  invoices                Invoice[]
-  importedInvoices        ImportedInvoice[]        // SPEC-INVOICE-IMPORT-001
-  importedDocumentFiles   ImportedDocumentFile[]
-  invoiceImportBatches    InvoiceImportBatch[]
-  bankAccount             CompanyBankAccount?      // SPEC-BANK-VERIF-001
-  bankVerificationSessions BankVerificationSession[]
-  accountingAccounts      AccountingAccount[]
-  accountingJournals      AccountingJournal[]
-  fiscalYears             FiscalYear[]
-  journalEntries          JournalEntry[]
-  journalEntryLines       JournalEntryLine[]
-  accountingSequences     AccountingSequence[]
-  accountingChainHeads    AccountingChainHead[]
-  documentCounters        DocumentCounter[]
-  billingSettings         BillingSettings?
-  billingMailLogs         BillingMailLog[]
-  invoicePayments         InvoicePayment[]
-  invoiceDepositDeductions InvoiceDepositDeduction[]
-  invoiceDocumentSnapshots InvoiceDocumentSnapshot[] // Correctif P2-03
-  accountingDocumentPostings AccountingDocumentPosting[]
-  suppliers               Supplier[]
-  supplierInvoices        SupplierInvoice[]
-  supplierInvoiceFiles    SupplierInvoiceFile[]
-  bankStatementImports    BankStatementImport[]
-  bankTransactions        BankTransaction[]
-  vatDeclarations         VatDeclaration[]
-  acquisitionMessages     AcquisitionMessage[]
-  worksiteImportDrafts    WorksiteImportDraft[]
-  acquisitionAttachments  AcquisitionAttachment[]
-  acquisitionScanCursors  AcquisitionScanCursor[]
-  acquisitionGmailConnections AcquisitionGmailConnection[]
+  hrDocumentStore                 HrDocumentStore?
+  users                           User[]
+  employees                       Employee[]
+  teams                           Team[]
+  clients                         Client[]
+  worksites                       Worksite[]
+  invitations                     Invitation[]
+  notifications                   Notification[]
+  historyLogs                     HistoryLog[]
+  absences                        Absence[]
+  expenseReports                  ExpenseReport[]
+  timeclocks                      Timeclock[]
+  settings                        CompanySettings?
+  accommodations                  Accommodation[]
+  gmailConnection                 GmailConnection?
+  processedGmailMessages          ProcessedGmailMessage[]
+  pendingAccommodations           PendingAccommodation[]
+  articles                        Article[]
+  quotes                          Quote[]
+  invoices                        Invoice[]
+  importedInvoices                ImportedInvoice[] // SPEC-INVOICE-IMPORT-001
+  importedDocumentFiles           ImportedDocumentFile[]
+  invoiceImportBatches            InvoiceImportBatch[]
+  bankAccount                     CompanyBankAccount? // SPEC-BANK-VERIF-001
+  bankVerificationSessions        BankVerificationSession[]
+  accountingAccounts              AccountingAccount[]
+  accountingJournals              AccountingJournal[]
+  fiscalYears                     FiscalYear[]
+  journalEntries                  JournalEntry[]
+  journalEntryLines               JournalEntryLine[]
+  accountingSequences             AccountingSequence[]
+  accountingChainHeads            AccountingChainHead[]
+  documentCounters                DocumentCounter[]
+  billingSettings                 BillingSettings?
+  billingMailLogs                 BillingMailLog[]
+  invoicePayments                 InvoicePayment[]
+  invoiceDepositDeductions        InvoiceDepositDeduction[]
+  invoiceDocumentSnapshots        InvoiceDocumentSnapshot[] // Correctif P2-03
+  accountingDocumentPostings      AccountingDocumentPosting[]
+  suppliers                       Supplier[]
+  supplierInvoices                SupplierInvoice[]
+  supplierInvoiceFiles            SupplierInvoiceFile[]
+  bankStatementImports            BankStatementImport[]
+  bankTransactions                BankTransaction[]
+  vatDeclarations                 VatDeclaration[]
+  acquisitionMessages             AcquisitionMessage[]
+  worksiteImportDrafts            WorksiteImportDraft[]
+  acquisitionAttachments          AcquisitionAttachment[]
+  acquisitionScanCursors          AcquisitionScanCursor[]
+  acquisitionGmailConnections     AcquisitionGmailConnection[]
   acquisitionAttachmentAccessLogs AcquisitionAttachmentAccessLog[]
-  acquisitionMessageContents AcquisitionMessageContent[]
-  acquisitionContentFetchStates AcquisitionContentFetchState[]
-  acquisitionPartners         AcquisitionPartner[]
-  acquisitionPartnerDomains   AcquisitionPartnerDomain[]
-  acquisitionPartnerEmails    AcquisitionPartnerEmail[]
-  acquisitionDecisionJournals AcquisitionDecisionJournal[]
-  integrationConnections      IntegrationConnection[]
-  inboundEnvelopes            InboundEnvelope[]
-  normalizedInbounds          NormalizedInbound[]
-  trucks                      Truck[]
-  truckAssignments            TruckAssignment[]
-  mileageEntries              MileageEntry[]
-  mileageTrips                MileageTrip[]
-  maintenancePlans            VehicleMaintenancePlan[]
-  maintenanceEntries          VehicleMaintenanceEntry[]
-  tasks                       Task[]
+  acquisitionMessageContents      AcquisitionMessageContent[]
+  acquisitionContentFetchStates   AcquisitionContentFetchState[]
+  acquisitionPartners             AcquisitionPartner[]
+  acquisitionPartnerDomains       AcquisitionPartnerDomain[]
+  acquisitionPartnerEmails        AcquisitionPartnerEmail[]
+  acquisitionDecisionJournals     AcquisitionDecisionJournal[]
+  integrationConnections          IntegrationConnection[]
+  inboundEnvelopes                InboundEnvelope[]
+  normalizedInbounds              NormalizedInbound[]
+  trucks                          Truck[]
+  truckAssignments                TruckAssignment[]
+  mileageEntries                  MileageEntry[]
+  mileageTrips                    MileageTrip[]
+  maintenancePlans                VehicleMaintenancePlan[]
+  maintenanceEntries              VehicleMaintenanceEntry[]
+  tasks                           Task[]
   /// PLAN-AGENT-GATEWAY-001 — LOT-1A (relation inverse, sans effet SQL sur companies)
-  agentPrincipals             AgentPrincipal[]
+  agentPrincipals                 AgentPrincipal[]
   // Lot A V2 (stocks et achats)
-  warehouses       Warehouse[]
-  stockLevels      StockLevel[]
-  stockMovements   StockMovement[]
-  purchaseOrders   PurchaseOrder[]
-  equipment        Equipment[]
-  equipmentBookings EquipmentBooking[]
-  equipmentRentals EquipmentRentalContract[]
-  equipmentMaintenances EquipmentMaintenance[]
-  goodsReceipts    GoodsReceipt[]
+  warehouses                      Warehouse[]
+  stockLevels                     StockLevel[]
+  stockMovements                  StockMovement[]
+  purchaseOrders                  PurchaseOrder[]
+  equipment                       Equipment[]
+  equipmentBookings               EquipmentBooking[]
+  equipmentRentals                EquipmentRentalContract[]
+  equipmentMaintenances           EquipmentMaintenance[]
+  goodsReceipts                   GoodsReceipt[]
 
-  @@map("companies")
+  opportunities Opportunity[] // Lot E V2
+  opportunityEvents OpportunityEvent[]
+  automationRules AutomationRule[]
+  automationRuns AutomationRun[]
 
   // Véhicules V3 — ajouts des lots isolés.
-  vehicleCartographyCache VehicleCartographyCache[]
-  vehicleImportProviderWindows VehicleImportProviderWindow[]
-  vehicleDocuments            VehicleDocument[]
-  vehicleDocumentVersions     VehicleDocumentVersion[]
+  vehicleCartographyCache        VehicleCartographyCache[]
+  vehicleImportProviderWindows   VehicleImportProviderWindow[]
+  vehicleDocuments               VehicleDocument[]
+  vehicleDocumentVersions        VehicleDocumentVersion[]
   vehicleDocumentReminderSetting VehicleDocumentReminderSetting?
-  vehicleDocumentReminders    VehicleDocumentReminder[]
-  vehicleAuditLogs            VehicleAuditLog[]
+  vehicleDocumentReminders       VehicleDocumentReminder[]
+  vehicleAuditLogs               VehicleAuditLog[]
 
   // SPEC-WORKSITE-PHOTOS-001 — photos d'engins (relations inverses, sans effet SQL).
   worksiteTruckPhotos             WorksiteTruckPhoto[]
@@ -452,16 +458,18 @@ model Company {
   worksitePhotoDriveFolders       WorksitePhotoDriveFolder[]
 
   // Veille prospection (V1) — opportunités publiques (relation inverse, sans effet SQL).
-  prospectOpportunities           ProspectOpportunity[]
+  prospectOpportunities ProspectOpportunity[]
+
+  @@map("companies")
 }
 
 // Paramètres de l'entreprise — extensible sans toucher au schéma principal
 model CompanySettings {
   id                    String @id @default(cuid())
   companyId             String @unique
-  defaultDailyHours     Float  @default(10)   // heures travaillées par journée
-  archiveDelayHours     Int    @default(48)   // délai avant archivage auto après COMPLETED
-  invitationExpiryHours Int    @default(24)   // durée de validité des liens d'invitation
+  defaultDailyHours     Float  @default(10) // heures travaillées par journée
+  archiveDelayHours     Int    @default(48) // délai avant archivage auto après COMPLETED
+  invitationExpiryHours Int    @default(24) // durée de validité des liens d'invitation
   timezone              String @default("Europe/Paris")
   primaryColor          String @default("#0f3460")
 
@@ -480,20 +488,20 @@ model CompanySettings {
 model Article {
   id          String   @id @default(cuid())
   companyId   String
-  reference   String?          // code article optionnel (ex: "PLB-001")
-  designation String           // libellé de l'article
-  description String?          // détail optionnel
-  unit        String   @default("u")            // unité : u, m², ml, h, forfait…
-  unitPrice   Decimal  @db.Decimal(10, 2)       // prix unitaire HT
+  reference   String? // code article optionnel (ex: "PLB-001")
+  designation String // libellé de l'article
+  description String? // détail optionnel
+  unit        String   @default("u") // unité : u, m², ml, h, forfait…
+  unitPrice   Decimal  @db.Decimal(10, 2) // prix unitaire HT
   vatRate     Decimal  @default(20) @db.Decimal(5, 2) // taux de TVA % (par article)
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   // Relations
-  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  quoteLines   QuoteLine[]
-  invoiceLines InvoiceLine[]
+  company            Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  quoteLines         QuoteLine[]
+  invoiceLines       InvoiceLine[]
   stockLevels        StockLevel[]
   stockMovements     StockMovement[]
   purchaseOrderLines PurchaseOrderLine[]
@@ -513,27 +521,27 @@ model Article {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Quote {
-  id          String      @id @default(cuid())
-  companyId   String
-  worksiteId  String
-  clientId    String
-  number      String      // "DEV-2026-0001" (séquentiel, unique par entreprise)
-  status      QuoteStatus @default(DRAFT)
-  issueDate   DateTime    @default(now())
-  validUntil  DateTime?   // date de validité du devis
-  totalHT     Decimal     @default(0) @db.Decimal(10, 2)
-  totalVAT    Decimal     @default(0) @db.Decimal(10, 2)
-  totalTTC    Decimal     @default(0) @db.Decimal(10, 2)
-  notes       String?     // notes / conditions particulières
-  paymentTerms String?    // conditions de paiement (mention légale)
-  createdById String      // userId de l'admin créateur
-  sentAt      DateTime?   // date d'envoi au client
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id           String      @id @default(cuid())
+  companyId    String
+  worksiteId   String
+  clientId     String
+  number       String // "DEV-2026-0001" (séquentiel, unique par entreprise)
+  status       QuoteStatus @default(DRAFT)
+  issueDate    DateTime    @default(now())
+  validUntil   DateTime? // date de validité du devis
+  totalHT      Decimal     @default(0) @db.Decimal(10, 2)
+  totalVAT     Decimal     @default(0) @db.Decimal(10, 2)
+  totalTTC     Decimal     @default(0) @db.Decimal(10, 2)
+  notes        String? // notes / conditions particulières
+  paymentTerms String? // conditions de paiement (mention légale)
+  createdById  String // userId de l'admin créateur
+  sentAt       DateTime? // date d'envoi au client
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
 
   // Lot C1 (SPEC-BILLING-C1) — colonnes additives, calculs en centimes (BigInt) côté service.
   subject                 String?
-  globalDiscountBp        Int       @default(0)     // remise globale en points de base (250 = 2,50 %)
+  globalDiscountBp        Int       @default(0) // remise globale en points de base (250 = 2,50 %)
   vatReverseCharge        Boolean   @default(false) // autoliquidation (art. 283-2 nonies CGI)
   acceptedAt              DateTime?
   refusedAt               DateTime?
@@ -542,18 +550,18 @@ model Quote {
   convertedAt             DateTime?
   signerName              String?
   signedAt                DateTime?
-  signatureIpHash         String?   // sha256 de l'adresse IP du signataire (jamais en clair)
+  signatureIpHash         String? // sha256 de l'adresse IP du signataire (jamais en clair)
   signatureTokenHash      String?   @unique // sha256 du jeton de signature (jeton jamais stocké)
   signatureTokenExpiresAt DateTime?
   reminderJ3SentAt        DateTime?
   reminderJ7SentAt        DateTime?
   reminderJ15SentAt       DateTime?
-  importRef               String?   // référence externe d'import (unique par société)
+  importRef               String? // référence externe d'import (unique par société)
   // V2 06/11/2026 (destinataire des devis) : destinataire EFFECTIF du dernier envoi/renvoi, confirmé par l'utilisateur.
   // Distinct de l'adresse principale du client (Client.email) qui n'est jamais modifiée par l'envoi ; historique = billing_mail_logs.
   recipientName           String?
   recipientEmail          String?
-  recipientSource         String?   // CONSULTATION | PREVIOUS | CLIENT | MANUAL (CHECK SQL)
+  recipientSource         String? // CONSULTATION | PREVIOUS | CLIENT | MANUAL (CHECK SQL)
   // V2 06/11/2026 (devis → facture) : numéro du bon de commande CLIENT, facultatif, jamais inventé ; copié dans la facture.
   clientPurchaseOrderRef  String?
 
@@ -562,8 +570,9 @@ model Quote {
   worksite Worksite    @relation(fields: [worksiteId], references: [id], onDelete: Cascade)
   client   Client      @relation(fields: [clientId], references: [id])
   lines    QuoteLine[]
-  invoices Invoice[]   // factures issues de ce devis
+  invoices Invoice[] // factures issues de ce devis
 
+  opportunities Opportunity[] // Lot E V2 : opportunités liées
   @@unique([companyId, number])
   @@unique([id, companyId])
   @@unique([companyId, importRef])
@@ -579,16 +588,16 @@ model Quote {
 model QuoteLine {
   id          String  @id @default(cuid())
   quoteId     String
-  articleId   String?           // lien optionnel vers le catalogue
-  designation String            // libellé figé
+  articleId   String? // lien optionnel vers le catalogue
+  designation String // libellé figé
   unit        String  @default("u")
   quantity    Decimal @db.Decimal(10, 2)
-  unitPrice   Decimal @db.Decimal(10, 2)  // prix HT figé
-  vatRate     Decimal @db.Decimal(5, 2)   // TVA figée
-  lineHT      Decimal @db.Decimal(10, 2)  // quantity * unitPrice (après remise de ligne, Lot C1)
-  position    Int     @default(0)         // ordre d'affichage
-  description String?                     // Lot C1 : détail facultatif
-  discountBp  Int     @default(0)         // Lot C1 : remise de ligne en points de base
+  unitPrice   Decimal @db.Decimal(10, 2) // prix HT figé
+  vatRate     Decimal @db.Decimal(5, 2) // TVA figée
+  lineHT      Decimal @db.Decimal(10, 2) // quantity * unitPrice (après remise de ligne, Lot C1)
+  position    Int     @default(0) // ordre d'affichage
+  description String? // Lot C1 : détail facultatif
+  discountBp  Int     @default(0) // Lot C1 : remise de ligne en points de base
 
   // Relations
   quote   Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
@@ -599,62 +608,62 @@ model QuoteLine {
 }
 
 model Invoice {
-  id          String        @id @default(cuid())
-  companyId   String
-  worksiteId  String
-  clientId    String
-  quoteId     String?       // devis d'origine (optionnel)
-  number      String        // "FAC-2026-0001" (séquentiel, unique par entreprise)
-  status      InvoiceStatus @default(DRAFT)
-  kind        InvoiceKind   @default(INVOICE)
-  creditedInvoiceId String?       // avoir : facture d'origine (Lot C4 : index unique partiel « un seul avoir TOTAL », plusieurs PARTIAL)
-  issueDate   DateTime      @default(now())
-  dueDate     DateTime?     // échéance de paiement
-  periodStart DateTime?     // début de la période facturée (= dates du chantier)
-  periodEnd   DateTime?     // fin de la période facturée
-  totalHT     Decimal       @default(0) @db.Decimal(10, 2)
-  totalVAT    Decimal       @default(0) @db.Decimal(10, 2)
-  totalTTC    Decimal       @default(0) @db.Decimal(10, 2)
-  notes       String?
-  paymentTerms String?      // conditions de paiement (mention légale)
-  createdById String        // userId de l'admin créateur
-  sentAt      DateTime?     // date d'envoi au client
-  paidAt      DateTime?     // date de règlement
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id                     String                    @id @default(cuid())
+  companyId              String
+  worksiteId             String
+  clientId               String
+  quoteId                String? // devis d'origine (optionnel)
+  number                 String // "FAC-2026-0001" (séquentiel, unique par entreprise)
+  status                 InvoiceStatus             @default(DRAFT)
+  kind                   InvoiceKind               @default(INVOICE)
+  creditedInvoiceId      String? // avoir : facture d'origine (Lot C4 : index unique partiel « un seul avoir TOTAL », plusieurs PARTIAL)
+  issueDate              DateTime                  @default(now())
+  dueDate                DateTime? // échéance de paiement
+  periodStart            DateTime? // début de la période facturée (= dates du chantier)
+  periodEnd              DateTime? // fin de la période facturée
+  totalHT                Decimal                   @default(0) @db.Decimal(10, 2)
+  totalVAT               Decimal                   @default(0) @db.Decimal(10, 2)
+  totalTTC               Decimal                   @default(0) @db.Decimal(10, 2)
+  notes                  String?
+  paymentTerms           String? // conditions de paiement (mention légale)
+  createdById            String // userId de l'admin créateur
+  sentAt                 DateTime? // date d'envoi au client
+  paidAt                 DateTime? // date de règlement
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
   // Lot C1 : remise globale et autoliquidation (copiées du devis ; utilisées par C2–C4).
-  globalDiscountBp Int     @default(0)
-  vatReverseCharge Boolean @default(false)
+  globalDiscountBp       Int                       @default(0)
+  vatReverseCharge       Boolean                   @default(false)
   // Lot C2 : objet, relances après échéance (J+30/45/60), paiements.
-  subject             String?
-  reminderDue30SentAt DateTime?
-  reminderDue45SentAt DateTime?
-  reminderDue60SentAt DateTime?
-  payments            InvoicePayment[]
+  subject                String?
+  reminderDue30SentAt    DateTime?
+  reminderDue45SentAt    DateTime?
+  reminderDue60SentAt    DateTime?
+  payments               InvoicePayment[]
   // Lot C3 : acomptes (pourcentage demandé ; déductions sur la facture de solde).
-  depositBp           Int?
-  depositDeductions   InvoiceDepositDeduction[] @relation("FinalInvoiceDeductions")
-  deductedBy          InvoiceDepositDeduction[] @relation("DepositInvoiceDeductions")
-  deductionLines      InvoiceLine[]             @relation("LineDeductsDeposit")
+  depositBp              Int?
+  depositDeductions      InvoiceDepositDeduction[] @relation("FinalInvoiceDeductions")
+  deductedBy             InvoiceDepositDeduction[] @relation("DepositInvoiceDeductions")
+  deductionLines         InvoiceLine[]             @relation("LineDeductsDeposit")
   // Lot C4 : avoirs partiels (TOTAL = Lot B, PARTIAL = plafonné au restant créditable).
-  creditScope         InvoiceCreditScope?
-  creditReason        String?
+  creditScope            InvoiceCreditScope?
+  creditReason           String?
   // Lot C5 : rapprochement bancaire.
-  bankTransactions    BankTransaction[] @relation("BankMatchedInvoice")
+  bankTransactions       BankTransaction[]         @relation("BankMatchedInvoice")
   // V2 06/11/2026 : numéro du bon de commande CLIENT (copié du devis à la conversion, modifiable en brouillon, figé à l'émission).
   clientPurchaseOrderRef String?
 
   // Relations
   // Lot B : pièces conservées — aucune suppression en cascade depuis la société ou le chantier.
-  company  Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  worksite Worksite      @relation(fields: [worksiteId], references: [id], onDelete: Restrict)
-  client   Client        @relation(fields: [clientId], references: [id])
-  quote    Quote?        @relation(fields: [companyId, quoteId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02 : FK composite société
-  lines    InvoiceLine[]
-  documentSnapshots InvoiceDocumentSnapshot[] // Correctif P2-03 : données documentaires figées à l'émission (au plus une : invoiceId UNIQUE en base)
-  creditedInvoice Invoice?  @relation("InvoiceCreditNote", fields: [creditedInvoiceId], references: [id], onDelete: Restrict)
-  creditNotes     Invoice[] @relation("InvoiceCreditNote") // Lot C4 : plusieurs avoirs partiels ; un seul TOTAL (index partiel SQL)
-  importedCreditNotes ImportedInvoice[] @relation("ImportedCreditOfNative") // SPEC-INVOICE-IMPORT-001
+  company             Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  worksite            Worksite                  @relation(fields: [worksiteId], references: [id], onDelete: Restrict)
+  client              Client                    @relation(fields: [clientId], references: [id])
+  quote               Quote?                    @relation(fields: [companyId, quoteId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02 : FK composite société
+  lines               InvoiceLine[]
+  documentSnapshots   InvoiceDocumentSnapshot[] // Correctif P2-03 : données documentaires figées à l'émission (au plus une : invoiceId UNIQUE en base)
+  creditedInvoice     Invoice?                  @relation("InvoiceCreditNote", fields: [creditedInvoiceId], references: [id], onDelete: Restrict)
+  creditNotes         Invoice[]                 @relation("InvoiceCreditNote") // Lot C4 : plusieurs avoirs partiels ; un seul TOTAL (index partiel SQL)
+  importedCreditNotes ImportedInvoice[]         @relation("ImportedCreditOfNative") // SPEC-INVOICE-IMPORT-001
 
   @@unique([companyId, number])
   @@unique([id, companyId])
@@ -676,7 +685,7 @@ model InvoicePayment {
   id                String        @id @default(cuid())
   companyId         String
   invoiceId         String
-  amountCents       BigInt        // négatif uniquement pour une contre-passation
+  amountCents       BigInt // négatif uniquement pour une contre-passation
   method            PaymentMethod
   paidAt            DateTime      @db.Date
   reference         String?
@@ -687,10 +696,10 @@ model InvoicePayment {
   bankTransactionId String?       @unique // Correctif P1-03 : opération bancaire à l'origine du paiement (un seul paiement par opération)
   createdAt         DateTime      @default(now())
 
-  company  Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  invoice  Invoice        @relation(fields: [companyId, invoiceId], references: [companyId, id], onDelete: Restrict)
-  reverses InvoicePayment? @relation("PaymentReversal", fields: [reversesPaymentId], references: [id], onDelete: Restrict)
-  reversedBy InvoicePayment? @relation("PaymentReversal")
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  invoice          Invoice           @relation(fields: [companyId, invoiceId], references: [companyId, id], onDelete: Restrict)
+  reverses         InvoicePayment?   @relation("PaymentReversal", fields: [reversesPaymentId], references: [id], onDelete: Restrict)
+  reversedBy       InvoicePayment?   @relation("PaymentReversal")
   // Relations déclarées en liste côté Prisma (FK composites société) ; l'unicité réelle est garantie en base
   // (bank_transactions.matchedPaymentId UNIQUE, invoice_payments.bankTransactionId UNIQUE).
   bankTransactions BankTransaction[] @relation("BankMatchedPayment") // Lot C5 : opération qui référence ce paiement
@@ -703,23 +712,23 @@ model InvoicePayment {
 }
 
 model InvoiceLine {
-  id          String  @id @default(cuid())
-  invoiceId   String
-  articleId   String?
-  designation String
-  unit        String  @default("u")
-  quantity    Decimal @db.Decimal(10, 2)
-  unitPrice   Decimal @db.Decimal(10, 2)
-  vatRate     Decimal @db.Decimal(5, 2)
-  lineHT      Decimal @db.Decimal(10, 2)
-  position    Int     @default(0)
-  description String?                 // Lot C1
-  discountBp  Int     @default(0)     // Lot C1 : remise de ligne en points de base
-  deductsDepositId String?            // Lot C3 : ligne de déduction d'un acompte (facture de solde)
+  id               String  @id @default(cuid())
+  invoiceId        String
+  articleId        String?
+  designation      String
+  unit             String  @default("u")
+  quantity         Decimal @db.Decimal(10, 2)
+  unitPrice        Decimal @db.Decimal(10, 2)
+  vatRate          Decimal @db.Decimal(5, 2)
+  lineHT           Decimal @db.Decimal(10, 2)
+  position         Int     @default(0)
+  description      String? // Lot C1
+  discountBp       Int     @default(0) // Lot C1 : remise de ligne en points de base
+  deductsDepositId String? // Lot C3 : ligne de déduction d'un acompte (facture de solde)
 
   // Relations
-  invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  article Article? @relation(fields: [articleId], references: [id], onDelete: Restrict)
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  article        Article? @relation(fields: [articleId], references: [id], onDelete: Restrict)
   deductsDeposit Invoice? @relation("LineDeductsDeposit", fields: [deductsDepositId], references: [id], onDelete: Restrict)
 
   @@index([invoiceId])
@@ -729,12 +738,12 @@ model InvoiceLine {
 
 /// Lot C3 (SPEC-BILLING-C3) — un acompte émis n'est déduit qu'une fois, sur une facture de solde du même devis.
 model InvoiceDepositDeduction {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   companyId        String
   finalInvoiceId   String
   depositInvoiceId String
   amountTTCCents   BigInt
-  createdAt        DateTime @default(now())
+  createdAt        DateTime  @default(now())
   // Cycle R4 (T1) : affectation ACTIVE (releasedAt NULL) vs trace HISTORIQUE libérée (releasedAt posé quand le solde émis est annulé par
   // avoir total). Une seule affectation active par acompte (index unique partiel SQL) ; la trace n'est jamais supprimée ni réécrite.
   releasedAt       DateTime?
@@ -784,22 +793,22 @@ enum BankCollisionResolution {
 // ═══════════════════════════════════════════════════════════════════════════
 
 enum VatRegime {
-  DEBITS        // TVA sur les débits (facturation)
+  DEBITS // TVA sur les débits (facturation)
   ENCAISSEMENTS // TVA sur les encaissements (prestations de services)
 }
 
 model BillingSettings {
   id                String    @id @default(cuid())
   companyId         String    @unique
-  vatNumber         String?   // TVA intracommunautaire du vendeur
-  legalForm         String?   // SARL, SAS, EI…
-  shareCapital      String?   // "10 000 €"
-  rcs               String?   // "RCS Paris 123 456 789"
+  vatNumber         String? // TVA intracommunautaire du vendeur
+  legalForm         String? // SARL, SAS, EI…
+  shareCapital      String? // "10 000 €"
+  rcs               String? // "RCS Paris 123 456 789"
   iban              String?
   bic               String?
   quoteValidityDays Int       @default(30)
   paymentTermsDays  Int       @default(30)
-  latePenaltyText   String?   // remplace la mention par défaut (pénalités, indemnité forfaitaire 40 €)
+  latePenaltyText   String? // remplace la mention par défaut (pénalités, indemnité forfaitaire 40 €)
   quoteFooter       String?
   invoiceFooter     String?
   vatRegime         VatRegime @default(DEBITS)
@@ -821,10 +830,10 @@ enum BillingMailStatus {
 model BillingMailLog {
   id           String            @id @default(cuid())
   companyId    String
-  kind         String            // QUOTE_SENT | QUOTE_REMINDER_J3 | … | INVOICE_SENT | INVOICE_REMINDER_30 | …
+  kind         String // QUOTE_SENT | QUOTE_REMINDER_J3 | … | INVOICE_SENT | INVOICE_REMINDER_30 | …
   to           String
   subject      String
-  documentType String            // "Quote" | "Invoice"
+  documentType String // "Quote" | "Invoice"
   documentId   String
   status       BillingMailStatus
   providerId   String?
@@ -862,39 +871,39 @@ model User {
   id          String    @id @default(cuid())
   email       String    @unique
   name        String?
-  password    String    // bcrypt hash
+  password    String // bcrypt hash
   role        Role      @default(EMPLOYEE)
   active      Boolean   @default(true)
-  companyId   String?   // null uniquement pour SUPER_ADMIN
+  companyId   String? // null uniquement pour SUPER_ADMIN
   lastLoginAt DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   // Relations
-  company         Company?        @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  employeeProfiles Employee[]       // présent pour ADMIN, TEAM_LEADER, EMPLOYEE
-  clientProfile   ClientProfile?  // présent pour CLIENT uniquement
-  sentInvitations Invitation[]    @relation("InvitedBy")
-  passwordResets  PasswordReset[]
-  notifications   Notification[]
-  historyLogs     HistoryLog[]    @relation("HistoryActor")
-  reviewedImportDrafts WorksiteImportDraft[] @relation("ImportDraftReviewer")
+  company                         Company?                         @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  employeeProfiles                Employee[] // présent pour ADMIN, TEAM_LEADER, EMPLOYEE
+  clientProfile                   ClientProfile? // présent pour CLIENT uniquement
+  sentInvitations                 Invitation[]                     @relation("InvitedBy")
+  passwordResets                  PasswordReset[]
+  notifications                   Notification[]
+  historyLogs                     HistoryLog[]                     @relation("HistoryActor")
+  reviewedImportDrafts            WorksiteImportDraft[]            @relation("ImportDraftReviewer")
   acquisitionAttachmentAccessLogs AcquisitionAttachmentAccessLog[]
   /// PLAN-AGENT-GATEWAY-001 — LOT-1A (relation inverse, sans effet SQL sur users)
-  createdAgentPrincipals AgentPrincipal[] @relation("AgentPrincipalCreatedBy")
-  skippedTourStops VehicleTourStop[] @relation("TourStopSkippedBy")
-  mileageEntries MileageEntry[] @relation("MileageAuthor")
-  maintenanceEntries VehicleMaintenanceEntry[] @relation("MaintenanceAuthor")
-  updatedMaintenancePlans VehicleMaintenancePlan[] @relation("MaintenancePlanAuthor")
+  createdAgentPrincipals          AgentPrincipal[]                 @relation("AgentPrincipalCreatedBy")
+  skippedTourStops                VehicleTourStop[]                @relation("TourStopSkippedBy")
+  mileageEntries                  MileageEntry[]                   @relation("MileageAuthor")
+  maintenanceEntries              VehicleMaintenanceEntry[]        @relation("MaintenanceAuthor")
+  updatedMaintenancePlans         VehicleMaintenancePlan[]         @relation("MaintenancePlanAuthor")
+
+  // Véhicules V3 — ajouts des lots isolés.
+  vehicleDocumentsCreated         VehicleDocument[]        @relation("VehicleDocumentAuthor")
+  vehicleDocumentVersionsUploaded VehicleDocumentVersion[] @relation("VehicleDocumentVersionAuthor")
+  vehicleAuditLogs                VehicleAuditLog[]        @relation("VehicleAuditActor")
 
   @@index([companyId])
   @@index([email])
   @@map("users")
-
-  // Véhicules V3 — ajouts des lots isolés.
-  vehicleDocumentsCreated VehicleDocument[] @relation("VehicleDocumentAuthor")
-  vehicleDocumentVersionsUploaded VehicleDocumentVersion[] @relation("VehicleDocumentVersionAuthor")
-  vehicleAuditLogs VehicleAuditLog[] @relation("VehicleAuditActor")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -905,7 +914,7 @@ model User {
 
 model Employee {
   id        String    @id @default(cuid())
-  userId    String    // un compte, une fiche par entreprise
+  userId    String // un compte, une fiche par entreprise
   role      Role      @default(EMPLOYEE)
   companyId String
   firstName String
@@ -940,10 +949,12 @@ model Employee {
   assignedTasks       Task[]               @relation("TaskAssignee")
   equipmentBookings   EquipmentBooking[]   @relation("EquipmentBookingResponsible")
 
+  ownedOpportunities  Opportunity[]        @relation("OpportunityOwner") // Lot E V2
+  automationTaskRules AutomationRule[]     @relation("AutomationTaskAssignee")
   @@unique([id, companyId])
+  @@unique([userId, companyId])
   @@index([companyId])
   @@index([userId])
-  @@unique([userId, companyId])
   @@map("employees")
 }
 
@@ -955,16 +966,16 @@ model Employee {
 model Team {
   id        String   @id @default(cuid())
   name      String
-  color     String?  // couleur hex pour le calendrier ex: #FF5733
+  color     String? // couleur hex pour le calendrier ex: #FF5733
   companyId String
-  leaderId  String   // employeeId — chef d'équipe obligatoire
+  leaderId  String // employeeId — chef d'équipe obligatoire
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
-  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  leader         Employee        @relation("TeamLeader", fields: [leaderId], references: [id])
+  company        Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leader         Employee          @relation("TeamLeader", fields: [leaderId], references: [id])
   members        TeamMember[]
   assignments    Assignment[]
   dailyReports   DailyReport[]
@@ -1011,13 +1022,13 @@ model Client {
   notes     String?
   companyId String
   active    Boolean  @default(true)
-  siret     String?  // Lot C1 : mentions de facturation (SIRET/SIREN du client)
-  vatNumber String?  // Lot C1 : TVA intracommunautaire du client
+  siret     String? // Lot C1 : mentions de facturation (SIRET/SIREN du client)
+  vatNumber String? // Lot C1 : TVA intracommunautaire du client
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
-  company             Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company             Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
   worksites           Worksite[]
   clientProfile       ClientProfile?
   quotes              Quote[]
@@ -1027,9 +1038,10 @@ model Client {
   /// PLAN-ACQ-CONSULTATIONS-FIX-001 — partenaires liés (FK composite tenant-safe)
   acquisitionPartners AcquisitionPartner[]
 
-  @@index([companyId])
+  opportunities       Opportunity[] // Lot E V2
   // Cible FK composite AcquisitionPartner.(clientId, companyId)
   @@unique([id, companyId])
+  @@index([companyId])
   @@map("clients")
 }
 
@@ -1052,52 +1064,53 @@ model ClientProfile {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Worksite {
-  id          String         @id @default(cuid())
-  name        String
-  description String?
-  address     String?
-  latitude    Float?         // prévu pour une carte future
-  longitude   Float?
-  status      WorksiteStatus @default(PLANNED)
-  startDate   DateTime? // null = dates inconnues (Acquisition)
-  endDate     DateTime? // null = dates inconnues (Acquisition)
-  dailyHours  Float          @default(10)   // heures de travail par journée
-  clientId    String
-  companyId   String
-  createdById String         // userId de l'admin qui a créé le chantier
-  completedAt DateTime?      // date de passage au statut COMPLETED
-  archivedAt  DateTime?      // date d'archivage effectif
-  delayedUntil DateTime?     // date de décalage (statut DELAYED)
+  id                          String         @id @default(cuid())
+  name                        String
+  description                 String?
+  address                     String?
+  latitude                    Float? // prévu pour une carte future
+  longitude                   Float?
+  status                      WorksiteStatus @default(PLANNED)
+  startDate                   DateTime? // null = dates inconnues (Acquisition)
+  endDate                     DateTime? // null = dates inconnues (Acquisition)
+  dailyHours                  Float          @default(10) // heures de travail par journée
+  clientId                    String
+  companyId                   String
+  createdById                 String // userId de l'admin qui a créé le chantier
+  completedAt                 DateTime? // date de passage au statut COMPLETED
+  archivedAt                  DateTime? // date d'archivage effectif
+  delayedUntil                DateTime? // date de décalage (statut DELAYED)
   // SPEC-WORKSITE-PHOTOS-001 D6 — contact client (e-mail) renseigné par l'agent Hermes ; nullable.
-  clientContact String?
+  clientContact               String?
   /// Marqueur durable : premier enregistrement de la liste des destinataires des photos (y compris une liste vide).
   /// NULL = jamais configurée ⇒ seule situation où l'adresse historique `clientContact` peut être PROPOSÉE à l'édition.
-  photoRecipientsConfiguredAt DateTime? @db.Timestamptz(3)
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  photoRecipientsConfiguredAt DateTime?      @db.Timestamptz(3)
+  createdAt                   DateTime       @default(now())
+  updatedAt                   DateTime       @updatedAt
 
   // Relations
-  client       Client        @relation(fields: [clientId], references: [id])
-  truckPhotos  WorksiteTruckPhoto[]
-  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  documents    Document[]
-  assignments  Assignment[]
-  extensions   Extension[]
-  historyLogs  HistoryLog[]
-  timeclocks   Timeclock[]
-  dailyReports DailyReport[]
-  quotes       Quote[]
-  invoices     Invoice[]
-  importedInvoices ImportedInvoice[] // SPEC-INVOICE-IMPORT-001 (chantier facultatif)
-  importDrafts WorksiteImportDraft[]
-  mileageTrips MileageTrip[] @relation("MileageWorksite")
-  tasks        Task[]
-  photoRecipients WorksitePhotoRecipient[] // destinataires des photos (configuration, SUPER_ADMIN)
-  stockMovements StockMovement[]
-  purchaseOrders PurchaseOrder[]
+  client            Client                    @relation(fields: [clientId], references: [id])
+  truckPhotos       WorksiteTruckPhoto[]
+  company           Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  documents         Document[]
+  assignments       Assignment[]
+  extensions        Extension[]
+  historyLogs       HistoryLog[]
+  timeclocks        Timeclock[]
+  dailyReports      DailyReport[]
+  quotes            Quote[]
+  invoices          Invoice[]
+  importedInvoices  ImportedInvoice[] // SPEC-INVOICE-IMPORT-001 (chantier facultatif)
+  importDrafts      WorksiteImportDraft[]
+  mileageTrips      MileageTrip[]             @relation("MileageWorksite")
+  tasks             Task[]
+  photoRecipients   WorksitePhotoRecipient[] // destinataires des photos (configuration, SUPER_ADMIN)
+  stockMovements    StockMovement[]
+  purchaseOrders    PurchaseOrder[]
   equipmentBookings EquipmentBooking[]
-  equipmentRentals EquipmentRentalContract[]
+  equipmentRentals  EquipmentRentalContract[]
 
+  opportunities     Opportunity[] // Lot E V2
   @@unique([id, companyId])
   @@index([companyId])
   @@index([clientId])
@@ -1111,21 +1124,21 @@ model Worksite {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Document {
-  id         String       @id @default(cuid())
-  worksiteId String
-  name       String
+  id                            String       @id @default(cuid())
+  worksiteId                    String
+  name                          String
   // Nullable : documents bridgés Acquisition (005D) n’ont pas d’URL publique.
   // L’accès se fait via sourceAcquisitionAttachmentId → route attachments.
-  url        String?
-  size       Int?         // taille en octets
-  mimeType   String?
-  latitude   Float?
-  longitude  Float?
-  type       DocumentType @default(DOCUMENT)
-  uploadedAt DateTime     @default(now())
+  url                           String?
+  size                          Int? // taille en octets
+  mimeType                      String?
+  latitude                      Float?
+  longitude                     Float?
+  type                          DocumentType @default(DOCUMENT)
+  uploadedAt                    DateTime     @default(now())
   // PLAN-ACQ-005D — bridge Cloudinary authenticated (pas de re-upload)
   storagePublicId               String?
-  sourceAcquisitionAttachmentId String? @unique
+  sourceAcquisitionAttachmentId String?      @unique
 
   // Relations
   worksite Worksite @relation(fields: [worksiteId], references: [id], onDelete: Cascade)
@@ -1143,9 +1156,9 @@ model Assignment {
   id            String           @id @default(cuid())
   worksiteId    String
   teamId        String
-  date          DateTime         @db.Date  // journée complète — pas d'heure
+  date          DateTime         @db.Date // journée complète — pas d'heure
   status        AssignmentStatus @default(PENDING)
-  refusalReason String?          // obligatoire si status = REFUSED
+  refusalReason String? // obligatoire si status = REFUSED
   notes         String?
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
@@ -1169,8 +1182,8 @@ model Assignment {
 model EmployeeAssignment {
   id           String   @id @default(cuid())
   assignmentId String
-  employeeId   String   // pointe vers Employee (pas User)
-  date         DateTime @db.Date  // dupliqué depuis Assignment pour la contrainte unique
+  employeeId   String // pointe vers Employee (pas User)
+  date         DateTime @db.Date // dupliqué depuis Assignment pour la contrainte unique
   createdAt    DateTime @default(now())
 
   // Relations
@@ -1194,7 +1207,7 @@ model Extension {
   previousEndDate DateTime // date de fin avant prolongation
   newEndDate      DateTime // nouvelle date de fin après prolongation
   reason          String?
-  createdById     String   // userId de celui qui a prolongé
+  createdById     String // userId de celui qui a prolongé
   createdAt       DateTime @default(now())
 
   // Relations
@@ -1219,13 +1232,13 @@ model Absence {
   endDate      DateTime      @db.Date
   reason       String?
   refusalNote  String?
-  approvedById String?       // userId du validateur
+  approvedById String? // userId du validateur
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
   // Relations
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  company  Company  @relation(fields: [companyId],  references: [id], onDelete: Cascade)
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
   @@index([companyId])
@@ -1243,13 +1256,13 @@ model HistoryLog {
   id         String        @id @default(cuid())
   companyId  String?
   worksiteId String?
-  actorId    String        // userId de celui qui a effectué l'action
+  actorId    String // userId de celui qui a effectué l'action
   action     HistoryAction
-  entityType String?       // "Worksite" | "Team" | "Assignment" | "Employee" | ...
-  entityId   String?       // id de l'entité concernée
-  detail     String?       // description lisible humainement
-  oldValue   Json?         // état de l'entité avant modification
-  newValue   Json?         // état de l'entité après modification
+  entityType String? // "Worksite" | "Team" | "Assignment" | "Employee" | ...
+  entityId   String? // id de l'entité concernée
+  detail     String? // description lisible humainement
+  oldValue   Json? // état de l'entité avant modification
+  newValue   Json? // état de l'entité après modification
   createdAt  DateTime      @default(now())
 
   // Relations
@@ -1278,8 +1291,8 @@ model Notification {
   message   String
   read      Boolean          @default(false)
   readAt    DateTime?
-  link      String?          // URL relative vers la ressource concernée
-  metadata  Json?            // données contextuelles (ids, noms, etc.)
+  link      String? // URL relative vers la ressource concernée
+  metadata  Json? // données contextuelles (ids, noms, etc.)
   createdAt DateTime         @default(now())
 
   // Relations
@@ -1301,11 +1314,11 @@ model Invitation {
   email       String
   role        Role
   companyId   String
-  invitedById String           // userId de l'admin qui a invité
+  invitedById String // userId de l'admin qui a invité
   token       String           @unique @default(cuid())
   status      InvitationStatus @default(PENDING)
-  expiresAt   DateTime         // calculé à la création (ex: now + 24h)
-  acceptedAt  DateTime?        // renseigné quand le compte est créé
+  expiresAt   DateTime // calculé à la création (ex: now + 24h)
+  acceptedAt  DateTime? // renseigné quand le compte est créé
   createdAt   DateTime         @default(now())
 
   // Relations
@@ -1327,7 +1340,7 @@ model PasswordReset {
   id        String    @id @default(cuid())
   userId    String
   token     String    @unique @default(cuid())
-  expiresAt DateTime  // durée de validité courte recommandée (15-30 min)
+  expiresAt DateTime // durée de validité courte recommandée (15-30 min)
   usedAt    DateTime? // renseigné une fois le mot de passe réinitialisé
   createdAt DateTime  @default(now())
 
@@ -1344,22 +1357,22 @@ model PasswordReset {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model ExpenseReport {
-  id             String          @id @default(cuid())
-  employeeId     String
-  companyId      String
-  date           DateTime        @db.Date
-  amount         Float
-  category       ExpenseCategory
-  description    String
-  receiptUrl     String?
-  status         ExpenseStatus   @default(PENDING)
-  rejectionNote  String?
-  approvedById   String?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  id            String          @id @default(cuid())
+  employeeId    String
+  companyId     String
+  date          DateTime        @db.Date
+  amount        Float
+  category      ExpenseCategory
+  description   String
+  receiptUrl    String?
+  status        ExpenseStatus   @default(PENDING)
+  rejectionNote String?
+  approvedById  String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
 
-  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
   @@index([companyId])
@@ -1372,24 +1385,24 @@ model ExpenseReport {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Timeclock {
-  id           String    @id @default(cuid())
-  employeeId   String
-  companyId    String
-  worksiteId   String?   // chantier associé (détecté par proximité ou choisi)
-  date         DateTime  @db.Date
-  checkInAt    DateTime?
-  checkInLat   Float?
-  checkInLng   Float?
-  checkOutAt   DateTime?
-  checkOutLat  Float?
-  checkOutLng  Float?
-  note         String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id          String    @id @default(cuid())
+  employeeId  String
+  companyId   String
+  worksiteId  String? // chantier associé (détecté par proximité ou choisi)
+  date        DateTime  @db.Date
+  checkInAt   DateTime?
+  checkInLat  Float?
+  checkInLng  Float?
+  checkOutAt  DateTime?
+  checkOutLat Float?
+  checkOutLng Float?
+  note        String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  worksite  Worksite? @relation(fields: [worksiteId], references: [id], onDelete: SetNull)
+  employee Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  worksite Worksite? @relation(fields: [worksiteId], references: [id], onDelete: SetNull)
 
   @@unique([employeeId, date])
   @@index([employeeId])
@@ -1435,8 +1448,8 @@ model DailyReport {
 model Signature {
   id           String   @id @default(cuid())
   assignmentId String   @unique
-  signedById   String   // employeeId of the team leader who signed
-  signatureUrl String   // Cloudinary URL of the signature image
+  signedById   String // employeeId of the team leader who signed
+  signatureUrl String // Cloudinary URL of the signature image
   signedAt     DateTime @default(now())
 
   assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
@@ -1452,25 +1465,25 @@ model Signature {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Accommodation {
-  id           String              @id @default(cuid())
-  companyId    String
-  teamId       String
-  createdById  String              // userId de l'admin qui a créé
+  id          String @id @default(cuid())
+  companyId   String
+  teamId      String
+  createdById String // userId de l'admin qui a créé
 
-  status       AccommodationStatus @default(UPCOMING)
+  status AccommodationStatus @default(UPCOMING)
 
-  startDate    DateTime            @db.Date
-  endDate      DateTime            @db.Date
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
 
-  address      String
-  city         String?
-  zipCode      String?
+  address String
+  city    String?
+  zipCode String?
 
   doorCode     String?
   contactName  String?
   contactPhone String?
 
-  notes        String?
+  notes String?
 
   // Source & référence externe
   /// Numéro de réservation Booking.com (métier). Ne jamais y stocker un id Gmail technique.
@@ -1480,12 +1493,12 @@ model Accommodation {
   gmailSourceMessageId String?
   source               String? @default("manual") // "manual" | "gmail-scan" | "n8n" | "agent"
 
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  company  Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  team     Team    @relation(fields: [teamId], references: [id])
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  team    Team    @relation(fields: [teamId], references: [id])
 
   @@unique([companyId, bookingReference])
   @@unique([companyId, gmailSourceMessageId])
@@ -1505,8 +1518,8 @@ model GmailConnection {
   id            String   @id @default(cuid())
   companyId     String   @unique
   gmailAddress  String
-  accessToken   String   // chiffré AES-256-GCM
-  refreshToken  String   // chiffré AES-256-GCM
+  accessToken   String // chiffré AES-256-GCM
+  refreshToken  String // chiffré AES-256-GCM
   tokenExpiry   DateTime
   connectedById String
   connectedAt   DateTime @default(now())
@@ -1580,14 +1593,14 @@ model ProcessedGmailMessage {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model PendingAccommodation {
-  id              String                     @id @default(cuid())
-  companyId       String
+  id               String                         @id @default(cuid())
+  companyId        String
   /// Id Gmail technique UNIQUEMENT. Null pour N8N / agent (jamais bookingReference).
-  gmailMessageId  String?
+  gmailMessageId   String?
   /// Clé d'idempotence pending : gmail:{id} | n8n:{ref} | agent:{eventId|ref}
   /// Borne applicative : IDEMPOTENCY_KEY_MAX_BYTES (512 octets UTF-8).
-  idempotencyKey  String
-  sourceKind      PendingAccommodationSourceKind
+  idempotencyKey   String
+  sourceKind       PendingAccommodationSourceKind
   /// Id externe non-Gmail. N8N = bookingReference. Agent = bookingReference si fournie (jamais un event id générique).
   externalSourceId String?
 
@@ -1595,8 +1608,8 @@ model PendingAccommodation {
   address         String?
   city            String?
   zipCode         String?
-  startDate       DateTime?                  @db.Date
-  endDate         DateTime?                  @db.Date
+  startDate       DateTime? @db.Date
+  endDate         DateTime? @db.Date
   doorCode        String?
   contactName     String?
   contactPhone    String?
@@ -1645,12 +1658,23 @@ model Truck {
   // V2 : projection reconstruisible du journal. NULL = compteur inconnu, jamais zéro implicite.
   currentMileage        Int?
   currentMileageEntryId String?
-  mileageRevision       Int     @default(0)
-  mileageEntries        MileageEntry[] @relation("TruckMileageEntries")
-  mileageTrips          MileageTrip[]  @relation("TruckMileageTrips")
+  mileageRevision       Int                       @default(0)
+  mileageEntries        MileageEntry[]            @relation("TruckMileageEntries")
+  mileageTrips          MileageTrip[]             @relation("TruckMileageTrips")
   maintenancePlan       VehicleMaintenancePlan?
   maintenanceEntries    VehicleMaintenanceEntry[]
-  currentMileageEntry   MileageEntry? @relation("TruckCurrentMileage", fields: [currentMileageEntryId, id, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "trucks_current_mileage_entry_fkey")
+  currentMileageEntry   MileageEntry?             @relation("TruckCurrentMileage", fields: [currentMileageEntryId, id, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "trucks_current_mileage_entry_fkey")
+
+  // Véhicules V3 — ajouts des lots isolés.
+  vehicleExpenses          VehicleExpense[]
+  tours                    VehicleTour[]
+  addressImports           VehicleAddressImport[]
+  vehicleDocuments         VehicleDocument[]
+  vehicleDocumentVersions  VehicleDocumentVersion[]
+  vehicleDocumentReminders VehicleDocumentReminder[]
+
+  // SPEC-WORKSITE-PHOTOS-001 — photos d'engins (relation inverse, sans effet SQL).
+  worksitePhotos WorksiteTruckPhoto[]
 
   @@unique([id, companyId])
   @@unique([currentMileageEntryId, id, companyId], map: "trucks_current_mileage_entry_truck_company_key")
@@ -1658,17 +1682,6 @@ model Truck {
   @@index([companyId])
   @@index([chauffeurId])
   @@map("trucks")
-
-  // Véhicules V3 — ajouts des lots isolés.
-  vehicleExpenses VehicleExpense[]
-  tours VehicleTour[]
-  addressImports        VehicleAddressImport[]
-  vehicleDocuments         VehicleDocument[]
-  vehicleDocumentVersions  VehicleDocumentVersion[]
-  vehicleDocumentReminders VehicleDocumentReminder[]
-
-  // SPEC-WORKSITE-PHOTOS-001 — photos d'engins (relation inverse, sans effet SQL).
-  worksitePhotos WorksiteTruckPhoto[]
 }
 
 // Entretien V2 : journal séparé du kilométrage ; les interventions ne changent pas le compteur.
@@ -1693,7 +1706,7 @@ model VehicleMaintenancePlan {
 }
 
 model VehicleMaintenanceEntry {
-  id                    String   @id @default(cuid())
+  id                    String                    @id @default(cuid())
   companyId             String
   truckId               String
   kind                  String
@@ -1702,26 +1715,26 @@ model VehicleMaintenanceEntry {
   notes                 String?
   createdById           String
   createdByNameSnapshot String
-  recordedAt            DateTime @default(now())
+  recordedAt            DateTime                  @default(now())
   idempotencyKey        String
-  supersedesEntryId     String? @unique
+  supersedesEntryId     String?                   @unique
   correctionReason      String?
-  supersedes VehicleMaintenanceEntry? @relation("MaintenanceCorrections", fields: [supersedesEntryId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict)
-  corrections VehicleMaintenanceEntry[] @relation("MaintenanceCorrections")
+  supersedes            VehicleMaintenanceEntry?  @relation("MaintenanceCorrections", fields: [supersedesEntryId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict)
+  corrections           VehicleMaintenanceEntry[] @relation("MaintenanceCorrections")
   requestHash           String
 
   company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   truck     Truck   @relation(fields: [truckId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
   createdBy User    @relation("MaintenanceAuthor", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
-  @@unique([companyId, truckId, idempotencyKey])
-  @@index([companyId, truckId, occurredAt])
-  @@map("vehicle_maintenance_entries")
-
   // Véhicules V3 — ajouts des lots isolés.
   documentVersions VehicleDocumentVersion[] @relation("VehicleDocumentMaintenanceEntry")
+  expenses         VehicleExpense[]         @relation("VehicleExpenseMaintenance")
+
+  @@unique([companyId, truckId, idempotencyKey])
   @@unique([id, truckId, companyId], map: "vehicle_maintenance_entries_id_truck_company_key")
-  expenses VehicleExpense[] @relation("VehicleExpenseMaintenance")
+  @@index([companyId, truckId, occurredAt])
+  @@map("vehicle_maintenance_entries")
 }
 
 enum MileageEntryKind {
@@ -1788,27 +1801,26 @@ model MileageTrip {
   teamNameSnapshot      String?
   chauffeurNameSnapshot String?
 
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  truck     Truck   @relation("TruckMileageTrips", fields: [truckId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  company    Company       @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  truck      Truck         @relation("TruckMileageTrips", fields: [truckId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
   startEntry MileageEntry  @relation("MileageTripStart", fields: [startEntryId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "mileage_trips_start_truck_company_fkey")
   endEntry   MileageEntry? @relation("MileageTripEnd", fields: [endEntryId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "mileage_trips_end_truck_company_fkey")
-  worksite   Worksite? @relation("MileageWorksite", fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
-  team       Team?     @relation("MileageTeam", fields: [teamId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
-  chauffeur  Employee? @relation("MileageDriver", fields: [chauffeurId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  worksite   Worksite?     @relation("MileageWorksite", fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  team       Team?         @relation("MileageTeam", fields: [teamId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  chauffeur  Employee?     @relation("MileageDriver", fields: [chauffeurId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  tour       VehicleTour?
 
   @@unique([startEntryId, truckId, companyId], map: "mileage_trips_start_truck_company_key")
   @@unique([endEntryId, truckId, companyId], map: "mileage_trips_end_truck_company_key")
+  // Véhicules V3 — ajouts des lots isolés.
+  @@unique([id, truckId, companyId], map: "mileage_trips_id_truck_company_key")
+  @@unique([id, truckId, companyId])
   // Un seul trajet ouvert : index partiel SQL mileage_trips_v2_open_truck_key.
   @@index([companyId, truckId])
   @@index([worksiteId, companyId])
   @@index([teamId, companyId])
   @@index([chauffeurId, companyId])
   @@map("mileage_trips")
-
-  // Véhicules V3 — ajouts des lots isolés.
-  @@unique([id, truckId, companyId], map: "mileage_trips_id_truck_company_key")
-  tour VehicleTour?
-  @@unique([id, truckId, companyId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1841,11 +1853,11 @@ model AcquisitionMessage {
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
 
-  company          Company                  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  resolvedPartner  AcquisitionPartner?      @relation(fields: [resolvedPartnerId], references: [id], onDelete: SetNull)
-  draft            WorksiteImportDraft?
-  attachments      AcquisitionAttachment[]
-  content          AcquisitionMessageContent?
+  company           Company                       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  resolvedPartner   AcquisitionPartner?           @relation(fields: [resolvedPartnerId], references: [id], onDelete: SetNull)
+  draft             WorksiteImportDraft?
+  attachments       AcquisitionAttachment[]
+  content           AcquisitionMessageContent?
   contentFetchState AcquisitionContentFetchState?
 
   // Idempotence par tenant + boîte : le même id Gmail peut exister sur deux
@@ -1918,36 +1930,36 @@ model AcquisitionContentFetchState {
 }
 
 model WorksiteImportDraft {
-  id                   String                    @id @default(cuid())
-  companyId            String
-  acquisitionMessageId String                    @unique
-  status               WorksiteImportDraftStatus @default(PENDING_EXTRACTION)
-  proposedClientId     String?
-  proposedClientName   String?
-  proposedWorksiteName String?
-  proposedAddress      String?
-  proposedPostalCode   String?
-  proposedCity         String?
-  proposedContactName  String?
-  proposedContactEmail String?
-  proposedContactPhone String?
-  proposedStartDate    DateTime?
-  proposedEndDate      DateTime?
+  id                      String                                 @id @default(cuid())
+  companyId               String
+  acquisitionMessageId    String                                 @unique
+  status                  WorksiteImportDraftStatus              @default(PENDING_EXTRACTION)
+  proposedClientId        String?
+  proposedClientName      String?
+  proposedWorksiteName    String?
+  proposedAddress         String?
+  proposedPostalCode      String?
+  proposedCity            String?
+  proposedContactName     String?
+  proposedContactEmail    String?
+  proposedContactPhone    String?
+  proposedStartDate       DateTime?
+  proposedEndDate         DateTime?
   /// Date métier d’émission / datation de la consultation client (≠ receivedAt, ≠ dates chantier).
-  clientConsultationDate DateTime?
-  proposedDescription  String?
-  extractedData        Json?
-  confidenceData       Json?
+  clientConsultationDate  DateTime?
+  proposedDescription     String?
+  extractedData           Json?
+  confidenceData          Json?
   // PLAN-ACQ-005B — warnings catalogués (pas de texte provider libre)
-  warningData          Json?
-  version              Int                       @default(0)
-  extractionStartedAt  DateTime?
-  extractionCompletedAt DateTime?
+  warningData             Json?
+  version                 Int                                    @default(0)
+  extractionStartedAt     DateTime?
+  extractionCompletedAt   DateTime?
   contentHashAtExtraction String?
   extractionSchemaVersion String?
-  extractionAttemptCount  Int                    @default(0)
-  extractionProvider   String?
-  extractionModel      String?
+  extractionAttemptCount  Int                                    @default(0)
+  extractionProvider      String?
+  extractionModel         String?
   lastExtractionErrorCode String?
   lastExtractionErrorAt   DateTime?
   /// PLAN-ACQ-DETECTION-001 — preuve Detection liée au contentHash (NULL = historique inconnu / fail-closed).
@@ -1956,12 +1968,12 @@ model WorksiteImportDraft {
   detectionCompletedAt    DateTime?
   /// PLAN-ACQ-DETECTION-001 — retry AUTO extraction (NULL = historique / fail-closed).
   extractionRetryable     Boolean?
-  reviewedByUserId     String?
-  reviewedAt           DateTime?
-  rejectionReason      String?
-  createdWorksiteId    String?                   @unique
-  createdAt            DateTime                  @default(now())
-  updatedAt            DateTime                  @updatedAt
+  reviewedByUserId        String?
+  reviewedAt              DateTime?
+  rejectionReason         String?
+  createdWorksiteId       String?                                @unique
+  createdAt               DateTime                               @default(now())
+  updatedAt               DateTime                               @updatedAt
 
   company            Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
   // FK composite (acquisitionMessageId, companyId) → (id, companyId) :
@@ -2028,9 +2040,9 @@ model AcquisitionAttachment {
   createdAt            DateTime                      @default(now())
   updatedAt            DateTime                      @updatedAt
 
-  company            Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company            Company                          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   // FK composite : même garantie anti inter-tenant que pour les brouillons.
-  acquisitionMessage AcquisitionMessage @relation(fields: [acquisitionMessageId, companyId], references: [id, companyId], onDelete: Cascade)
+  acquisitionMessage AcquisitionMessage               @relation(fields: [acquisitionMessageId, companyId], references: [id, companyId], onDelete: Cascade)
   accessLogs         AcquisitionAttachmentAccessLog[]
 
   @@unique([id, companyId])
@@ -2054,8 +2066,8 @@ model AcquisitionAttachmentAccessLog {
   reasonCode            String?
   createdAt             DateTime                           @default(now())
 
-  company    Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company    Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user       User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   attachment AcquisitionAttachment? @relation(fields: [attachmentId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([companyId, createdAt])
@@ -2094,37 +2106,37 @@ model AcquisitionScanCursor {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model AcquisitionPartner {
-  id         String            @id @default(cuid())
-  companyId  String
-  name       String
+  id                 String            @id @default(cuid())
+  companyId          String
+  name               String
   // Code interne stable par tenant (slug) — ex. "lauralu" (donnée, pas constante pipeline)
-  code       String
+  code               String
   // Canal connecteur : enum existant AcquisitionSource (GMAIL V1) — pas un nouveau type
-  connector  AcquisitionSource @default(GMAIL)
+  connector          AcquisitionSource @default(GMAIL)
   // Clé technique contrôlée (V1: "consultations") — pas une chaîne libre utilisateur
-  pipeline   String            @default("consultations")
-  active     Boolean           @default(true)
+  pipeline           String            @default("consultations")
+  active             Boolean           @default(true)
   /// Priorité relative (plus petit = plus prioritaire) — Lot I
-  priority   Int               @default(100)
+  priority           Int               @default(100)
   /// Si true : domaine seul insuffisant, email allowlist obligatoire
-  requireExactEmail  Boolean   @default(false)
+  requireExactEmail  Boolean           @default(false)
   /// Politique auto (Lot I / F) — défaut OFF (revue humaine)
-  autoApproveEnabled Boolean   @default(false)
-  autoConvertEnabled Boolean   @default(false)
+  autoApproveEnabled Boolean           @default(false)
+  autoConvertEnabled Boolean           @default(false)
   /// Autorise création client NEW en auto-convert — défaut OFF (R2)
-  allowCreateClient  Boolean   @default(false)
+  allowCreateClient  Boolean           @default(false)
   /// Seuil confiance [0..1] ; null = fallback env global
   minConfidence      Float?
   /// PLAN-ACQ-CONSULTATIONS-FIX-001 — Client Planificator déterministe (nullable)
   clientId           String?
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
 
-  company  Company                     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company  Company                    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   /// FK composite tenant-safe. onDelete Restrict : companyId est NOT NULL —
   /// une politique SetNull sur FK composite est incompatible ; un Client
   /// référencé ne peut pas être supprimé tant qu’un Partner le pointe.
-  client   Client?                     @relation(fields: [clientId, companyId], references: [id, companyId], onDelete: Restrict)
+  client   Client?                    @relation(fields: [clientId, companyId], references: [id, companyId], onDelete: Restrict)
   domains  AcquisitionPartnerDomain[]
   emails   AcquisitionPartnerEmail[]
   messages AcquisitionMessage[]
@@ -2277,20 +2289,20 @@ model IntegrationConnection {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model InboundEnvelope {
-  id               String                  @id @default(cuid())
-  companyId        String
-  connectionId     String
-  connectorType    String
-  externalId       String
-  idempotencyKey   String
-  receivedAt       DateTime
-  payloadRef       String
-  contentType      String
-  schemaVersion    String                  @default("1.0.0")
-  lifecycleStatus  EnvelopeLifecycleStatus @default(RECEIVED)
-  rawPayloadHash   String?
-  createdAt        DateTime                @default(now())
-  updatedAt        DateTime                @updatedAt
+  id              String                  @id @default(cuid())
+  companyId       String
+  connectionId    String
+  connectorType   String
+  externalId      String
+  idempotencyKey  String
+  receivedAt      DateTime
+  payloadRef      String
+  contentType     String
+  schemaVersion   String                  @default("1.0.0")
+  lifecycleStatus EnvelopeLifecycleStatus @default(RECEIVED)
+  rawPayloadHash  String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
 
   company            Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
   connection         IntegrationConnection @relation(fields: [connectionId, companyId], references: [id, companyId], onDelete: Cascade, map: "integration_inbound_envelopes_connectionId_companyId_fkey")
@@ -2350,9 +2362,9 @@ model Task {
   status      TaskStatus   @default(TODO)
   priority    TaskPriority @default(MEDIUM)
   dueDate     DateTime?
-  assigneeId  String?      // employeeId de l'employé assigné (même entreprise)
-  worksiteId  String?      // chantier rattaché (même entreprise)
-  createdById String       // userId du créateur (identifiant scalaire, sans FK)
+  assigneeId  String? // employeeId de l'employé assigné (même entreprise)
+  worksiteId  String? // chantier rattaché (même entreprise)
+  createdById String // userId du créateur (identifiant scalaire, sans FK)
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
@@ -2490,7 +2502,6 @@ model AgentGatewayControl {
   @@map("agent_gateway_control")
 }
 
-
 // ═══════════════════════════════════════════════════════════════════════════
 // COMPTABILITÉ — Lot A1 (ADR-PLAN-003, SPEC-ACC-A) : partie double, multi-société.
 // Montants en centimes (BigInt). Écritures validées immuables (déclencheurs SQL de la
@@ -2510,23 +2521,23 @@ enum JournalEntryStatus {
 }
 
 enum AccountingJournalKind {
-  SALES      // VT
-  PURCHASES  // HA
-  BANK       // BQ
-  MISC       // OD
+  SALES // VT
+  PURCHASES // HA
+  BANK // BQ
+  MISC // OD
 }
 
 model AccountingAccount {
   id        String   @id @default(cuid())
   companyId String
-  number    String   // numéro PCG (ex. 411000)
+  number    String // numéro PCG (ex. 411000)
   label     String
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
 
-  company Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  lines   JournalEntryLine[]
-  supplierDefaults Supplier[]        // Lot C5
+  company          Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  lines            JournalEntryLine[]
+  supplierDefaults Supplier[] // Lot C5
   supplierInvoices SupplierInvoice[] // Lot C5
 
   @@unique([companyId, number])
@@ -2537,7 +2548,7 @@ model AccountingAccount {
 model AccountingJournal {
   id        String                @id @default(cuid())
   companyId String
-  code      String                // VT, HA, BQ, OD
+  code      String // VT, HA, BQ, OD
   label     String
   kind      AccountingJournalKind
   createdAt DateTime              @default(now())
@@ -2622,12 +2633,12 @@ model JournalEntry {
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 
-  company    Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  journal    AccountingJournal  @relation(fields: [companyId, journalId], references: [companyId, id], onDelete: Restrict)
-  fiscalYear FiscalYear         @relation(fields: [companyId, fiscalYearId], references: [companyId, id], onDelete: Restrict)
-  reversalOf JournalEntry?      @relation("EntryReversal", fields: [companyId, reversalOfId], references: [companyId, id], onDelete: Restrict)
-  reversedBy JournalEntry[]     @relation("EntryReversal")
-  lines      JournalEntryLine[]
+  company          Company                     @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  journal          AccountingJournal           @relation(fields: [companyId, journalId], references: [companyId, id], onDelete: Restrict)
+  fiscalYear       FiscalYear                  @relation(fields: [companyId, fiscalYearId], references: [companyId, id], onDelete: Restrict)
+  reversalOf       JournalEntry?               @relation("EntryReversal", fields: [companyId, reversalOfId], references: [companyId, id], onDelete: Restrict)
+  reversedBy       JournalEntry[]              @relation("EntryReversal")
+  lines            JournalEntryLine[]
   documentPostings AccountingDocumentPosting[] // Lot C5
 
   @@unique([companyId, id])
@@ -2647,7 +2658,7 @@ model JournalEntryLine {
   label       String?
   debitCents  BigInt  @default(0)
   creditCents BigInt  @default(0)
-  vatRateBp   Int?    // taux de TVA en points de base (2000 = 20 %)
+  vatRateBp   Int? // taux de TVA en points de base (2000 = 20 %)
 
   company Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
   entry   JournalEntry      @relation(fields: [companyId, entryId], references: [companyId, id], onDelete: Restrict)
@@ -2671,8 +2682,8 @@ model VehicleExpense {
   supplier              String?
   reference             String?
   receiptFingerprint    String?
-  maintenanceEntryId String?
-  documentVersionId   String?
+  maintenanceEntryId    String?
+  documentVersionId     String?
   notes                 String?
   status                String                     @default("PENDING")
   revision              Int                        @default(1)
@@ -2684,15 +2695,14 @@ model VehicleExpense {
   truck                 Truck                      @relation(fields: [truckId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
   allocations           VehicleExpenseAllocation[]
   commands              VehicleExpenseCommand[]
+  documentVersion       VehicleDocumentVersion?    @relation("VehicleExpenseDocument", fields: [documentVersionId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "vehicle_expenses_document_scope_fkey")
+  maintenanceEntry      VehicleMaintenanceEntry?   @relation("VehicleExpenseMaintenance", fields: [maintenanceEntryId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "vehicle_expenses_maintenance_scope_fkey")
 
   @@unique([id, truckId, companyId])
   @@unique([companyId, sourceExpenseReportId])
   @@index([companyId, truckId, occurredAt])
   @@map("vehicle_expenses")
-  documentVersion VehicleDocumentVersion? @relation("VehicleExpenseDocument", fields: [documentVersionId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "vehicle_expenses_document_scope_fkey")
-  maintenanceEntry VehicleMaintenanceEntry? @relation("VehicleExpenseMaintenance", fields: [maintenanceEntryId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "vehicle_expenses_maintenance_scope_fkey")
 }
-
 
 model VehicleExpenseAllocation {
   id            String         @id @default(cuid())
@@ -2706,7 +2716,6 @@ model VehicleExpenseAllocation {
   @@index([companyId, truckId, expenseId])
   @@map("vehicle_expense_allocations")
 }
-
 
 model VehicleExpenseCommand {
   id             String         @id @default(cuid())
@@ -2728,74 +2737,81 @@ model VehicleExpenseCommand {
   @@map("vehicle_expense_commands")
 }
 
-
 model VehicleTour {
- id String @id @default(cuid())
- companyId String
- truckId String
- teamId String?
- chauffeurId String?
- teamNameSnapshot String?
- chauffeurNameSnapshot String?
- title String
- startsAt DateTime @db.Timestamptz(3)
- endsAt DateTime @db.Timestamptz(3)
- status String @default("PLANNED")
- revision Int @default(1)
- estimatedKm Float?
- mileageTripId String? @unique
- createdById String
- createdAt DateTime @default(now())
- completedAt DateTime?
- truck Truck @relation(fields: [truckId, companyId], references: [id, companyId], onDelete: Restrict)
- mileageTrip MileageTrip? @relation(fields: [mileageTripId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict)
- stops VehicleTourStop[]
- commands VehicleTourCommand[]
- @@unique([id, companyId])
- @@unique([mileageTripId, truckId, companyId])
- @@index([companyId, truckId, startsAt])
- @@map("vehicle_tours")
-}
+  id                    String               @id @default(cuid())
+  companyId             String
+  truckId               String
+  teamId                String?
+  chauffeurId           String?
+  teamNameSnapshot      String?
+  chauffeurNameSnapshot String?
+  title                 String
+  startsAt              DateTime             @db.Timestamptz(3)
+  endsAt                DateTime             @db.Timestamptz(3)
+  status                String               @default("PLANNED")
+  revision              Int                  @default(1)
+  estimatedKm           Float?
+  /// AUTO : km calculés et tenus à jour par Planificator ; MANUAL : saisis à la main (jamais écrasés) ; null : tournée antérieure.
+  estimatedKmSource     String?
+  estimatedKmComputedAt DateTime?            @db.Timestamptz(3)
+  /// Empreinte des données du dernier calcul automatique (étapes, dates, planning, logement) : recalcul seulement si elles changent.
+  estimatedKmInputHash  String?
+  /// Détail du dernier calcul automatique (lignes, logement, itinéraire) ou code d'échec.
+  estimatedKmDetail     Json?
+  mileageTripId         String?              @unique
+  createdById           String
+  createdAt             DateTime             @default(now())
+  completedAt           DateTime?
+  truck                 Truck                @relation(fields: [truckId, companyId], references: [id, companyId], onDelete: Restrict)
+  mileageTrip           MileageTrip?         @relation(fields: [mileageTripId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict)
+  stops                 VehicleTourStop[]
+  commands              VehicleTourCommand[]
 
+  @@unique([id, companyId])
+  @@unique([mileageTripId, truckId, companyId])
+  @@index([companyId, truckId, startsAt])
+  @@index([status, estimatedKmSource, estimatedKmComputedAt])
+  @@map("vehicle_tours")
+}
 
 model VehicleTourStop {
- id String @id @default(cuid())
- tourId String
- companyId String
- position Int
- label String
- address String
- worksiteId String?
- clientId String?
- latitude Float?
- longitude Float?
- validatedById String
- validatedAt DateTime @default(now())
- completedAt DateTime?
- skippedAt DateTime? @db.Timestamptz(3)
- skippedReason String?
- skippedById String?
- skippedBy User? @relation("TourStopSkippedBy", fields: [skippedById], references: [id], onDelete: Restrict)
- tour VehicleTour @relation(fields: [tourId, companyId], references: [id, companyId], onDelete: Restrict)
- @@unique([tourId, position])
- @@map("vehicle_tour_stops")
-}
+  id            String      @id @default(cuid())
+  tourId        String
+  companyId     String
+  position      Int
+  label         String
+  address       String
+  worksiteId    String?
+  clientId      String?
+  latitude      Float?
+  longitude     Float?
+  validatedById String
+  validatedAt   DateTime    @default(now())
+  completedAt   DateTime?
+  skippedAt     DateTime?   @db.Timestamptz(3)
+  skippedReason String?
+  skippedById   String?
+  skippedBy     User?       @relation("TourStopSkippedBy", fields: [skippedById], references: [id], onDelete: Restrict)
+  tour          VehicleTour @relation(fields: [tourId, companyId], references: [id, companyId], onDelete: Restrict)
 
+  @@unique([tourId, position])
+  @@map("vehicle_tour_stops")
+}
 
 model VehicleTourCommand {
- id String @id @default(cuid())
- tourId String
- companyId String
- truckId String
- key String @db.Uuid
- requestHash String
- acceptedRevision Int
- createdAt DateTime @default(now())
- tour VehicleTour @relation(fields: [tourId, companyId], references: [id, companyId], onDelete: Restrict)
- @@unique([companyId, truckId, key])
- @@map("vehicle_tour_commands")
-}
+  id               String      @id @default(cuid())
+  tourId           String
+  companyId        String
+  truckId          String
+  key              String      @db.Uuid
+  requestHash      String
+  acceptedRevision Int
+  createdAt        DateTime    @default(now())
+  tour             VehicleTour @relation(fields: [tourId, companyId], references: [id, companyId], onDelete: Restrict)
 
+  @@unique([companyId, truckId, key])
+  @@map("vehicle_tour_commands")
+}
 
 model VehicleAddressImport {
   id             String    @id @default(cuid())
@@ -2821,7 +2837,6 @@ model VehicleAddressImport {
   @@map("vehicle_address_imports")
 }
 
-
 model VehicleImportProviderWindow {
   companyId   String
   provider    String
@@ -2833,15 +2848,13 @@ model VehicleImportProviderWindow {
   @@map("vehicle_import_provider_windows")
 }
 
-
 enum VehicleDocumentCategory {
   TECHNICAL_INSPECTION // Contrôle technique
-  REPAIR_MAINTENANCE   // Réparations et entretien (factures, comptes rendus)
-  REGISTRATION         // Carte grise
-  INSURANCE            // Assurance
+  REPAIR_MAINTENANCE // Réparations et entretien (factures, comptes rendus)
+  REGISTRATION // Carte grise
+  INSURANCE // Assurance
   EXPENSE_RECEIPT
 }
-
 
 model VehicleDocument {
   id                     String                  @id @default(cuid())
@@ -2872,7 +2885,6 @@ model VehicleDocument {
   @@index([companyId, truckId, category])
   @@map("vehicle_documents")
 }
-
 
 model VehicleDocumentVersion {
   id                     String    @id @default(cuid())
@@ -2918,18 +2930,17 @@ model VehicleDocumentVersion {
   maintenanceEntry VehicleMaintenanceEntry?  @relation("VehicleDocumentMaintenanceEntry", fields: [maintenanceEntryId, truckId, companyId], references: [id, truckId, companyId], onDelete: Restrict, onUpdate: Restrict, map: "vehicle_document_versions_maintenance_entry_fkey")
   currentOf        VehicleDocument?          @relation("VehicleDocumentCurrentVersion")
   reminders        VehicleDocumentReminder[]
+  expenses         VehicleExpense[]          @relation("VehicleExpenseDocument")
 
   @@unique([id, documentId, companyId], map: "vehicle_document_versions_id_document_company_key")
   @@unique([documentId, versionNumber], map: "vehicle_document_versions_document_number_key")
   @@unique([companyId, truckId, idempotencyKey], map: "vehicle_document_versions_company_truck_idempotency_key")
   @@unique([companyId, storageKey], map: "vehicle_document_versions_company_storage_key")
+  @@unique([id, truckId, companyId], map: "vehicle_document_versions_id_truck_company_key")
   @@index([companyId, validUntil])
   @@index([maintenanceEntryId, truckId, companyId], map: "vehicle_document_versions_maintenance_entry_idx")
   @@map("vehicle_document_versions")
-  expenses VehicleExpense[] @relation("VehicleExpenseDocument")
-  @@unique([id, truckId, companyId], map: "vehicle_document_versions_id_truck_company_key")
 }
-
 
 model VehicleDocumentReminderSetting {
   id                    String   @id @default(cuid())
@@ -2944,7 +2955,6 @@ model VehicleDocumentReminderSetting {
 
   @@map("vehicle_document_reminder_settings")
 }
-
 
 model VehicleDocumentReminder {
   id              String   @id @default(cuid())
@@ -2968,7 +2978,6 @@ model VehicleDocumentReminder {
   @@map("vehicle_document_reminders")
 }
 
-
 model VehicleAuditLog {
   id                String   @id @default(cuid())
   companyId         String
@@ -2991,18 +3000,21 @@ model VehicleAuditLog {
 }
 
 model VehicleCartographyAdmission {
- provider String @id
- nextAllowedAt DateTime @db.Timestamptz(6)
- @@map("vehicle_cartography_admission")
+  provider      String   @id
+  nextAllowedAt DateTime @db.Timestamptz(6)
+
+  @@map("vehicle_cartography_admission")
 }
+
 model VehicleCartographyCache {
- key String @id
- companyId String
- value Json
- expiresAt DateTime @db.Timestamptz(6)
- company Company @relation(fields:[companyId],references:[id],onDelete:Cascade)
- @@index([expiresAt],map:"vehicle_cartography_cache_expiresAt_idx")
- @@map("vehicle_cartography_cache")
+  key       String   @id
+  companyId String
+  value     Json
+  expiresAt DateTime @db.Timestamptz(6)
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt], map: "vehicle_cartography_cache_expiresAt_idx")
+  @@map("vehicle_cartography_cache")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3013,7 +3025,7 @@ model VehicleCartographyCache {
 model AccountingDocumentPosting {
   id            String   @id @default(cuid())
   companyId     String
-  sourceType    String   // INVOICE | CREDIT_NOTE | DEPOSIT | PAYMENT | SUPPLIER_INVOICE
+  sourceType    String // INVOICE | CREDIT_NOTE | DEPOSIT | PAYMENT | SUPPLIER_INVOICE
   sourceId      String
   sourceVersion Int      @default(1)
   entryId       String
@@ -3040,11 +3052,11 @@ model Supplier {
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
-  company               Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  defaultExpenseAccount AccountingAccount? @relation(fields: [companyId, defaultExpenseAccountId], references: [companyId, id], onDelete: Restrict)
+  company               Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  defaultExpenseAccount AccountingAccount?        @relation(fields: [companyId, defaultExpenseAccountId], references: [companyId, id], onDelete: Restrict)
   invoices              SupplierInvoice[]
-  purchaseOrders PurchaseOrder[]
-  equipmentRentals EquipmentRentalContract[]
+  purchaseOrders        PurchaseOrder[]
+  equipmentRentals      EquipmentRentalContract[]
   equipmentMaintenances EquipmentMaintenance[]
 
   @@unique([companyId, id])
@@ -3105,10 +3117,10 @@ model SupplierInvoice {
   createdAt        DateTime              @default(now())
   updatedAt        DateTime              @updatedAt
 
-  company        Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  supplier       Supplier?            @relation(fields: [companyId, supplierId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
-  expenseAccount AccountingAccount?   @relation(fields: [companyId, expenseAccountId], references: [companyId, id], onDelete: Restrict)
-  file           SupplierInvoiceFile? @relation(fields: [companyId, fileId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
+  company          Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  supplier         Supplier?                 @relation(fields: [companyId, supplierId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
+  expenseAccount   AccountingAccount?        @relation(fields: [companyId, expenseAccountId], references: [companyId, id], onDelete: Restrict)
+  file             SupplierInvoiceFile?      @relation(fields: [companyId, fileId], references: [companyId, id], onDelete: Restrict) // Correctif P2-02
   bankTransactions BankTransaction[]
   goodsReceipts    GoodsReceipt[]
   equipmentRentals EquipmentRentalContract[]
@@ -3145,25 +3157,25 @@ enum BankTransactionStatus {
 }
 
 model BankTransaction {
-  id                       String                @id @default(cuid())
+  id                       String                   @id @default(cuid())
   companyId                String
   importId                 String
-  date                     DateTime              @db.Date
+  date                     DateTime                 @db.Date
   label                    String
   amountCents              BigInt
   reference                String?
   fingerprint              String
-  status                   BankTransactionStatus @default(PENDING)
+  status                   BankTransactionStatus    @default(PENDING)
   matchedInvoiceId         String?
   matchedPaymentId         String?
   matchedSupplierInvoiceId String?
   matchedAt                DateTime?
   notes                    String?
-  createdAt                DateTime              @default(now())
+  createdAt                DateTime                 @default(now())
   // Correctif P2-01 : identité d'une opération (identifiant bancaire stable, rang d'occurrence du même tuple, ambiguïté).
   externalId               String?
-  occurrence               Int                   @default(1)
-  identityAmbiguous        Boolean               @default(false)
+  occurrence               Int                      @default(1)
+  identityAmbiguous        Boolean                  @default(false)
   // Correctif R4 : collision inter-fichiers (tuple déjà connu d'un relevé antérieur, sans identifiant bancaire) — conservée en
   // attente d'une résolution explicite (doublon ⇒ ignorée ; opération distincte ⇒ rapprochable) ; provenance = opération connue.
   tupleKey                 String?
@@ -3224,23 +3236,23 @@ model VatDeclaration {
 
 enum WorksitePhotoPhase {
   BEFORE // Avant chantier
-  AFTER  // Après chantier
+  AFTER // Après chantier
 }
 
 enum WorksitePhotoStatus {
   PENDING // en attente d'envoi par Hermes
-  SENT    // envoyée (preuve d'envoi complète et figée)
+  SENT // envoyée (preuve d'envoi complète et figée)
   DELETED // corbeille Drive confirmée (uniquement depuis SENT)
   REJECTED // rejetée avant envoi par un Super Admin, corbeille Drive confirmée (terminal, sans preuve d'envoi ; LOT-ADMIN-REVIEW)
 }
 
 enum WorksitePhotoReservationState {
-  RESERVED  // clé réservée, identifiant Drive préalloué, aucun octet envoyé
+  RESERVED // clé réservée, identifiant Drive préalloué, aucun octet envoyé
   UPLOADING // tentative détentrice du bail en cours d'envoi vers Drive
   COMMITTED // photo rattachée (terminal)
   ABANDONED // bail expiré ou échec applicatif ; non réutilisable ; surveillé sans limite de durée
-  CLEANING  // nettoyage exclusif par le cron de réconciliation
-  CLOSED    // suppression distante confirmée, ou clôture motivée par un administrateur (terminal)
+  CLEANING // nettoyage exclusif par le cron de réconciliation
+  CLOSED // suppression distante confirmée, ou clôture motivée par un administrateur (terminal)
 }
 
 enum WorksitePhotoReservationCloseReason {
@@ -3255,49 +3267,49 @@ enum WorksitePhotoDriveFolderState {
 
 enum WorksitePhotoDriveConnectionStatus {
   ACTIVE
-  ERROR        // refresh refusé par Google (invalid_grant), quelle qu'en soit la cause
+  ERROR // refresh refusé par Google (invalid_grant), quelle qu'en soit la cause
   DISCONNECTED // tokens effacés localement ; aucune révocation Google (D16)
 }
 
 model WorksiteTruckPhoto {
-  id                     String              @id // = reservation.photoId, attribué à la réservation (D15)
-  companyId              String
-  worksiteId             String
-  truckId                String
-  reservationId          String              @unique
-  phase                  WorksitePhotoPhase
-  status                 WorksitePhotoStatus @default(PENDING)
-  driveFileId            String              // identifiant Drive opaque préalloué ; jamais d'URL
-  drivePath              String              // snapshot du chemin logique /Chantiers/<client>-<chantier>~<id6>/<yyyy-MM-dd>/<fichier>
-  originalFilename       String
-  mimeType               String              // image/jpeg | image/png, issu des magic bytes
-  sizeBytes              Int
-  sha256                 String              @db.Char(64)
-  takenAt                DateTime?           @db.Timestamptz(3) // déclaré par le client, informatif
-  uploadedAt             DateTime            @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
-  uploadedById           String              // identifiant scalaire sans FK (patron Task.createdById)
-  uploadedByNameSnapshot String
+  id                            String              @id // = reservation.photoId, attribué à la réservation (D15)
+  companyId                     String
+  worksiteId                    String
+  truckId                       String
+  reservationId                 String              @unique
+  phase                         WorksitePhotoPhase
+  status                        WorksitePhotoStatus @default(PENDING)
+  driveFileId                   String // identifiant Drive opaque préalloué ; jamais d'URL
+  drivePath                     String // snapshot du chemin logique /Chantiers/<client>-<chantier>~<id6>/<yyyy-MM-dd>/<fichier>
+  originalFilename              String
+  mimeType                      String // image/jpeg | image/png, issu des magic bytes
+  sizeBytes                     Int
+  sha256                        String              @db.Char(64)
+  takenAt                       DateTime?           @db.Timestamptz(3) // déclaré par le client, informatif
+  uploadedAt                    DateTime            @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  uploadedById                  String // identifiant scalaire sans FK (patron Task.createdById)
+  uploadedByNameSnapshot        String
   // Preuve d'envoi déclarée par Hermes (D17) : complète et non vide pour SENT/DELETED, figée après SENT.
-  sentAt                 DateTime?           @db.Timestamptz(3)
-  sentByAgent            String?
-  sentTo                 String?
-  sentMessageId          String?
-  sentTransportKind      String?             // smtp | provider:<nom>
-  sentTransportRef       String?
+  sentAt                        DateTime?           @db.Timestamptz(3)
+  sentByAgent                   String?
+  sentTo                        String?
+  sentMessageId                 String?
+  sentTransportKind             String? // smtp | provider:<nom>
+  sentTransportRef              String?
   // Suppression en deux phases : demande en base, corbeille Drive, confirmation ; purge différée.
-  trashRequestedAt       DateTime?           @db.Timestamptz(3)
-  trashedAt              DateTime?           @db.Timestamptz(3)
-  purgedAt               DateTime?           @db.Timestamptz(3)
-  unsentAlertedAt        DateTime?           @db.Timestamptz(3)
+  trashRequestedAt              DateTime?           @db.Timestamptz(3)
+  trashedAt                     DateTime?           @db.Timestamptz(3)
+  purgedAt                      DateTime?           @db.Timestamptz(3)
+  unsentAlertedAt               DateTime?           @db.Timestamptz(3)
   // Contrôle Super Admin (LOT-ADMIN-REVIEW, D19–D21) : validation interne INDÉPENDANTE du statut (PENDING reste « non envoyée »),
   // rejet avant envoi en deux phases (intention, corbeille Drive, finalisation REJECTED). Horodatages posés par la base, figés.
-  approvedAt                    DateTime? @db.Timestamptz(3)
+  approvedAt                    DateTime?           @db.Timestamptz(3)
   approvedById                  String?
   approvedByNameSnapshot        String?
-  rejectRequestedAt             DateTime? @db.Timestamptz(3)
+  rejectRequestedAt             DateTime?           @db.Timestamptz(3)
   rejectRequestedById           String?
   rejectRequestedByNameSnapshot String?
-  rejectedAt                    DateTime? @db.Timestamptz(3) // corbeille Drive confirmée pour une photo rejetée
+  rejectedAt                    DateTime?           @db.Timestamptz(3) // corbeille Drive confirmée pour une photo rejetée
   // Auteur d'une suppression APRÈS envoi (cycle SENT → DELETED, trashRequestedAt / trashedAt) : posé avec la demande, figé.
   trashRequestedById            String?
   trashRequestedByNameSnapshot  String?
@@ -3318,29 +3330,29 @@ model WorksiteTruckPhoto {
 }
 
 model WorksitePhotoUploadReservation {
-  id                 String                               @id @default(cuid())
-  companyId          String
-  idempotencyKey     String                               @db.Uuid
-  requestHash        String                               @db.Char(64)
-  worksiteId         String
-  truckId            String
-  uploadedById       String
-  photoId            String                               @unique // devient l'id de la photo au commit
-  driveFileId        String                               @unique // préalloué par files.generateIds (D15)
-  state              WorksitePhotoReservationState        @default(RESERVED)
-  attemptGeneration  Int                                  @default(1)
-  attemptOwner       String                               @db.Uuid
-  leaseExpiresAt     DateTime                             @db.Timestamptz(3)
-  driveFileCreatedAt DateTime?                            @db.Timestamptz(3)
-  abandonedAt        DateTime?                            @db.Timestamptz(3)
-  lastRemoteCheckAt  DateTime?                            @db.Timestamptz(3)
-  remoteCheckCount   Int                                  @default(0)
-  unresolvedAlertedAt DateTime?                           @db.Timestamptz(3)
-  closedAt           DateTime?                            @db.Timestamptz(3)
-  closeReason        WorksitePhotoReservationCloseReason?
-  closeNote          String?
-  createdAt          DateTime                             @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
-  updatedAt          DateTime                             @updatedAt @db.Timestamptz(3)
+  id                  String                               @id @default(cuid())
+  companyId           String
+  idempotencyKey      String                               @db.Uuid
+  requestHash         String                               @db.Char(64)
+  worksiteId          String
+  truckId             String
+  uploadedById        String
+  photoId             String                               @unique // devient l'id de la photo au commit
+  driveFileId         String                               @unique // préalloué par files.generateIds (D15)
+  state               WorksitePhotoReservationState        @default(RESERVED)
+  attemptGeneration   Int                                  @default(1)
+  attemptOwner        String                               @db.Uuid
+  leaseExpiresAt      DateTime                             @db.Timestamptz(3)
+  driveFileCreatedAt  DateTime?                            @db.Timestamptz(3)
+  abandonedAt         DateTime?                            @db.Timestamptz(3)
+  lastRemoteCheckAt   DateTime?                            @db.Timestamptz(3)
+  remoteCheckCount    Int                                  @default(0)
+  unresolvedAlertedAt DateTime?                            @db.Timestamptz(3)
+  closedAt            DateTime?                            @db.Timestamptz(3)
+  closeReason         WorksitePhotoReservationCloseReason?
+  closeNote           String?
+  createdAt           DateTime                             @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  updatedAt           DateTime                             @updatedAt @db.Timestamptz(3)
 
   company Company             @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   photo   WorksiteTruckPhoto?
@@ -3357,12 +3369,12 @@ model WorksitePhotoEvent {
   companyId         String
   photoId           String?
   worksiteId        String?
-  action            String   // RESERVED | UPLOAD_SUPERSEDED | UPLOADED | SENT | TRASH_REQUESTED | TRASHED | PURGED | CONTACT_SET | UNSENT_ALERT | ACCESS_GRANTED | ACCESS_DENIED | FILE_MISSING | CLEANUP_FAILED | UNRESOLVED_ABANDON | OPERATOR_CLOSE | RECONCILED
-  actorKind         String   // USER | AGENT | SYSTEM
+  action            String // RESERVED | UPLOAD_SUPERSEDED | UPLOADED | SENT | TRASH_REQUESTED | TRASHED | PURGED | CONTACT_SET | UNSENT_ALERT | ACCESS_GRANTED | ACCESS_DENIED | FILE_MISSING | CLEANUP_FAILED | UNRESOLVED_ABANDON | OPERATOR_CLOSE | RECONCILED
+  actorKind         String // USER | AGENT | SYSTEM
   actorId           String
   actorNameSnapshot String
-  outcome           String   // DONE | FAILED | GRANTED | DENIED
-  detail            Json?    // jamais d'URL ni de secret
+  outcome           String // DONE | FAILED | GRANTED | DENIED
+  detail            Json? // jamais d'URL ni de secret
   createdAt         DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
 
   company Company             @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -3377,10 +3389,10 @@ model WorksitePhotoDriveConnection {
   id             String                             @id @default(cuid())
   companyId      String                             @unique
   accountEmail   String
-  accessToken    String                             // chiffré AES-256-GCM (src/lib/encryption.ts)
-  refreshToken   String                             // chiffré AES-256-GCM
+  accessToken    String // chiffré AES-256-GCM (src/lib/encryption.ts)
+  refreshToken   String // chiffré AES-256-GCM
   tokenExpiry    DateTime                           @db.Timestamptz(3)
-  rootFolderId   String?                            // dossier racine « Chantiers » créé par l'application (scope drive.file)
+  rootFolderId   String? // dossier racine « Chantiers » créé par l'application (scope drive.file)
   status         WorksitePhotoDriveConnectionStatus @default(ACTIVE)
   lastErrorCode  String?
   lastErrorAt    DateTime?                          @db.Timestamptz(3)
@@ -3401,7 +3413,7 @@ model WorksitePhotoDriveFolder {
   worksiteId    String?
   day           DateTime?                     @db.Date
   driveFolderId String                        @unique // préalloué par files.generateIds, création idempotente
-  path          String                        // libellé décoratif tel que créé
+  path          String // libellé décoratif tel que créé
   state         WorksitePhotoDriveFolderState @default(RESERVED)
   createdAt     DateTime                      @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
 
@@ -3419,12 +3431,12 @@ model WorksitePhotoRecipient {
   id          String   @id @default(cuid())
   companyId   String
   worksiteId  String
-  label       String?  // nom / fonction, facultatif, ≤ 120
-  email       String   // trimé, ≤ 254, une seule adresse
-  emailKey    String   // lower(email), imposé par CHECK
+  label       String? // nom / fonction, facultatif, ≤ 120
+  email       String // trimé, ≤ 254, une seule adresse
+  emailKey    String // lower(email), imposé par CHECK
   active      Boolean  @default(true)
-  position    Int      // 0..19, ordre d'affichage
-  createdById String   // scalaire sans FK (patron Task.createdById)
+  position    Int // 0..19, ordre d'affichage
+  createdById String // scalaire sans FK (patron Task.createdById)
   updatedById String
   createdAt   DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
   updatedAt   DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
@@ -3440,98 +3452,108 @@ model WorksitePhotoRecipient {
 
 // PLV2-DOC-RH-001 — additive, inactive until an independently authorized rollout.
 model HrDocumentStore {
-  companyId String @id
-  rootId String @unique
+  companyId            String                 @id
+  rootId               String                 @unique
   connectionGeneration String
-  accountEmail String
-  company Company @relation(fields:[companyId],references:[id],onDelete:Restrict)
-  events HrDocumentStoreEvent[]
+  accountEmail         String
+  company              Company                @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  events               HrDocumentStoreEvent[]
+
   @@map("hr_document_stores")
 }
+
 model HrDocument {
-  id String @id
-  companyId String
-  employeeId String
-  category String
-  period String
-  title String
-  status String
-  version Int @default(1)
-  sha256 String
-  size Int
-  driveFileId String @unique
-  rootId String
+  id           String              @id
+  companyId    String
+  employeeId   String
+  category     String
+  period       String
+  title        String
+  status       String
+  version      Int                 @default(1)
+  sha256       String
+  size         Int
+  driveFileId  String              @unique
+  rootId       String
   uploadedById String
-  uploadKey String
+  uploadKey    String
   uploadIntent String
   reviewedById String?
-  createdAt DateTime @default(now())
-  publishedAt DateTime?
-  employee Employee @relation(fields:[employeeId,companyId],references:[id,companyId],onDelete:Restrict)
-  events HrDocumentEvent[]
-  receipts HrDocumentReceipt[]
-  notices HrDocumentNotice[]
-  messages HrMessage[]
-  accesses HrDocumentAccess[]
-  @@unique([id,companyId])
-  @@unique([companyId,uploadedById,uploadKey])
-  @@unique([companyId,employeeId,category,period,sha256])
-  @@index([companyId,status,id])
-  @@index([companyId,employeeId,status,id])
+  createdAt    DateTime            @default(now())
+  publishedAt  DateTime?
+  employee     Employee            @relation(fields: [employeeId, companyId], references: [id, companyId], onDelete: Restrict)
+  events       HrDocumentEvent[]
+  receipts     HrDocumentReceipt[]
+  notices      HrDocumentNotice[]
+  messages     HrMessage[]
+  accesses     HrDocumentAccess[]
+
+  @@unique([id, companyId])
+  @@unique([companyId, uploadedById, uploadKey])
+  @@unique([companyId, employeeId, category, period, sha256])
+  @@index([companyId, status, id])
+  @@index([companyId, employeeId, status, id])
   @@map("hr_documents")
 }
+
 model HrDocumentEvent {
   driveFileId String?
-  sha256 String?
-  id String @id
-  companyId String
-  documentId String
-  actorId String
-  action String
-  version Int
-  createdAt DateTime @default(now())
-  document HrDocument @relation(fields:[documentId,companyId],references:[id,companyId],onDelete:Restrict)
-  @@unique([documentId,version])
-  @@index([companyId,documentId])
+  sha256      String?
+  id          String     @id
+  companyId   String
+  documentId  String
+  actorId     String
+  action      String
+  version     Int
+  createdAt   DateTime   @default(now())
+  document    HrDocument @relation(fields: [documentId, companyId], references: [id, companyId], onDelete: Restrict)
+
+  @@unique([documentId, version])
+  @@index([companyId, documentId])
   @@map("hr_document_events")
 }
+
 model HrDocumentReceipt {
-  id String @id
-  companyId String
-  actorId String
-  key String
-  intent String
+  id         String     @id
+  companyId  String
+  actorId    String
+  key        String
+  intent     String
   documentId String
-  version Int
-  createdAt DateTime @default(now())
-  document HrDocument @relation(fields:[documentId,companyId],references:[id,companyId],onDelete:Restrict)
-  @@unique([companyId,actorId,key])
+  version    Int
+  createdAt  DateTime   @default(now())
+  document   HrDocument @relation(fields: [documentId, companyId], references: [id, companyId], onDelete: Restrict)
+
+  @@unique([companyId, actorId, key])
   @@map("hr_document_receipts")
 }
+
 model HrDocumentNotice {
-  id String @id
-  companyId String
-  documentId String
+  id               String     @id
+  companyId        String
+  documentId       String
   publishedVersion Int
-  userId String
-  status String @default("PENDING")
-  attemptAt DateTime?
-  sentAt DateTime?
-  @@unique([documentId,publishedVersion])
-  document HrDocument @relation(fields:[documentId,companyId],references:[id,companyId],onDelete:Restrict)
-  @@index([companyId,status])
+  userId           String
+  status           String     @default("PENDING")
+  attemptAt        DateTime?
+  sentAt           DateTime?
+  document         HrDocument @relation(fields: [documentId, companyId], references: [id, companyId], onDelete: Restrict)
+
+  @@unique([documentId, publishedVersion])
+  @@index([companyId, status])
   @@map("hr_document_notices")
 }
 
 model HrDocumentStoreEvent {
-  id String @id
-  companyId String
-  actorId String
-  action String
+  id         String          @id
+  companyId  String
+  actorId    String
+  action     String
   generation String
-  createdAt DateTime @default(now())
-  store HrDocumentStore @relation(fields:[companyId],references:[companyId],onDelete:Restrict)
-  @@index([companyId,createdAt])
+  createdAt  DateTime        @default(now())
+  store      HrDocumentStore @relation(fields: [companyId], references: [companyId], onDelete: Restrict)
+
+  @@index([companyId, createdAt])
   @@map("hr_document_store_events")
 }
 
@@ -3539,37 +3561,41 @@ model HrDocumentStoreEvent {
 /// Table séparée : employees et users gardent leur forme. Le numéro de pièce n'est jamais conservé en entier.
 /// Espace privé RH : un fil par salarié, entre ce salarié et les RH habilités. Texte seul, aucun envoi externe.
 model HrMessage {
-  id String @id
-  companyId String
-  employeeId String
-  authorId String
-  authorSide String
-  kind String
-  body String
-  documentId String?
+  id            String      @id
+  companyId     String
+  employeeId    String
+  authorId      String
+  authorSide    String
+  kind          String
+  body          String
+  documentId    String?
   requestStatus String?
-  createKey String
-  createdAt DateTime @default(now())
-  readAt DateTime?
-  employee Employee @relation(fields:[employeeId,companyId],references:[id,companyId],onDelete:Restrict)
-  document HrDocument? @relation(fields:[documentId],references:[id],onDelete:Restrict)
-  @@unique([companyId,authorId,createKey])
-  @@index([companyId,employeeId,createdAt])
+  createKey     String
+  createdAt     DateTime    @default(now())
+  readAt        DateTime?
+  employee      Employee    @relation(fields: [employeeId, companyId], references: [id, companyId], onDelete: Restrict)
+  document      HrDocument? @relation(fields: [documentId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, authorId, createKey])
+  @@index([companyId, employeeId, createdAt])
   @@map("hr_messages")
 }
+
 /// Espace privé RH : première remise réussie d'une version publiée au salarié destinataire (fait serveur, pas une signature).
 model HrDocumentAccess {
-  id String @id
-  companyId String
+  id         String     @id
+  companyId  String
   documentId String
-  version Int
-  userId String
-  firstAt DateTime @default(now())
-  document HrDocument @relation(fields:[documentId,companyId],references:[id,companyId],onDelete:Restrict)
-  @@unique([documentId,version,userId])
-  @@index([companyId,documentId])
+  version    Int
+  userId     String
+  firstAt    DateTime   @default(now())
+  document   HrDocument @relation(fields: [documentId, companyId], references: [id, companyId], onDelete: Restrict)
+
+  @@unique([documentId, version, userId])
+  @@index([companyId, documentId])
   @@map("hr_document_accesses")
 }
+
 model HrEmployeeDraft {
   id                String    @id
   companyId         String
@@ -3782,16 +3808,16 @@ model PurchaseOrderLine {
 }
 
 model GoodsReceipt {
-  id                String    @id @default(cuid())
+  id                String   @id @default(cuid())
   companyId         String
   number            String
   purchaseOrderId   String
   warehouseId       String
   supplierInvoiceId String?
-  receivedAt        DateTime  @default(now())
+  receivedAt        DateTime @default(now())
   notes             String?
   createdById       String
-  createdAt         DateTime  @default(now())
+  createdAt         DateTime @default(now())
 
   company         Company            @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   purchaseOrder   PurchaseOrder      @relation(fields: [companyId, purchaseOrderId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
@@ -4152,4 +4178,159 @@ model BankVerificationSession {
 
   @@index([companyId, accountId])
   @@map("bank_verification_sessions")
+}
+// ═══════════════════════════════════════════════════════════════════════════
+// Lot E Planificator V2 (04/11/2026, reporté sur main 12debffa le 15/11/2026 ; déclencheur réserve retiré) : opportunités commerciales (évolution 5) et automatisations bornées (6).
+// Opportunité : étape, probabilité, montant, relance ; liens facultatifs vers un client, un chantier, un devis (clés
+// composites) et une consultation (identifiant contrôlé par le service ET par un déclencheur : la table des
+// consultations n'a pas de clé composite et n'est pas modifiée). Historique append-only (OpportunityEvent).
+// Automatisation : déclencheurs internes en liste fermée, actions limitées (tâche interne, notification interne des
+// administrateurs), approbation explicite avant activation, journal avec clé d'événement unique (une exécution par
+// événement et par règle), jamais d'envoi externe. Modules désactivés par défaut (CRM_OPPORTUNITIES_ENABLED,
+// AUTOMATIONS_ENABLED).
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum OpportunityStage {
+  LEAD
+  QUALIFIED
+  PROPOSAL
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum OpportunityEventType {
+  CREATED
+  STAGE_CHANGED
+  UPDATED
+  FOLLOW_UP_DONE
+  NOTE
+}
+
+enum AutomationTrigger {
+  OPPORTUNITY_STAGE_CHANGED
+  OPPORTUNITY_FOLLOW_UP_DUE
+  QUOTE_ACCEPTED
+}
+
+enum AutomationAction {
+  CREATE_TASK
+  NOTIFY_ADMINS
+}
+
+enum AutomationRuleStatus {
+  DRAFT
+  ACTIVE
+  DISABLED
+}
+
+enum AutomationRunStatus {
+  DONE
+  SKIPPED
+}
+
+model Opportunity {
+  id                  String           @id @default(cuid())
+  companyId           String
+  number              String
+  title               String
+  clientId            String?
+  prospectName        String?
+  worksiteId          String?
+  quoteId             String?
+  consultationDraftId String?
+  stage               OpportunityStage @default(LEAD)
+  probabilityBp       Int
+  amountCents         BigInt           @default(0)
+  expectedCloseDate   DateTime?        @db.Date
+  ownerEmployeeId     String?
+  nextFollowUpDate    DateTime?        @db.Date
+  followUpNote        String?
+  lostReason          String?
+  closedAt            DateTime?
+  createdById         String
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  company  Company            @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  client   Client?            @relation(fields: [clientId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  worksite Worksite?          @relation(fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  quote    Quote?             @relation(fields: [quoteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  owner    Employee?          @relation("OpportunityOwner", fields: [ownerEmployeeId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  events   OpportunityEvent[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, number])
+  @@index([companyId, stage])
+  @@index([companyId, nextFollowUpDate])
+  @@map("opportunities")
+}
+
+model OpportunityEvent {
+  id            String               @id @default(cuid())
+  companyId     String
+  opportunityId String
+  type          OpportunityEventType
+  fromStage     OpportunityStage?
+  toStage       OpportunityStage?
+  note          String?
+  actorId       String
+  createdAt     DateTime             @default(now())
+
+  company     Company     @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  opportunity Opportunity @relation(fields: [companyId, opportunityId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([companyId, id])
+  @@index([companyId, opportunityId, createdAt])
+  @@index([companyId, type, createdAt])
+  @@map("opportunity_events")
+}
+
+model AutomationRule {
+  id                   String               @id @default(cuid())
+  companyId            String
+  name                 String
+  trigger              AutomationTrigger
+  stageFilter          OpportunityStage?
+  action               AutomationAction
+  taskTitle            String?
+  taskAssigneeId       String?
+  taskDueInDays        Int?
+  message              String?
+  status               AutomationRuleStatus @default(DRAFT)
+  approvedById         String?
+  approvedAt           DateTime?
+  activatedAt          DateTime?
+  disabledAt           DateTime?
+  createdById          String
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  company      Company         @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  taskAssignee Employee?       @relation("AutomationTaskAssignee", fields: [taskAssigneeId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  runs         AutomationRun[]
+
+  @@unique([companyId, id])
+  @@index([companyId, status])
+  @@map("automation_rules")
+}
+
+model AutomationRun {
+  id          String              @id @default(cuid())
+  companyId   String
+  ruleId      String
+  eventKey    String
+  status      AutomationRunStatus
+  detail      String
+  taskId      String?
+  notified    Int                 @default(0)
+  createdAt   DateTime            @default(now())
+
+  company Company        @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  rule    AutomationRule @relation(fields: [companyId, ruleId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([companyId, id])
+  @@unique([companyId, ruleId, eventKey]) // idempotence atomique : une exécution par (société, règle, événement)
+  @@index([companyId, createdAt])
+  @@map("automation_runs")
 }

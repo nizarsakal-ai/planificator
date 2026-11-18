@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { Loader2, Save, Pencil, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { AddressAutocomplete } from "@/components/ui/address-autocomplete"
 import { Label } from "@/components/ui/label"
 import { updateChantier } from "@/lib/actions/chantier.actions"
 import type { PhotoRecipientRow } from "@/lib/chantiers/photo-recipients"
@@ -108,7 +109,7 @@ export function ChantierEditForm({ worksiteId, defaultValues, clients, coordinat
       {/* Adresse */}
       <div className="space-y-1">
         <Label className="text-xs text-slate-600">Adresse</Label>
-        <Input name="address" defaultValue={defaultValues.address} placeholder="Adresse du chantier" className="h-8 text-sm" />
+        <AddressAutocomplete name="address" defaultValue={defaultValues.address} placeholder="Adresse du chantier" aria-label="Adresse du chantier" className="h-8 text-sm" />
       </div>
 
       {/* Coordonnées — saisie manuelle explicite, sinon calcul depuis l'adresse quand elle change */}

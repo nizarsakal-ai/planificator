@@ -4,9 +4,10 @@ import { redirect, notFound } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { MapPin, Calendar, Clock, Users, HardHat, FileText, Download, Mail } from "lucide-react"
+import { MapPin, Calendar, Clock, Users, HardHat, FileText, Download, Mail, Truck, AlertTriangle } from "lucide-react"
 import { initialRecipientState } from "@/lib/chantiers/photo-recipients"
 import { canReadPhotoRecipients } from "@/lib/chantiers/photo-recipients-access"
+import { consultationPhotoRecipients } from "@/lib/acquisition/conversion/consultation-photo-recipients"
 import { ChantierStatusActions } from "@/components/chantiers/ChantierStatusActions"
 import { ChantierEditForm } from "@/components/chantiers/ChantierEditForm"
 import { AffecterEquipeForm } from "@/components/chantiers/AffecterEquipeForm"
@@ -17,6 +18,9 @@ import { RemoveEmployeeFromBlockButton } from "@/components/chantiers/RemoveEmpl
 import { AddEmployeeToBlockButton } from "@/components/chantiers/AddEmployeeToBlockButton"
 import { groupAssignmentBlocks } from "@/lib/chantiers/assignment-blocks"
 import { canShowAffecterEquipeForm } from "@/lib/chantiers/assignment-ui-policy"
+import { worksiteTeamVehicles, worksiteTourHref } from "@/lib/chantiers/worksite-vehicles"
+import { isVehiclesV3Enabled } from "@/lib/vehicules/v3/v3-feature-flag"
+import Link from "next/link"
 
 export const metadata: Metadata = { title: "Détail chantier" }
 
@@ -128,11 +132,46 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
         select: { label: true, email: true, active: true },
       })
     : []
+  // Chantier issu d'une consultation, liste jamais configurée et sans adresse historique : le contact de la
+  // consultation est SUGGÉRÉ (bouton explicite « Ajouter comme destinataire »), jamais enregistré d'office ici.
+  // Les chantiers convertis depuis le 16/11/2026 reçoivent ces destinataires dès la conversion.
+  const consultationSuggestion =
+    isSuperAdmin && chantier.photoRecipientsConfiguredAt === null && !chantier.clientContact
+      ? await loadConsultationRecipientSuggestion(chantier.id, session.user.companyId!)
+      : null
   const photoRecipientState = isSuperAdmin
-    ? initialRecipientState({ recipients: photoRecipientRows, configuredAt: chantier.photoRecipientsConfiguredAt, clientContact: chantier.clientContact })
+    ? initialRecipientState({
+        recipients: photoRecipientRows,
+        configuredAt: chantier.photoRecipientsConfiguredAt,
+        clientContact: chantier.clientContact ?? consultationSuggestion,
+      })
     : null
 
   const status = statusLabels[chantier.status] ?? { label: chantier.status, variant: "secondary" as const }
+
+  // Véhicule et chauffeur : équipe affectée → camion de l'équipe → chauffeur du camion.
+  const assignedTeamIds = [...new Set(chantier.assignments.map((a) => a.teamId))]
+  const teamTrucks = assignedTeamIds.length > 0 && (isAdmin || isTeamLeader)
+    ? await prisma.truck.findMany({
+        where: { companyId: session.user.companyId!, active: true, teamId: { in: assignedTeamIds } },
+        select: {
+          id: true, matricule: true, marque: true, modele: true, teamId: true,
+          chauffeur: { select: { firstName: true, lastName: true } },
+        },
+      })
+    : []
+  const todayParis = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" }).format(new Date())
+  const teamVehicles = (isAdmin || isTeamLeader)
+    ? worksiteTeamVehicles({
+        assignments: chantier.assignments.map((a) => ({ teamId: a.teamId, teamName: a.team.name, date: a.date })),
+        trucks: teamTrucks.flatMap((t) => t.teamId ? [{
+          id: t.id, matricule: t.matricule, marque: t.marque, modele: t.modele, teamId: t.teamId,
+          chauffeurName: t.chauffeur ? `${t.chauffeur.firstName} ${t.chauffeur.lastName}`.trim() : null,
+        }] : []),
+        today: todayParis,
+      })
+    : []
+  const canPlanTours = isAdmin && isVehiclesV3Enabled()
 
   // Calcul des blocs groupés
   const assignmentBlocks = groupAssignmentBlocks(chantier.assignments)
@@ -237,7 +276,9 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
                       </ul>
                     )}
                     {photoRecipientState.historicSuggestion && (
-                      <p className="text-xs text-amber-700 break-all">Adresse historique (non utilisée) : {photoRecipientState.historicSuggestion}</p>
+                      <p className="text-xs text-amber-700 break-all">
+                        {consultationSuggestion ? "Contact de la consultation (à ajouter via Modifier)" : "Adresse historique (non utilisée)"} : {photoRecipientState.historicSuggestion}
+                      </p>
                     )}
                   </div>
                 </div>
@@ -461,6 +502,67 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
             </CardContent>
           </Card>
 
+          {/* Véhicule et chauffeur (dérivés de l'équipe affectée) */}
+          {(isAdmin || isTeamLeader) && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                  <Truck className="h-4 w-4" />
+                  Véhicule et chauffeur
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {teamVehicles.length === 0 ? (
+                  <p className="text-sm text-slate-400 text-center py-4">
+                    Affectez d&apos;abord une équipe : son véhicule et son chauffeur apparaîtront ici.
+                  </p>
+                ) : (
+                  teamVehicles.map((v) => (
+                    <div key={v.teamId} className="rounded-lg border border-slate-100 p-3 text-sm space-y-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-slate-800">{v.teamName}</span>
+                        <span className="text-xs text-slate-500">
+                          {v.firstDate === v.lastDate ? v.firstDate.split("-").reverse().join("/") : `${v.firstDate.split("-").reverse().join("/")} → ${v.lastDate.split("-").reverse().join("/")}`}
+                          {v.upcoming ? "" : " (passé)"}
+                        </span>
+                      </div>
+                      {v.truck ? (
+                        <>
+                          <p className="text-slate-700">
+                            <span className="font-mono">{v.truck.matricule}</span> · {v.truck.label}
+                          </p>
+                          <p className="text-slate-600">
+                            Chauffeur : {v.truck.chauffeurName ?? <span className="text-amber-700">aucun chauffeur sur ce véhicule</span>}
+                          </p>
+                          {canPlanTours && v.upcoming && (
+                            <Link
+                              href={worksiteTourHref({ truckId: v.truck.id, worksiteId: chantier.id, start: v.tourStart, end: v.tourEnd })}
+                              className="inline-block text-sm font-medium text-blue-700 underline"
+                            >
+                              Créer la tournée de ce véhicule
+                            </Link>
+                          )}
+                        </>
+                      ) : (
+                        <p className="flex items-start gap-1.5 text-amber-700">
+                          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                          <span>
+                            Aucun véhicule affecté à cette équipe.{" "}
+                            {isAdmin && (
+                              <Link href="/vehicules" className="underline">
+                                Affecter un véhicule (Véhicules → choisir l&apos;équipe et le chauffeur)
+                              </Link>
+                            )}
+                          </span>
+                        </p>
+                      )}
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Prolongations */}
           {chantier.extensions.length > 0 && (
             <Card>
@@ -488,4 +590,29 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
       </div>
     </div>
   )
+}
+
+/** Contact de la consultation ayant créé ce chantier (première adresse utilisable), sinon null. */
+async function loadConsultationRecipientSuggestion(worksiteId: string, companyId: string): Promise<string | null> {
+  try {
+    const draft = await prisma.worksiteImportDraft.findFirst({
+      where: { createdWorksiteId: worksiteId, companyId },
+      select: {
+        proposedContactName: true,
+        proposedContactEmail: true,
+        acquisitionMessage: { select: { senderEmail: true } },
+      },
+    })
+    if (!draft) return null
+    return (
+      consultationPhotoRecipients({
+        contactName: draft.proposedContactName,
+        contactEmail: draft.proposedContactEmail,
+        senderEmail: draft.acquisitionMessage.senderEmail,
+      })[0]?.email ?? null
+    )
+  } catch {
+    // Suggestion de confort : une panne de lecture ne doit jamais casser la fiche chantier.
+    return null
+  }
 }
