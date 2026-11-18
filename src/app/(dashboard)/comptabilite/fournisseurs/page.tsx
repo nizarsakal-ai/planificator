@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { Fragment } from "react"
 import Link from "next/link"
 import { prisma } from "@/lib/prisma"
 import { requireAccountingPage, dateFr } from "@/lib/accounting/ui/page-context"
@@ -14,6 +15,9 @@ import { supplierExportHref } from "@/lib/accounting/ui/supplier-export"
 import { SupplierQuickValidateButton } from "@/components/comptabilite/SupplierQuickValidateButton"
 
 export const metadata: Metadata = { title: "Comptabilité — Factures fournisseurs" }
+// Liste groupée par mois (date de facture, UTC comme les autres dates comptables).
+const monthFr = new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" })
+const monthKey = (d: Date) => d.toISOString().slice(0, 7)
 const STATUS: Record<string, { label: string; cls: string }> = { PENDING: { label: "À valider", cls: "bg-amber-50 text-amber-700" }, VALIDATED: { label: "Validée", cls: "bg-green-50 text-green-700" }, REJECTED: { label: "Rejetée", cls: "bg-red-50 text-red-600" } }
 
 export default async function FournisseursPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -50,7 +54,9 @@ export default async function FournisseursPage({ searchParams }: { searchParams:
         <table className="w-full text-sm"><thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">Fournisseur</th><th className="hidden px-3 py-2 sm:table-cell">N°</th><th className="hidden px-3 py-2 sm:table-cell">Date</th><th className="hidden px-3 py-2 text-right lg:table-cell">HT</th><th className="hidden px-3 py-2 text-right lg:table-cell">TVA</th><th className="px-3 py-2 text-right">TTC</th><th className="hidden px-3 py-2 md:table-cell">Compte de charge</th><th className="px-3 py-2">Statut</th></tr></thead>
           <tbody>
             {list.rows.length === 0 && <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400">Aucune facture fournisseur.</td></tr>}
-            {list.rows.map((s) => <tr key={s.id} className="border-t hover:bg-slate-50">
+            {list.rows.map((s, i) => <Fragment key={s.id}>
+              {(i === 0 || monthKey(list.rows[i - 1]!.date) !== monthKey(s.date)) && <tr className="border-t bg-slate-50/60"><td colSpan={8} className="px-3 py-1.5 text-xs font-semibold text-slate-700 first-letter:uppercase">{monthFr.format(s.date)}</td></tr>}
+              <tr className="border-t hover:bg-slate-50">
               <td className="px-3 py-2"><Link className="font-medium text-[#0f3460] hover:underline" href={`/comptabilite/fournisseurs/${s.id}`}>{s.supplier?.name ?? s.supplierName}</Link>{s.siret && <div className="text-xs text-slate-400">SIRET {s.siret}</div>}<div className="text-xs text-slate-500 sm:hidden">{s.number} · {dateFr.format(s.date)}</div></td>
               <td className="hidden px-3 py-2 sm:table-cell">{s.number}</td><td className="hidden px-3 py-2 sm:table-cell">{dateFr.format(s.date)}</td>
               <td className="hidden px-3 py-2 text-right tabular-nums lg:table-cell">{formatEuro(s.totalHTCents)}</td><td className="hidden px-3 py-2 text-right tabular-nums lg:table-cell">{formatEuro(s.vatCents)}</td><td className="px-3 py-2 text-right tabular-nums">{formatEuro(s.totalTTCCents)}</td>
@@ -63,7 +69,7 @@ export default async function FournisseursPage({ searchParams }: { searchParams:
                 : <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:whitespace-nowrap">{row}</div>
               })()}{s.paidAt && <div className="mt-1 text-xs text-slate-400">payée {dateFr.format(s.paidAt)}</div>}
                 {duplicateOf.has(s.id) && <Link href={`/comptabilite/fournisseurs/${duplicateOf.get(s.id)}`} className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium hover:underline ${s.status === "PENDING" ? "bg-amber-50 text-amber-800" : "bg-slate-100 text-slate-600"}`}>{s.status === "PENDING" ? "Doublon probable : déjà validée" : "Doublon de la facture validée"}</Link>}</td>
-            </tr>)}
+            </tr></Fragment>)}
           </tbody></table>
         </div>
         {list.total > list.pageSize && <div className="flex justify-between border-t px-3 py-2 text-sm"><span>Page {list.page} / {Math.ceil(list.total / list.pageSize)}</span></div>}

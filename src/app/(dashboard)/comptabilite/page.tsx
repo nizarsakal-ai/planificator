@@ -76,7 +76,7 @@ export default async function ComptabilitePage() {
           <p className="font-medium text-slate-700">Modules à venir dans la Comptabilité</p>
           <p className="mt-1">{UPCOMING_MODULES.join(" · ")}. Ils s&apos;ajouteront à ce menu sans changer vos données.</p>
         </>) : (
-          <p className="font-medium text-slate-700">Tableau de bord, TVA, export FEC, banque et factures fournisseurs sont disponibles dans le menu ci-dessus.</p>
+          <p className="font-medium text-slate-700">Tableau de bord, TVA, export FEC, banque et factures fournisseurs sont disponibles dans les onglets Achats, Banque et Plus.</p>
         )}
         <p className="mt-1 text-xs text-slate-400">Dernière vérification : {isoDay(new Date())}</p>
       </CardContent></Card>

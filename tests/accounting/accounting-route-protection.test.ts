@@ -53,6 +53,7 @@ describe("/comptabilite (A2) — protection côté serveur de chaque écran (pas
       `${UI_DIR}/layout.tsx`,
       `${UI_DIR}/page.tsx`,
       `${UI_DIR}/plan/page.tsx`,
+      `${UI_DIR}/plus/page.tsx`,
       `${UI_DIR}/tableau-de-bord/page.tsx`,
       `${UI_DIR}/tva/page.tsx`,
     ])
@@ -238,6 +239,7 @@ describe("A1 — périmètre du moteur comptable (aucun branchement facture, auc
       "src/lib/accounting/engine/setup.ts",
       "src/lib/accounting/engine/transaction.ts",
       "src/lib/accounting/engine/validate.ts",
+      "src/lib/accounting/ui/accounting-nav.ts", // 18/11/2026 : cinq onglets du module et contenu de « Plus » (pur, aucun accès base)
       "src/lib/accounting/ui/csv.ts",
       "src/lib/accounting/ui/forms.ts",
       "src/lib/accounting/ui/labels.ts",
