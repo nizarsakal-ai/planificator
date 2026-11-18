@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { getInitials } from "@/lib/utils"
 import { AvatarUpload } from "@/components/employes/AvatarUpload"
 import { EmployeActions } from "@/components/employes/EmployeActions"
+import { ResendEmployeeAccessButton } from "@/components/employes/ResendEmployeeAccessButton"
 import { EmployeeProfileTabs } from "@/components/employes/EmployeeProfileTabs"
 import { resolveEmployeeHrSpace, resolveHrDocumentNavigation } from "@/lib/hr-documents/navigation"
 
@@ -157,7 +158,9 @@ export default async function EmployeDetailPage({
             )}
           </div>
           {isAdmin && (
-            <div className="mt-3">
+            <div className="mt-3 flex flex-col gap-1">
+              <ResendEmployeeAccessButton employeeId={employee.id}
+                employeeName={`${employee.firstName} ${employee.lastName}`.trim()} email={employee.user.email} />
               <EmployeActions employeeId={employee.id} active={employee.active} />
             </div>
           )}

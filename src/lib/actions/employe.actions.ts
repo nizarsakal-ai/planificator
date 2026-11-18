@@ -10,6 +10,7 @@ import { createEmployeSchema, updateEmployeSchema } from "@/lib/validations/empl
 import { sendWelcomeEmail } from "@/lib/email"
 import crypto from "crypto"
 import { deleteEmployeImpl } from "@/lib/actions/employe-delete.core"
+import { resendAccessForEmployee } from "@/lib/actions/employe-access.core"
 
 // ─── Utilitaire : récupère la session et vérifie le rôle ────────────────────
 
@@ -211,6 +212,33 @@ export async function resendAccessEmails() {
   }
 
   return { success: true, sent }
+}
+
+// ─── Renvoyer l'email d'accès à un seul employé (fiche employé) ─────────────
+
+export async function resendEmployeeAccessEmail(employeeId: string) {
+  const adminUser = await requireAdmin()
+  try {
+    return await resendAccessForEmployee({
+      findEmployee: (id, companyId) => prisma.employee.findFirst({
+        where: { id, companyId },
+        select: { id: true, firstName: true, active: true, user: { select: { id: true, email: true, active: true } } },
+      }),
+      companyName: async (companyId) => (await prisma.company.findUnique({ where: { id: companyId }, select: { name: true } }))?.name ?? null,
+      replaceResetToken: async (userId, token, expiresAt) => {
+        await prisma.$transaction([
+          prisma.passwordReset.deleteMany({ where: { userId, usedAt: null } }),
+          prisma.passwordReset.create({ data: { userId, token, expiresAt } }),
+        ])
+      },
+      sendWelcomeEmail,
+      newToken: () => crypto.randomBytes(32).toString("hex"),
+      now: () => new Date(),
+    }, adminUser.companyId!, employeeId)
+  } catch (e) {
+    console.error("[employes] RESEND_ACCESS_FAILED", { employeeId, error: e instanceof Error ? e.name : "unknown" })
+    return { success: false as const, error: "L'e-mail d'accès n'a pas pu être envoyé. Réessayez." }
+  }
 }
 
 // ─── Désactiver un employé ───────────────────────────────────────────────────
