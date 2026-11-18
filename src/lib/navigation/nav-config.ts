@@ -229,7 +229,7 @@ export function withFuelTicketNavItem(items: readonly NavItem[], visible: boolea
   const result = [...items]
   if (visible !== true || result.some(i => i.href === "/ticket-carburant")) return result
   const expenses = result.findIndex(i => i.href === "/mes-notes-de-frais")
-  result.splice(expenses < 0 ? result.length : expenses + 1, 0, { label: "Ticket carburant", href: "/ticket-carburant", icon: Fuel })
+  result.splice(expenses < 0 ? result.length : expenses + 1, 0, { label: "Ticket carburant / péage", href: "/ticket-carburant", icon: Fuel })
   return result
 }
 

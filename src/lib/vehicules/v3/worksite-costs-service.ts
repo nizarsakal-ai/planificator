@@ -15,6 +15,7 @@ import { authorizeVehicleLocked } from "../vehicle-authority"
 import { nationalAveragePrice } from "./fuel-estimate-providers"
 import { loadCompanyCardSpend } from "./bank-fuel-service"
 import { loadTruckConsumption, type TruckConsumption } from "./fuel-consumption-service"
+import { TOLL_REFERENCE } from "./driver-fuel-ticket-domain"
 import {
   computeWorksiteCosts,
   truckAveragePrice,
@@ -76,7 +77,7 @@ export async function readWorksiteCosts(truckId: string, rawQuery: unknown, deps
     })
     const expenses = await tx.vehicleExpense.findMany({
       where: { companyId, truckId, status: { in: ["PENDING", "APPROVED"] }, occurredAt: { gte: lo, lt: hi } },
-      select: { id: true, occurredAt: true, category: true, status: true, amount: true, currency: true, litres: true },
+      select: { id: true, occurredAt: true, category: true, status: true, amount: true, currency: true, litres: true, reference: true },
       take: 2_000,
     })
     const assignments = truck.teamId
@@ -117,6 +118,7 @@ export async function readWorksiteCosts(truckId: string, rawQuery: unknown, deps
         status: e.status as CostExpense["status"],
         amount: Number(e.amount),
         litres: e.litres === null ? null : Number(e.litres),
+        toll: e.category === "OTHER" && e.reference === TOLL_REFERENCE,
       })
     }
     const costAssignments = assignments.map((a) => ({ day: a.date.toISOString().slice(0, 10), worksiteId: a.worksiteId }))

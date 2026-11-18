@@ -78,7 +78,7 @@ export function VehicleWorksiteCosts({ truckId, timeZone }: { truckId: string; t
             <div className="rounded-xl bg-slate-50 p-3"><dt className="text-sm text-slate-600">Kilomètres des tournées</dt><dd className="text-2xl font-semibold">{num.format(data.totals.km)} km</dd></div>
             <div className="rounded-xl bg-slate-50 p-3"><dt className="text-sm text-slate-600">Carburant estimé</dt><dd className="text-2xl font-semibold">{data.totals.estimatedFuelCost === null ? "—" : eur.format(data.totals.estimatedFuelCost)}</dd></div>
             <div className="rounded-xl bg-slate-50 p-3"><dt className="text-sm text-slate-600">Dépenses enregistrées</dt><dd className="text-2xl font-semibold">{eur.format(data.totals.expensesTotal)}</dd></div>
-            <div className="rounded-xl bg-slate-50 p-3"><dt className="text-sm text-slate-600">Péages, repas, hôtels (carte)</dt><dd className="text-2xl font-semibold">{eur.format(data.totals.cardSpendTotal)}</dd></div>
+            <div className="rounded-xl bg-slate-50 p-3"><dt className="text-sm text-slate-600">Péages, repas, hôtels</dt><dd className="text-2xl font-semibold">{eur.format(data.totals.cardSpendTotal)}</dd></div>
           </dl>
 
           <div className="overflow-x-auto">

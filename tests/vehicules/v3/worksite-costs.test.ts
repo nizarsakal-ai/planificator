@@ -115,4 +115,23 @@ describe("frais de la carte du camion par chantier", () => {
     assert.equal(r.rows.find((x) => x.key === UNASSIGNED_KEY)!.cardSpendTotal, 15)
     assert.equal(r.totals.cardSpendTotal, 216.2)
   })
+  it("ticket de péage du chauffeur : compté avec les péages, une seule fois s'il est aussi sur le relevé", () => {
+    const r = computeWorksiteCosts({
+      tours: [tour("t1", "2026-11-20", "2026-11-27", 100, "alz")],
+      expenses: [
+        { id: "p1", day: "2026-11-20", category: "OTHER", status: "PENDING", amount: 64.2, litres: null, toll: true }, // aussi sur le relevé (J+1)
+        { id: "p2", day: "2026-11-22", category: "OTHER", status: "PENDING", amount: 12.4, litres: null, toll: true }, // payé en liquide
+        { id: "o1", day: "2026-11-22", category: "OTHER", status: "APPROVED", amount: 30, litres: null },
+      ],
+      assignments: [],
+      cardSpend: [{ day: "2026-11-21", kind: "TOLL", amount: 64.2 }, { day: "2026-11-23", kind: "TOLL", amount: 7.1 }],
+      worksiteNames: names,
+      fuelPrice: null,
+    })
+    const alz = r.rows.find((x) => x.worksiteId === "alz")!
+    assert.equal(alz.cardSpend.TOLL, 83.7) // 64,20 (une fois) + 12,40 + 7,10
+    assert.equal(alz.expenses.OTHER, 30) // le péage n'est pas en « Autre »
+    assert.equal(alz.pendingExpenses, 2)
+    assert.equal(r.totals.cardSpendTotal, 83.7)
+  })
 })

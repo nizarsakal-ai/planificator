@@ -131,7 +131,8 @@ export async function submitDriverTicket(rawInput: unknown, file: DocumentFileIn
       mileageObservation: r.mileageObservation, documentVersionId: r.documentVersionId, status: r.status,
     }))
   }, txOptions)
-  const bank = findBankExpenseToComplete(candidates, amountCents, input.day)
+  // Péage : jamais de plein bancaire à compléter (les péages du relevé sont rapprochés dans les coûts par chantier).
+  const bank = input.kind === "TOLL" ? null : findBankExpenseToComplete(candidates, amountCents, input.day)
   const command = bank ? ticketCorrectCommand(bank, input, documentVersionId, ctx.driverName) : ticketCreateCommand(input, documentVersionId, ctx.driverName)
 
   // 4. Dépense : création d'un plein, ou complément de CE plein bancaire précis, rien d'autre.

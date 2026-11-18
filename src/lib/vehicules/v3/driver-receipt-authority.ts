@@ -16,7 +16,7 @@ export interface DriverSession { userId: string; companyId: string; role: string
 export const DRIVER_RECEIPT_ROLES = new Set(["EMPLOYEE", "TEAM_LEADER", "ADMIN", "SUPER_ADMIN"])
 export const DRIVER_RECEIPT_CATEGORY = "EXPENSE_RECEIPT" as const
 
-type Employee = { id: string; userId: string; companyId: string; active: boolean; role: string }
+type Employee = { id: string; userId: string; companyId: string; active: boolean; role: string; firstName: string | null; lastName: string | null }
 
 /** Session applicative → session chauffeur (aucune autre donnée n'est retenue). */
 export function driverSessionFrom(raw: { user?: { id?: string | null; role?: string | null; companyId?: string | null } | null } | null): DriverSession {
@@ -35,14 +35,17 @@ async function lockedDriverIdentity(tx: Prisma.TransactionClient, session: Drive
   const companies = await tx.$queryRaw<{ active: boolean }[]>`SELECT "active" FROM "companies" WHERE "id" = ${session.companyId} FOR SHARE`
   if (!companies[0]?.active) throw new MileageDomainError("FORBIDDEN", 403)
   const employees = await tx.$queryRaw<Employee[]>`
-    SELECT "id", "userId", "companyId", "active", "role"::text AS "role" FROM "employees"
+    SELECT "id", "userId", "companyId", "active", "role"::text AS "role", "firstName", "lastName" FROM "employees"
     WHERE "userId" = ${identity.id} AND "companyId" = ${session.companyId} FOR SHARE`
   const employee = employees[0]
   // Un chauffeur est toujours un profil employé actif de l'entreprise (pas de repli « entreprise principale »).
   if (!employee?.active) throw new MileageDomainError("FORBIDDEN", 403)
   const effectiveRole = identity.role === "SUPER_ADMIN" ? "SUPER_ADMIN" : employee.role
   if (effectiveRole !== session.role || !DRIVER_RECEIPT_ROLES.has(effectiveRole)) throw new MileageDomainError("FORBIDDEN", 403)
-  const actor: MileageActor = { ...identity, role: effectiveRole, companyId: session.companyId }
+  // Nom affiché (justificatif « ajouté par », notes) : nom du compte, sinon prénom et nom de la fiche employé,
+  // jamais l'identifiant technique.
+  const employeeName = [employee.firstName, employee.lastName].map((x) => x?.trim()).filter(Boolean).join(" ")
+  const actor: MileageActor = { ...identity, name: identity.name?.trim() || employeeName || "Chauffeur", role: effectiveRole, companyId: session.companyId }
   return { actor, employee }
 }
 

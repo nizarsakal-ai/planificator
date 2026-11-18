@@ -27,8 +27,14 @@ export function optionalTicketMileage(value: unknown): number | null {
   return Number.isInteger(n) && n > 0 && n <= 9_999_999 ? n : null
 }
 
+/** Ticket de péage : dépense « Autre » marquée par cette référence (rapprochée des péages du relevé bancaire). */
+export const TOLL_REFERENCE = "PEAGE"
+export type DriverTicketKind = "FUEL" | "TOLL"
+
 export const driverTicketSchema = z.object({
   truckId: z.string().trim().min(1).max(200),
+  /** Carburant par défaut (anciens écrans) ; péage : ni litres ni compteur. */
+  kind: z.enum(["FUEL", "TOLL"]).optional().default("FUEL"),
   amount: money,
   litres: litres.nullable().optional(),
   day,
@@ -36,7 +42,9 @@ export const driverTicketSchema = z.object({
   mileage: z.unknown().optional().transform(optionalTicketMileage),
 }).strict()
 
-export type DriverTicketInput = Omit<z.infer<typeof driverTicketSchema>, "mileage"> & { mileage?: number | null }
+export type DriverTicketInput = Omit<z.infer<typeof driverTicketSchema>, "mileage" | "kind"> & { mileage?: number | null; kind?: DriverTicketKind }
+
+const isToll = (input: { kind?: DriverTicketKind }) => input.kind === "TOLL"
 
 export function normalizeDecimal(v: string): string { return v.trim().replace(",", ".") }
 export const toCents = (amount: string) => Math.round(Number(normalizeDecimal(amount)) * 100)
@@ -85,6 +93,15 @@ export function derivedKey(key: string, purpose: string): string {
 
 /** Titre et métadonnées du justificatif (document du camion). */
 export function receiptDocumentBody(input: DriverTicketInput, driverName: string) {
+  if (isToll(input)) {
+    return {
+      category: "EXPENSE_RECEIPT" as const,
+      title: `Ticket de péage du ${input.day.split("-").reverse().join("/")}`.slice(0, 200),
+      issuedOn: input.day,
+      issuerName: input.station?.trim() || null,
+      observations: `Photographié par ${driverName}. Péage ${normalizeDecimal(input.amount)} €.`.slice(0, 2000),
+    }
+  }
   return {
     category: "EXPENSE_RECEIPT" as const,
     title: `Ticket carburant du ${input.day.split("-").reverse().join("/")}`.slice(0, 200),
@@ -106,6 +123,23 @@ export function ticketOccurredAt(day: string, now: Date = new Date()): string {
 
 /** Création d'un plein « à valider » depuis le ticket. */
 export function ticketCreateCommand(input: DriverTicketInput, documentVersionId: string, driverName: string, now: Date = new Date()) {
+  if (isToll(input)) {
+    return {
+      action: "CREATE" as const,
+      data: {
+        category: "OTHER" as const,
+        occurredAt: ticketOccurredAt(input.day, now),
+        amount: normalizeDecimal(input.amount),
+        currency: "EUR",
+        litres: null,
+        mileageObservation: null,
+        supplier: input.station?.trim() || "Péage",
+        reference: TOLL_REFERENCE,
+        documentVersionId,
+        notes: `Ticket de péage photographié par ${driverName}.`,
+      },
+    }
+  }
   return {
     action: "CREATE" as const,
     data: {
