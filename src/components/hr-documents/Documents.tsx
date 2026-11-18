@@ -157,16 +157,18 @@ type AccessSummary={email:string|null;placeholderEmail:boolean;accountActive:boo
  * Explique un espace « Mes documents » vide (documents non publiés, autre fiche, compte inactif ou jamais utilisé).
  */
 function AccessPanel({employeeId,revision}:{employeeId:string;revision:string}){
-  const [access,setAccess]=useState<AccessSummary|null>(null),[failed,setFailed]=useState(false)
+  const [access,setAccess]=useState<AccessSummary|null>(null),[failed,setFailed]=useState("")
   useEffect(()=>{
     let alive=true
-    setFailed(false)
-    call(`/api/hr-documents/employees/${encodeURIComponent(employeeId)}/access`)
+    setFailed("")
+    // Une nouvelle tentative : la lecture part en même temps que la liste du dossier (transactions RH sérialisées).
+    const url=`/api/hr-documents/employees/${encodeURIComponent(employeeId)}/access`
+    call(url).catch(()=>new Promise(r=>setTimeout(r,1500)).then(()=>call(url)))
       .then(d=>{if(alive)setAccess(d.access as AccessSummary)})
-      .catch(()=>{if(alive){setAccess(null);setFailed(true)}})
+      .catch(e=>{if(alive){setAccess(null);setFailed(e instanceof Error?`${e.message}${errorCode(e)?` (${errorCode(e)})`:""}`:"Opération indisponible.")}})
     return()=>{alive=false}
   },[employeeId,revision])
-  if(failed)return <p className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-600">Visibilité côté salarié indisponible pour le moment.</p>
+  if(failed)return <p className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-600">Visibilité côté salarié indisponible pour le moment : {failed}</p>
   if(!access)return null
   const warnings:string[]=[]
   if(access.draft||access.placeholderEmail)warnings.push("Ce dossier n’est rattaché à aucun compte de connexion réel : le salarié ne peut pas voir ces documents. Fusionnez ce dossier avec la fiche de son compte.")
