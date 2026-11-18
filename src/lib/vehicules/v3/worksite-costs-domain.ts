@@ -34,6 +34,8 @@ export interface CostExpense {
   status: ExpenseStatus
   amount: number
   litres: number | null
+  /** Ticket de péage du chauffeur (dépense « Autre » marquée) : compté avec les péages, pas en « Autre ». */
+  toll?: boolean
 }
 
 export interface CostAssignment { day: string; worksiteId: string }
@@ -128,14 +130,31 @@ export function computeWorksiteCosts(input: {
     if (t.estimatedKm !== null && Number.isFinite(t.estimatedKm) && t.estimatedKm >= 0) r.km += t.estimatedKm
     else r.toursWithoutKm++
   }
+  // Péage photographié ET payé avec la carte du camion : une seule fois (même montant, à ± 1 jour).
+  const cents = (n: number) => Math.round(n * 100)
+  const dayGap = (a: string, b: string) => Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000
+  const unmatchedTolls = input.expenses.filter((e) => e.toll && e.amount > 0)
+  const cardSpend = (input.cardSpend ?? []).filter((c) => {
+    if (c.kind !== "TOLL") return true
+    const i = unmatchedTolls.findIndex((t) => cents(t.amount) === cents(c.amount) && dayGap(t.day, c.day) <= 1)
+    if (i < 0) return true
+    unmatchedTolls.splice(i, 1)
+    return false
+  })
   for (const e of input.expenses) {
     if (!(e.amount >= 0)) continue
     const r = row(worksiteForDay(e.day, input.tours, input.assignments))
+    if (e.toll) {
+      r.cardSpend.TOLL = round2(r.cardSpend.TOLL + e.amount)
+      r.cardSpendTotal = round2(r.cardSpendTotal + e.amount)
+      if (e.status === "PENDING") r.pendingExpenses++
+      continue
+    }
     r.expenses[e.category] = round2(r.expenses[e.category] + e.amount)
     r.expensesTotal = round2(r.expensesTotal + e.amount)
     if (e.status === "PENDING") r.pendingExpenses++
   }
-  for (const c of input.cardSpend ?? []) {
+  for (const c of cardSpend) {
     if (!(c.amount > 0)) continue
     const r = row(worksiteForDay(c.day, input.tours, input.assignments))
     r.cardSpend[c.kind] = round2(r.cardSpend[c.kind] + c.amount)

@@ -17,8 +17,8 @@ export default async function TicketCarburantPage() {
   return (
     <div className="mx-auto max-w-md space-y-4">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Ticket carburant</h1>
-        <p className="mt-1 text-sm text-slate-500">Prenez le ticket en photo juste après le plein : montant et litres sont lus automatiquement, le ticket est archivé comme justificatif.</p>
+        <h1 className="text-2xl font-bold text-slate-900">Ticket carburant ou péage</h1>
+        <p className="mt-1 text-sm text-slate-500">Prenez le ticket en photo juste après le plein ou le péage : le montant est lu automatiquement et le ticket est archivé comme justificatif.</p>
       </div>
       <DriverFuelTicket />
     </div>

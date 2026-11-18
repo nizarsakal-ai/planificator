@@ -78,6 +78,19 @@ test("ticket du chauffeur : complète le plein bancaire, sinon crée ; refus hor
     assert.deepEqual([fresh.category, fresh.status, fresh.amount.toString(), fresh.litres?.toString(), fresh.createdById], ["FUEL", "PENDING", "61", "34", hassen.user.id])
     assert.ok(fresh.documentVersionId)
 
+    // 3 bis. Ticket de péage, compte sans nom (seule la fiche employé est renseignée) : dépense « Autre »
+    // marquée péage, justificatif au nom du chauffeur (jamais son identifiant technique).
+    await db.user.update({ where: { id: hassen.user.id }, data: { name: null } })
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" }).format(new Date())
+    const toll = await submitDriverTicket({ truckId: f.truck.id, kind: "TOLL", amount: "12,40", litres: "9", mileage: "123456", day: today, station: "Vinci Autoroutes" }, file(7), randomUUID(), hassen.deps)
+    assert.equal(toll.outcome, "CREATED")
+    const tollExpense = await db.vehicleExpense.findUniqueOrThrow({ where: { id: toll.expenseId } })
+    assert.deepEqual([tollExpense.category, tollExpense.reference, tollExpense.litres, tollExpense.mileageObservation, tollExpense.amount.toString(), tollExpense.supplier], ["OTHER", "PEAGE", null, null, "12.4", "Vinci Autoroutes"])
+    assert.ok(tollExpense.occurredAt.getTime() <= Date.now(), "jamais une dépense future, même envoyée le matin")
+    const tollVersion = await db.vehicleDocumentVersion.findUniqueOrThrow({ where: { id: tollExpense.documentVersionId! }, include: { document: true } })
+    assert.match(tollVersion.document.title, /^Ticket de péage du /)
+    assert.equal(tollVersion.uploadedByNameSnapshot, "Hassen Test")
+
     // 4. Non-chauffeur de ce camion, et camion d'une autre société : refus, aucun fichier stocké.
     const before = blobs.size
     await assert.rejects(submitDriverTicket({ truckId: f.truck.id, amount: "10", day: "2026-11-10" }, file(3), randomUUID(), bilel.deps), /TRUCK_NOT_FOUND/)
@@ -92,7 +105,7 @@ test("ticket du chauffeur : complète le plein bancaire, sinon crée ; refus hor
 
     // Audit : le dépôt et la commande de dépense sont tracés au nom du chauffeur.
     const commands = await db.vehicleExpenseCommand.findMany({ where: { truckId: f.truck.id, actorId: hassen.user.id } })
-    assert.deepEqual(commands.map((c) => c.action).sort(), ["CORRECT", "CREATE"])
+    assert.deepEqual(commands.map((c) => c.action).sort(), ["CORRECT", "CREATE", "CREATE"])
   } finally {
     process.env.PLANIFICATOR_VEHICLES_V3_ENABLED = previous
     await db.$disconnect()

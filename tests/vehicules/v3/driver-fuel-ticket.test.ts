@@ -1,7 +1,7 @@
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
 import {
-  derivedKey, driverTicketSchema, findBankExpenseToComplete, receiptDocumentBody, ticketCorrectCommand, ticketCreateCommand, ticketDayAllowed, toCents, type CandidateExpense,
+  TOLL_REFERENCE, derivedKey, driverTicketSchema, findBankExpenseToComplete, receiptDocumentBody, ticketCorrectCommand, ticketCreateCommand, ticketDayAllowed, toCents, type CandidateExpense,
 } from "@/lib/vehicules/v3/driver-fuel-ticket-domain"
 import { authorizeDriverReceipt, driverSessionFrom } from "@/lib/vehicules/v3/driver-receipt-authority"
 import { parseExpenseCommand } from "@/lib/vehicules/v3/expense-domain"
@@ -82,6 +82,19 @@ describe("commandes de dépense", () => {
     assert.equal(civil(ticketCreateCommand(today, "v1", "Maher", new Date("2026-11-17T23:05:00Z")).data.occurredAt), "2026-11-18")
     // Ticket d'un jour passé : midi UTC, inchangé.
     assert.equal(ticketCreateCommand(input, "v1", "Hassen", morning).data.occurredAt, "2026-11-05T12:00:00.000Z")
+  })
+  it("péage : dépense « Autre » marquée, sans litres ni compteur, justificatif dédié", () => {
+    const toll = { ...input, kind: "TOLL" as const, litres: "12,5", mileage: 123456, station: "Vinci Autoroutes" }
+    const parsed = driverTicketSchema.parse({ truckId: "t1", amount: "12,40", day: "2026-11-18", station: "Vinci", kind: "TOLL" })
+    assert.equal(parsed.kind, "TOLL")
+    assert.equal(driverTicketSchema.parse({ truckId: "t1", amount: "12,40", day: "2026-11-18" }).kind, "FUEL")
+    assert.equal(driverTicketSchema.safeParse({ truckId: "t1", amount: "12,40", day: "2026-11-18", kind: "HOTEL" }).success, false)
+    const cmd = ticketCreateCommand(toll, "v1", "Maher")
+    assert.deepEqual([cmd.data.category, cmd.data.reference, cmd.data.litres, cmd.data.mileageObservation, cmd.data.supplier], ["OTHER", TOLL_REFERENCE, null, null, "Vinci Autoroutes"])
+    assert.equal(parseExpenseCommand(cmd, key).command.action, "CREATE")
+    const doc = receiptDocumentBody(toll, "Maher")
+    assert.match(doc.title, /^Ticket de péage du 05\/11\/2026$/)
+    assert.equal(parseDocumentUpload(doc, "11111111-2222-4333-8444-555555555555").category, "EXPENSE_RECEIPT")
   })
   it("justificatif : document EXPENSE_RECEIPT valide", () => {
     const body = receiptDocumentBody(input, "Hassen")

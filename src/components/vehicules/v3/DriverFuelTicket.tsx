@@ -54,6 +54,7 @@ export function DriverFuelTicket() {
   const [day, setDay] = useState(today())
   const [station, setStation] = useState("")
   const [mileage, setMileage] = useState("")
+  const [kind, setKind] = useState<"FUEL" | "TOLL">("FUEL")
 
   useEffect(() => {
     fetch("/api/me/trucks", { cache: "no-store" })
@@ -96,11 +97,11 @@ export function DriverFuelTicket() {
       if (!r.ok) { setReadNote(ERRORS[body.code ?? ""] ?? "Lecture automatique indisponible : saisissez les montants."); return }
       if (body.refund) { setReadNote("Ce ticket ressemble à un remboursement : vérifiez avant d’envoyer."); return }
       if (body.amount) setAmount(body.amount.value.replace(".", ","))
-      if (body.litres) setLitres(body.litres.value.replace(".", ","))
+      if (body.litres && kind === "FUEL") setLitres(body.litres.value.replace(".", ","))
       if (body.day && body.day.value <= today()) setDay(body.day.value)
       if (body.station) setStation(body.station.value)
-      if (body.mileage) setMileage(String(body.mileage.value))
-      const found = [body.amount && "montant", body.litres && "litres", body.day && "date", body.station && "station", body.mileage && "compteur"].filter(Boolean)
+      if (body.mileage && kind === "FUEL") setMileage(String(body.mileage.value))
+      const found = [body.amount && "montant", kind === "FUEL" && body.litres && "litres", body.day && "date", body.station && (kind === "TOLL" ? "société d’autoroute" : "station"), kind === "FUEL" && body.mileage && "compteur"].filter(Boolean)
       setReadNote(found.length ? `Lu automatiquement : ${found.join(", ")}. Vérifiez avant d’envoyer.` : "Rien n’a pu être lu : saisissez les montants.")
     } catch {
       setReadNote("Lecture automatique indisponible : saisissez les montants.")
@@ -115,11 +116,13 @@ export function DriverFuelTicket() {
     try {
       const form = new FormData()
       form.append("file", pending.blob, "ticket.jpg")
-      form.append("payload", JSON.stringify({ truckId, amount: amount.trim(), litres: litres.trim() || null, day, station: station.trim() || null, mileage: mileage.trim() || null }))
+      form.append("payload", JSON.stringify({ truckId, amount: amount.trim(), litres: litres.trim() || null, kind, day, station: station.trim() || null, ...(kind === "FUEL" ? { mileage: mileage.trim() || null } : { litres: null }) }))
       const r = await fetch("/api/me/fuel-ticket", { method: "POST", headers: { "Idempotency-Key": pending.key }, body: form })
       const body = (await r.json().catch(() => ({}))) as { outcome?: string; code?: string }
       if (!r.ok) { setError(ERRORS[body.code ?? ""] ?? `Envoi impossible, réessayez (le même ticket ne sera pas enregistré deux fois).${body.code ? ` Code : ${body.code}` : ""}`); return }
-      setDone(body.outcome === "COMPLETED_BANK_EXPENSE"
+      setDone(kind === "TOLL"
+        ? "Ticket de péage enregistré : il est transmis au bureau pour validation."
+        : body.outcome === "COMPLETED_BANK_EXPENSE"
         ? "Ticket enregistré : il complète le plein déjà relevé sur le compte bancaire."
         : "Ticket enregistré : le plein est transmis au bureau pour validation.")
     } catch {
@@ -157,6 +160,16 @@ export function DriverFuelTicket() {
       )}
       {trucks.length === 1 && <p className="text-sm text-slate-600">Camion : <span className="font-semibold">{trucks[0].matricule}</span></p>}
 
+      <div role="radiogroup" aria-label="Type de ticket" className="grid grid-cols-2 gap-2">
+        {([["FUEL", "Carburant"], ["TOLL", "Péage"]] as const).map(([value, label]) => (
+          <button key={value} type="button" role="radio" aria-checked={kind === value} disabled={!!busy}
+            className={`rounded-xl border px-4 py-3 text-base font-semibold ${kind === value ? "border-[#0f3460] bg-[#0f3460] text-white" : "border-slate-300 bg-white text-slate-800"}`}
+            onClick={() => { if (kind !== value) { setKind(value); setLitres(""); setMileage("") } }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       <label className={`flex w-full cursor-pointer items-center justify-center gap-2 rounded-2xl px-4 py-5 text-lg font-semibold text-white ${truckId && !busy ? "bg-[#0f3460]" : "bg-slate-400"}`}>
         {busy === "photo" || busy === "read" ? <Loader2 className="h-6 w-6 animate-spin" aria-hidden /> : <Camera className="h-6 w-6" aria-hidden />}
         {busy === "read" ? "Lecture du ticket…" : pending ? "Reprendre la photo" : "Photo du ticket"}
@@ -168,16 +181,16 @@ export function DriverFuelTicket() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={pending.previewUrl} alt="Photo du ticket" className="mx-auto max-h-64 rounded-lg object-contain" />
           {readNote && <p className="text-sm text-slate-600">{readNote}</p>}
-          <div className="grid grid-cols-2 gap-3">
+          <div className={kind === "FUEL" ? "grid grid-cols-2 gap-3" : "grid gap-3"}>
             <label className="text-sm font-medium">Montant (€)<input className={input} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="95,50" aria-invalid={!!amount && !amountOk} /></label>
-            <label className="text-sm font-medium">Litres<input className={input} inputMode="decimal" value={litres} onChange={(e) => setLitres(e.target.value)} placeholder="52,3" aria-invalid={!litresOk} /></label>
+            {kind === "FUEL" && <label className="text-sm font-medium">Litres<input className={input} inputMode="decimal" value={litres} onChange={(e) => setLitres(e.target.value)} placeholder="52,3" aria-invalid={!litresOk} /></label>}
           </div>
           <label className="block text-sm font-medium">Date<input type="date" className={input} value={day} max={today()} onChange={(e) => setDay(e.target.value)} /></label>
-          <label className="block text-sm font-medium">Compteur du camion (km), facultatif
+          {kind === "FUEL" && <label className="block text-sm font-medium">Compteur du camion (km), facultatif
             <input className={input} inputMode="numeric" value={mileage} onChange={(e) => setMileage(e.target.value.replace(/[^\d\s]/g, ""))} placeholder="Si vous l’avez noté" maxLength={9} />
             <span className="mt-1 block text-xs font-normal text-slate-500">Pas obligatoire : le ticket s’enregistre aussi sans.</span>
-          </label>
-          <label className="block text-sm font-medium">Station<input className={input} value={station} onChange={(e) => setStation(e.target.value)} placeholder="TotalEnergies Carcassonne" maxLength={200} /></label>
+          </label>}
+          <label className="block text-sm font-medium">{kind === "TOLL" ? "Société d’autoroute" : "Station"}<input className={input} value={station} onChange={(e) => setStation(e.target.value)} placeholder={kind === "TOLL" ? "Vinci Autoroutes" : "TotalEnergies Carcassonne"} maxLength={200} /></label>
           <button className="w-full rounded-xl bg-emerald-600 px-4 py-3 text-base font-semibold text-white disabled:opacity-50" disabled={!amountOk || !litresOk || !day || !!busy} onClick={() => void send()}>
             {busy === "send" ? "Envoi…" : "Envoyer le ticket"}
           </button>
