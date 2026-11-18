@@ -111,3 +111,62 @@ test("ticket du chauffeur : complète le plein bancaire, sinon crée ; refus hor
     await db.$disconnect()
   }
 })
+
+test("ticket du chauffeur → facture fournisseur « à valider », sans doublon avec un scan manuel", { timeout: 60000 }, async () => {
+  const previous = process.env.PLANIFICATOR_VEHICLES_V3_ENABLED
+  process.env.PLANIFICATOR_VEHICLES_V3_ENABLED = "true"
+  const local = new PrismaClient({ datasources: { db: { url: value } } })
+  try {
+    const f = await fixture(local)
+    const storage: DocumentStoragePort = {
+      provider: "cloudinary",
+      async store(location) { return { storageKey: buildDocumentStorageKey(location), created: true } },
+      async destroy() {},
+      async createSignedUrl(key) { return `https://storage.example.test/${encodeURIComponent(key)}` },
+    }
+    const user = await local.user.create({ data: { email: `${randomUUID()}@example.test`, password: "unused", role: "EMPLOYEE", companyId: f.company.id, name: null } })
+    const employee = await local.employee.create({ data: { userId: user.id, companyId: f.company.id, role: "EMPLOYEE", firstName: "Maher", lastName: "Test" } })
+    await local.truck.update({ where: { id: f.truck.id }, data: { chauffeurId: employee.id } })
+    const tasks: Array<() => Promise<void>> = []
+    const deps = (enabled: boolean) => ({
+      auth: async () => ({ user: { id: user.id, role: "EMPLOYEE", companyId: f.company.id } }), db: local, storage,
+      env: { ...process.env, ACCOUNTING_MODULE_ENABLED: enabled ? "true" : "false" },
+      afterResponse: (t: () => Promise<void>) => { tasks.push(t) },
+    })
+    const runTasks = async () => { while (tasks.length) await tasks.shift()!() }
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" }).format(new Date())
+
+    // Ticket TotalEnergies déjà scanné à la main en comptabilité (même montant, même jour).
+    await local.supplierInvoice.create({ data: { companyId: f.company.id, supplierName: "TotalEnergies - Relais de l'Amitié", siret: "90240085200015", number: "106000012672", date: new Date(`${today}T00:00:00Z`), totalHTCents: BigInt(12500), vatCents: BigInt(2500), totalTTCCents: BigInt(15000), status: "PENDING", createdById: f.user.id } })
+
+    // 1. Même plein envoyé par le chauffeur : reconnu, aucune deuxième facture.
+    await submitDriverTicket({ truckId: f.truck.id, amount: "150,00", litres: "68,97", day: today, station: "TOTAL" }, file(20), randomUUID(), deps(true))
+    await runTasks()
+    assert.equal(await local.supplierInvoice.count({ where: { companyId: f.company.id } }), 1)
+
+    // 2. Péage non scanné : facture « à valider », TVA 20 % calculée, photo jointe, compte « Déplacements ».
+    const tollKey = randomUUID()
+    await submitDriverTicket({ truckId: f.truck.id, kind: "TOLL", amount: "33,80", day: today, station: "Vinci Autoroutes" }, file(21), tollKey, deps(true))
+    await runTasks()
+    const toll = await local.supplierInvoice.findFirstOrThrow({ where: { companyId: f.company.id, totalTTCCents: BigInt(3380) } })
+    assert.deepEqual([toll.status, toll.supplierName, toll.totalHTCents, toll.vatCents, toll.vatRateBp, toll.category, toll.createdById], ["PENDING", "Vinci Autoroutes", BigInt(2817), BigInt(563), 2000, "deplacement", user.id])
+    assert.ok(toll.fileId)
+    assert.match(toll.number, /^TICKET-\d{8}-[0-9A-F]{8}$/)
+    assert.match(toll.notes ?? "", /Ticket de péage photographié par Maher Test/)
+    assert.match(toll.notes ?? "", /TVA calculée à 20 %/)
+
+    // 3. Rejeu du même envoi (connexion perdue) : aucune tâche, aucune facture de plus.
+    await submitDriverTicket({ truckId: f.truck.id, kind: "TOLL", amount: "33,80", day: today, station: "Vinci Autoroutes" }, file(21), tollKey, deps(true))
+    assert.equal(tasks.length, 0)
+    assert.equal(await local.supplierInvoice.count({ where: { companyId: f.company.id } }), 2)
+
+    // 4. Comptabilité désactivée : le ticket véhicule est enregistré, aucune facture.
+    const r = await submitDriverTicket({ truckId: f.truck.id, amount: "61", litres: "34", day: today, station: "Esso" }, file(22), randomUUID(), deps(false))
+    await runTasks()
+    assert.equal(r.outcome, "CREATED")
+    assert.equal(await local.supplierInvoice.count({ where: { companyId: f.company.id } }), 2)
+  } finally {
+    process.env.PLANIFICATOR_VEHICLES_V3_ENABLED = previous
+    await local.$disconnect()
+  }
+})
