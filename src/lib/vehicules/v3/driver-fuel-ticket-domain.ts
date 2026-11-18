@@ -94,13 +94,23 @@ export function receiptDocumentBody(input: DriverTicketInput, driverName: string
   }
 }
 
+/**
+ * Instant d'enregistrement du plein : midi UTC du jour du ticket (stable, même jour civil en France), sauf
+ * si cet instant est encore à venir (ticket du jour envoyé avant 13 h à Paris) : le registre refuse toute
+ * dépense future, l'instant d'envoi est alors retenu — il tombe le même jour civil que le ticket.
+ */
+export function ticketOccurredAt(day: string, now: Date = new Date()): string {
+  const noon = Date.parse(`${day}T12:00:00.000Z`)
+  return new Date(Math.min(noon, now.getTime())).toISOString()
+}
+
 /** Création d'un plein « à valider » depuis le ticket. */
-export function ticketCreateCommand(input: DriverTicketInput, documentVersionId: string, driverName: string) {
+export function ticketCreateCommand(input: DriverTicketInput, documentVersionId: string, driverName: string, now: Date = new Date()) {
   return {
     action: "CREATE" as const,
     data: {
       category: "FUEL" as const,
-      occurredAt: `${input.day}T12:00:00.000Z`,
+      occurredAt: ticketOccurredAt(input.day, now),
       amount: normalizeDecimal(input.amount),
       currency: "EUR",
       litres: input.litres ? normalizeDecimal(input.litres) : null,
@@ -113,7 +123,7 @@ export function ticketCreateCommand(input: DriverTicketInput, documentVersionId:
 }
 
 /** Complément du plein bancaire : tous les champs existants sont renvoyés (la correction remplace l'enregistrement). */
-export function ticketCorrectCommand(expense: CandidateExpense, input: DriverTicketInput, documentVersionId: string, driverName: string) {
+export function ticketCorrectCommand(expense: CandidateExpense, input: DriverTicketInput, documentVersionId: string, driverName: string, now: Date = new Date()) {
   const amount = (expense.amountCents / 100).toFixed(2)
   return {
     action: "CORRECT" as const,
@@ -122,7 +132,7 @@ export function ticketCorrectCommand(expense: CandidateExpense, input: DriverTic
     reason: `Ticket photographié par ${driverName} : litres et justificatif ajoutés.`.slice(0, 2000),
     data: {
       category: "FUEL" as const,
-      occurredAt: `${expense.day}T12:00:00.000Z`,
+      occurredAt: ticketOccurredAt(expense.day, now),
       amount,
       currency: "EUR",
       litres: input.litres ? normalizeDecimal(input.litres) : expense.litres,

@@ -21,8 +21,14 @@ export function handleDriverTicketRecognize(request: Request, deps: DriverTicket
 
 export function handleDriverTicketSubmit(request: Request, deps: DriverTicketDeps) {
   return v3Route(request, async () => {
-    const { body, file } = await readDocumentMultipart(request, deps.env)
-    const result = await submitDriverTicket(body, file, request.headers.get("Idempotency-Key"), deps)
-    return Response.json(result, { status: result.replayed ? 200 : 201, headers })
+    try {
+      const { body, file } = await readDocumentMultipart(request, deps.env)
+      const result = await submitDriverTicket(body, file, request.headers.get("Idempotency-Key"), deps)
+      return Response.json(result, { status: result.replayed ? 200 : 201, headers })
+    } catch (error) {
+      // Un ticket refusé se voit dans les journaux (code seul : ni montant, ni nom, ni fichier).
+      console.warn("[vehicle-fuel-ticket] submit refused", { code: error instanceof MileageDomainError ? error.code : "SERVER_ERROR", name: error instanceof Error ? error.name : typeof error })
+      throw error
+    }
   })
 }

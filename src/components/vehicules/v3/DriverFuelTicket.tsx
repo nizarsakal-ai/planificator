@@ -29,6 +29,11 @@ const ERRORS: Record<string, string> = {
   DOCUMENT_TOO_LARGE: "Photo trop lourde : reprenez-la.",
   RECOGNITION_BUSY: "Lecture déjà en cours, réessayez dans un instant.",
   RECOGNITION_TIMEOUT: "Lecture trop longue : saisissez les montants.",
+  FUTURE_EXPENSE: "Date du ticket dans le futur : vérifiez la date.",
+  V3_DISABLED: "L’envoi des tickets n’est pas activé : prévenez le bureau.",
+  FEATURE_DISABLED: "L’envoi des tickets n’est pas activé : prévenez le bureau.",
+  FORBIDDEN: "Vous n’avez pas le droit d’envoyer ce ticket : prévenez le bureau.",
+  UNAUTHENTICATED: "Reconnectez-vous puis réessayez.",
 }
 
 function today() {
@@ -113,7 +118,7 @@ export function DriverFuelTicket() {
       form.append("payload", JSON.stringify({ truckId, amount: amount.trim(), litres: litres.trim() || null, day, station: station.trim() || null, mileage: mileage.trim() || null }))
       const r = await fetch("/api/me/fuel-ticket", { method: "POST", headers: { "Idempotency-Key": pending.key }, body: form })
       const body = (await r.json().catch(() => ({}))) as { outcome?: string; code?: string }
-      if (!r.ok) { setError(ERRORS[body.code ?? ""] ?? "Envoi impossible, réessayez (le même ticket ne sera pas enregistré deux fois)."); return }
+      if (!r.ok) { setError(ERRORS[body.code ?? ""] ?? `Envoi impossible, réessayez (le même ticket ne sera pas enregistré deux fois).${body.code ? ` Code : ${body.code}` : ""}`); return }
       setDone(body.outcome === "COMPLETED_BANK_EXPENSE"
         ? "Ticket enregistré : il complète le plein déjà relevé sur le compte bancaire."
         : "Ticket enregistré : le plein est transmis au bureau pour validation.")
