@@ -31,3 +31,16 @@ describe("visibilité côté salarié", () => {
     assert.equal(await tx(null, []).employeeAccess("c", "e"), null)
   })
 })
+describe("fiches à compléter désactivées (table absente en production)", () => {
+  it("ne lit jamais la relation hrDraft sans le drapeau", async () => {
+    const previous = process.env.HR_DOCUMENT_EMPLOYEE_DRAFTS_ENABLED
+    delete process.env.HR_DOCUMENT_EMPLOYEE_DRAFTS_ENABLED
+    try {
+      let select: Record<string, unknown> = {}
+      const db = { employee: { findFirst: async (a: { select: Record<string, unknown> }) => { select = a.select; return { active: true, user: account() } } },
+        hrDocument: { groupBy: async () => [] } }
+      const s = await new PrismaHrTx(db as never, () => undefined).employeeAccess("c", "e")
+      assert.equal("hrDraft" in select, false); assert.equal(s?.draft, false)
+    } finally { if (previous === undefined) delete process.env.HR_DOCUMENT_EMPLOYEE_DRAFTS_ENABLED; else process.env.HR_DOCUMENT_EMPLOYEE_DRAFTS_ENABLED = previous }
+  })
+})

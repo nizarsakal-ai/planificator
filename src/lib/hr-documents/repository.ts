@@ -87,7 +87,9 @@ export class PrismaHrTx implements Tx {
   async mergeEmployees(companyId:string,sourceId:string,targetId:string,actorId:string){
     await this.db.$queryRaw`SELECT id FROM employees WHERE "companyId"=${companyId} AND id IN (${sourceId},${targetId}) FOR UPDATE`
     const target=await this.db.employee.findFirst({where:{id:targetId,companyId,active:true,user:{active:true}},select:{id:true,firstName:true,lastName:true}})
-    const source=await this.db.employee.findFirst({where:{id:sourceId,companyId},select:{id:true,active:true,firstName:true,lastName:true,hrDraft:{select:{id:true,status:true}}}})
+    const source=await this.db.employee.findFirst({where:{id:sourceId,companyId},select:{id:true,active:true,firstName:true,lastName:true,
+      // Table des fiches à compléter absente tant que leur drapeau est éteint (migration non appliquée) : ne pas la lire.
+      ...(employeeDraftsEnabled()?{hrDraft:{select:{id:true,status:true}}}:{})}}) as {id:string;active:boolean;firstName:string;lastName:string;hrDraft?:{id:string;status:string}|null}|null
     if(!target||!source)throw new HrError("NOT_FOUND",404)
     const isDraft=source.hrDraft?.status==="OPEN"
     if(!isDraft&&source.hrDraft)throw new HrError("CONFLICT",409)
@@ -106,7 +108,9 @@ export class PrismaHrTx implements Tx {
   }
   async employeeAccess(companyId:string,employeeId:string){
     const employee=await this.db.employee.findFirst({where:{id:employeeId,companyId},select:{active:true,
-      user:{select:{email:true,active:true,lastLoginAt:true}},hrDraft:{select:{status:true}}}})
+      user:{select:{email:true,active:true,lastLoginAt:true}},
+      // Table des fiches à compléter absente tant que leur drapeau est éteint : ne la lire qu'avec le drapeau.
+      ...(employeeDraftsEnabled()?{hrDraft:{select:{status:true}}}:{})}}) as {active:boolean;user:{email:string;active:boolean;lastLoginAt:Date|null}|null;hrDraft?:{status:string}|null}|null
     if(!employee)return null
     const counts=await this.db.hrDocument.groupBy({by:["status"],where:{companyId,employeeId},_count:{_all:true}})
     const count=(statuses:string[])=>counts.filter(c=>statuses.includes(c.status)).reduce((n,c)=>n+c._count._all,0)
