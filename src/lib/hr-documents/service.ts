@@ -65,6 +65,8 @@ export interface Tx {
    * effet si la cible a déjà une pièce identique (même catégorie, période, contenu).
    */
   mergeEmployees(companyId:string,sourceId:string,targetId:string,actorId:string):Promise<import("./domain").MergeResult>
+  /** Compte de connexion rattaché à la fiche et répartition de ses documents (visibles, en attente, bloqués). */
+  employeeAccess(companyId:string,employeeId:string):Promise<import("./domain").EmployeeAccessSummary|null>
 }
 /** Lecture locale : texte brut (couche texte) ou lecture complète avec son statut (OCR, moteur absent, échec, illisible). */
 export type TextExtractor=(bytes:Uint8Array,kind:DocumentKind)=>Promise<string|Reading>
@@ -177,6 +179,16 @@ export class HrDocumentsService {
     return this.repo.run(identity,async(tx,a)=>{
       requireCapability(a,"IMPORT");requireCapability(a,"PUBLISH");requireCapability(a,"READ")
       return tx.mergeEmployees(a.companyId,input.sourceEmployeeId,input.targetEmployeeId,a.userId)
+    })
+  }
+  async employeeAccess(identity:Identity,employeeId:unknown) {
+    const selected=employeeSelectionSchema.parse(employeeId)
+    if(!selected)throw new HrError("INVALID_INPUT")
+    return this.repo.run(identity,async(tx,a)=>{
+      requireCapability(a,"READ")
+      const summary=await tx.employeeAccess(a.companyId,selected)
+      if(!summary)throw new HrError("NOT_FOUND",404)
+      return summary
     })
   }
   async employees(identity:Identity) {
