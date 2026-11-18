@@ -232,13 +232,15 @@ export async function findOrCreateSupplier(tx: Tx, ctx: AccountingContext, input
   return tx.supplier.create({ data: { companyId: ctx.companyId, name, siret: input.siret }, select: { id: true, name: true, defaultExpenseAccountId: true } })
 }
 
-export interface SupplierInvoiceFilters { search?: string; status?: "PENDING" | "VALIDATED" | "REJECTED"; page?: number }
+/** `status` absent : factures actives (rejetées masquées, retour 18/11/2026) ; "ALL" : toutes, rejetées comprises. */
+export interface SupplierInvoiceFilters { search?: string; status?: "PENDING" | "VALIDATED" | "REJECTED" | "ALL"; page?: number }
 export const SUPPLIER_PAGE_SIZE = 50
 
 /** Filtre commun à la liste et à l'export comptable : mêmes critères, donc l'export contient exactement ce que la liste affiche. */
 function supplierInvoiceWhere(companyId: string, f: Pick<SupplierInvoiceFilters, "search" | "status">): Prisma.SupplierInvoiceWhereInput {
   const where: Prisma.SupplierInvoiceWhereInput = { companyId }
-  if (f.status) where.status = f.status
+  if (f.status === "ALL") { /* toutes */ } else if (f.status) where.status = f.status
+  else where.status = { not: "REJECTED" }
   const q = f.search?.trim().slice(0, 100)
   if (q) {
     const digits = q.replace(/\s/g, "")

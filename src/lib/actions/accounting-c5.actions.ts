@@ -18,6 +18,7 @@ import { executeExpenseCommand } from "@/lib/vehicules/v3/expense-service"
 import { expenseEnabled } from "@/lib/vehicules/v3/expense-domain"
 import { auth } from "@/auth"
 import { withLifecycleAbort } from "@/lib/billing/lifecycle-abort"
+import { findValidatedDuplicates } from "@/lib/accounting/c5/supplier-duplicates"
 import { createSupplierInvoice, extractSupplierInvoice, rejectSupplierInvoice, storeSupplierFile, updateSupplierInvoice, validateSupplierInvoice, SUPPLIER_CATEGORIES } from "@/lib/accounting/c5/supplier-invoice.service"
 
 type Result<T = Record<never, never>> = ({ ok: true } & T) | { ok: false; error: string }
@@ -183,4 +184,21 @@ export async function rejectSupplierInvoiceAction(id: unknown, reason: unknown):
   const motive = typeof reason === "string" ? reason.trim().slice(0, 300) : ""
   const r = await run((ctx) => rejectSupplierInvoice(prisma, ctx, i.data, motive || null))
   return r.ok ? { ok: true } : r
+}
+
+const duplicateProbeSchema = z.object({ number: z.string().trim().min(1).max(100), supplierName: z.string().trim().min(1).max(200),
+  siret: z.string().trim().max(20).optional(), excludeId: z.string().trim().min(1).max(64).optional() }).strict()
+
+/**
+ * Alerte de saisie (lecture seule, aucune revalidation) : une facture VALIDÉE du même fournisseur porte-t-elle déjà ce numéro ?
+ * Ne bloque rien : le refus reste celui de la validation et de l'index unique.
+ */
+export async function checkSupplierDuplicateAction(raw: unknown): Promise<{ duplicateOf: string | null }> {
+  const p = duplicateProbeSchema.safeParse(raw)
+  if (!p.success) return { duplicateOf: null }
+  try {
+    const c = await requireAccountingAdmin()
+    const [hit] = await findValidatedDuplicates(prisma, { companyId: c.companyId }, [{ number: p.data.number, supplierName: p.data.supplierName, siret: p.data.siret || null }], p.data.excludeId ? [p.data.excludeId] : [])
+    return { duplicateOf: hit }
+  } catch { return { duplicateOf: null } }
 }

@@ -2,7 +2,7 @@
 // Saisie / vérification d'une facture fournisseur : import ou capture (caméra) du fichier, extraction OCR (si activée), champs avec confiance.
 import { supplierOcrMetadata } from "@/lib/supplier-intake/ocr-metadata"
 import { classificationAfterOcr, suggestedExpenseAccountId } from "@/lib/accounting/c5/supplier-classification"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
@@ -10,9 +10,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
-import { createSupplierInvoiceAction, updateSupplierInvoiceAction, uploadSupplierFileAction } from "@/lib/actions/accounting-c5.actions"
+import { checkSupplierDuplicateAction, createSupplierInvoiceAction, updateSupplierInvoiceAction, uploadSupplierFileAction } from "@/lib/actions/accounting-c5.actions"
 
-import { createIntakeInvoiceAction, updateIntakeInvoiceAction, uploadIntakeFileAction } from "@/lib/actions/supplier-intake.actions"
+import { checkIntakeDuplicateAction, createIntakeInvoiceAction, updateIntakeInvoiceAction, uploadIntakeFileAction } from "@/lib/actions/supplier-intake.actions"
 
 export interface SupplierFormValues { supplierName: string; siret: string; number: string; date: string; dueDate: string; totalHT: string; vat: string; totalTTC: string; vatRate: string; category: string; expenseAccountId: string; notes: string }
 const CATS = [["", "—"], ["marchandises", "Marchandises"], ["services", "Prestations"], ["location", "Locations"], ["deplacement", "Déplacements"], ["honoraires", "Honoraires"], ["entretien", "Entretien"], ["restauration", "Restauration"], ["autre", "Autre"]]
@@ -33,6 +33,22 @@ export function SupplierInvoiceForm({ mode, invoiceId, initial, accounts, confid
   const [loading, setLoading] = useState(false)
   const set = (k: keyof SupplierFormValues) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => { const value = e.target.value; setV((current) => ({ ...current, [k]: value })) }
   void fileMime
+  // Alerte doublon dès la saisie (après lecture OCR ou frappe) : même fournisseur + même numéro qu'une facture déjà validée.
+  // Purement informative : la validation refuse de toute façon un second exemplaire.
+  const [duplicate, setDuplicate] = useState<{ href: string | null } | null>(null)
+  useEffect(() => {
+    const number = v.number.trim(), supplierName = v.supplierName.trim(), siret = v.siret.trim()
+    if (!number || !supplierName) { setDuplicate(null); return }
+    let live = true
+    const timer = setTimeout(() => {
+      const probe = { number, supplierName, ...(siret ? { siret } : {}), ...(invoiceId ? { excludeId: invoiceId } : {}) }
+      const check = intake
+        ? checkIntakeDuplicateAction(probe).then((r) => (r.duplicate ? { href: null } : null))
+        : checkSupplierDuplicateAction(probe).then((r) => (r.duplicateOf ? { href: `/comptabilite/fournisseurs/${encodeURIComponent(r.duplicateOf)}` } : null))
+      check.then((d) => { if (live) setDuplicate(d) }).catch(() => { if (live) setDuplicate(null) })
+    }, 400)
+    return () => { live = false; clearTimeout(timer) }
+  }, [v.number, v.supplierName, v.siret, invoiceId, intake])
 
   async function onFile(file: File | undefined) {
     if (!file) return
@@ -83,6 +99,7 @@ export function SupplierInvoiceForm({ mode, invoiceId, initial, accounts, confid
         <div><Label htmlFor="sn">Fournisseur *<Conf c={conf.supplier} /></Label><Input id="sn" required value={v.supplierName} onChange={set("supplierName")} /></div>
         <div><Label htmlFor="si">SIRET (14 chiffres)<Conf c={conf.siret} /></Label><Input id="si" value={v.siret} onChange={set("siret")} /></div>
         <div><Label htmlFor="nu">N° de facture *<Conf c={conf.invoiceNumber} /></Label><Input id="nu" required value={v.number} onChange={set("number")} /></div>
+        {duplicate && <p role="alert" className="sm:col-span-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">Doublon probable : une facture de ce fournisseur portant ce numéro est déjà validée. Elle ne pourra pas être validée une seconde fois.{duplicate.href && <> <a className="underline" href={duplicate.href}>Voir la facture validée</a></>}</p>}
         <div><Label htmlFor="da">Date *<Conf c={conf.date} /></Label><Input id="da" type="date" required value={v.date} onChange={set("date")} /></div>
         <div><Label htmlFor="du">Échéance</Label><Input id="du" type="date" value={v.dueDate} onChange={set("dueDate")} /></div>
         <div><Label htmlFor="vr">Taux de TVA (%)<Conf c={conf.vatRate} /></Label><Input id="vr" value={v.vatRate} onChange={set("vatRate")} /></div>
