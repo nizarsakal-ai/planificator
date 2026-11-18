@@ -122,6 +122,7 @@ export function Documents({manage=false,configure=false,canImport=false,canPubli
       : manage ? "Documents RH" : "Mes documents"}
       {employeeFolder && <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium"><LockKeyhole size={14} aria-hidden="true"/>Privé</span>}</h1>
       <p className="mt-2 text-sm text-slate-600">{manage?"Les informations du salarié proviennent de sa fiche. Vérifiez le PDF avant chaque publication.":"Vos documents personnels, classés par période. Aucun document d’un autre salarié n’est accessible."}</p></div>{manage&&canImport&&<button type="button" className="rounded-lg bg-blue-800 px-4 py-2 text-sm text-white" disabled={busy} onClick={()=>setImportOpen(v=>!v)}>{importOpen?"Fermer le dépôt":"Ajouter des fichiers"}</button>}</header>
+    {manage&&employeeId&&canImport&&canPublish&&<MergePanel employeeId={employeeId} employeeName={selectedEmployee?`${selectedEmployee.firstName} ${selectedEmployee.lastName}`.trim():"ce salarié"} busy={busy} run={action}/>}
     {manage&&employeeId&&<div className="flex flex-wrap gap-4 text-sm text-blue-900">{canReturnToEmployee&&<Link className="underline" href={`/employes/${encodeURIComponent(employeeId)}`}>Retour à la fiche employé</Link>}<Link className="underline" href="/rh/documents">Tous les documents RH</Link></div>}
     {manage&&!employeeId&&employees.length>0&&<div className="flex flex-wrap items-end gap-3 rounded-xl border bg-white p-4">
       <label className="min-w-48 text-sm">Dossier salarié<select className={control} value={employeeChoice} onChange={e=>setEmployeeChoice(e.target.value)}>
@@ -149,6 +150,39 @@ export function Documents({manage=false,configure=false,canImport=false,canPubli
   </section>
 }
 type Runner=(fn:()=>Promise<unknown>,success:string)=>Promise<void>
+/**
+ * Fusion de deux dossiers du même salarié (fiche créée depuis une pièce, homonyme) : tous les documents — publiés compris —
+ * et les messages RH de CE dossier sont rattachés à la fiche choisie (celle de son compte), puis ce dossier est fermé.
+ */
+function MergePanel({employeeId,employeeName,busy,run}:{employeeId:string;employeeName:string;busy:boolean;run:Runner}){
+  const [open,setOpen]=useState(false)
+  const [targets,setTargets]=useState<Employee[]|null>(null)
+  const [target,setTarget]=useState("")
+  const [checked,setChecked]=useState(false)
+  const [error,setError]=useState("")
+  useEffect(()=>{
+    if(!open||targets)return
+    call("/api/hr-documents/employees").then(d=>setTargets((d.employees as Employee[]).filter(e=>!e.draft&&e.id!==employeeId)))
+      .catch(e=>setError(e instanceof Error?e.message:"Liste des salariés indisponible."))
+  },[open,targets,employeeId])
+  const chosen=targets?.find(e=>e.id===target)
+  return <details className="rounded-xl border border-amber-200 bg-amber-50/40 p-4" open={open} onToggle={e=>setOpen((e.currentTarget as HTMLDetailsElement).open)}>
+    <summary className="cursor-pointer text-sm font-medium text-amber-950">Fusionner ce dossier avec un autre dossier du même salarié</summary>
+    <p className="my-2 text-sm text-slate-700">À utiliser quand le même salarié a deux fiches (fiche créée depuis une pièce d’identité, homonyme). Tous les documents de <strong>{employeeName}</strong>, publiés compris, et ses messages RH passent sur la fiche choisie, celle avec laquelle il se connecte. Ce dossier est ensuite fermé ; son planning et ses pointages restent sur l’ancienne fiche.</p>
+    {error&&<p role="alert" className="text-sm text-red-800">{error}</p>}
+    <div className="flex flex-wrap items-end gap-3">
+      <label className="min-w-56 text-sm">Fiche à conserver<select className={control} value={target} onChange={e=>{setTarget(e.target.value);setChecked(false)}} disabled={!targets||busy}>
+        <option value="">{targets?"Choisir la fiche à conserver":"Chargement…"}</option>{targets?.map(e=><option key={e.id} value={e.id}>{e.lastName} {e.firstName}</option>)}
+      </select></label>
+    </div>
+    {chosen&&<label className="mt-3 flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={checked} onChange={e=>setChecked(e.target.checked)}/>J’ai vérifié qu’il s’agit de la même personne : tous les documents de {employeeName} seront rattachés à {chosen.firstName} {chosen.lastName}.</label>}
+    <button type="button" disabled={busy||!chosen||!checked} className="mt-3 rounded-lg bg-amber-800 px-4 py-2 text-sm text-white disabled:opacity-50" onClick={()=>void run(async()=>{
+      const r=await call("/api/hr-documents/merge",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sourceEmployeeId:employeeId,targetEmployeeId:target})})
+      window.location.assign(`/rh/documents?employeeId=${encodeURIComponent(target)}`)
+      return r
+    },"Dossiers fusionnés. Ouverture du dossier conservé…")}>Fusionner les dossiers</button>
+  </details>
+}
 function PublishButton({doc,busy,run}:{doc:Doc;busy:boolean;run:Runner}){
   const key=useRef<string|undefined>(undefined)
   return <button type="button" disabled={busy} className="rounded-lg bg-blue-800 px-3 py-2 text-sm text-white disabled:opacity-50" onClick={()=>{key.current??=crypto.randomUUID();void run(()=>call(`/api/hr-documents/${doc.id}/publish`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({expectedVersion:doc.version,key:key.current})}),"Document publié dans l’espace du salarié. La notification reste suivie séparément.")}}>Publier la version vérifiée</button>
