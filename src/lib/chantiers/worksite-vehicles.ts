@@ -132,3 +132,29 @@ export function parseTourPrefill(query: {
   if (end < start || end > addDays(start, TOUR_MAX_DAYS - 1)) return null
   return { worksiteId, start, end }
 }
+
+/** Véhicule proposé pour une équipe du chantier qui n'en a pas. */
+export interface AssignableTruck {
+  id: string
+  matricule: string
+  label: string
+  chauffeurName: string | null
+  /** Équipe actuelle du véhicule (null = libre). */
+  team: { id: string; name: string } | null
+  /** Le véhicule est rattaché à une AUTRE équipe portant le même nom (doublon d'équipe). */
+  sameNameTeam: boolean
+}
+
+const norm = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase().replace(/\s+/g, " ")
+
+/**
+ * Ordre de proposition : véhicule d'une équipe homonyme (cas typique d'une équipe en double), puis
+ * véhicules libres, puis véhicules d'autres équipes (l'affectation les retire de leur équipe actuelle).
+ */
+export function assignableTrucksFor(teamName: string, trucks: readonly Omit<AssignableTruck, "sameNameTeam">[]): AssignableTruck[] {
+  const target = norm(teamName)
+  const rank = (t: AssignableTruck) => (t.sameNameTeam ? 0 : t.team === null ? 1 : 2)
+  return trucks
+    .map((t) => ({ ...t, sameNameTeam: t.team !== null && norm(t.team.name) === target }))
+    .sort((a, b) => rank(a) - rank(b) || a.matricule.localeCompare(b.matricule, "fr"))
+}
