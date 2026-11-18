@@ -109,7 +109,7 @@ describe("real restricted supplier actions", () => {
     }
   })
   it("has no validation/payment exports and rejects attachment replacement on edit", async () => {
-    assert.deepEqual(Object.keys(actions).sort(), ["createIntakeInvoiceAction", "updateIntakeInvoiceAction", "uploadIntakeFileAction"].sort())
+    assert.deepEqual(Object.keys(actions).sort(), ["checkIntakeDuplicateAction", "createIntakeInvoiceAction", "updateIntakeInvoiceAction", "uploadIntakeFileAction"].sort())
     assert.equal((await actions.updateIntakeInvoiceAction("invoice1", { ...input(), fileId: "file1" })).ok, false)
     assert.equal(state.writes, 0)
   })

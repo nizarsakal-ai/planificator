@@ -12,7 +12,7 @@ export async function GET(request: Request): Promise<Response> {
   if (!guard.ok) return guard.response
   const sp = new URL(request.url).searchParams
   const st = sp.get("statut")
-  const status = st === "PENDING" || st === "VALIDATED" || st === "REJECTED" ? st : undefined
+  const status = st === "PENDING" || st === "VALIDATED" || st === "REJECTED" || st === "ALL" ? st : undefined
   const { rows, truncated } = await listSupplierInvoicesForExport(prisma, guard.ctx, { search: sp.get("q") ?? undefined, status })
   const today = new Date().toISOString().slice(0, 10)
   const response = csvResponse(buildSupplierExportCsv(rows, CATEGORY_LABEL), csvFilename(`factures-fournisseurs-${today}${status ? `-${status.toLowerCase()}` : ""}`))

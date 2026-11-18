@@ -232,13 +232,15 @@ export async function findOrCreateSupplier(tx: Tx, ctx: AccountingContext, input
   return tx.supplier.create({ data: { companyId: ctx.companyId, name, siret: input.siret }, select: { id: true, name: true, defaultExpenseAccountId: true } })
 }
 
-export interface SupplierInvoiceFilters { search?: string; status?: "PENDING" | "VALIDATED" | "REJECTED"; page?: number }
+/** `status` absent : factures actives (rejetées masquées, retour 18/11/2026) ; "ALL" : toutes, rejetées comprises. */
+export interface SupplierInvoiceFilters { search?: string; status?: "PENDING" | "VALIDATED" | "REJECTED" | "ALL"; page?: number }
 export const SUPPLIER_PAGE_SIZE = 50
 
 /** Filtre commun à la liste et à l'export comptable : mêmes critères, donc l'export contient exactement ce que la liste affiche. */
 function supplierInvoiceWhere(companyId: string, f: Pick<SupplierInvoiceFilters, "search" | "status">): Prisma.SupplierInvoiceWhereInput {
   const where: Prisma.SupplierInvoiceWhereInput = { companyId }
-  if (f.status) where.status = f.status
+  if (f.status === "ALL") { /* toutes */ } else if (f.status) where.status = f.status
+  else where.status = { not: "REJECTED" }
   const q = f.search?.trim().slice(0, 100)
   if (q) {
     const digits = q.replace(/\s/g, "")
@@ -289,4 +291,43 @@ export async function getSupplierInvoiceFile(db: Db, ctx: { companyId: string },
 export async function settleSupplierInvoiceExact(tx: Tx, companyId: string, id: string, paidAt: Date): Promise<void> {
   const u = await tx.supplierInvoice.updateMany({ where: { id, companyId, status: "VALIDATED", paidAt: null }, data: { paidAt } })
   if (u.count !== 1) throw new LifecycleAbort("Facture fournisseur modifiée entre-temps : règlement annulé.")
+}
+
+// Doublons de factures fournisseurs (retour 18/11/2026, CALI GAME n° 36077 importée deux fois) : repérage d'une facture
+// VALIDÉE du même fournisseur portant le même numéro. Lecture seule : la garantie comptable reste l'index partiel « une
+// facture validée par (fournisseur, numéro) » et le refus à la validation ; ce module ne sert qu'à prévenir et à signaler.
+
+/** Ce qu'on compare : le numéro (même égalité stricte que la validation) et l'identité du fournisseur. */
+export interface DuplicateProbe { number: string; supplierName: string; siret: string | null }
+export interface ValidatedCandidate { id: string; number: string; supplierName: string; siret: string | null; supplier: { name: string; siret: string | null } | null }
+
+const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
+
+/**
+ * Même fournisseur, selon la règle de rattachement de la validation (findOrCreateSupplier) : même SIRET s'il est connu des
+ * deux côtés, sinon même nom (casse ignorée). Même numéro : égalité stricte après suppression des espaces de bord.
+ */
+export function isSameInvoice(probe: DuplicateProbe, c: ValidatedCandidate): boolean {
+  if (probe.number.trim() !== c.number.trim()) return false
+  const siret = probe.siret?.trim() || null
+  const candidateSirets = [c.siret, c.supplier?.siret].filter((v): v is string => !!v)
+  if (siret && candidateSirets.length) return candidateSirets.includes(siret)
+  return [c.supplierName, c.supplier?.name].some(n => !!n && sameName(n, probe.supplierName))
+}
+
+type DuplicateDb = { supplierInvoice: { findMany(args: Prisma.SupplierInvoiceFindManyArgs): Promise<unknown[]> } }
+
+/**
+ * Pour chaque sonde, l'identifiant d'une facture VALIDÉE qui la double (ou null). `exclude` : factures à ignorer (la sonde
+ * elle-même). Une seule requête bornée par numéros, filtrée par société.
+ */
+export async function findValidatedDuplicates(db: DuplicateDb, ctx: { companyId: string }, probes: readonly DuplicateProbe[], exclude: readonly string[] = []): Promise<(string | null)[]> {
+  const numbers = [...new Set(probes.map(p => p.number.trim()).filter(Boolean))].slice(0, 200)
+  if (!numbers.length) return probes.map(() => null)
+  const candidates = await db.supplierInvoice.findMany({
+    where: { companyId: ctx.companyId, status: "VALIDATED", number: { in: numbers }, ...(exclude.length ? { id: { notIn: [...exclude] } } : {}) },
+    select: { id: true, number: true, supplierName: true, siret: true, supplier: { select: { name: true, siret: true } } },
+    take: 500,
+  }) as ValidatedCandidate[]
+  return probes.map(p => candidates.find(c => isSameInvoice(p, c))?.id ?? null)
 }

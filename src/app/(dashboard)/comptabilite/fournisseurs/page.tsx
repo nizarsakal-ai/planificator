@@ -3,7 +3,7 @@ import Link from "next/link"
 import { prisma } from "@/lib/prisma"
 import { requireAccountingPage, dateFr } from "@/lib/accounting/ui/page-context"
 import { searchParam } from "@/lib/accounting/ui/labels"
-import { CATEGORY_LABEL, listSupplierInvoices } from "@/lib/accounting/c5/supplier-invoice.service"
+import { CATEGORY_LABEL, findValidatedDuplicates, listSupplierInvoices } from "@/lib/accounting/c5/supplier-invoice.service"
 import { formatEuro } from "@/lib/billing/money"
 import { isBillingOcrEnabled } from "@/lib/billing/billing-feature-flag"
 import { Card, CardContent } from "@/components/ui/card"
@@ -20,14 +20,18 @@ export default async function FournisseursPage({ searchParams }: { searchParams:
   const ctx = await requireAccountingPage()
   const sp = await searchParams
   const st = searchParam(sp.statut)
-  const status = st === "PENDING" || st === "VALIDATED" || st === "REJECTED" ? st : undefined
+  const status = st === "PENDING" || st === "VALIDATED" || st === "REJECTED" || st === "ALL" ? st : undefined
   const q = searchParam(sp.q) ?? ""
   const list = await listSupplierInvoices(prisma, ctx, { search: q || undefined, status, page: Number(searchParam(sp.page) ?? 1) || 1 })
+  // Doublons : une facture non validée qui porte le numéro d'une facture VALIDÉE du même fournisseur est signalée (lecture seule).
+  const pendingOrRejected = list.rows.filter((s) => s.status !== "VALIDATED")
+  const duplicateIds = await findValidatedDuplicates(prisma, ctx, pendingOrRejected.map((s) => ({ number: s.number, supplierName: s.supplierName, siret: s.siret })), pendingOrRejected.map((s) => s.id))
+  const duplicateOf = new Map(pendingOrRejected.flatMap((s, i) => duplicateIds[i] ? [[s.id, duplicateIds[i]!] as const] : []))
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <form method="get" className="flex flex-wrap gap-2"><Input name="q" placeholder="Fournisseur, n°, SIRET / SIREN" defaultValue={q} className="w-64" aria-label="Recherche" />
-          <select name="statut" defaultValue={status ?? ""} className="h-10 rounded-md border border-input bg-background px-3 text-sm" aria-label="Statut"><option value="">Tous</option><option value="PENDING">À valider</option><option value="VALIDATED">Validées</option><option value="REJECTED">Rejetées</option></select>
+          <select name="statut" defaultValue={status ?? ""} className="h-10 rounded-md border border-input bg-background px-3 text-sm" aria-label="Statut"><option value="">Actives (hors rejetées)</option><option value="ALL">Toutes, rejetées comprises</option><option value="PENDING">À valider</option><option value="VALIDATED">Validées</option><option value="REJECTED">Rejetées</option></select>
           <Button type="submit" variant="secondary">Filtrer</Button></form>
         {/* Export comptable : CSV des factures correspondant aux filtres actifs (toutes pages), téléchargé via <a> (pas de navigation client). */}
         <div className="flex flex-wrap gap-2">
@@ -57,7 +61,8 @@ export default async function FournisseursPage({ searchParams }: { searchParams:
                 </>); return a.quickValidate && a.validateAriaLabel
                 ? <SupplierQuickValidateButton id={s.id} expenseAccountId={s.expenseAccountId} ariaLabel={a.validateAriaLabel} verifyHref={a.href}>{row}</SupplierQuickValidateButton>
                 : <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:whitespace-nowrap">{row}</div>
-              })()}{s.paidAt && <div className="mt-1 text-xs text-slate-400">payée {dateFr.format(s.paidAt)}</div>}</td>
+              })()}{s.paidAt && <div className="mt-1 text-xs text-slate-400">payée {dateFr.format(s.paidAt)}</div>}
+                {duplicateOf.has(s.id) && <Link href={`/comptabilite/fournisseurs/${duplicateOf.get(s.id)}`} className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium hover:underline ${s.status === "PENDING" ? "bg-amber-50 text-amber-800" : "bg-slate-100 text-slate-600"}`}>{s.status === "PENDING" ? "Doublon probable : déjà validée" : "Doublon de la facture validée"}</Link>}</td>
             </tr>)}
           </tbody></table>
         </div>

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma"
 import { requireSupplierIntake } from "@/lib/supplier-intake/access"
 import { issueFileProof, verifyFileProof } from "@/lib/supplier-intake/file-proof"
 import { parseSupplierForm } from "@/lib/supplier-intake/input"
-import { createSupplierInvoice, updateSupplierInvoice, storeSupplierFile, extractSupplierInvoice } from "@/lib/accounting/c5/supplier-invoice.service"
+import { createSupplierInvoice, updateSupplierInvoice, storeSupplierFile, extractSupplierInvoice, findValidatedDuplicates } from "@/lib/accounting/c5/supplier-invoice.service"
 import { withLifecycleAbort } from "@/lib/billing/lifecycle-abort"
 const denied = { ok: false as const, error: "Opération refusée ou accès indisponible." }
 const signingSecret = () => process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET ?? ""
@@ -66,4 +66,21 @@ export async function updateIntakeInvoiceAction(id: unknown, raw: unknown) {
     revalidatePath("/factures-fournisseurs", "layout"); revalidatePath("/comptabilite/fournisseurs", "layout")
     return { ok: true as const }
   } catch { return denied }
+}
+
+/**
+ * Alerte de saisie côté dépôt de factures : même contrôle que la comptabilité, mais seulement un booléen (le dépôt n'ouvre pas
+ * les factures validées). Lecture seule ; ne bloque rien.
+ */
+export async function checkIntakeDuplicateAction(raw: unknown): Promise<{ duplicate: boolean }> {
+  try {
+    const ctx = await requireSupplierIntake()
+    const r = raw as { number?: unknown; supplierName?: unknown; siret?: unknown; excludeId?: unknown } | null
+    const str = (v: unknown, max: number) => typeof v === "string" && v.trim() && v.length <= max ? v.trim() : null
+    const number = str(r?.number, 100), supplierName = str(r?.supplierName, 200)
+    if (!number || !supplierName) return { duplicate: false }
+    const excludeId = str(r?.excludeId, 64)
+    const [hit] = await findValidatedDuplicates(prisma, ctx, [{ number, supplierName, siret: str(r?.siret, 20) }], excludeId ? [excludeId] : [])
+    return { duplicate: !!hit }
+  } catch { return { duplicate: false } }
 }
