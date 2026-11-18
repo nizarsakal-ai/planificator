@@ -3,7 +3,7 @@ import Link from "next/link"
 import { prisma } from "@/lib/prisma"
 import { requireAccountingPage, dateFr } from "@/lib/accounting/ui/page-context"
 import { searchParam } from "@/lib/accounting/ui/labels"
-import { CATEGORY_LABEL, listSupplierInvoices } from "@/lib/accounting/c5/supplier-invoice.service"
+import { CATEGORY_LABEL, findValidatedDuplicates, listSupplierInvoices } from "@/lib/accounting/c5/supplier-invoice.service"
 import { formatEuro } from "@/lib/billing/money"
 import { isBillingOcrEnabled } from "@/lib/billing/billing-feature-flag"
 import { Card, CardContent } from "@/components/ui/card"
@@ -12,7 +12,6 @@ import { Input } from "@/components/ui/input"
 import { supplierRowAction } from "@/lib/accounting/ui/supplier-row-action"
 import { supplierExportHref } from "@/lib/accounting/ui/supplier-export"
 import { SupplierQuickValidateButton } from "@/components/comptabilite/SupplierQuickValidateButton"
-import { findValidatedDuplicates } from "@/lib/accounting/c5/supplier-duplicates"
 
 export const metadata: Metadata = { title: "Comptabilité — Factures fournisseurs" }
 const STATUS: Record<string, { label: string; cls: string }> = { PENDING: { label: "À valider", cls: "bg-amber-50 text-amber-700" }, VALIDATED: { label: "Validée", cls: "bg-green-50 text-green-700" }, REJECTED: { label: "Rejetée", cls: "bg-red-50 text-red-600" } }

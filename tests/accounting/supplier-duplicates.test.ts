@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { describe, it } from "node:test"
-import { findValidatedDuplicates, isSameInvoice, type ValidatedCandidate } from "../../src/lib/accounting/c5/supplier-duplicates"
+import { findValidatedDuplicates, isSameInvoice, type ValidatedCandidate } from "../../src/lib/accounting/c5/supplier-invoice.service"
 import { listSupplierInvoices } from "../../src/lib/accounting/c5/supplier-invoice.service"
 
 // Données synthétiques. Retour 18/11/2026 : même facture fournisseur importée deux fois (une validée, une rejetée).

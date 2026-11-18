@@ -4,9 +4,8 @@ import { prisma } from "@/lib/prisma"
 import { requireSupplierIntake } from "@/lib/supplier-intake/access"
 import { issueFileProof, verifyFileProof } from "@/lib/supplier-intake/file-proof"
 import { parseSupplierForm } from "@/lib/supplier-intake/input"
-import { createSupplierInvoice, updateSupplierInvoice, storeSupplierFile, extractSupplierInvoice } from "@/lib/accounting/c5/supplier-invoice.service"
+import { createSupplierInvoice, updateSupplierInvoice, storeSupplierFile, extractSupplierInvoice, findValidatedDuplicates } from "@/lib/accounting/c5/supplier-invoice.service"
 import { withLifecycleAbort } from "@/lib/billing/lifecycle-abort"
-import { findValidatedDuplicates } from "@/lib/accounting/c5/supplier-duplicates"
 const denied = { ok: false as const, error: "Opération refusée ou accès indisponible." }
 const signingSecret = () => process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET ?? ""
 

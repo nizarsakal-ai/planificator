@@ -18,8 +18,7 @@ import { executeExpenseCommand } from "@/lib/vehicules/v3/expense-service"
 import { expenseEnabled } from "@/lib/vehicules/v3/expense-domain"
 import { auth } from "@/auth"
 import { withLifecycleAbort } from "@/lib/billing/lifecycle-abort"
-import { findValidatedDuplicates } from "@/lib/accounting/c5/supplier-duplicates"
-import { createSupplierInvoice, extractSupplierInvoice, rejectSupplierInvoice, storeSupplierFile, updateSupplierInvoice, validateSupplierInvoice, SUPPLIER_CATEGORIES } from "@/lib/accounting/c5/supplier-invoice.service"
+import { createSupplierInvoice, extractSupplierInvoice, findValidatedDuplicates, rejectSupplierInvoice, storeSupplierFile, updateSupplierInvoice, validateSupplierInvoice, SUPPLIER_CATEGORIES } from "@/lib/accounting/c5/supplier-invoice.service"
 
 type Result<T = Record<never, never>> = ({ ok: true } & T) | { ok: false; error: string }
 const idSchema = z.string().trim().min(1).max(64)
