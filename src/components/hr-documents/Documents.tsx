@@ -86,7 +86,7 @@ export function Documents({manage=false,configure=false,canImport=false,canPubli
   const employeeFolder = manage && !!employeeId
   const renderDoc = (doc: Doc, month?: string) => {
     const review = manage&&canImport&&doc.status==="READY"
-      ? <ReviewForm key={`${doc.id}:${doc.version}`} doc={doc} employees={employees} categories={categories} busy={busy} run={action}/>
+      ? <ReviewForm key={`${doc.id}:${doc.version}`} doc={doc} employees={employees} categories={categories} busy={busy} run={action} canPublish={canPublish}/>
       : null
     const viewable = ["READY","REVIEWED","PUBLISHED"].includes(doc.status)
     const iconButton = "inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-blue-950 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2"
@@ -110,7 +110,7 @@ export function Documents({manage=false,configure=false,canImport=false,canPubli
           {manage&&canImport&&doc.status==="REVIEWED"&&<button disabled={busy} type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={()=>void action(()=>call(`/api/hr-documents/${doc.id}/edit`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({expectedVersion:doc.version,key:crypto.randomUUID()})}),"La validation a été retirée. Corrigez puis vérifiez à nouveau.")}>Corriger l’affectation avant publication</button>}
           {manage&&canPublish&&mailEnabled&&doc.status==="PUBLISHED"&&<button type="button" disabled={busy} className="rounded-lg border px-3 py-2 text-sm" onClick={()=>void action(()=>call(`/api/hr-documents/${doc.id}/notify`,{method:"POST"}),"Notification traitée. Aucun renvoi si elle était déjà envoyée.")}>Notifier la disponibilité par email</button>}
         </div>
-        {review && (employeeFolder ? <details className="mt-2"><summary className="cursor-pointer text-sm text-blue-900">Vérifier l’affectation</summary>{review}</details> : review)}
+        {review && (employeeFolder ? <details className="mt-2"><summary className="cursor-pointer text-sm text-blue-900">{canPublish?"Vérifier et publier":"Vérifier l’affectation"}</summary>{review}</details> : review)}
         {doc.status==="UPLOADING"&&manage&&canImport&&doc.canResume&&<RecoveryForm key={`${doc.id}:${doc.version}`} doc={doc} action="RESUME" busy={busy} run={action}/>}
         {doc.status==="BLOCKED"&&<div className="mt-2 space-y-3"><p className="text-sm text-red-800">L’intégrité ou les accès Drive doivent être revérifiés par une personne RH habilitée.</p>{manage&&canImport&&<><button disabled={busy} type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={()=>void action(()=>call(`/api/hr-documents/${doc.id}/recover`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"REVERIFY",expectedVersion:doc.version})}),"Intégrité et droits revérifiés. Revue et publication à refaire.")}>Revérifier après réparation des accès</button><RecoveryForm key={`${doc.id}:${doc.version}`} doc={doc} action="RESTORE" busy={busy} run={action}/></>}</div>}
       </li>
@@ -223,15 +223,30 @@ function PublishButton({doc,busy,run}:{doc:Doc;busy:boolean;run:Runner}){
   const key=useRef<string|undefined>(undefined)
   return <button type="button" disabled={busy} className="rounded-lg bg-blue-800 px-3 py-2 text-sm text-white disabled:opacity-50" onClick={()=>{key.current??=crypto.randomUUID();void run(()=>call(`/api/hr-documents/${doc.id}/publish`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({expectedVersion:doc.version,key:key.current})}),"Document publié dans l’espace du salarié. La notification reste suivie séparément.")}}>Publier la version vérifiée</button>
 }
-function ReviewForm({doc,employees,categories,busy,run}:{doc:Doc;employees:Employee[];categories:Category[];busy:boolean;run:Runner}){
+export function ReviewForm({doc,employees,categories,busy,run,canPublish}:{doc:Doc;employees:Employee[];categories:Category[];busy:boolean;run:Runner;canPublish:boolean}){
   return <form className="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-2" onSubmit={e=>{
     e.preventDefault();const f=new FormData(e.currentTarget)
+    const andPublish=canPublish&&(e.nativeEvent as SubmitEvent).submitter?.getAttribute("value")==="publish"
     const data={employeeId:f.get("employeeId"),category:f.get("category"),period:f.get("period"),title:f.get("title"),key:crypto.randomUUID(),expectedVersion:doc.version}
-    void run(()=>call(`/api/hr-documents/${doc.id}/review`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)}),"Affectation et version vérifiées. Publication séparée requise.")
+    const review=()=>call(`/api/hr-documents/${doc.id}/review`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)})
+    if(!andPublish){void run(review,"Affectation et version vérifiées. Publication séparée requise.");return}
+    // En un clic : la même vérification, puis la publication de la version tout juste vérifiée (mêmes contrôles serveur).
+    // Si la publication échoue, le document reste « Vérifié, à publier » et le bouton de publication seul reste disponible.
+    void run(async()=>{
+      const reviewed=await review() as {document?:{version?:unknown}}
+      const version=reviewed.document?.version
+      if(typeof version!=="number")throw new ApiError("Vérification enregistrée, publication à relancer.")
+      try{
+        return await call(`/api/hr-documents/${doc.id}/publish`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({expectedVersion:version,key:crypto.randomUUID()})})
+      }catch(e){throw new ApiError(`Affectation vérifiée, mais la publication a échoué : ${e instanceof Error?e.message:"opération indisponible."} Utilisez « Publier la version vérifiée ».`,errorCode(e))}
+    },"Document vérifié et publié dans l’espace du salarié.")
   }}>
     <MetadataFields employees={employees} categories={categories} defaults={doc}/>
     <label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" required className="mt-1"/>J’ai vérifié le contenu du PDF, le salarié et la catégorie de cette version.</label>
-    <button disabled={busy} className="rounded-lg border border-blue-300 px-4 py-2 text-sm text-blue-900 disabled:opacity-50">Valider cette affectation</button>
+    <div className="flex flex-wrap gap-3 sm:col-span-2">
+      {canPublish&&<button type="submit" value="publish" disabled={busy} className="rounded-lg bg-blue-800 px-4 py-2 text-sm text-white disabled:opacity-50">Valider et publier</button>}
+      <button type="submit" value="review" disabled={busy} className="rounded-lg border border-blue-300 px-4 py-2 text-sm text-blue-900 disabled:opacity-50">{canPublish?"Valider seulement":"Valider cette affectation"}</button>
+    </div>
   </form>
 }
 type Hint={confidence:number;source:string}
