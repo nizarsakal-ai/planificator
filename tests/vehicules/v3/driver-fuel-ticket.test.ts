@@ -62,6 +62,27 @@ describe("commandes de dépense", () => {
     assert.match(cmd.data.notes, /carte •1111/)
     assert.doesNotMatch(cmd.data.notes, /Ajoutez le ticket/)
   })
+  it("ticket du jour envoyé le matin (cas Maher, 18/11 à 11:49 Paris) : jamais refusé comme dépense future", () => {
+    const today = { ...input, day: "2026-11-18" }
+    const morning = new Date("2026-11-18T10:49:00Z") // 11:49 à Paris
+    const create = ticketCreateCommand(today, "v1", "Maher", morning)
+    assert.equal(create.data.occurredAt, "2026-11-18T10:49:00.000Z")
+    // Le registre accepte la commande à cet instant (avant la correction : midi UTC, refusé FUTURE_EXPENSE).
+    const realNow = Date.now
+    Date.now = () => morning.getTime()
+    try {
+      assert.equal(parseExpenseCommand(create, key).command.action, "CREATE")
+      assert.throws(() => parseExpenseCommand({ ...create, data: { ...create.data, occurredAt: "2026-11-18T12:00:00.000Z" } }, key), /FUTURE_EXPENSE/)
+      const correct = ticketCorrectCommand(bank({ day: "2026-11-18" }), today, "v1", "Maher", morning)
+      assert.equal(parseExpenseCommand(correct, key).command.action, "CORRECT")
+    } finally { Date.now = realNow }
+    // Même jour civil à Paris, y compris juste après minuit.
+    const civil = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" }).format(new Date(iso))
+    assert.equal(civil(create.data.occurredAt), "2026-11-18")
+    assert.equal(civil(ticketCreateCommand(today, "v1", "Maher", new Date("2026-11-17T23:05:00Z")).data.occurredAt), "2026-11-18")
+    // Ticket d'un jour passé : midi UTC, inchangé.
+    assert.equal(ticketCreateCommand(input, "v1", "Hassen", morning).data.occurredAt, "2026-11-05T12:00:00.000Z")
+  })
   it("justificatif : document EXPENSE_RECEIPT valide", () => {
     const body = receiptDocumentBody(input, "Hassen")
     const parsed = parseDocumentUpload(body, "11111111-2222-4333-8444-555555555555")
