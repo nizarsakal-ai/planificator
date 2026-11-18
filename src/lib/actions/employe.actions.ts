@@ -11,6 +11,7 @@ import { sendWelcomeEmail } from "@/lib/email"
 import crypto from "crypto"
 import { deleteEmployeImpl } from "@/lib/actions/employe-delete.core"
 import { resendAccessForEmployee } from "@/lib/actions/employe-access.core"
+import { inviterMembre } from "@/lib/actions/invitation.actions"
 
 // ─── Utilitaire : récupère la session et vérifie le rôle ────────────────────
 
@@ -222,7 +223,7 @@ export async function resendEmployeeAccessEmail(employeeId: string) {
     return await resendAccessForEmployee({
       findEmployee: (id, companyId) => prisma.employee.findFirst({
         where: { id, companyId },
-        select: { id: true, firstName: true, active: true, user: { select: { id: true, email: true, active: true } } },
+        select: { id: true, firstName: true, active: true, role: true, user: { select: { id: true, email: true, active: true } } },
       }),
       companyName: async (companyId) => (await prisma.company.findUnique({ where: { id: companyId }, select: { name: true } }))?.name ?? null,
       replaceResetToken: async (userId, token, expiresAt) => {
@@ -234,6 +235,14 @@ export async function resendEmployeeAccessEmail(employeeId: string) {
       sendWelcomeEmail,
       newToken: () => crypto.randomBytes(32).toString("hex"),
       now: () => new Date(),
+      activateUser: async (userId, companyId) =>
+        (await prisma.user.updateMany({ where: { id: userId, companyId, active: false }, data: { active: true } })).count === 1,
+      sendInvitation: async (email, role) => {
+        const form = new FormData()
+        form.set("email", email)
+        form.set("role", role)
+        return inviterMembre(form)
+      },
     }, adminUser.companyId!, employeeId)
   } catch (e) {
     console.error("[employes] RESEND_ACCESS_FAILED", { employeeId, error: e instanceof Error ? e.name : "unknown" })

@@ -25,7 +25,9 @@ export function ResendEmployeeAccessButton({ employeeId, employeeName, email }: 
     try {
       const result = await resendEmployeeAccessEmail(employeeId)
       if (result.success) {
-        toast.success(`E-mail d'accès envoyé à ${result.email}.`)
+        toast.success(result.kind === "INVITATION"
+          ? `Invitation envoyée à ${result.email} : son compte sera activé dès qu'il l'aura acceptée.`
+          : `E-mail d'accès envoyé à ${result.email}.`)
         setOpen(false)
       } else {
         toast.error(result.error)
@@ -49,7 +51,8 @@ export function ResendEmployeeAccessButton({ employeeId, employeeName, email }: 
           <DialogTitle>Renvoyer l&apos;accès à {employeeName} ?</DialogTitle>
           <DialogDescription>
             Un e-mail sera envoyé uniquement à <strong>{email}</strong> avec un lien pour définir ou réinitialiser
-            son mot de passe (valable 72 h). Tout lien précédent encore inutilisé sera remplacé.
+            son mot de passe (valable 72 h), ou une invitation si son compte n'a jamais été activé. Tout lien précédent
+            encore inutilisé sera remplacé.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
