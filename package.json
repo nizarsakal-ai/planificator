@@ -58,6 +58,7 @@
     "test:billing:fix:legacy:pg": "sh tests/billing/pg/legacy/run-legacy-campaign.sh coherent && sh tests/billing/pg/legacy/run-legacy-campaign.sh cross-company && sh tests/billing/pg/legacy/run-legacy-campaign.sh stale-match && sh tests/billing/pg/legacy/run-legacy-campaign.sh deduction-orphan && sh tests/billing/pg/legacy/run-legacy-campaign.sh cancelled-final",
     "test:invitations": "node --import tsx --experimental-test-module-mocks --test tests/employes/invitation-superadmin.action.test.ts",
     "test:invitations:pg": "node --import tsx tests/employes/pg/invitation-superadmin-run.ts test",
+    "test:pwa": "node --import tsx --test tests/pwa/service-worker-scope.test.ts",
     "test:navigation": "node --import tsx --test tests/navigation/nav-config.test.ts tests/navigation/nav-worksite-photos.test.ts tests/navigation/nav-categories.test.ts tests/navigation/appearance.test.ts && node --import tsx --experimental-test-module-mocks --test tests/navigation/nav-categories.render.test.tsx tests/auth/login-experience.render.test.tsx",
     "test:lot-e": "node --import tsx --test tests/crm/crm-core.test.ts tests/crm/retour-navigation.test.ts tests/crm/garde-historique.test.ts tests/automation/automation-core.test.ts tests/automation/flags-matrix.test.ts tests/automation/migration.test.ts tests/navigation/nav-lot-e.test.ts tests/navigation/nav-lot-e-document.test.ts",
     "test:crm:pg": "node --import tsx --test --test-concurrency=1 tests/crm/pg/crm-service.pg.test.ts",

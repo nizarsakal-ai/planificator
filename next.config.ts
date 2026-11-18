@@ -25,39 +25,41 @@ export function vehicleOcrWorkerTraceIncludes(root: string = process.cwd()): str
   return ["./.vehicle-ocr-worker/worker.cjs", ...manifest.files.map((f: string) => `./${f}`)]
 }
 
+/**
+ * Pages HTML, flux RSC et API : jamais interceptés par le service worker.
+ * Ils sont privés (session, rôle, entreprise) et passent par des redirections d'authentification. Servis depuis un cache,
+ * ils exposaient la page d'un autre compte sur un appareil partagé, et WebKit (Safari, Chrome iOS) refuse une réponse
+ * redirigée rendue par un service worker : la navigation échouait avec « ERR_FAILED » (incident du 18/11).
+ * Seuls les fichiers statiques versionnés restent en cache ; aucune règle « attrape-tout » : sans règle, le navigateur
+ * charge la page lui-même.
+ */
+export const PWA_STATIC_RUNTIME_CACHING = [
+  { urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i, handler: "CacheFirst" as const,
+    options: { cacheName: "google-fonts-webfonts", expiration: { maxEntries: 4, maxAgeSeconds: 31536e3 } } },
+  { urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i, handler: "StaleWhileRevalidate" as const,
+    options: { cacheName: "google-fonts-stylesheets", expiration: { maxEntries: 4, maxAgeSeconds: 604800 } } },
+  { urlPattern: ({ url, sameOrigin }: { url: URL; sameOrigin: boolean }) => sameOrigin && /^\/_next\/static\/.+\.(?:js|css|woff2?)$/i.test(url.pathname),
+    handler: "CacheFirst" as const, options: { cacheName: "next-static-assets", expiration: { maxEntries: 200, maxAgeSeconds: 2592e3 } } },
+  { urlPattern: ({ url, sameOrigin }: { url: URL; sameOrigin: boolean }) => sameOrigin && /^\/(?:icons\/.+|favicon-32x32\.png|apple-touch-icon\.png)$/i.test(url.pathname),
+    handler: "StaleWhileRevalidate" as const, options: { cacheName: "app-icons", expiration: { maxEntries: 32, maxAgeSeconds: 2592e3 } } },
+]
+
 const withPWA = withPWAInit({
   dest: "public",
-  cacheOnFrontEndNav: true,
-  aggressiveFrontEndNavCaching: true,
+  // Aucune mise en cache des pages : ni à la navigation, ni de l'URL de démarrage (voir PWA_STATIC_RUNTIME_CACHING).
+  cacheOnFrontEndNav: false,
+  aggressiveFrontEndNavCaching: false,
+  cacheStartUrl: false,
+  dynamicStartUrl: false,
+  // src/worker/index.ts : purge des anciens caches privés à l'activation du service worker.
+  customWorkerSrc: "src/worker",
   reloadOnOnline: true,
   disable: process.env.NODE_ENV === "development",
-  extendDefaultRuntimeCaching: true,
+  extendDefaultRuntimeCaching: false,
   workboxOptions: {
-    // Données de parc authentifiées : jamais de repli sur la réponse d'une autre session.
-    // Cette règle précède les caches génériques API / pages de next-pwa.
-    // V3 : les routes documentaires hors préfixe /api/trucks restent elles aussi NetworkOnly
-    // (aucun cache partagé ni hors ligne pour des pièces privées).
-    runtimeCaching: [{
-      urlPattern: ({ url, sameOrigin }) => sameOrigin && (
-        url.pathname === "/mes-documents" || url.pathname === "/rh/documents"
-        || url.pathname === "/api/hr-documents" || url.pathname.startsWith("/api/hr-documents/")
-        || url.pathname === "/vehicules" || url.pathname.startsWith("/vehicules/")
-        || url.pathname === "/api/trucks" || url.pathname.startsWith("/api/trucks/")
-        || url.pathname === "/api/vehicle-documents" || url.pathname.startsWith("/api/vehicle-documents/")
-        // Lot C : pièces de facturation et comptabilité (PDF, exports CSV/FEC, pages privées) — jamais de cache SW.
-        || url.pathname.startsWith("/api/pdf/devis/") || url.pathname.startsWith("/api/pdf/facture/")
-        || url.pathname === "/devis" || url.pathname.startsWith("/devis/")
-        || url.pathname === "/factures" || url.pathname.startsWith("/factures/")
-        || url.pathname === "/factures-fournisseurs" || url.pathname.startsWith("/factures-fournisseurs/")
-        || url.pathname === "/comptabilite" || url.pathname.startsWith("/comptabilite/")
-        // Photos d'engins (SPEC-WORKSITE-PHOTOS-001) : page et API privées, fichiers par proxy — jamais de cache SW.
-        || url.pathname === "/photos-engins" || url.pathname.startsWith("/photos-engins/")
-        || url.pathname === "/api/worksite-photos" || url.pathname.startsWith("/api/worksite-photos/")
-        || url.pathname.startsWith("/api/auth/drive")
-      ),
-      handler: "NetworkOnly",
-      method: "GET",
-    }],
+    // Fichiers statiques seulement : pages privées (RH, parc, facturation, photos…) et API ne sont jamais
+    // interceptées, donc jamais mises en cache ni servies à une autre session.
+    runtimeCaching: PWA_STATIC_RUNTIME_CACHING,
     disableDevLogs: true,
     // Le nouveau service worker s'active dès qu'il est installé…
     skipWaiting: true,

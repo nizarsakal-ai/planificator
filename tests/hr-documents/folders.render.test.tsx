@@ -98,9 +98,9 @@ describe("espace salarié et dossier RH : mêmes sous-dossiers, actions et prote
     assert.match(page,/const viewable = \["READY","REVIEWED","PUBLISHED"\]\.includes\(doc\.status\)/)
     assert.match(page,/async function downloadDocument\(id:string\)\{\s*const \{blob,name\}=await fetchHrDocument\(id\)/)
     assert.doesNotMatch(page,/href=\{?[`"']\/api\/hr-documents/)
-    // Dépôt groupé : chaque fichier garde sa clé, et une reprise renvoie le corps déjà tenté (même clé, mêmes champs).
-    assert.match(page,/const previous=attempts\.current\.get\(key\)\s*if\(previous\)\{requests\.push\(\{key,body:previous\}\);continue\}/)
-    assert.match(page,/body\.set\("key",key\)/)
+    // Dépôt groupé : chaque envoi relit les champs affichés ; la clé d'idempotence n'est réutilisée qu'à champs identiques.
+    assert.match(page,/key:depositKey\(attempts\.current\.get\(key\),signature,\(\)=>crypto\.randomUUID\(\)\)/)
+    assert.match(page,/body\.set\("key",attempt\.key\)/)
     // Le sélecteur de dossier ne propose pas une fiche à compléter : son dossier n'est pas ouvrable.
     assert.match(page,/employees\.filter\(e=>!e\.draft\)\.map\(e=><option/)
   })
