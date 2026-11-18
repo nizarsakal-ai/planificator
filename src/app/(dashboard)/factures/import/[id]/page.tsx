@@ -29,9 +29,10 @@ export default async function ImportPreviewPage({ params }: { params: Promise<{ 
     )
   }
 
-  const [clients, worksites] = await Promise.all([
+  const [clients, worksites, company] = await Promise.all([
     prisma.client.findMany({ where: { companyId: ctx.companyId }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
     prisma.worksite.findMany({ where: { companyId: ctx.companyId, archivedAt: null }, orderBy: { name: "asc" }, take: 500, select: { id: true, name: true, clientId: true } }),
+    prisma.company.findUnique({ where: { id: ctx.companyId }, select: { name: true } }),
   ])
   return (
     <div className="space-y-4">
@@ -39,7 +40,7 @@ export default async function ImportPreviewPage({ params }: { params: Promise<{ 
         <h1 className="text-2xl font-bold text-slate-900">Aperçu de l’import</h1>
         <p className="mt-1 text-sm text-slate-500">Vérifiez et corrigez chaque ligne. Rien n’est enregistré avant « Valider l’import ».</p>
       </div>
-      <InvoiceImportPreview key={view.version} batchId={view.id} version={view.version} analyzed={view.analyzed} summary={view.summary} table={view.table} clients={clients} worksites={worksites} />
+      <InvoiceImportPreview key={view.version} batchId={view.id} version={view.version} analyzed={view.analyzed} summary={view.summary} table={view.table} clients={clients} worksites={worksites} companyName={company?.name ?? ""} />
       <InvoiceImportStart batchId={view.id} />
     </div>
   )
