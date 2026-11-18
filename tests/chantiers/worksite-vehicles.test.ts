@@ -1,6 +1,7 @@
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
 import {
+  assignableTrucksFor,
   parseTourPrefill,
   worksiteTeamVehicles,
   worksiteTourHref,
@@ -82,5 +83,22 @@ describe("durée maximale d'une tournée (tour-domain)", () => {
     }
     assert.equal(createTourSchema.safeParse({ ...base, startsAt: "2026-11-20T07:00:00+01:00", endsAt: "2026-11-27T19:00:00+01:00" }).success, true)
     assert.equal(createTourSchema.safeParse({ ...base, startsAt: "2026-11-20T07:00:00+01:00", endsAt: "2026-12-05T19:00:00+01:00" }).success, false)
+  })
+})
+
+describe("affecter un véhicule depuis la fiche chantier", () => {
+  const truck = (id: string, matricule: string, team: { id: string; name: string } | null) => ({ id, matricule, label: "Renault Master", chauffeurName: null, team })
+  it("équipe en double : le camion de l'équipe homonyme est proposé en premier et signalé", () => {
+    const r = assignableTrucksFor("Hassen", [
+      truck("t1", "AA-111-AA", { id: "bilel", name: "Bilel" }),
+      truck("t2", "BB-222-BB", null),
+      truck("t3", "FQ-643-VZ", { id: "hassen-ancienne", name: " hassen " }),
+    ])
+    assert.deepEqual(r.map((t) => [t.matricule, t.sameNameTeam]), [["FQ-643-VZ", true], ["BB-222-BB", false], ["AA-111-AA", false]])
+  })
+  it("sans doublon : véhicules libres d'abord, puis ceux des autres équipes", () => {
+    const r = assignableTrucksFor("Équipe Alzonne", [truck("t1", "ZZ-999-ZZ", { id: "x", name: "Makram" }), truck("t2", "CC-333-CC", null)])
+    assert.deepEqual(r.map((t) => t.matricule), ["CC-333-CC", "ZZ-999-ZZ"])
+    assert.equal(r.some((t) => t.sameNameTeam), false)
   })
 })

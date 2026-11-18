@@ -19,7 +19,8 @@ import { RemoveEmployeeFromBlockButton } from "@/components/chantiers/RemoveEmpl
 import { AddEmployeeToBlockButton } from "@/components/chantiers/AddEmployeeToBlockButton"
 import { groupAssignmentBlocks } from "@/lib/chantiers/assignment-blocks"
 import { canShowAffecterEquipeForm } from "@/lib/chantiers/assignment-ui-policy"
-import { worksiteTeamVehicles, worksiteTourHref } from "@/lib/chantiers/worksite-vehicles"
+import { assignableTrucksFor, worksiteTeamVehicles, worksiteTourHref } from "@/lib/chantiers/worksite-vehicles"
+import { AssignTruckToTeam } from "@/components/chantiers/AssignTruckToTeam"
 import { isVehiclesV3Enabled } from "@/lib/vehicules/v3/v3-feature-flag"
 import Link from "next/link"
 
@@ -157,6 +158,20 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
       })
     : []
   const canPlanTours = isAdmin && isVehiclesV3Enabled()
+  // Véhicules affectables depuis la fiche (administrateurs), seulement si une équipe planifiée n'en a pas.
+  const fleet = isAdmin && teamVehicles.some((v) => !v.truck)
+    ? (await prisma.truck.findMany({
+        where: { companyId: session.user.companyId!, active: true, archivedAt: null },
+        select: { id: true, matricule: true, marque: true, modele: true, team: { select: { id: true, name: true } }, chauffeur: { select: { firstName: true, lastName: true } } },
+        orderBy: { matricule: "asc" },
+        take: 200,
+      })).map((t) => ({
+        id: t.id, matricule: t.matricule,
+        label: [t.marque, t.modele].filter((x) => x && x.trim()).join(" ") || "Véhicule",
+        chauffeurName: t.chauffeur ? `${t.chauffeur.firstName} ${t.chauffeur.lastName}`.trim() : null,
+        team: t.team,
+      }))
+    : []
 
   // Calcul des blocs groupés
   const assignmentBlocks = groupAssignmentBlocks(chantier.assignments)
@@ -531,15 +546,14 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
                       ) : (
                         <p className="flex items-start gap-1.5 text-amber-700">
                           <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                          <span>
-                            Aucun véhicule affecté à cette équipe.{" "}
-                            {isAdmin && (
-                              <Link href="/vehicules" className="underline">
-                                Affecter un véhicule (Véhicules → choisir l&apos;équipe et le chauffeur)
-                              </Link>
-                            )}
-                          </span>
+                          <span>Aucun véhicule affecté à cette équipe.</span>
                         </p>
+                      )}
+                      {!v.truck && isAdmin && (
+                        <>
+                          <AssignTruckToTeam teamId={v.teamId} teamName={v.teamName} trucks={assignableTrucksFor(v.teamName, fleet)} />
+                          <Link href="/vehicules" className="text-xs text-slate-500 underline">Gérer les véhicules (équipe, chauffeur)</Link>
+                        </>
                       )}
                     </div>
                   ))
