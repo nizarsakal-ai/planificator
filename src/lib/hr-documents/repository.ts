@@ -19,7 +19,7 @@ export class PrismaHrRepository implements Repository {
     },{isolationLevel:Prisma.TransactionIsolationLevel.ReadCommitted,maxWait:5000,timeout:10000})
   }
 }
-class PrismaHrTx implements Tx {
+export class PrismaHrTx implements Tx {
   constructor(private readonly db:Prisma.TransactionClient,private readonly grants:()=>string|undefined) {}
   async actor(identity:Identity):Promise<Actor> {
     const user=await this.db.user.findUnique({where:{id:identity.userId},select:{active:true,role:true,companyId:true,
@@ -83,6 +83,26 @@ class PrismaHrTx implements Tx {
       :{status:"PUBLISHED"})}
     const where:Prisma.HrDocumentWhereInput={companyId:actor.companyId,...(manage?(employeeId?{employeeId}:{}):own),...(cursor?{id:{gt:cursor}}:{})}
     return this.db.hrDocument.findMany({where,orderBy:{id:"asc"},take:26})
+  }
+  async mergeEmployees(companyId:string,sourceId:string,targetId:string,actorId:string){
+    await this.db.$queryRaw`SELECT id FROM employees WHERE "companyId"=${companyId} AND id IN (${sourceId},${targetId}) FOR UPDATE`
+    const target=await this.db.employee.findFirst({where:{id:targetId,companyId,active:true,user:{active:true}},select:{id:true,firstName:true,lastName:true}})
+    const source=await this.db.employee.findFirst({where:{id:sourceId,companyId},select:{id:true,active:true,firstName:true,lastName:true,hrDraft:{select:{id:true,status:true}}}})
+    if(!target||!source)throw new HrError("NOT_FOUND",404)
+    const isDraft=source.hrDraft?.status==="OPEN"
+    if(!isDraft&&source.hrDraft)throw new HrError("CONFLICT",409)
+    // Même pièce (catégorie, période, contenu) déjà dans la cible : contrainte unique, refus sans rien déplacer.
+    const docs=await this.db.hrDocument.findMany({where:{companyId,employeeId:sourceId},select:{category:true,period:true,sha256:true}})
+    if(docs.length&&await this.db.hrDocument.findFirst({where:{companyId,employeeId:targetId,OR:docs.map(d=>({category:d.category,period:d.period,sha256:d.sha256}))},select:{id:true}}))
+      throw new HrError("DUPLICATE",409)
+    const moved=await this.db.hrDocument.updateMany({where:{companyId,employeeId:sourceId},data:{employeeId:targetId}})
+    const messages=await this.db.hrMessage.updateMany({where:{companyId,employeeId:sourceId},data:{employeeId:targetId}})
+    if(isDraft)await this.db.hrEmployeeDraft.update({where:{id:source.hrDraft!.id},data:{status:"MERGED"}})
+    else await this.db.employee.update({where:{id:sourceId},data:{active:false}})
+    await this.db.historyLog.create({data:{companyId,actorId,action:"UPDATED",entityType:"Employee",entityId:targetId,
+      detail:`Dossier RH fusionné : ${moved.count} document(s) et ${messages.count} message(s) de la fiche ${source.firstName} ${source.lastName} rattachés à ${target.firstName} ${target.lastName} ; fiche source ${isDraft?"(à compléter) fermée":"désactivée"}.`,
+      oldValue:{sourceEmployeeId:sourceId,sourceKind:isDraft?"DRAFT":"EMPLOYEE"},newValue:{targetEmployeeId:targetId,documents:moved.count,messages:messages.count}}})
+    return {documents:moved.count,messages:messages.count,source:isDraft?"DRAFT" as const:"EMPLOYEE" as const}
   }
   async employees(companyId:string){
     const active=await this.db.employee.findMany({where:{companyId,active:true,user:{active:true}},select:{id:true,firstName:true,lastName:true},orderBy:[{lastName:"asc"},{id:"asc"}],take:500})

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { assertContent, canRead, detectKind, digest, DOWNLOADABLE_STATUSES, draftSchema, employeeDraftsEnabled, employeeSelectionSchema, employeeVisible, HrError, KIND_EXTENSION, MESSAGE_PAGE, messageSchema, privateSpaceEnabled, recognitionEnabled, REQUEST_SCAN_PAGE, requireCapability, reviewSchema, SUBMISSION_INTENT_PREFIX, submissionSchema, validateDocument, type Actor, type DocumentKind, type DraftInput, type Identity } from "./domain"
+import { mergeSchema, assertContent, canRead, detectKind, digest, DOWNLOADABLE_STATUSES, draftSchema, employeeDraftsEnabled, employeeSelectionSchema, employeeVisible, HrError, KIND_EXTENSION, MESSAGE_PAGE, messageSchema, privateSpaceEnabled, recognitionEnabled, REQUEST_SCAN_PAGE, requireCapability, reviewSchema, SUBMISSION_INTENT_PREFIX, submissionSchema, validateDocument, type Actor, type DocumentKind, type DraftInput, type Identity } from "./domain"
 import { verifiedDownload, type PrivateDrive } from "./drive"
 import { recognize, type EmployeeRef, type Proposal } from "./recognition/engine"
 import type { Reading } from "./recognition/ocr"
@@ -59,6 +59,12 @@ export interface Tx {
   recordAccess(doc:DocumentRecord,userId:string,at:Date):Promise<void>
   accesses(companyId:string,documentIds:string[],userId:string):Promise<{documentId:string;version:number;firstAt:Date}[]>
   createDraft(companyId:string,createdById:string,input:Omit<DraftInput,"key">&{key:string},passwordHash:string):Promise<EmployeeRef>
+  /**
+   * Rattache à `targetId` (fiche active, compte actif) tous les documents RH et messages de `sourceId` (fiche à compléter
+   * ouverte ou autre fiche de l'entreprise), puis ferme la source (brouillon fusionné ou fiche désactivée). Refus sans
+   * effet si la cible a déjà une pièce identique (même catégorie, période, contenu).
+   */
+  mergeEmployees(companyId:string,sourceId:string,targetId:string,actorId:string):Promise<import("./domain").MergeResult>
 }
 /** Lecture locale : texte brut (couche texte) ou lecture complète avec son statut (OCR, moteur absent, échec, illisible). */
 export type TextExtractor=(bytes:Uint8Array,kind:DocumentKind)=>Promise<string|Reading>
@@ -163,6 +169,14 @@ export class HrDocumentsService {
         }
       }
       return docs.map(doc=>({...project(doc),canResume:manage&&doc.uploadedById===a.userId,...(opened.has(doc.id)?{openedAt:opened.get(doc.id)}:{})}))
+    })
+  }
+  /** Fusion de deux dossiers du même salarié (doublon créé depuis une pièce, homonyme) : import ET publication requis. */
+  async mergeEmployees(identity:Identity,raw:unknown) {
+    const input=mergeSchema.parse(raw)
+    return this.repo.run(identity,async(tx,a)=>{
+      requireCapability(a,"IMPORT");requireCapability(a,"PUBLISH");requireCapability(a,"READ")
+      return tx.mergeEmployees(a.companyId,input.sourceEmployeeId,input.targetEmployeeId,a.userId)
     })
   }
   async employees(identity:Identity) {

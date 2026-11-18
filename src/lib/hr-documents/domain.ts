@@ -19,6 +19,11 @@ export const draftSchema = z.object({ firstName: z.string().trim().min(1).max(80
   identityExpiry: isoDate.optional(), documentNumberEnd: z.string().regex(/^[A-Z0-9]{1,4}$/).optional(),
   sourceSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(), key: z.string().uuid() }).strict()
 export type DraftInput = z.infer<typeof draftSchema>
+/** Fusion de deux dossiers du même salarié : la fiche source (doublon) est rattachée à la fiche cible (compte utilisé). */
+export const mergeSchema = z.object({ sourceEmployeeId: id, targetEmployeeId: id }).strict()
+  .refine(v => v.sourceEmployeeId !== v.targetEmployeeId, { message: "Fiches identiques" })
+export type MergeInput = z.infer<typeof mergeSchema>
+export type MergeResult = { documents: number; messages: number; source: "DRAFT" | "EMPLOYEE" }
 export function recognitionEnabled(env: NodeJS.ProcessEnv = process.env) { return env.HR_DOCUMENT_RECOGNITION_ENABLED === "true" }
 export function employeeDraftsEnabled(env: NodeJS.ProcessEnv = process.env) { return env.HR_DOCUMENT_EMPLOYEE_DRAFTS_ENABLED === "true" }
 /** Espace privé RH ↔ salarié (dépôts, messages, suivi) : absent = désactivé, tant que sa migration n'est pas appliquée. */
