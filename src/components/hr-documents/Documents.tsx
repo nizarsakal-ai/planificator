@@ -122,6 +122,7 @@ export function Documents({manage=false,configure=false,canImport=false,canPubli
       : manage ? "Documents RH" : "Mes documents"}
       {employeeFolder && <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium"><LockKeyhole size={14} aria-hidden="true"/>Privé</span>}</h1>
       <p className="mt-2 text-sm text-slate-600">{manage?"Les informations du salarié proviennent de sa fiche. Vérifiez le PDF avant chaque publication.":"Vos documents personnels, classés par période. Aucun document d’un autre salarié n’est accessible."}</p></div>{manage&&canImport&&<button type="button" className="rounded-lg bg-blue-800 px-4 py-2 text-sm text-white" disabled={busy} onClick={()=>setImportOpen(v=>!v)}>{importOpen?"Fermer le dépôt":"Ajouter des fichiers"}</button>}</header>
+    {manage&&employeeId&&<AccessPanel employeeId={employeeId} revision={docs.map(d=>`${d.id}:${d.status}:${d.version}`).join("|")}/>}
     {manage&&employeeId&&canImport&&canPublish&&<MergePanel employeeId={employeeId} employeeName={selectedEmployee?`${selectedEmployee.firstName} ${selectedEmployee.lastName}`.trim():"ce salarié"} busy={busy} run={action}/>}
     {manage&&employeeId&&<div className="flex flex-wrap gap-4 text-sm text-blue-900">{canReturnToEmployee&&<Link className="underline" href={`/employes/${encodeURIComponent(employeeId)}`}>Retour à la fiche employé</Link>}<Link className="underline" href="/rh/documents">Tous les documents RH</Link></div>}
     {manage&&!employeeId&&employees.length>0&&<div className="flex flex-wrap items-end gap-3 rounded-xl border bg-white p-4">
@@ -150,6 +151,39 @@ export function Documents({manage=false,configure=false,canImport=false,canPubli
   </section>
 }
 type Runner=(fn:()=>Promise<unknown>,success:string)=>Promise<void>
+type AccessSummary={email:string|null;placeholderEmail:boolean;accountActive:boolean;employeeActive:boolean;draft:boolean;lastLoginAt:string|null;visible:number;pending:number;blocked:number}
+/**
+ * Ce que le salarié voit réellement depuis son compte : compte de connexion rattaché à CE dossier et documents publiés.
+ * Explique un espace « Mes documents » vide (documents non publiés, autre fiche, compte inactif ou jamais utilisé).
+ */
+function AccessPanel({employeeId,revision}:{employeeId:string;revision:string}){
+  const [access,setAccess]=useState<AccessSummary|null>(null),[failed,setFailed]=useState(false)
+  useEffect(()=>{
+    let alive=true
+    setFailed(false)
+    call(`/api/hr-documents/employees/${encodeURIComponent(employeeId)}/access`)
+      .then(d=>{if(alive)setAccess(d.access as AccessSummary)})
+      .catch(()=>{if(alive){setAccess(null);setFailed(true)}})
+    return()=>{alive=false}
+  },[employeeId,revision])
+  if(failed)return <p className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-600">Visibilité côté salarié indisponible pour le moment.</p>
+  if(!access)return null
+  const warnings:string[]=[]
+  if(access.draft||access.placeholderEmail)warnings.push("Ce dossier n’est rattaché à aucun compte de connexion réel : le salarié ne peut pas voir ces documents. Fusionnez ce dossier avec la fiche de son compte.")
+  else{
+    if(!access.accountActive)warnings.push("Le compte de connexion est inactif : renvoyez l’accès depuis la fiche employé.")
+    if(!access.employeeActive)warnings.push("La fiche salarié est désactivée : le salarié ne voit aucun document.")
+    if(access.accountActive&&!access.lastLoginAt)warnings.push("Ce compte ne s’est encore jamais connecté : le salarié se connecte peut-être avec une autre adresse.")
+  }
+  if(access.pending>0)warnings.push(`${access.pending} document${access.pending>1?"s":""} pas encore publié${access.pending>1?"s":""} : invisible${access.pending>1?"s":""} pour le salarié tant qu’ils ne sont pas vérifiés puis publiés.`)
+  if(access.blocked>0)warnings.push(`${access.blocked} document${access.blocked>1?"s":""} en remise suspendue.`)
+  const ok=!warnings.length
+  return <div role="status" className={`rounded-xl border p-4 text-sm ${ok?"border-green-200 bg-green-50 text-green-950":"border-amber-300 bg-amber-50 text-amber-950"}`}>
+    <p className="font-semibold">Ce que voit le salarié : {access.visible} document{access.visible>1?"s":""} publié{access.visible>1?"s":""}</p>
+    <p className="mt-1 break-all">Compte de connexion : {access.email??"aucun (fiche à compléter)"}{access.email&&` · ${access.accountActive?"actif":"inactif"}`}{access.email&&` · dernière connexion : ${access.lastLoginAt?new Date(access.lastLoginAt).toLocaleString("fr-FR",{dateStyle:"short",timeStyle:"short"}):"jamais"}`}</p>
+    {warnings.length>0&&<ul className="mt-2 list-disc space-y-1 pl-5">{warnings.map(w=><li key={w}>{w}</li>)}</ul>}
+  </div>
+}
 /**
  * Fusion de deux dossiers du même salarié (fiche créée depuis une pièce, homonyme) : tous les documents — publiés compris —
  * et les messages RH de CE dossier sont rattachés à la fiche choisie (celle de son compte), puis ce dossier est fermé.

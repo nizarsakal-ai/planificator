@@ -104,6 +104,18 @@ export class PrismaHrTx implements Tx {
       oldValue:{sourceEmployeeId:sourceId,sourceKind:isDraft?"DRAFT":"EMPLOYEE"},newValue:{targetEmployeeId:targetId,documents:moved.count,messages:messages.count}}})
     return {documents:moved.count,messages:messages.count,source:isDraft?"DRAFT" as const:"EMPLOYEE" as const}
   }
+  async employeeAccess(companyId:string,employeeId:string){
+    const employee=await this.db.employee.findFirst({where:{id:employeeId,companyId},select:{active:true,
+      user:{select:{email:true,active:true,lastLoginAt:true}},hrDraft:{select:{status:true}}}})
+    if(!employee)return null
+    const counts=await this.db.hrDocument.groupBy({by:["status"],where:{companyId,employeeId},_count:{_all:true}})
+    const count=(statuses:string[])=>counts.filter(c=>statuses.includes(c.status)).reduce((n,c)=>n+c._count._all,0)
+    const email=employee.user?.email??null
+    const placeholderEmail=!!email&&email.toLowerCase().endsWith(".invalid")
+    return {email:placeholderEmail?null:email,placeholderEmail,accountActive:!!employee.user?.active,employeeActive:employee.active,
+      draft:employee.hrDraft?.status==="OPEN",lastLoginAt:employee.user?.lastLoginAt??null,
+      visible:count(["PUBLISHED"]),pending:count(["UPLOADING","READY","REVIEWED"]),blocked:count(["BLOCKED"])}
+  }
   async employees(companyId:string){
     const active=await this.db.employee.findMany({where:{companyId,active:true,user:{active:true}},select:{id:true,firstName:true,lastName:true},orderBy:[{lastName:"asc"},{id:"asc"}],take:500})
     if(!employeeDraftsEnabled())return active

@@ -24,6 +24,11 @@ export const mergeSchema = z.object({ sourceEmployeeId: id, targetEmployeeId: id
   .refine(v => v.sourceEmployeeId !== v.targetEmployeeId, { message: "Fiches identiques" })
 export type MergeInput = z.infer<typeof mergeSchema>
 export type MergeResult = { documents: number; messages: number; source: "DRAFT" | "EMPLOYEE" }
+/** Ce que le salarié voit réellement depuis son compte : de quoi expliquer un espace « Mes documents » vide. */
+export type EmployeeAccessSummary = {
+  email: string | null; placeholderEmail: boolean; accountActive: boolean; employeeActive: boolean; draft: boolean
+  lastLoginAt: Date | null; visible: number; pending: number; blocked: number
+}
 export function recognitionEnabled(env: NodeJS.ProcessEnv = process.env) { return env.HR_DOCUMENT_RECOGNITION_ENABLED === "true" }
 export function employeeDraftsEnabled(env: NodeJS.ProcessEnv = process.env) { return env.HR_DOCUMENT_EMPLOYEE_DRAFTS_ENABLED === "true" }
 /** Espace privé RH ↔ salarié (dépôts, messages, suivi) : absent = désactivé, tant que sa migration n'est pas appliquée. */
