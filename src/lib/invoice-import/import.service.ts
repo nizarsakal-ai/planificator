@@ -12,6 +12,7 @@ import { MAX_OCR_FILE_BYTES, sniffMime } from "@/lib/accounting/c5/ocr-provider"
 import { analyzeBatch, rowContentHash, summarize, type AnalysisState, type ExistingImported } from "./analyze"
 import { nameKey, numberKey } from "./normalize"
 import { extractDocument, type ExtractedDocument, type OwnCompany } from "./pdf-extract"
+import { clientNameFromFileName, existingClientByName } from "./client-hint"
 import { TabularError, guessMapping, headerLabels, headerSignature, readTable, tableToPreviewRows, validateMapping, type Cell } from "./tabular"
 import { ZipError, isZip, readZip } from "./zip"
 import type { AnalyzedRow, BatchSummary, ColumnMapping, ImportRowKind, ImportSourceSystem, ImportStatus, PreviewRow } from "./types"
@@ -203,7 +204,10 @@ export async function addFileToBatch(db: Db, ctx: ImportContext, batchId: string
       const k = x.number ? numberKey(x.number) : ""
       const byNumber = k && x.kind !== "SUPPLIER" ? doc.rows.filter((r) => r.origin.type === "table" && !r.fileId && numberKey(r.number) === k) : []
       if (byNumber.length === 1) { byNumber[0].fileId = stored.value.id; byNumber[0].fileName = baseName(d.name).slice(0, 200); result.attached++; continue }
-      doc.rows.push(rowFromExtraction(x, d.name, stored.value.id, x.text ? clientHintFromText(x.text, clients, company) : ""))
+      // Client : nom d'un client existant trouvé dans le texte, sinon nom lu dans le nom du fichier (simple proposition).
+      const fromFile = clientNameFromFileName(d.name, company.name)
+      const hint = (x.text ? clientHintFromText(x.text, clients, company) : "") || (fromFile ? existingClientByName(fromFile, clients)?.name ?? fromFile : "")
+      doc.rows.push(rowFromExtraction(x, d.name, stored.value.id, x.kind === "SUPPLIER" ? "" : hint))
       result.added++
     }
   }

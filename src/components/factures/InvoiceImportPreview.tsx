@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { cancelInvoiceImportAction, commitInvoiceImportAction, updateInvoiceImportMappingAction, updateInvoiceImportRowsAction } from "@/lib/actions/invoice-import.actions"
 import { KIND_LABEL, STATUS_LABEL, centsToEuros, eurosToCents } from "@/lib/invoice-import/format"
+import { clientKey, clientNameFromFileName, existingClientByName } from "@/lib/invoice-import/client-hint"
 import { IMPORT_FIELDS, IMPORT_FIELD_LABEL, type AnalyzedRow, type BatchSummary, type ColumnMapping, type ImportField, type ImportRowKind, type ImportStatus, type PreviewRow } from "@/lib/invoice-import/types"
 
 interface Option { id: string; name: string }
@@ -17,6 +18,8 @@ interface Props {
   batchId: string; version: number; analyzed: AnalyzedRow[]; summary: BatchSummary
   table: { file: string; headers: string[]; sample: (string | number | null)[][]; mapping: ColumnMapping } | null
   clients: Option[]; worksites: (Option & { clientId: string })[]
+  /** Société émettrice : retirée du nom de fichier pour en déduire le client. */
+  companyName?: string
 }
 type Draft = Pick<PreviewRow, "kind" | "number" | "clientName" | "clientId" | "createClient" | "worksiteId" | "issueDate" | "dueDate" | "status" | "creditedNumber" | "decision" | "excluded"> & { ht: string; vat: string; ttc: string }
 
@@ -31,14 +34,35 @@ const OUTCOME: Record<AnalyzedRow["outcome"], { label: string; className: string
   REDIRECT: { label: "Fournisseur", className: "bg-amber-50 text-amber-700" },
 }
 
-export function InvoiceImportPreview({ batchId, version, analyzed, summary, table, clients, worksites }: Props) {
+export function InvoiceImportPreview({ batchId, version, analyzed, summary, table, clients, worksites, companyName = "" }: Props) {
   const router = useRouter()
-  const initial = useMemo(() => new Map(analyzed.map((a) => [a.row.id, toDraft(a.row, a.resolvedClientId)])), [analyzed])
+  // Nom de client proposé pour une pièce sans client : lu dans le nom du fichier (ex. « …_GALYA_EVENTS_JEDDIS_TRANSPORT.pdf »).
+  const suggestedName = (r: PreviewRow) => r.clientName.trim() || (r.fileName ? clientNameFromFileName(r.fileName, companyName) : "")
+  const initial = useMemo(() => new Map(analyzed.map((a) => { const d = toDraft(a.row, a.resolvedClientId); return [a.row.id, d.clientName.trim() ? d : { ...d, clientName: suggestedName(a.row) }] })), [analyzed]) // eslint-disable-line react-hooks/exhaustive-deps
   const [drafts, setDrafts] = useState(initial)
   const [dirty, setDirty] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [mapping, setMapping] = useState<ColumnMapping | null>(table?.mapping ?? null)
   const [confirming, setConfirming] = useState(false)
+
+  // Pièces sans client dont un nom est connu (source ou nom du fichier) : client existant associé, sinon client à créer.
+  const missing = analyzed.flatMap((a) => {
+    const d = drafts.get(a.row.id) as Draft
+    if (d.excluded || d.kind === "SUPPLIER" || d.clientId || d.createClient || !d.clientName.trim()) return []
+    return [{ id: a.row.id, name: d.clientName.trim(), existing: existingClientByName(d.clientName, clients) }]
+  })
+  const newNames = [...new Map(missing.filter((m) => !m.existing).map((m) => [clientKey(m.name), m.name])).values()].sort((x, y) => x.localeCompare(y, "fr"))
+  const [reviewingClients, setReviewingClients] = useState(false)
+  function completeClients() {
+    setDrafts((prev) => {
+      const next = new Map(prev)
+      for (const m of missing) next.set(m.id, { ...(prev.get(m.id) as Draft), clientName: m.name, ...(m.existing ? { clientId: m.existing.id, createClient: false } : { clientId: null, createClient: true }) })
+      return next
+    })
+    setDirty((prev) => { const next = new Set(prev); for (const m of missing) next.add(m.id); return next })
+    setReviewingClients(false); setConfirming(false)
+    toast.success("Clients complétés : enregistrez les corrections. Les nouveaux clients ne seront créés qu’à la validation de l’import.")
+  }
 
   const edit = (id: string, patch: Partial<Draft>) => {
     setDrafts((prev) => { const next = new Map(prev); next.set(id, { ...(prev.get(id) as Draft), ...patch }); return next })
@@ -120,6 +144,17 @@ export function InvoiceImportPreview({ batchId, version, analyzed, summary, tabl
         {summary.supplier > 0 && <span className="text-amber-700"><strong>{summary.supplier}</strong> facture(s) fournisseur (non importées ici)</span>}
       </CardContent></Card>
 
+      {missing.length > 0 && <Card><CardContent className="space-y-2 p-4 text-sm">
+        <p><strong>{missing.length}</strong> pièce(s) sans client mais dont le nom du client est connu (fichier ou source) : {missing.length - missing.filter((m) => !m.existing).length} client(s) existant(s) à associer, <strong>{newNames.length}</strong> nouveau(x) client(s) à créer.</p>
+        {!reviewingClients
+          ? <Button type="button" variant="outline" onClick={() => setReviewingClients(true)} disabled={busy}>Compléter les clients depuis les factures</Button>
+          : <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+              {newNames.length > 0 && <><p className="font-medium text-amber-950">Nouveaux clients qui seront créés à la validation de l’import :</p><ul className="list-disc pl-5">{newNames.map((n) => <li key={n}>{n}</li>)}</ul></>}
+              <p className="text-xs text-amber-900">Vérifiez l’orthographe : chaque nom reste modifiable ligne par ligne avant validation. Les pièces d’un même client sont rattachées à un seul client.</p>
+              <div className="flex flex-wrap gap-2"><Button type="button" onClick={completeClients}>Confirmer</Button><Button type="button" variant="outline" onClick={() => setReviewingClients(false)}>Annuler</Button></div>
+            </div>}
+      </CardContent></Card>}
+
       {analyzed.length === 0 ? <Card><CardContent className="p-8 text-center text-sm text-slate-400">Aucune ligne pour le moment. Associez les colonnes ou ajoutez des fichiers.</CardContent></Card> : (
         <div className="space-y-3">
           {analyzed.map((a) => {
@@ -152,6 +187,7 @@ export function InvoiceImportPreview({ batchId, version, analyzed, summary, tabl
                         <optgroup label="Tous les clients">{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup>
                         {d.clientName.trim() && <option value="__new">Créer le client « {d.clientName.trim()} »</option>}
                       </select>
+                      {d.createClient && <input className={cell} value={d.clientName} maxLength={200} aria-label="Nom du nouveau client" placeholder="Nom du nouveau client" onChange={(e) => edit(a.row.id, { clientName: e.target.value })} />}
                     </label>
                     <label className="flex flex-col gap-1 text-xs">Chantier (facultatif)<select className={cell} value={d.worksiteId ?? ""} onChange={(e) => edit(a.row.id, { worksiteId: e.target.value || null })}><option value="">— aucun —</option>{clientWorksites.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
                     <label className="flex flex-col gap-1 text-xs">HT (€)<input inputMode="decimal" className={`${cell} text-right tabular-nums`} value={d.ht} onChange={(e) => edit(a.row.id, { ht: e.target.value })} /></label>
