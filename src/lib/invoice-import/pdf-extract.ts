@@ -40,6 +40,8 @@ function firstDate(text: string, labels: string): string | null {
 /** Heuristiques sur le texte d'une facture française ; tolérantes, jamais bloquantes. */
 export function parseInvoiceText(raw: string): Omit<ExtractedDocument, "issuerName" | "issuerSiret" | "method" | "note"> {
   const text = raw.replace(/\r/g, "")
+  // « Sous-total HT » (avant remise) ne doit jamais être lu comme le « Total HT » (après remise).
+  const amountsText = text.replace(/sous[-\s]?total/gi, "SOUSTOTAL")
   const isCredit = /\b(facture d['’ ]avoir|avoir n|note de cr[ée]dit|credit note)\b/i.test(text) || /^\s*avoir\b/im.test(text)
   // Un numéro contient au moins un chiffre : « Numéro um… » (mot voisin capté) n'est jamais retenu.
   const withDigit = (m: RegExpExecArray | null) => (m && /\d/.test(m[1]) ? m : null)
@@ -47,11 +49,14 @@ export function parseInvoiceText(raw: string): Omit<ExtractedDocument, "issuerNa
     withDigit(/(?:facture|avoir|invoice|credit note)\s*(?:d['’ ]avoir\s*)?(?:n[°ºo.]?|num[ée]ro|#)\s*:?\s*([A-Z0-9][A-Z0-9/_.-]{1,40})/i.exec(text)) ??
     withDigit(/(?:n[°º]|num[ée]ro)\s*(?:de\s+(?:facture|pi[èe]ce))?\s*:?\s*([A-Z0-9][A-Z0-9/_.-]{2,40})/i.exec(text))
   const credited = isCredit ? /(?:sur|de)\s+la\s+facture\s*(?:n[°ºo.]?|num[ée]ro)?\s*:?\s*([A-Z0-9][A-Z0-9/_.-]{2,40})/i.exec(text) : null
-  const amounts = completeAmounts({
-    ht: firstAmount(text, "total\\s+(?:net\\s+)?h\\.?t\\.?|montant\\s+h\\.?t\\.?|total\\s+hors\\s+taxes?"),
-    vat: firstAmount(text, "total\\s+t\\.?v\\.?a\\.?|montant\\s+t\\.?v\\.?a\\.?|t\\.?v\\.?a\\.?\\s*(?:\\(?\\d{1,2}(?:[.,]\\d)?\\s*%\\)?)?"),
-    ttc: firstAmount(text, "total\\s+t\\.?t\\.?c\\.?|montant\\s+t\\.?t\\.?c\\.?|net\\s+[àa]\\s+payer|total\\s+[àa]\\s+payer"),
+  const read = completeAmounts({
+    ht: firstAmount(amountsText, "total\\s+(?:net\\s+)?h\\.?t\\.?|montant\\s+h\\.?t\\.?|total\\s+hors\\s+taxes?"),
+    vat: firstAmount(amountsText, "total\\s+t\\.?v\\.?a\\.?|montant\\s+t\\.?v\\.?a\\.?|t\\.?v\\.?a\\.?\\s*(?:\\(?\\d{1,2}(?:[.,]\\d)?\\s*%\\)?)?"),
+    ttc: firstAmount(amountsText, "total\\s+t\\.?t\\.?c\\.?|montant\\s+t\\.?t\\.?c\\.?|net\\s+[àa]\\s+payer|total\\s+[àa]\\s+payer"),
   })
+  // Facture avec remise dont le HT lu reste le montant avant remise : HT net = TTC − TVA (les montants imprimés font foi).
+  const amounts = read.ht !== null && read.vat !== null && read.ttc !== null && read.ht + read.vat !== read.ttc && read.ttc > read.vat && /remise/i.test(text)
+    ? { ...read, ht: read.ttc - read.vat } : read
   return {
     kind: isCredit ? "CREDIT_NOTE" : numberMatch || amounts.ttc !== null ? "INVOICE" : null,
     number: numberMatch ? numberMatch[1].replace(/[.,;:]+$/, "").slice(0, 64) : null,

@@ -50,3 +50,18 @@ describe("numéro de pièce illisible (« um »)", () => {
     assert.equal(parseInvoiceText("Facture n° F-2026-001\nTotal TTC 120,00 €").number, "F-2026-001")
   })
 })
+
+describe("facture avec remises (retour 19/11/2026, client Agasf)", () => {
+  it("le « Total HT » après remise est lu, jamais le « Sous-total HT »", () => {
+    const t = parseInvoiceText("Facture N° 2026-05-000010\nDate d'émission : 18/05/2026\nTente 900,00\nRemise 250,00\nSous-total HT 1 728,00 €\nRemise HT 700,40 €\nTotal HT 1 027,60 €\nTVA 20% 205,52 €\nTotal TTC 1 233,12 €")
+    assert.equal(t.htCents, BigInt(102760)); assert.equal(t.vatCents, BigInt(20552)); assert.equal(t.ttcCents, BigInt(123312))
+  })
+  it("remise sans « Total HT » net lisible : HT = TTC − TVA", () => {
+    const t = parseInvoiceText("Avoir N° 2026-08-000031\nRemise 66,00\nTotal HT 2 080,00 €\nTotal TVA 370,80 €\nTotal TTC 2 384,80 €")
+    assert.equal(t.htCents, BigInt(201400)); assert.equal(t.ttcCents, BigInt(238480))
+  })
+  it("sans remise, des montants incohérents restent tels quels (signalés à l'aperçu)", () => {
+    const t = parseInvoiceText("Facture N° F-1\nTotal HT 100,00 €\nTotal TVA 20,00 €\nTotal TTC 130,00 €")
+    assert.equal(t.htCents, BigInt(10000))
+  })
+})
