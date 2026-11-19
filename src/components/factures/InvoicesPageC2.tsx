@@ -12,6 +12,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { InvoiceStatusBadge } from "@/components/factures/InvoiceStatusBadge"
 import { isInvoiceImportEnabled } from "@/lib/invoice-import/invoice-import-feature-flag"
+import { listImportedInvoices } from "@/lib/invoice-import/import.service"
+import { STATUS_LABEL as IMPORTED_STATUS_LABEL } from "@/lib/invoice-import/format"
 
 const dateFr = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" })
 const STATUSES = [["", "Tous les statuts"], ["DRAFT", "Brouillon"], ["SENT", "Émise"], ["PARTIAL", "Partiellement payée"], ["PAID", "Payée"], ["CANCELLED", "Annulée"]]
@@ -24,6 +26,11 @@ export async function InvoicesPageC2({ ctx, searchParams }: { ctx: BillingContex
     prisma.client.findMany({ where: { companyId: ctx.companyId, active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
     importEnabled ? prisma.importedInvoice.count({ where: { companyId: ctx.companyId } }) : Promise.resolve(0),
   ])
+  // Factures importées d'un autre logiciel : affichées sous la liste (même recherche et même client), sans entrer dans
+  // les totaux de la facturation Planificator. Filtre client borné à la société (clé composite client/société).
+  const imported = importEnabled && importedCount > 0
+    ? await listImportedInvoices(prisma, ctx.companyId, { clientId: f.raw.client || undefined, q: f.raw.q || undefined, page: 1 })
+    : null
   const query = new URLSearchParams(Object.entries(f.raw).filter(([k, v]) => v && k !== "page")).toString()
   const pages = Math.max(1, Math.ceil(list.total / list.pageSize))
 
@@ -38,7 +45,7 @@ export async function InvoicesPageC2({ ctx, searchParams }: { ctx: BillingContex
           <Button asChild><Link href="/factures/nouvelle"><Plus className="h-4 w-4" /> Nouvelle facture</Link></Button>
         </div>
       </div>
-      {importEnabled && importedCount > 0 && <p className="text-sm text-slate-600"><Link className="text-[#0f3460] underline" href="/factures/importees">{importedCount} facture{importedCount > 1 ? "s" : ""} importée{importedCount > 1 ? "s" : ""} d’un autre logiciel</Link> (hors totaux ci-dessous).</p>}
+      {importEnabled && importedCount > 0 && <p className="text-sm text-slate-600"><Link className="text-[#0f3460] underline" href="/factures/importees">{importedCount} facture{importedCount > 1 ? "s" : ""} importée{importedCount > 1 ? "s" : ""} d’un autre logiciel</Link> (hors totaux ci-dessous, listées sous les factures Planificator).</p>}
       <div className="grid gap-3 sm:grid-cols-3">
         <Card><CardContent className="p-4"><p className="text-xs uppercase text-slate-500">Total encaissé</p><p className="mt-1 text-2xl font-semibold text-green-700 tabular-nums">{formatEuro(summary.collectedCents)}</p></CardContent></Card>
         <Card><CardContent className="p-4"><p className="text-xs uppercase text-slate-500">Total dû</p><p className="mt-1 text-2xl font-semibold text-blue-700 tabular-nums">{formatEuro(summary.dueCents)}</p><p className="text-xs text-slate-500">{summary.openCount} facture{summary.openCount > 1 ? "s" : ""} en attente</p></CardContent></Card>
@@ -75,6 +82,32 @@ export async function InvoicesPageC2({ ctx, searchParams }: { ctx: BillingContex
         </table>
         {pages > 1 && <div className="flex items-center justify-between border-t px-3 py-2 text-sm"><span>Page {list.page} / {pages}</span><div className="flex gap-2">{list.page > 1 && <Link className="underline" href={`/factures?${query}&page=${list.page - 1}`}>Précédente</Link>}{list.page < pages && <Link className="underline" href={`/factures?${query}&page=${list.page + 1}`}>Suivante</Link>}</div></div>}
       </CardContent></Card>
+      {imported && <Card><CardContent className="p-0">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
+          <h2 className="text-sm font-semibold text-slate-800">Factures importées d’un autre logiciel ({imported.total})</h2>
+          <Link className="text-sm text-[#0f3460] underline" href="/factures/importees">Tout voir et filtrer</Link>
+        </div>
+        <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">N°</th><th className="px-3 py-2">Client</th><th className="px-3 py-2">Date</th><th className="hidden px-3 py-2 md:table-cell">Échéance</th><th className="px-3 py-2 text-right">Montant TTC</th><th className="px-3 py-2">Statut</th><th className="px-3 py-2">PDF</th></tr></thead>
+          <tbody>
+            {imported.rows.length === 0 && <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-400">Aucune facture importée pour cette recherche.</td></tr>}
+            {imported.rows.map((i) => (
+              <tr key={i.id} className="border-t hover:bg-slate-50">
+                <td className="px-3 py-2 font-medium">{i.number}<span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">Importée</span>{i.kind === "CREDIT_NOTE" && <span className="ml-1 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">Avoir</span>}</td>
+                <td className="px-3 py-2">{i.clientName}{i.worksiteName && <div className="text-xs text-slate-400">{i.worksiteName}</div>}</td>
+                <td className="px-3 py-2">{dateFr.format(i.issueDate)}</td>
+                <td className="hidden px-3 py-2 md:table-cell">{i.dueDate ? dateFr.format(i.dueDate) : "—"}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{i.kind === "CREDIT_NOTE" ? "−" : ""}{formatEuro(i.totalTTCCents)}</td>
+                <td className="px-3 py-2">{IMPORTED_STATUS_LABEL[i.status]}</td>
+                <td className="px-3 py-2">{i.hasFile ? <a className="underline" href={`/factures/importees/${i.id}/pdf`} target="_blank" rel="noopener noreferrer">Ouvrir</a> : <span className="text-slate-400">—</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        </div>
+        {imported.total > imported.rows.length && <p className="border-t px-3 py-2 text-sm text-slate-600">{imported.rows.length} sur {imported.total} affichées. <Link className="text-[#0f3460] underline" href="/factures/importees">Voir toutes les factures importées</Link></p>}
+      </CardContent></Card>}
     </div>
   )
 }
