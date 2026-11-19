@@ -86,6 +86,15 @@ export function InvoiceImportPreview({ batchId, version, analyzed, summary, tabl
     }
     return [...groups.values()].filter((g) => g.length > 1).flatMap((g) => { const keep = g.find((a) => a.row.fileId) ?? g[0]; return g.filter((a) => a !== keep).map((a) => a.row.id) })
   })()
+  // HT lu avant remise (« Sous-total HT ») : HT + TVA ≠ TTC. HT net après remise = TTC − TVA, montants imprimés à vérifier.
+  const discounted = analyzed.flatMap((a) => {
+    const d = drafts.get(a.row.id) as Draft
+    if (d.excluded) return []
+    const ht = eurosToCents(d.ht), vat = eurosToCents(d.vat), ttc = eurosToCents(d.ttc)
+    if (ht == null || vat == null || ttc == null) return []
+    const [h, v, t] = [BigInt(ht), BigInt(vat), BigInt(ttc)]
+    return h + v !== t && t > v && v >= BigInt(0) ? [{ id: a.row.id, ht: centsToEuros((t - v).toString()) }] : []
+  })
   function bulk(patches: { id: string; patch: Partial<Draft> }[], message: string) {
     setDrafts((prev) => { const next = new Map(prev); for (const { id, patch } of patches) next.set(id, { ...(prev.get(id) as Draft), ...patch }); return next })
     setDirty((prev) => { const next = new Set(prev); for (const { id } of patches) next.add(id); return next })
@@ -173,13 +182,14 @@ export function InvoiceImportPreview({ batchId, version, analyzed, summary, tabl
         {summary.supplier > 0 && <span className="text-amber-700"><strong>{summary.supplier}</strong> facture(s) fournisseur (non importées ici)</span>}
       </CardContent></Card>
 
-      {(reasons.length > 0 || badNumbers.length > 0 || identicalExtras.length > 0) && <Card><CardContent className="space-y-3 p-4 text-sm">
+      {(reasons.length > 0 || badNumbers.length > 0 || identicalExtras.length > 0 || discounted.length > 0) && <Card><CardContent className="space-y-3 p-4 text-sm">
         {reasons.length > 0 && <div><p className="font-medium">Pourquoi des lignes restent à corriger :</p><ul className="mt-1 list-disc pl-5">{reasons.map(([msg, n]) => <li key={msg}><strong>{n}</strong> × {msg}</li>)}</ul></div>}
         <div className="flex flex-wrap gap-2">
           {badNumbers.length > 0 && <Button type="button" variant="outline" disabled={busy} onClick={() => bulk(badNumbers.map((b) => ({ id: b.id, patch: { number: b.number } })), `${badNumbers.length} numéro(s) repris du nom du fichier : vérifiez-les puis enregistrez les corrections.`)}>Reprendre {badNumbers.length} numéro(s) illisible(s) depuis les noms de fichiers</Button>}
+          {discounted.length > 0 && <Button type="button" variant="outline" disabled={busy} onClick={() => bulk(discounted.map((x) => ({ id: x.id, patch: { ht: x.ht } })), `${discounted.length} HT ajusté(s) après remise (HT = TTC − TVA) : vérifiez-les sur les PDF puis enregistrez les corrections.`)}>Ajuster {discounted.length} HT après remise (HT = TTC − TVA)</Button>}
           {identicalExtras.length > 0 && <Button type="button" variant="outline" disabled={busy} onClick={() => bulk(identicalExtras.map((id) => ({ id, patch: { excluded: true } })), `${identicalExtras.length} doublon(s) identique(s) exclu(s) : enregistrez les corrections.`)}>Exclure {identicalExtras.length} doublon(s) identique(s)</Button>}
         </div>
-        {(badNumbers.length > 0 || identicalExtras.length > 0) && <p className="text-xs text-slate-500">Rien n’est enregistré avant « Enregistrer les corrections » ; l’analyse est alors recalculée et les compteurs mis à jour.</p>}
+        {(badNumbers.length > 0 || identicalExtras.length > 0 || discounted.length > 0) && <p className="text-xs text-slate-500">Rien n’est enregistré avant « Enregistrer les corrections » ; l’analyse est alors recalculée et les compteurs mis à jour.</p>}
       </CardContent></Card>}
 
       {missing.length > 0 && <Card><CardContent className="space-y-2 p-4 text-sm">
