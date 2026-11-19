@@ -41,9 +41,11 @@ function firstDate(text: string, labels: string): string | null {
 export function parseInvoiceText(raw: string): Omit<ExtractedDocument, "issuerName" | "issuerSiret" | "method" | "note"> {
   const text = raw.replace(/\r/g, "")
   const isCredit = /\b(facture d['’ ]avoir|avoir n|note de cr[ée]dit|credit note)\b/i.test(text) || /^\s*avoir\b/im.test(text)
+  // Un numéro contient au moins un chiffre : « Numéro um… » (mot voisin capté) n'est jamais retenu.
+  const withDigit = (m: RegExpExecArray | null) => (m && /\d/.test(m[1]) ? m : null)
   const numberMatch =
-    /(?:facture|avoir|invoice|credit note)\s*(?:d['’ ]avoir\s*)?(?:n[°ºo.]?|num[ée]ro|#)\s*:?\s*([A-Z0-9][A-Z0-9/_.-]{1,40})/i.exec(text) ??
-    /(?:n[°º]|num[ée]ro)\s*(?:de\s+(?:facture|pi[èe]ce))?\s*:?\s*([A-Z0-9][A-Z0-9/_.-]{2,40})/i.exec(text)
+    withDigit(/(?:facture|avoir|invoice|credit note)\s*(?:d['’ ]avoir\s*)?(?:n[°ºo.]?|num[ée]ro|#)\s*:?\s*([A-Z0-9][A-Z0-9/_.-]{1,40})/i.exec(text)) ??
+    withDigit(/(?:n[°º]|num[ée]ro)\s*(?:de\s+(?:facture|pi[èe]ce))?\s*:?\s*([A-Z0-9][A-Z0-9/_.-]{2,40})/i.exec(text))
   const credited = isCredit ? /(?:sur|de)\s+la\s+facture\s*(?:n[°ºo.]?|num[ée]ro)?\s*:?\s*([A-Z0-9][A-Z0-9/_.-]{2,40})/i.exec(text) : null
   const amounts = completeAmounts({
     ht: firstAmount(text, "total\\s+(?:net\\s+)?h\\.?t\\.?|montant\\s+h\\.?t\\.?|total\\s+hors\\s+taxes?"),

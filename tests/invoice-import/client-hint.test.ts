@@ -1,7 +1,8 @@
 // Retour 18/11/2026 : 46 factures PDF importées sans client. Données synthétiques sur le modèle des noms de fichiers réels.
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { clientKey, clientNameFromFileName, existingClientByName } from "@/lib/invoice-import/client-hint"
+import { clientKey, clientNameFromFileName, existingClientByName, invoiceNumberFromFileName, isPlausibleNumber } from "@/lib/invoice-import/client-hint"
+import { parseInvoiceText } from "@/lib/invoice-import/pdf-extract"
 import { nameKey } from "@/lib/invoice-import/normalize"
 
 describe("client lu dans le nom du fichier d'une facture", () => {
@@ -28,5 +29,24 @@ describe("client lu dans le nom du fichier d'une facture", () => {
     assert.equal(existingClientByName("JEDDIS TRANSPORT", clients)?.id, "c1")
     assert.equal(existingClientByName("ALLO PAREBRISE", clients), null)
     assert.equal(existingClientByName("Inconnu", clients), null)
+  })
+})
+
+describe("numéro de pièce illisible (« um »)", () => {
+  const own = "GALYA EVENTS"
+  it("un numéro plausible contient un chiffre", () => {
+    assert.equal(isPlausibleNumber("um"), false); assert.equal(isPlausibleNumber(""), false); assert.equal(isPlausibleNumber(null), false)
+    assert.equal(isPlausibleNumber("F-2026-001"), true)
+  })
+  it("numéro repris du nom du fichier, société et date retirées", () => {
+    assert.equal(invoiceNumberFromFileName("2026-03-05_2603-F-2026-001-GALYA-EVENTS.pdf", own), "2603-F-2026-001")
+    assert.equal(invoiceNumberFromFileName("2026-03-16_Facture_000002_GALYA_EVENTS_HALL_EXPO.pdf", own), "000002")
+    assert.equal(invoiceNumberFromFileName("2026-05-18_Facture_000010_GALYA_EVENTS_Agasf (1).pdf", own), "000010")
+    assert.equal(invoiceNumberFromFileName("GALYA_EVENTS.pdf", own), "")
+  })
+  it("lecture du PDF : un mot sans chiffre après « Numéro » n'est jamais pris pour le numéro", () => {
+    const t = parseInvoiceText("FACTURE\nNuméro um client 4521\nDate : 05/03/2026\nTotal TTC 120,00 €")
+    assert.notEqual(t.number, "um")
+    assert.equal(parseInvoiceText("Facture n° F-2026-001\nTotal TTC 120,00 €").number, "F-2026-001")
   })
 })
