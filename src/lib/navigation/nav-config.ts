@@ -40,6 +40,12 @@ import {
   Fuel,
   Target,
   Workflow,
+  Sparkles,
+  PlugZap,
+  FilePenLine,
+  CalendarCheck,
+  Megaphone,
+  Store,
 } from "lucide-react"
 
 export interface NavItem {
@@ -311,6 +317,72 @@ export function withCrmAutomationNavItems(items: readonly NavItem[], crmVisible:
   const result = [...items]
   const add = [...(crmVisible === true ? [CRM_NAV_ITEM] : []), ...(automationVisible === true ? [AUTOMATION_NAV_ITEM] : [])]
     .filter((entry) => !result.some((i) => i.href === entry.href))
+  const profile = result.findIndex((i) => i.href === "/profil")
+  result.splice(profile < 0 ? result.length : profile, 0, ...add)
+  return result
+}
+
+/**
+ * Lot F Planificator V2 : entrées « Assistant » (ASSISTANT_ENABLED, catégorie Pilotage) et « Connecteurs »
+ * (CONNECTOR_CENTER_ENABLED, catégorie Administration), ADMIN et SUPER_ADMIN avec société ; insérées avant « Profil ».
+ * Transition ordinaire du routeur client (pas de `documentNavigation`, réservée au « Pipeline commercial » du lot E).
+ * Affichage seulement : chaque page et action du module refuse côté serveur. Drapeau strictement `true`, idempotent.
+ */
+export const ASSISTANT_NAV_ITEM: NavItem = { label: "Assistant", href: "/assistant", icon: Sparkles }
+export const CONNECTORS_NAV_ITEM: NavItem = { label: "Connecteurs", href: "/connecteurs", icon: PlugZap }
+
+export function withAssistantConnectorNavItems(items: readonly NavItem[], assistantVisible: boolean, connectorsVisible: boolean): NavItem[] {
+  const result = [...items]
+  const add = [...(assistantVisible === true ? [ASSISTANT_NAV_ITEM] : []), ...(connectorsVisible === true ? [CONNECTORS_NAV_ITEM] : [])]
+    .filter((entry) => !result.some((i) => i.href === entry.href))
+  const profile = result.findIndex((i) => i.href === "/profil")
+  result.splice(profile < 0 ? result.length : profile, 0, ...add)
+  return result
+}
+
+/**
+ * Lot G Planificator V2 : entrée « Document Studio » (DOCUMENT_STUDIO_ENABLED, catégorie Administration, route
+ * `/studio-documents`), ADMIN et SUPER_ADMIN avec société ; insérée avant « Profil ». Navigation native du document
+ * (même motif que « Pipeline commercial », correctif E4). Affichage seulement : chaque page, action et PDF du module
+ * refuse côté serveur.
+ */
+export const DOCUMENT_STUDIO_NAV_ITEM: NavItem = { label: "Document Studio", href: "/studio-documents", icon: FilePenLine, documentNavigation: true }
+
+export function withDocumentStudioNavItem(items: readonly NavItem[], visible: boolean): NavItem[] {
+  const result = [...items]
+  if (visible !== true || result.some((i) => i.href === DOCUMENT_STUDIO_NAV_ITEM.href)) return result
+  const profile = result.findIndex((i) => i.href === "/profil")
+  result.splice(profile < 0 ? result.length : profile, 0, DOCUMENT_STUDIO_NAV_ITEM)
+  return result
+}
+
+/**
+ * Lot H Planificator V2 : entrée « Pré-paie » (PAYROLL_PREP_ENABLED, catégorie Équipes & RH, route `/pre-paie`), ADMIN et
+ * SUPER_ADMIN avec société ; insérée avant « Profil ». Navigation native du document (motif E4, comme le portage G).
+ * Affichage seulement : chaque page, action et export du module refuse côté serveur.
+ */
+export const PAYROLL_PREP_NAV_ITEM: NavItem = { label: "Pré-paie", href: "/pre-paie", icon: CalendarCheck, documentNavigation: true }
+
+export function withPayrollPrepNavItem(items: readonly NavItem[], visible: boolean): NavItem[] {
+  const result = [...items]
+  if (visible !== true || result.some((i) => i.href === PAYROLL_PREP_NAV_ITEM.href)) return result
+  const profile = result.findIndex((i) => i.href === "/profil")
+  result.splice(profile < 0 ? result.length : profile, 0, PAYROLL_PREP_NAV_ITEM)
+  return result
+}
+
+/**
+ * Lot I Planificator V2 : entrées « Marketing » et « Boutique » (un seul drapeau MARKETING_SHOP_ENABLED, catégorie
+ * Commercial), ADMIN et SUPER_ADMIN avec société ; insérées avant « Profil ». Navigation native du document (motif E4).
+ * Affichage seulement : chaque page et action du module refuse côté serveur.
+ */
+export const MARKETING_NAV_ITEM: NavItem = { label: "Marketing", href: "/marketing", icon: Megaphone, documentNavigation: true }
+export const SHOP_NAV_ITEM: NavItem = { label: "Boutique", href: "/boutique", icon: Store, documentNavigation: true }
+
+export function withMarketingShopNavItems(items: readonly NavItem[], visible: boolean): NavItem[] {
+  const result = [...items]
+  if (visible !== true) return result
+  const add = [MARKETING_NAV_ITEM, SHOP_NAV_ITEM].filter((entry) => !result.some((i) => i.href === entry.href))
   const profile = result.findIndex((i) => i.href === "/profil")
   result.splice(profile < 0 ? result.length : profile, 0, ...add)
   return result

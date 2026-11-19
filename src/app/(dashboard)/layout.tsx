@@ -18,6 +18,11 @@ import { isEquipmentRentalEnabled } from "@/lib/equipment/equipment-feature-flag
 import { isVehiclesV3Enabled } from "@/lib/vehicules/v3/v3-feature-flag"
 import { isCrmEnabled } from "@/lib/crm/crm-feature-flag"
 import { isAutomationsEnabled } from "@/lib/automation/automation-feature-flag"
+import { isAssistantEnabled } from "@/lib/assistant/assistant-feature-flag"
+import { isConnectorCenterEnabled } from "@/lib/connectors/connector-feature-flag"
+import { isDocumentStudioEnabled } from "@/lib/document-studio/studio-feature-flag"
+import { isPayrollPrepEnabled } from "@/lib/payroll-prep/prepay-feature-flag"
+import { isMarketingShopEnabled } from "@/lib/marketing-shop/marketing-shop-feature-flag"
 import type { Role } from "@prisma/client"
 
 export default async function DashboardLayout({
@@ -58,13 +63,22 @@ export default async function DashboardLayout({
   // Lot E V2 : opportunités CRM et automatisations ; même règle d'affichage, drapeaux distincts.
   const crmNavVisible = isCrmEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
   const automationNavVisible = isAutomationsEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
+  // Lot F V2 : assistant et centre de connecteurs ; même règle d'affichage, drapeaux distincts.
+  const assistantNavVisible = isAssistantEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
+  const connectorsNavVisible = isConnectorCenterEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
+  // Lot G V2 : Document Studio ; même règle d'affichage, drapeau distinct.
+  const documentStudioNavVisible = isDocumentStudioEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
+  // Lot H V2 : pré-paie ; même règle d'affichage, drapeau distinct (lu côté serveur seulement).
+  const payrollPrepNavVisible = isPayrollPrepEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
+  // Lot I V2 : marketing et boutique (un seul drapeau) ; même règle d'affichage, drapeau lu côté serveur seulement.
+  const marketingShopNavVisible = isMarketingShopEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
   const company = companyId ? await prisma.company.findUnique({
     where: { id: companyId }, select: { name: true, logoUrl: true },
   }) : null
   // Correctif #418 : adresse courte d'affichage, jamais la data URL dans la charge RSC de la coquille (voir companyLogoDisplaySrc).
   const companyLogo = companyLogoDisplaySrc(company?.logoUrl)
   const hrNavigation = await resolveHrDocumentNavigation()
-  const user = { ...hrNavigation, ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, worksitePhotosNavVisible, prospectionNavVisible, stockPurchasingNavVisible, equipmentNavVisible, fuelTicketNavVisible, companyLogo, companyName: company?.name, crmNavVisible, automationNavVisible }
+  const user = { ...hrNavigation, ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, worksitePhotosNavVisible, prospectionNavVisible, stockPurchasingNavVisible, equipmentNavVisible, fuelTicketNavVisible, companyLogo, companyName: company?.name, documentStudioNavVisible, payrollPrepNavVisible, marketingShopNavVisible, crmNavVisible, automationNavVisible, assistantNavVisible, connectorsNavVisible }
 
   return (
     <div data-app-backdrop="" className="flex h-screen overflow-hidden bg-[#f6f1e7] bg-[radial-gradient(45%_55%_at_4%_0%,rgba(120,160,255,0.65)_0,transparent_70%),radial-gradient(40%_45%_at_100%_100%,rgba(70,120,250,0.45)_0,transparent_70%),radial-gradient(28%_34%_at_100%_8%,rgba(140,175,255,0.4)_0,transparent_70%),radial-gradient(30%_36%_at_55%_45%,rgba(255,250,240,0.85)_0,transparent_70%)]">

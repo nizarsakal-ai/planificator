@@ -30,13 +30,44 @@ export function formulaireDe(a: RetourAction | FormData, b?: FormData): FormData
 const FICHE = /^\/crm\/opportunites\/[A-Za-z0-9_-]{1,64}$/
 /** Pages du lot E pouvant être rouvertes après une action sans cible. */
 const PAGES_LOT_E = /^\/(?:crm\/opportunites(?:\/[A-Za-z0-9_-]{1,64})?|automatisations)$/
+/** Lot F (recette Chrome v2) : page exacte du centre de connecteurs, rouverte après une action SANS cible (actualisation
+ * seulement). Jamais une cible : la liste des fiches (FICHE) reste celle du pipeline commercial. */
+const PAGES_LOT_F = /^\/connecteurs$/
+/** Intégration FGHI v2 (incident Chrome) : page exacte de l'assistant (lot F), rouverte après une action SANS cible
+ * (actualisation seulement), comme « /connecteurs ». Jamais une cible explicite. */
+const PAGES_LOT_F_ASSISTANT = /^\/assistant$/
+
+// Lot G Planificator V2 (portage sur ef36578f) : Document Studio, listes DISTINCTES (la liste FICHE du CRM est inchangée).
+// Identifiants bornés (1 à 64 caractères sûrs) ; « documents » n'est jamais lu comme un identifiant de modèle.
+/** Cibles G calculées côté serveur : fiche d'un modèle (création) ou d'un document généré (génération). */
+const FICHES_LOT_G = /^\/studio-documents\/(?:documents\/[A-Za-z0-9_-]{1,64}|(?!documents$)[A-Za-z0-9_-]{1,64})$/
+/** Pages G pouvant être rouvertes après une action sans cible : liste, modèle, document généré. */
+const PAGES_LOT_G = /^\/studio-documents(?:\/(?:documents\/[A-Za-z0-9_-]{1,64}|(?!documents$)[A-Za-z0-9_-]{1,64}))?$/
+
+// Lot H Planificator V2 (portage sur 90ae644) : pré-paie, liste DISTINCTE (FICHE du CRM et pages E inchangées).
+/** Pages H, admises comme cible calculée côté serveur ou comme page rouverte : liste « /pre-paie » ou fiche d'une période
+ * (identifiant borné de 1 à 64 caractères sûrs). L'export (« /pre-paie/<id>/export ») n'en fait jamais partie. */
+const PAGES_LOT_H = /^\/pre-paie(?:\/[A-Za-z0-9_-]{1,64})?$/
+
+// Lot I Planificator V2 : marketing et boutique, listes DISTINCTES (FICHE du CRM et pages E inchangées).
+/** Cible I calculée côté serveur : fiche d'une commande boutique (identifiant borné). */
+const FICHES_LOT_I = /^\/boutique\/commandes\/[A-Za-z0-9_-]{1,64}$/
+/** Pages I rouvertes après une action sans cible : Marketing, Boutique, fiche d'une commande. */
+const PAGES_LOT_I = /^\/(?:marketing|boutique(?:\/commandes\/[A-Za-z0-9_-]{1,64})?)$/
 
 /** Adresse relative à ouvrir après le résultat `r` d'une action envoyée depuis `cheminCourant` (pathname), ou null : pas de
- * navigation (erreur, état initial, adresse hors lot E). Le message n'est jamais interprété : il est encodé dans « ok ». */
+ * navigation (erreur, état initial, adresse hors lots E à I). Le message n'est jamais interprété : il est encodé dans « ok ».
+ * Intégration FGHI : réunion EXACTE des listes de chaque lot, chacune inchangée. Cibles admises : fiche CRM (E), fiches G,
+ * pages H, fiche de commande I ; jamais « /connecteurs » ni « /assistant » (F), ni une page E, ni « /marketing » ou
+ * « /boutique » (I). Pages rouvertes sans cible : pages E, F (connecteurs, assistant), G, H et I. Exports, PDF et
+ * adresses externes : jamais. */
 export function adresseApresSucces(r: RetourAction, cheminCourant: string): string | null {
   if (r.etat !== "ok") return null
   const chemin = r.cible ?? cheminCourant
-  if (!(r.cible ? FICHE : PAGES_LOT_E).test(chemin)) return null
+  const admis = r.cible
+    ? FICHE.test(chemin) || FICHES_LOT_G.test(chemin) || PAGES_LOT_H.test(chemin) || FICHES_LOT_I.test(chemin)
+    : PAGES_LOT_E.test(chemin) || PAGES_LOT_F.test(chemin) || PAGES_LOT_F_ASSISTANT.test(chemin) || PAGES_LOT_G.test(chemin) || PAGES_LOT_H.test(chemin) || PAGES_LOT_I.test(chemin)
+  if (!admis) return null
   return `${chemin}?${new URLSearchParams({ ok: r.message }).toString()}`
 }
 

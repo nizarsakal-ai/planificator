@@ -440,6 +440,23 @@ model Company {
   opportunityEvents OpportunityEvent[]
   automationRules AutomationRule[]
   automationRuns AutomationRun[]
+  connectorSettings ConnectorSetting[] // Lot F V2
+  connectorSyncRuns ConnectorSyncRun[]
+  connectorStagedRecords ConnectorStagedRecord[]
+  assistantProposals AssistantProposal[]
+  assistantActionLogs AssistantActionLog[]
+  documentTemplates DocumentTemplate[] // Lot G V2
+  documentTemplateVersions DocumentTemplateVersion[]
+  generatedDocuments GeneratedDocument[]
+  payrollPeriods PayrollPeriod[] // Lot H V2
+  payrollManualVariables PayrollManualVariable[]
+  marketingSources MarketingSource[] // Lot I V2
+  marketingCampaigns MarketingCampaign[]
+  marketingConsents MarketingConsent[]
+  marketingConversions MarketingConversion[]
+  shopPromotions ShopPromotion[]
+  shopOrders ShopOrder[]
+  shopOrderLines ShopOrderLine[]
 
   // Véhicules V3 — ajouts des lots isolés.
   vehicleCartographyCache        VehicleCartographyCache[]
@@ -505,6 +522,7 @@ model Article {
   stockLevels        StockLevel[]
   stockMovements     StockMovement[]
   purchaseOrderLines PurchaseOrderLine[]
+  shopOrderLines     ShopOrderLine[] // Lot I V2 : lignes de commandes boutique (simulation interne)
 
   @@unique([companyId, id])
   @@index([companyId])
@@ -951,6 +969,7 @@ model Employee {
 
   ownedOpportunities  Opportunity[]        @relation("OpportunityOwner") // Lot E V2
   automationTaskRules AutomationRule[]     @relation("AutomationTaskAssignee")
+  payrollManualVariables PayrollManualVariable[] // Lot H V2 : variables de pré-paie saisies
   @@unique([id, companyId])
   @@unique([userId, companyId])
   @@index([companyId])
@@ -1039,6 +1058,9 @@ model Client {
   acquisitionPartners AcquisitionPartner[]
 
   opportunities       Opportunity[] // Lot E V2
+  generatedDocuments  GeneratedDocument[] @relation("GeneratedDocumentClient") // Lot G V2 : documents générés liés
+  marketingConsents   MarketingConsent[] // Lot I V2 : consentement d'attribution marketing
+  shopOrders          ShopOrder[] // Lot I V2 : commandes boutique (simulation interne)
   // Cible FK composite AcquisitionPartner.(clientId, companyId)
   @@unique([id, companyId])
   @@index([companyId])
@@ -1111,6 +1133,7 @@ model Worksite {
   equipmentRentals  EquipmentRentalContract[]
 
   opportunities     Opportunity[] // Lot E V2
+  generatedDocuments GeneratedDocument[] @relation("GeneratedDocumentWorksite") // Lot G V2 : documents générés liés
   @@unique([id, companyId])
   @@index([companyId])
   @@index([clientId])
@@ -4333,4 +4356,507 @@ model AutomationRun {
   @@unique([companyId, ruleId, eventKey]) // idempotence atomique : une exécution par (société, règle, événement)
   @@index([companyId, createdAt])
   @@map("automation_runs")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Lot F Planificator V2 (04/11/2026, porté sur ab987847 le 19/11/2026) : centre de connecteurs (évolution 7) et assistant (évolution 8).
+// Connecteurs commerciaux : catalogue fermé (contrôlé aussi en base), DEUX modes seulement — désactivé ou simulation
+// (double fictif sans réseau). Aucun mode « réel » n'existe dans l'énumération : une connexion réelle exige une
+// migration et une autorisation dédiées. Aucun identifiant de connexion n'est stocké ici. La synchronisation simulée
+// alimente une zone de transit (enregistrements reçus, idempotents par identifiant externe), jamais les tables métier.
+// La plateforme d'intégration existante (IntegrationConnection, InboundEnvelope, passerelle agent) n'est pas modifiée.
+// Assistant : propositions générées par des règles locales déterministes (aucun fournisseur d'IA externe), chacune
+// liée à ses sources ; aucune action sans approbation humaine explicite ; journal append-only. Modules désactivés par
+// défaut (CONNECTOR_CENTER_ENABLED, ASSISTANT_ENABLED). Migration : 20261119120000_v2_lot_f_connectors_assistant (SQL v6).
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum ConnectorMode {
+  DISABLED
+  SIMULATION
+}
+
+enum ConnectorSyncStatus {
+  SUCCEEDED
+  FAILED
+}
+
+enum AssistantActionKind {
+  CREATE_TASK
+}
+
+enum AssistantProposalStatus {
+  PENDING
+  EXECUTED
+  REJECTED
+  OBSOLETE
+}
+
+enum AssistantLogEvent {
+  GENERATED
+  EXECUTED
+  REJECTED
+  OBSOLETE
+}
+
+model ConnectorSetting {
+  id           String        @id @default(cuid())
+  companyId    String
+  connectorKey String
+  mode         ConnectorMode @default(DISABLED)
+  /// Curseurs par ressource (JSON sérialisé, validé par le service) ; avancé seulement par une synchronisation réussie.
+  watermark    String?
+  changedById  String
+  changedAt    DateTime
+  createdAt    DateTime      @default(now())
+
+  company Company            @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  runs    ConnectorSyncRun[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, connectorKey])
+  @@map("connector_settings")
+}
+
+model ConnectorSyncRun {
+  id              String              @id @default(cuid())
+  companyId       String
+  settingId       String
+  connectorKey    String
+  mode            ConnectorMode
+  status          ConnectorSyncStatus
+  triggeredById   String
+  startedAt       DateTime
+  finishedAt      DateTime
+  watermarkBefore String?
+  watermarkAfter  String?
+  received        Int                 @default(0)
+  created         Int                 @default(0)
+  updated         Int                 @default(0)
+  unchanged       Int                 @default(0)
+  /// Code d'erreur stable (liste fermée), jamais un message d'origine externe.
+  errorCode       String?
+
+  company Company          @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  setting ConnectorSetting @relation(fields: [companyId, settingId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([companyId, id])
+  @@index([companyId, connectorKey, startedAt])
+  @@map("connector_sync_runs")
+}
+
+model ConnectorStagedRecord {
+  id           String   @id @default(cuid())
+  companyId    String
+  connectorKey String
+  resource     String
+  externalId   String
+  payloadHash  String
+  payload      Json
+  version      Int      @default(1)
+  firstRunId   String
+  lastRunId    String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([companyId, id])
+  @@unique([companyId, connectorKey, resource, externalId])
+  @@index([companyId, connectorKey, updatedAt])
+  @@map("connector_staged_records")
+}
+
+model AssistantProposal {
+  id               String                  @id @default(cuid())
+  companyId        String
+  /// Clé stable de la source et du fait observé : une même observation n'est proposée qu'une fois.
+  sourceKey        String
+  rule             String
+  provider         String
+  title            String
+  rationale        String
+  action           AssistantActionKind
+  payload          Json
+  sources          Json
+  status           AssistantProposalStatus @default(PENDING)
+  createdById      String
+  createdAt        DateTime                @default(now())
+  decidedById      String?
+  decidedAt        DateTime?
+  decisionNote     String?
+  resultEntityType String?
+  resultEntityId   String?
+
+  company Company              @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  logs    AssistantActionLog[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, sourceKey])
+  @@index([companyId, status, createdAt])
+  @@map("assistant_proposals")
+}
+
+model AssistantActionLog {
+  id         String            @id @default(cuid())
+  companyId  String
+  proposalId String
+  event      AssistantLogEvent
+  actorId    String
+  detail     String
+  createdAt  DateTime          @default(now())
+
+  company  Company           @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  proposal AssistantProposal @relation(fields: [companyId, proposalId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([companyId, id])
+  @@index([companyId, createdAt])
+  @@index([proposalId, createdAt])
+  @@map("assistant_action_logs")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Lot G Planificator V2 (04/11/2026, porté sur ef36578f le 19/11/2026) : Document Studio (évolution 10). Modèles
+// versionnés : brouillon modifiable, version publiée figée (empreinte de contenu), retirée à la publication suivante ;
+// une seule version publiée et un seul brouillon par modèle (index partiels). Documents générés depuis la version
+// publiée : valeurs validées, instantané rendu, figé et empreint (PDF reproductible) ; circuit de validation facultatif
+// par un second administrateur avec signature manuscrite (analyseur local au lot G). Les PDF existants ne sont pas
+// modifiés. Module désactivé par défaut (DOCUMENT_STUDIO_ENABLED).
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum DocumentTemplateVersionStatus {
+  DRAFT
+  PUBLISHED
+  RETIRED
+}
+
+enum GeneratedDocumentStatus {
+  PENDING_APPROVAL
+  ISSUED
+  REJECTED
+}
+
+model DocumentTemplate {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  category    String
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company  Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  versions DocumentTemplateVersion[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, name])
+  @@map("document_templates")
+}
+
+model DocumentTemplateVersion {
+  id               String                        @id @default(cuid())
+  companyId        String
+  templateId       String
+  version          Int
+  status           DocumentTemplateVersionStatus @default(DRAFT)
+  title            String
+  body             String
+  fields           Json
+  requiresApproval Boolean                       @default(false)
+  contentSha256    String?
+  createdById      String
+  createdAt        DateTime                      @default(now())
+  updatedAt        DateTime                      @updatedAt
+  publishedById    String?
+  publishedAt      DateTime?
+  retiredAt        DateTime?
+
+  company   Company             @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  template  DocumentTemplate    @relation(fields: [companyId, templateId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  documents GeneratedDocument[]
+
+  @@unique([companyId, id])
+  @@unique([templateId, version])
+  @@index([companyId, templateId, status])
+  @@map("document_template_versions")
+}
+
+model GeneratedDocument {
+  id              String                  @id @default(cuid())
+  companyId       String
+  versionId       String
+  number          String
+  title           String
+  values          Json
+  snapshot        Json
+  snapshotSha256  String
+  status          GeneratedDocumentStatus
+  clientId        String?
+  worksiteId      String?
+  createdById     String
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  approvedById    String?
+  approvedAt      DateTime?
+  signerName      String?
+  signaturePng    Bytes?
+  signatureSha256 String?
+  rejectedById    String?
+  rejectedAt      DateTime?
+  rejectReason    String?
+
+  company  Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  version  DocumentTemplateVersion @relation(fields: [companyId, versionId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  client   Client?                 @relation("GeneratedDocumentClient", fields: [clientId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  worksite Worksite?               @relation("GeneratedDocumentWorksite", fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([companyId, id])
+  @@unique([companyId, number])
+  @@index([companyId, status, createdAt])
+  @@index([companyId, versionId])
+  @@index([clientId, companyId])
+  @@index([worksiteId, companyId])
+  @@map("generated_documents")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Lot H Planificator V2 (05/11/2026, porté sur 90ae644 le 19/11/2026) : pré-paie (évolution 9, périmètre réduit).
+// Période mensuelle ouverte puis clôturée ; variables calculées à partir des pointages et des absences validées, plus
+// primes et frais saisis ; la clôture fige un instantané empreint, et une période clôturée est immuable (garanti en
+// base). AUCUN calcul de salaire ni de cotisation, aucun bulletin, aucune DSN déposée : le modèle DSN (format seulement)
+// est une bibliothèque sans table. Module désactivé par défaut (PAYROLL_PREP_ENABLED).
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum PayrollPeriodStatus {
+  OPEN
+  CLOSED
+}
+
+enum PayrollVariableKind {
+  BONUS
+  EXPENSE
+}
+
+model PayrollPeriod {
+  id             String              @id @default(cuid())
+  companyId      String
+  year           Int
+  month          Int
+  status         PayrollPeriodStatus @default(OPEN)
+  snapshot       Json?
+  snapshotSha256 String?
+  createdById    String
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  closedById     String?
+  closedAt       DateTime?
+
+  company   Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  variables PayrollManualVariable[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, year, month])
+  @@map("payroll_periods")
+}
+
+model PayrollManualVariable {
+  id          String              @id @default(cuid())
+  companyId   String
+  periodId    String
+  employeeId  String
+  kind        PayrollVariableKind
+  amountCents BigInt
+  label       String
+  createdById String
+  createdAt   DateTime            @default(now())
+
+  company  Company       @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  period   PayrollPeriod @relation(fields: [companyId, periodId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  employee Employee      @relation(fields: [employeeId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([companyId, id])
+  @@index([companyId, periodId])
+  @@index([employeeId, companyId])
+  @@map("payroll_manual_variables")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Lot I Planificator V2 (19/11/2026) : marketing et boutique, LABORATOIRE INTERNE sur données fictives (évolutions 13,
+// 14 et indicateurs marketing de 15). Sources (canal fermé) et campagnes ; consentement d'attribution marketing par
+// client (explicite, jamais par défaut, octroi et retrait tracés) ; conversion = attribution explicite d'une commande
+// boutique à une campagne, au plus une par commande, consentement en cours exigé. Commandes boutique de SIMULATION :
+// lignes et totaux figés depuis l'article (libellé, prix HT, TVA) et la promotion, montants en centimes, clé
+// idempotente par société. Aucun paiement, aucune facture, aucun devis, aucun mouvement de stock, aucun prestataire.
+// Catalogue unique `Article`, client unique `Client`. Module désactivé par défaut (MARKETING_SHOP_ENABLED).
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum MarketingChannel {
+  WEBSITE
+  SOCIAL_MEDIA
+  EMAILING
+  PRINT
+  EVENT
+  REFERRAL
+  PARTNER
+  OTHER
+}
+
+enum MarketingConsentStatus {
+  GRANTED
+  WITHDRAWN
+}
+
+model MarketingSource {
+  id          String           @id @default(cuid())
+  companyId   String
+  channel     MarketingChannel
+  name        String
+  createdById String
+  createdAt   DateTime         @default(now())
+
+  company   Company             @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  campaigns MarketingCampaign[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, name])
+  @@map("marketing_sources")
+}
+
+model MarketingCampaign {
+  id          String    @id @default(cuid())
+  companyId   String
+  sourceId    String
+  name        String
+  startsOn    DateTime? @db.Date
+  endsOn      DateTime? @db.Date
+  createdById String
+  createdAt   DateTime  @default(now())
+
+  company     Company               @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  source      MarketingSource       @relation(fields: [companyId, sourceId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  conversions MarketingConversion[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, name])
+  @@index([companyId, sourceId])
+  @@map("marketing_campaigns")
+}
+
+model MarketingConsent {
+  id            String                 @id @default(cuid())
+  companyId     String
+  clientId      String
+  status        MarketingConsentStatus
+  grantedAt     DateTime
+  grantedById   String
+  withdrawnAt   DateTime?
+  withdrawnById String?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  company     Company               @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  client      Client                @relation(fields: [clientId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  conversions MarketingConversion[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, clientId])
+  @@map("marketing_consents")
+}
+
+model ShopPromotion {
+  id          String   @id @default(cuid())
+  companyId   String
+  code        String
+  percentBp   Int
+  active      Boolean
+  validFrom   DateTime @db.Date
+  validUntil  DateTime @db.Date
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company Company     @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  orders  ShopOrder[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, code])
+  @@map("shop_promotions")
+}
+
+model ShopOrder {
+  id                 String   @id @default(cuid())
+  companyId          String
+  idempotencyKey     String
+  requestSha256      String
+  clientId           String
+  promotionId        String?
+  promotionCode      String?
+  promotionPercentBp Int
+  lineCount          Int
+  subtotalCents      BigInt
+  discountCents      BigInt
+  totalHTCents       BigInt
+  totalVATCents      BigInt
+  totalTTCCents      BigInt
+  createdById        String
+  createdAt          DateTime @default(now())
+
+  company     Company               @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  client      Client                @relation(fields: [clientId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  promotion   ShopPromotion?        @relation(fields: [companyId, promotionId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  lines       ShopOrderLine[]
+  conversions MarketingConversion[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, id, clientId])
+  @@unique([companyId, idempotencyKey])
+  @@index([companyId, createdAt])
+  @@index([clientId, companyId])
+  @@map("shop_orders")
+}
+
+model ShopOrderLine {
+  id             String @id @default(cuid())
+  companyId      String
+  orderId        String
+  position       Int
+  articleId      String
+  designation    String
+  unit           String
+  quantity       Int
+  unitPriceCents BigInt
+  vatRateBp      Int
+  grossCents     BigInt
+  discountCents  BigInt
+  netCents       BigInt
+  vatCents       BigInt
+
+  company Company   @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  order   ShopOrder @relation(fields: [companyId, orderId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  article Article   @relation(fields: [companyId, articleId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([orderId, position])
+  @@index([companyId, orderId])
+  @@index([companyId, articleId])
+  @@map("shop_order_lines")
+}
+
+model MarketingConversion {
+  id                String   @id @default(cuid())
+  companyId         String
+  orderId           String
+  clientId          String
+  campaignId        String
+  attributedHTCents BigInt
+  createdById       String
+  createdAt         DateTime @default(now())
+
+  company  Company           @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  order    ShopOrder         @relation(fields: [companyId, orderId, clientId], references: [companyId, id, clientId], onDelete: Restrict, onUpdate: Cascade)
+  campaign MarketingCampaign @relation(fields: [companyId, campaignId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  consent  MarketingConsent  @relation(fields: [companyId, clientId], references: [companyId, clientId], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([companyId, id])
+  @@unique([companyId, orderId])
+  @@index([companyId, campaignId])
+  @@map("marketing_conversions")
 }

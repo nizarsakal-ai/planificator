@@ -63,9 +63,52 @@ export const NAV_CATEGORY_EXTENSIONS: readonly { href: string; id: NavCategoryId
   { href: "/automatisations", id: "administration", rank: 1.5 },
 ]
 
+/**
+ * Lot F Planificator V2 : rattachements ajoutés de même, SANS modifier les listes ni les extensions du lot E.
+ * « Assistant » dans Pilotage, après « Rapports » (rang 1) ; « Connecteurs » dans Administration, après
+ * « Automatisations » (rang 1,5). Chaque entrée n'apparaît que si son drapeau la compose.
+ */
+export const NAV_CATEGORY_EXTENSIONS_LOT_F: readonly { href: string; id: NavCategoryId; rank: number }[] = [
+  { href: "/assistant", id: "pilotage", rank: 2 },
+  { href: "/connecteurs", id: "administration", rank: 1.75 },
+]
+
+/**
+ * Lot G Planificator V2 : rattachement distinct (la liste du lot E est figée par ses tests). « Document Studio » dans
+ * Administration, après « Automatisations » (rang 1,5). N'apparaît que si son drapeau le compose.
+ */
+export const NAV_CATEGORY_EXTENSIONS_LOT_G: readonly { href: string; id: NavCategoryId; rank: number }[] = [
+  { href: "/studio-documents", id: "administration", rank: 2.5 },
+]
+
+/**
+ * Lot H Planificator V2 : rattachement distinct (la liste du lot E et les listes de main restent figées par leurs tests).
+ * « Pré-paie » dans Équipes & RH, juste après « Pointages » (rang 7) et avant « Pointage » (rang 8). N'apparaît que si son
+ * drapeau la compose.
+ */
+export const NAV_CATEGORY_EXTENSIONS_LOT_H: readonly { href: string; id: NavCategoryId; rank: number }[] = [
+  { href: "/pre-paie", id: "rh", rank: 7.5 },
+]
+
+/**
+ * Lot I Planificator V2 : rattachements distincts (la liste du lot E et les listes de main restent figées par leurs
+ * tests). « Marketing » puis « Boutique » dans Commercial, après « Articles » (rang 3). N'apparaissent que si leur
+ * drapeau les compose.
+ */
+export const NAV_CATEGORY_EXTENSIONS_LOT_I: readonly { href: string; id: NavCategoryId; rank: number }[] = [
+  { href: "/marketing", id: "commercial", rank: 3.5 },
+  { href: "/boutique", id: "commercial", rank: 3.6 },
+]
+
+// Intégration FGHI : chaque extension reste distincte et inchangée ; aucun href partagé entre deux extensions (vérifié
+// par tests/integration/fghi-interactions.test.ts).
 const CATEGORY_BY_HREF: ReadonlyMap<string, { id: NavCategoryId; rank: number }> = new Map([
   ...NAV_CATEGORY_DEFINITIONS.flatMap((category) => category.hrefs.map((href, rank) => [href, { id: category.id, rank }] as const)),
   ...NAV_CATEGORY_EXTENSIONS.map((e) => [e.href, { id: e.id, rank: e.rank }] as const),
+  ...NAV_CATEGORY_EXTENSIONS_LOT_F.map((e) => [e.href, { id: e.id, rank: e.rank }] as const),
+  ...NAV_CATEGORY_EXTENSIONS_LOT_G.map((e) => [e.href, { id: e.id, rank: e.rank }] as const),
+  ...NAV_CATEGORY_EXTENSIONS_LOT_H.map((e) => [e.href, { id: e.id, rank: e.rank }] as const),
+  ...NAV_CATEGORY_EXTENSIONS_LOT_I.map((e) => [e.href, { id: e.id, rank: e.rank }] as const),
 ])
 
 /** Catégorie d'un href (cartographie exacte) ; `null` pour une entrée du pied ; « autres » si inconnu. */
