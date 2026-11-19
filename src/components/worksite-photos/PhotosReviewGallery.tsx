@@ -5,7 +5,7 @@ import { CheckCircle2, Clock, Loader2, RotateCcw, Send, ShieldCheck, Trash2, Tri
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import type { ReviewItem } from "@/lib/worksite-photos/photo-review.service"
 
 /**
@@ -176,6 +176,134 @@ export function PhotoReviewDetail({ photo, busy, locked = false, confirming, onA
   )
 }
 
+interface DeliveryPreview {
+  worksiteName: string
+  recipients: Array<{ label: string | null; email: string }>
+  photoCount: number
+  snapshot: string
+  blocked: string | null
+  enabled: boolean
+}
+
+const deliveryBlocks: Record<string, string> = {
+  DELIVERY_PENDING: "Un précédent envoi est à vérifier. Le lot est bloqué pour éviter un doublon.",
+  DELIVERY_NO_RECIPIENTS: "Aucun destinataire actif. Renseignez les destinataires dans la fiche chantier.",
+  DELIVERY_NO_PHOTOS: "Aucune photo validée à envoyer.",
+  DELIVERY_TOO_LARGE: "Le lot dépasse la limite d’un seul e-mail (100 photos ou 24 Mio de fichiers).",
+}
+
+function WorksiteDeliveryPreview({ worksiteId, disabled, onSent }: {
+  worksiteId: string
+  disabled: boolean
+  onSent: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [preview, setPreview] = useState<DeliveryPreview | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const pending = useRef<AbortController | null>(null)
+  const sending = useRef(false)
+  const [isSending, setIsSending] = useState(false)
+  const endpoint = `/api/worksite-photos/worksites/${encodeURIComponent(worksiteId)}/delivery-preview`
+
+  async function loadPreview() {
+    pending.current?.abort()
+    const controller = new AbortController()
+    pending.current = controller
+    setPreview(null)
+    setError(null)
+    setOpen(true)
+    try {
+      const response = await fetch(endpoint, { cache: "no-store", signal: controller.signal })
+      if (!response.ok) throw new Error("Aperçu indisponible")
+      const data: DeliveryPreview = await response.json()
+      if (!controller.signal.aborted) setPreview(data)
+    } catch {
+      if (!controller.signal.aborted) setError("Impossible de charger les destinataires et les photos du chantier.")
+    }
+  }
+
+  async function confirmDelivery() {
+    if (!preview?.enabled || preview.blocked || sending.current) return
+    sending.current = true
+    setIsSending(true)
+    setError(null)
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ snapshot: preview.snapshot }),
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        setPreview(null)
+        setError(result.error ?? "Impossible de confirmer le résultat de l’envoi.")
+        return
+      }
+      setOpen(false)
+      toast.success(`Envoi accepté par la messagerie pour ${result.photoCount} photo(s).`)
+      onSent()
+    } catch {
+      setPreview(null)
+      setError("Résultat de l’envoi inconnu. Rechargez l’aperçu pour vérifier le statut du lot.")
+    } finally {
+      sending.current = false
+      setIsSending(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => {
+      if (sending.current) return
+      if (!next) pending.current?.abort()
+      setOpen(next)
+    }}>
+      <DialogTrigger asChild>
+        <Button size="sm" className="h-9" onClick={() => void loadPreview()} disabled={disabled}>
+          <Send className="h-4 w-4" /> Envoyer au client
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Vérifier l’envoi au client</DialogTitle>
+        <DialogDescription>Aperçu du lot de photos validées à envoyer.</DialogDescription>
+        {error && (
+          <div className="space-y-2">
+            <p role="alert">{error}</p>
+            <Button variant="outline" onClick={() => void loadPreview()}>Actualiser l’aperçu</Button>
+          </div>
+        )}
+        {!preview && !error && <p role="status">Chargement des destinataires et des photos…</p>}
+        {preview && (
+          <div className="space-y-3">
+            <p className="font-medium">{preview.worksiteName}</p>
+            <p>{preview.photoCount} photo{preview.photoCount === 1 ? "" : "s"} validée{preview.photoCount === 1 ? "" : "s"} à envoyer</p>
+            <h3 className="text-sm font-semibold">Destinataires actifs du chantier</h3>
+            {preview.recipients.length ? (
+              <ul className="list-disc space-y-1 pl-5 text-sm">
+                {preview.recipients.map(({ email, label }) => (
+                  <li key={email} className="break-all">{label ? `${label} (${email})` : email}</li>
+                ))}
+              </ul>
+            ) : null}
+            {preview.blocked && <p role="status">{deliveryBlocks[preview.blocked]}</p>}
+            {!preview.enabled && <p className="text-sm text-muted-foreground">L’envoi groupé est désactivé.</p>}
+          </div>
+        )}
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="outline" disabled={isSending} onClick={() => {
+            pending.current?.abort()
+            setOpen(false)
+          }}>Fermer</Button>
+          {preview?.enabled && !preview.blocked && (
+            <Button disabled={isSending} onClick={() => void confirmDelivery()}>
+              {isSending ? "Envoi en cours…" : "Confirmer l’envoi"}
+            </Button>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 interface Props {
   worksites: Array<{ id: string; name: string; clientName: string }>
   initialPage: ReviewPage
@@ -319,7 +447,11 @@ export function PhotosReviewGallery({ worksites, initialPage }: Props) {
             {worksites.map((w) => <option key={w.id} value={w.id}>{w.clientName} — {w.name}</option>)}
           </select>
         </label>
-        <div className="flex items-center justify-end">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {worksiteId && filter === "APPROVED" && (
+            <WorksiteDeliveryPreview key={worksiteId} worksiteId={worksiteId} disabled={locked}
+              onSent={() => void load({ worksiteId, filter, cursor: null })} />
+          )}
           {/* Relecture manuelle (photos prises entre-temps, y compris via « Ajouter une photo ») ; aucune interrogation périodique. */}
           <Button variant="outline" size="sm" className="h-9" onClick={() => void load({ worksiteId, filter, cursor: null })} disabled={locked}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />} Actualiser

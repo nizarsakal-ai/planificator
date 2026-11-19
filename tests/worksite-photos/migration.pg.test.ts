@@ -44,7 +44,10 @@ describe("migration worksite_photos_lot1 — base jetable", () => {
   })
   it("ROLLBACK.sql puis ré-application : le lot est réversible tant qu'aucune donnée n'existe", { timeout: 180_000 }, () => {
     const url = disposableUrl()
-    // Migration postérieure (LOT-ADMIN-REVIEW) retirée d'abord, dans l'ordre inverse d'application.
+    // Retirer les migrations photos dans l'ordre inverse d'application.
+    const deliveryRollback = prismaDbExecute(url, path.join(process.cwd(), "prisma/migrations/20261119170000_worksite_photo_batch_delivery/ROLLBACK.sql"))
+    assert.equal(deliveryRollback.status, 0, `rollback batch_delivery en échec :
+${deliveryRollback.stderr.slice(-2000)}`)
     const reviewRollback = prismaDbExecute(url, path.join(process.cwd(), "prisma/migrations/20261031090000_worksite_photos_admin_review/ROLLBACK.sql"))
     assert.equal(reviewRollback.status, 0, `rollback admin_review en échec :\n${reviewRollback.stderr.slice(-2000)}`)
     const rollback = prismaDbExecute(url, path.join(process.cwd(), "prisma/migrations/20261030180000_worksite_photos_lot1/ROLLBACK.sql"))
@@ -54,6 +57,7 @@ describe("migration worksite_photos_lot1 — base jetable", () => {
     assert.equal(deploy.status, 0, `migrate deploy en échec :\n${deploy.stderr.slice(-2000)}`)
     assert.match(deploy.stdout, /20261030180000_worksite_photos_lot1/)
     assert.match(deploy.stdout, /20261031090000_worksite_photos_admin_review/)
+    assert.match(deploy.stdout, /20261119170000_worksite_photo_batch_delivery/)
     const again = prismaDbExecute(url, PROBES)
     assert.equal(again.status, 0, `sondes SQL après ré-application en échec :\n${again.stderr.slice(-2000)}`)
   })

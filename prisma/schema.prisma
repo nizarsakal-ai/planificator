@@ -3312,7 +3312,8 @@ model WorksiteTruckPhoto {
   uploadedAt                    DateTime            @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
   uploadedById                  String // identifiant scalaire sans FK (patron Task.createdById)
   uploadedByNameSnapshot        String
-  // Preuve d'envoi déclarée par Hermes (D17) : complète et non vide pour SENT/DELETED, figée après SENT.
+  deliveryClaim                 String?             @db.Uuid // Lot d'envoi réservé jusqu'à réconciliation ou résultat certain.
+  // Preuve de transport complète et non vide pour SENT/DELETED, figée après SENT.
   sentAt                        DateTime?           @db.Timestamptz(3)
   sentByAgent                   String?
   sentTo                        String?
