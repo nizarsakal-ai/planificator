@@ -120,7 +120,10 @@ export function analyzeBatch(rows: PreviewRow[], state: AnalysisState): Analyzed
       const existing = importedByKey.get(`${row.kind}|${key}`)
       if (existing) {
         const sameClient = clientId ?? (row.createClient ? "" : existing.clientId)
-        if (!anomalies.some((a) => a.blocking && a.code !== "CLIENT_MISSING" && a.code !== "CLIENT_TO_CONFIRM" && a.code !== "CLIENT_AMBIGUOUS") && rowContentHash(row, sameClient) === existing.contentHash) {
+        // Statut entrant « non précisé » : il n'apporte aucune information, le statut déjà enregistré (ex. « Payée » posé
+        // après import) fait foi — ce n'est pas un conflit. Tout autre écart de statut reste un conflit.
+        const compared = row.status === "UNKNOWN" && existing.status !== "UNKNOWN" ? { ...row, status: existing.status as PreviewRow["status"] } : row
+        if (!anomalies.some((a) => a.blocking && a.code !== "CLIENT_MISSING" && a.code !== "CLIENT_TO_CONFIRM" && a.code !== "CLIENT_AMBIGUOUS") && rowContentHash(compared, sameClient) === existing.contentHash) {
           // Même identité, même contenu : déjà importée. Le client de la pièce existante fait foi (aucune confirmation redemandée).
           identical = true
           for (let i = anomalies.length - 1; i >= 0; i--) if (anomalies[i].code.startsWith("CLIENT_")) anomalies.splice(i, 1)
@@ -129,7 +132,7 @@ export function analyzeBatch(rows: PreviewRow[], state: AnalysisState): Analyzed
           conflict = { existingId: existing.id, differences: [] }
         } else {
           const name = clientId ? clientById.get(clientId)?.name ?? row.clientName : row.clientName
-          conflict = { existingId: existing.id, differences: differences(row, name, existing) }
+          conflict = { existingId: existing.id, differences: differences(compared, name, existing) }
           push("CONFLICT", row.decision === null, row.decision === "KEEP" ? "Conflit : la pièce déjà importée est conservée, cette ligne est ignorée." : "Conflit avec une pièce déjà importée (jamais écrasée) : confirmez « Conserver l'existant » ou excluez la ligne.")
         }
       }

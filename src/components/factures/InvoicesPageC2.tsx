@@ -3,7 +3,7 @@ import Link from "next/link"
 import { FileText, Plus, Settings, Upload } from "lucide-react"
 import { prisma } from "@/lib/prisma"
 import type { BillingContext } from "@/lib/billing/access"
-import { invoiceSummary, listInvoices } from "@/lib/billing/invoices/invoice-queries"
+import { invoiceSummary, listInvoices, todayUtc } from "@/lib/billing/invoices/invoice-queries"
 import { invoiceFiltersFromParams } from "@/lib/billing/invoices/invoice-filters"
 import { formatEuro } from "@/lib/billing/money"
 import { PAYMENT_METHOD_LABEL } from "@/lib/billing/invoices/invoice-schemas"
@@ -14,6 +14,8 @@ import { InvoiceStatusBadge } from "@/components/factures/InvoiceStatusBadge"
 import { isInvoiceImportEnabled } from "@/lib/invoice-import/invoice-import-feature-flag"
 import { listImportedInvoices } from "@/lib/invoice-import/import.service"
 import { STATUS_LABEL as IMPORTED_STATUS_LABEL } from "@/lib/invoice-import/format"
+import { combineTotals, computeImportedTotals } from "@/lib/invoice-import/imported-totals"
+import { loadImportedTotalsRows } from "@/lib/invoice-import/status-update.service"
 
 const dateFr = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" })
 const STATUSES = [["", "Tous les statuts"], ["DRAFT", "Brouillon"], ["SENT", "Émise"], ["PARTIAL", "Partiellement payée"], ["PAID", "Payée"], ["CANCELLED", "Annulée"]]
@@ -21,13 +23,21 @@ const STATUSES = [["", "Tous les statuts"], ["DRAFT", "Brouillon"], ["SENT", "É
 export async function InvoicesPageC2({ ctx, searchParams }: { ctx: BillingContext; searchParams: Record<string, string | string[] | undefined> }) {
   const f = invoiceFiltersFromParams(searchParams)
   const importEnabled = isInvoiceImportEnabled() // SPEC-INVOICE-IMPORT-001 : OFF ⇒ page strictement identique à avant.
-  const [list, summary, clients, importedCount] = await Promise.all([
-    listInvoices(prisma, ctx.companyId, f), invoiceSummary(prisma, ctx.companyId),
+  const now = new Date()
+  const [list, summary, clients, importedCount, importedRows] = await Promise.all([
+    listInvoices(prisma, ctx.companyId, f), invoiceSummary(prisma, ctx.companyId, now),
     prisma.client.findMany({ where: { companyId: ctx.companyId, active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
     importEnabled ? prisma.importedInvoice.count({ where: { companyId: ctx.companyId } }) : Promise.resolve(0),
+    importEnabled ? loadImportedTotalsRows(prisma, ctx.companyId) : Promise.resolve(null),
   ])
-  // Factures importées d'un autre logiciel : affichées sous la liste (même recherche et même client), sans entrer dans
-  // les totaux de la facturation Planificator. Filtre client borné à la société (clé composite client/société).
+  // Amendement SPEC-INVOICE-IMPORT-001 §5 : les pièces importées « Payée » / « Émise » / « En retard » entrent dans les totaux,
+  // affichés séparément (Planificator / Importées). Statuts non précisés, partiels et annulés : hors totaux, comptés à part.
+  const importedTotals = importedRows && importedRows.length > 0 ? computeImportedTotals(importedRows, todayUtc(now)) : null
+  const totals = combineTotals(summary, importedTotals)
+  const excluded = importedTotals ? importedTotals.excluded.unknown + importedTotals.excluded.partial + importedTotals.excluded.cancelled : 0
+  const split = (native: bigint, imp: bigint | undefined) => importedTotals && imp !== undefined ? <p className="mt-1 text-xs text-slate-500 tabular-nums">Planificator {formatEuro(native)} · Importées {formatEuro(imp)}</p> : null
+  // Factures importées d'un autre logiciel : listées sous la liste (même recherche et même client).
+  // Filtre client borné à la société (clé composite client/société).
   const imported = importEnabled && importedCount > 0
     ? await listImportedInvoices(prisma, ctx.companyId, { clientId: f.raw.client || undefined, q: f.raw.q || undefined, page: 1 })
     : null
@@ -45,11 +55,15 @@ export async function InvoicesPageC2({ ctx, searchParams }: { ctx: BillingContex
           <Button asChild><Link href="/factures/nouvelle"><Plus className="h-4 w-4" /> Nouvelle facture</Link></Button>
         </div>
       </div>
-      {importEnabled && importedCount > 0 && <p className="text-sm text-slate-600"><Link className="text-[#0f3460] underline" href="/factures/importees">{importedCount} facture{importedCount > 1 ? "s" : ""} importée{importedCount > 1 ? "s" : ""} d’un autre logiciel</Link> (hors totaux ci-dessous, listées sous les factures Planificator).</p>}
+      {importEnabled && importedCount > 0 && <p className="text-sm text-slate-600"><Link className="text-[#0f3460] underline" href="/factures/importees">{importedCount} facture{importedCount > 1 ? "s" : ""} importée{importedCount > 1 ? "s" : ""} d’un autre logiciel</Link> (incluses dans les totaux ci-dessous, ligne « Importées », et listées sous les factures Planificator){excluded > 0 && importedTotals ? <> — <strong>{excluded}</strong> hors totaux : {[
+        importedTotals.excluded.unknown ? `${importedTotals.excluded.unknown} au statut non précisé` : "",
+        importedTotals.excluded.partial ? `${importedTotals.excluded.partial} partiellement payée(s) (montant réglé inconnu)` : "",
+        importedTotals.excluded.cancelled ? `${importedTotals.excluded.cancelled} annulée(s)` : "",
+      ].filter(Boolean).join(", ")}</> : null}.</p>}
       <div className="grid gap-3 sm:grid-cols-3">
-        <Card><CardContent className="p-4"><p className="text-xs uppercase text-slate-500">Total encaissé</p><p className="mt-1 text-2xl font-semibold text-green-700 tabular-nums">{formatEuro(summary.collectedCents)}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs uppercase text-slate-500">Total dû</p><p className="mt-1 text-2xl font-semibold text-blue-700 tabular-nums">{formatEuro(summary.dueCents)}</p><p className="text-xs text-slate-500">{summary.openCount} facture{summary.openCount > 1 ? "s" : ""} en attente</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs uppercase text-slate-500">En retard</p><p className="mt-1 text-2xl font-semibold text-red-700 tabular-nums">{formatEuro(summary.overdueCents)}</p><p className="text-xs text-slate-500">{summary.overdueCount} facture{summary.overdueCount > 1 ? "s" : ""}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs uppercase text-slate-500">Total encaissé</p><p className="mt-1 text-2xl font-semibold text-green-700 tabular-nums">{formatEuro(totals.total.collectedCents)}</p>{split(summary.collectedCents, importedTotals?.collectedCents)}</CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs uppercase text-slate-500">Total dû</p><p className="mt-1 text-2xl font-semibold text-blue-700 tabular-nums">{formatEuro(totals.total.dueCents)}</p><p className="text-xs text-slate-500">{totals.total.openCount} facture{totals.total.openCount > 1 ? "s" : ""} en attente</p>{split(summary.dueCents, importedTotals?.dueCents)}</CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs uppercase text-slate-500">En retard</p><p className="mt-1 text-2xl font-semibold text-red-700 tabular-nums">{formatEuro(totals.total.overdueCents)}</p><p className="text-xs text-slate-500">{totals.total.overdueCount} facture{totals.total.overdueCount > 1 ? "s" : ""}</p>{split(summary.overdueCents, importedTotals?.overdueCents)}</CardContent></Card>
       </div>
       <Card><CardContent className="p-4">
         <form method="get" className="grid gap-2 sm:grid-cols-3 lg:grid-cols-7">
