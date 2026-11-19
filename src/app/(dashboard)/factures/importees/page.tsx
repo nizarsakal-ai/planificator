@@ -9,6 +9,8 @@ import { formatEuro } from "@/lib/billing/money"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { listBatchesWithStatus } from "@/lib/invoice-import/status-update.service"
+import { ImportedBulkMarkPaid } from "@/components/factures/ImportedBulkMarkPaid"
 
 export const metadata: Metadata = { title: "Factures importées" }
 const dateFr = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" })
@@ -21,7 +23,10 @@ export default async function FacturesImporteesPage({ searchParams }: { searchPa
   const clients = await prisma.client.findMany({ where: { companyId: ctx.companyId }, orderBy: { name: "asc" }, select: { id: true, name: true } })
   // Le filtre client n'est appliqué que si l'identifiant appartient à la société de session.
   const clientId = clients.some((c) => c.id === clientParam) ? clientParam : undefined
-  const list = await listImportedInvoices(prisma, ctx.companyId, { clientId, q, page: Number(one(sp.page)) || 1 })
+  const [list, unknownBatches] = await Promise.all([
+    listImportedInvoices(prisma, ctx.companyId, { clientId, q, page: Number(one(sp.page)) || 1 }),
+    listBatchesWithStatus(prisma, ctx.companyId, "UNKNOWN"),
+  ])
   const pages = Math.max(1, Math.ceil(list.total / list.pageSize))
   const query = new URLSearchParams({ ...(clientId ? { client: clientId } : {}), ...(q ? { q } : {}) }).toString()
   return (
@@ -30,6 +35,11 @@ export default async function FacturesImporteesPage({ searchParams }: { searchPa
         <div><h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900"><FileText className="h-6 w-6 text-[#0f3460]" /> Factures importées</h1><p className="mt-1 text-sm text-slate-500">{list.total} pièce{list.total > 1 ? "s" : ""} émise{list.total > 1 ? "s" : ""} dans un autre logiciel — numérotation et statut d’origine conservés, hors relances, règlements et comptabilité de Planificator.</p></div>
         <div className="flex gap-2"><Button variant="outline" asChild><Link href="/factures">Factures</Link></Button><Button asChild><Link href="/factures/import"><Upload className="h-4 w-4" /> Importer des factures</Link></Button></div>
       </div>
+      {unknownBatches.length > 0 && <Card><CardContent className="space-y-2 p-4">
+        <h2 className="text-sm font-semibold text-slate-800">Statut « Non précisé » : hors totaux de la page Factures</h2>
+        <p className="text-xs text-slate-500">Si ces pièces sont réglées dans le logiciel d’origine, marquez-les « Payée » pour les inclure dans « Total encaissé ». Le changement porte sur un import à la fois et s’affiche avant confirmation.</p>
+        {unknownBatches.map((b) => <ImportedBulkMarkPaid key={b.id} batchId={b.id} count={b.count} label={`Import ${b.source}${b.committedAt ? ` du ${dateFr.format(b.committedAt)}` : ""}`} />)}
+      </CardContent></Card>}
       <Card><CardContent className="p-4">
         <form method="get" className="grid gap-2 sm:grid-cols-4">
           <Input name="q" placeholder="N° ou client" defaultValue={q} className="sm:col-span-2" aria-label="Recherche" />

@@ -95,6 +95,10 @@ export function InvoiceImportPreview({ batchId, version, analyzed, summary, tabl
     const [h, v, t] = [BigInt(ht), BigInt(vat), BigInt(ttc)]
     return h + v !== t && t > v && v >= BigInt(0) ? [{ id: a.row.id, ht: centsToEuros((t - v).toString()) }] : []
   })
+  // Pièces au statut « Non précisé » (factures et avoirs) : à marquer « Payée » si elles sont réglées dans le logiciel d'origine.
+  // Seules les lignes qui seront créées : une ligne reconnue identique à une pièce déjà importée (ou en conflit avec elle)
+  // n'est pas touchée — changer son statut en ferait un conflit. Le statut d'une pièce existante se change sur /factures/importees.
+  const unknownStatus = analyzed.filter((a) => { const d = drafts.get(a.row.id) as Draft; return !d.excluded && d.kind !== "SUPPLIER" && d.status === "UNKNOWN" && !a.conflict && (a.outcome === "IMPORT" || a.outcome === "BLOCKED") }).map((a) => a.row.id)
   function bulk(patches: { id: string; patch: Partial<Draft> }[], message: string) {
     setDrafts((prev) => { const next = new Map(prev); for (const { id, patch } of patches) next.set(id, { ...(prev.get(id) as Draft), ...patch }); return next })
     setDirty((prev) => { const next = new Set(prev); for (const { id } of patches) next.add(id); return next })
@@ -181,6 +185,11 @@ export function InvoiceImportPreview({ batchId, version, analyzed, summary, tabl
         <span><strong>{summary.skipped}</strong> ignorée(s)</span>
         {summary.supplier > 0 && <span className="text-amber-700"><strong>{summary.supplier}</strong> facture(s) fournisseur (non importées ici)</span>}
       </CardContent></Card>
+
+      {unknownStatus.length > 0 && <Card><CardContent className="flex flex-wrap items-center justify-between gap-2 p-4 text-sm">
+        <span><strong>{unknownStatus.length}</strong> pièce(s) au statut « Non précisé » : elles resteront hors des totaux « encaissé / dû » de la page Factures. Si elles sont réglées dans le logiciel d’origine, marquez-les « Payée » (un avoir payé vient en déduction de l’encaissé).</span>
+        <Button type="button" variant="outline" disabled={busy} onClick={() => bulk(unknownStatus.map((id) => ({ id, patch: { status: "PAID" } })), `${unknownStatus.length} pièce(s) marquée(s) « Payée » : enregistrez les corrections.`)}>Marquer {unknownStatus.length} pièce(s) « Payée »</Button>
+      </CardContent></Card>}
 
       {(reasons.length > 0 || badNumbers.length > 0 || identicalExtras.length > 0 || discounted.length > 0) && <Card><CardContent className="space-y-3 p-4 text-sm">
         {reasons.length > 0 && <div><p className="font-medium">Pourquoi des lignes restent à corriger :</p><ul className="mt-1 list-disc pl-5">{reasons.map(([msg, n]) => <li key={msg}><strong>{n}</strong> × {msg}</li>)}</ul></div>}

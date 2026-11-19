@@ -69,5 +69,20 @@ Drapeaux à OFF ⇒ fonctionnalités absentes. Migration additive : l'applicatio
 2. **Prestataire bancaire** : aucun adaptateur réel ; choix du prestataire, contrat et identifiants requis. Le simulateur ne doit être activé que sur un environnement dont la base n'est pas celle de production.
 3. **Deux IBAN** : `billing_settings.iban` (imprimé sur les factures, inchangé) et `company_bank_accounts.iban` (compte vérifié). Un écart est signalé à l'écran ; l'unification toucherait le parcours Paramètres de facturation existant.
 4. **Suppression d'un client ou d'un chantier portant des factures importées** : refusée par la contrainte en base ; les messages existants (« rattachement concurrent… », « factures liées… ») restent corrects mais ne nomment pas les factures importées. Les préciser modifierait `deleteClient` / la suppression de chantier.
-5. **Liste Factures** : les pièces importées sont dans une liste dédiée (lien depuis Factures et depuis la carte client), hors totaux « encaissé / dû / en retard ».
+5. **Liste Factures** : les pièces importées sont dans une liste dédiée (lien depuis Factures et depuis la carte client). ~~Hors totaux « encaissé / dû / en retard ».~~ **Remplacé par l'amendement du 19/11/2026 (§9).**
 6. **OCR** : un scan envoyé à l'import utilise le prestataire OCR existant (mêmes drapeau, modèle et sous-traitant que les factures fournisseurs) ; cet OCR lit l'émetteur et les montants, pas le client, qui reste à choisir.
+
+## 9. Amendement du 19/11/2026 — pièces importées dans les totaux de la page Factures (décision Nizar)
+
+Contexte : les 38 pièces importées (toutes encaissées selon le métier) étaient au statut « Non précisé » et hors totaux : les cartes affichaient 0,00 €.
+
+1. **Totaux** (`src/lib/invoice-import/imported-totals.ts`, calcul pur) : le signe vient de la nature (facture +, avoir −), jamais du montant (stocké positif, contrainte SQL).
+   - `PAID` → « Total encaissé » ; un avoir payé (remboursé ou imputé) vient en déduction.
+   - `ISSUED` / `OVERDUE` → « Total dû » ; facture `OVERDUE` ou échéance dépassée → « En retard ». Un avoir non soldé vient en déduction du dû ; il n'est jamais « en retard ».
+   - `PARTIALLY_PAID` (montant réglé inconnu), `CANCELLED`, `UNKNOWN` → hors totaux, comptés et signalés sous les cartes.
+   - Aucun total n'est ramené à zéro (un dû négatif reste visible). Affichage : total global + détail « Planificator · Importées ». Les totaux Planificator (`invoiceSummary`) sont inchangés.
+2. **Statut « Payée »** : à l'import, bouton « Marquer N pièce(s) Payée » dans l'aperçu (factures et avoirs « Non précisé »). Après import, changement en masse **par lot**, `UNKNOWN → PAID` uniquement (`status-update.service.ts`) : vérification (liste exacte, aucune écriture) puis confirmation avec le nombre vérifié ; transaction unique, conditionnée au statut de départ, idempotente ; `contentHash` recalculé ; une ligne `history_logs` (`STATUS_CHANGED`) par pièce. Montants, numéros, PDF et `sourceStatus` inchangés.
+3. **Réimport** : un statut entrant « Non précisé » face à un statut enregistré n'est pas un conflit (le statut enregistré fait foi). Tout autre écart reste un conflit, et l'existant n'est jamais écrasé.
+4. **Données existantes** : `scripts/imported-invoices-mark-paid.ts` (dry-run par défaut ; `--apply` exige `--backup-confirmed`, `--expected` et `--actor`). Aucune migration de schéma.
+5. **Hors périmètre / limites** : pas de date d'encaissement pour une pièce importée (total « depuis toujours ») ; un avoir importé lié à une facture Planificator n'est pas compensé dans le dû de cette facture ; une même vente ressaisie sous un autre numéro dans Planificator n'est pas détectable. La TVA, la comptabilité et les exports ne lisent toujours pas les pièces importées.
+

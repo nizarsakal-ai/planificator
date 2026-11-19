@@ -80,13 +80,33 @@ export async function invoiceSummary(db: Db, companyId: string, now: Date = new 
     db.invoicePayment.aggregate({ where: { companyId }, _sum: { amountCents: true } }),
     db.invoice.findMany({ where: { companyId, status: { in: ["SENT", "PARTIAL"] }, kind: { not: "CREDIT_NOTE" } }, select: { id: true, totalTTC: true, dueDate: true, status: true, kind: true, payments: { select: { amountCents: true } }, creditNotes: { where: { creditScope: "PARTIAL", status: { not: "CANCELLED" } }, select: { totalTTC: true } } } }),
   ])
-  let due = BigInt(0), overdue = BigInt(0), overdueCount = 0
-  for (const i of open) {
-    const r = decimalToCents(i.totalTTC) - i.payments.reduce((s, p) => s + p.amountCents, BigInt(0)) - i.creditNotes.reduce((s, c) => s + decimalToCents(c.totalTTC), BigInt(0))
+  return summarizeNativeInvoices(
+    paid._sum.amountCents ?? BigInt(0),
+    open.map((i) => ({
+      status: i.status, kind: i.kind, dueDate: i.dueDate, totalTTCCents: decimalToCents(i.totalTTC),
+      paidCents: i.payments.reduce((s, p) => s + p.amountCents, BigInt(0)),
+      partialCreditCents: i.creditNotes.reduce((s, c) => s + decimalToCents(c.totalTTC), BigInt(0)),
+    })),
+    today,
+  )
+}
+
+export interface NativeSummaryInvoice { status: string; kind: string; dueDate: Date | null; totalTTCCents: bigint; paidCents: bigint; partialCreditCents: bigint }
+
+/**
+ * Calcul PUR des totaux Planificator. Seules les factures émises non soldées (SENT, PARTIAL ; hors avoirs) portent un dû :
+ * brouillons, payées et annulées sont ignorés ici même si l'appelant les fournit (filet en plus du filtre SQL).
+ */
+export function summarizeNativeInvoices(collectedCents: bigint, invoices: readonly NativeSummaryInvoice[], today: Date) {
+  let due = BigInt(0), overdue = BigInt(0), overdueCount = 0, openCount = 0
+  for (const i of invoices) {
+    if (i.kind === "CREDIT_NOTE" || (i.status !== "SENT" && i.status !== "PARTIAL")) continue
+    const r = i.totalTTCCents - i.paidCents - i.partialCreditCents
+    openCount++
     due += r
     if (isOverdue(i, today)) { overdue += r; overdueCount++ }
   }
-  return { collectedCents: paid._sum.amountCents ?? BigInt(0), dueCents: due, overdueCents: overdue, overdueCount, openCount: open.length }
+  return { collectedCents, dueCents: due, overdueCents: overdue, overdueCount, openCount }
 }
 
 export async function getInvoiceDetail(db: Db, companyId: string, invoiceId: string, now: Date = new Date()) {
