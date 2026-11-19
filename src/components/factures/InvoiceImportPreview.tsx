@@ -96,7 +96,9 @@ export function InvoiceImportPreview({ batchId, version, analyzed, summary, tabl
     return h + v !== t && t > v && v >= BigInt(0) ? [{ id: a.row.id, ht: centsToEuros((t - v).toString()) }] : []
   })
   // Pièces au statut « Non précisé » (factures et avoirs) : à marquer « Payée » si elles sont réglées dans le logiciel d'origine.
-  const unknownStatus = analyzed.filter((a) => { const d = drafts.get(a.row.id) as Draft; return !d.excluded && d.kind !== "SUPPLIER" && d.status === "UNKNOWN" }).map((a) => a.row.id)
+  // Seules les lignes qui seront créées : une ligne reconnue identique à une pièce déjà importée (ou en conflit avec elle)
+  // n'est pas touchée — changer son statut en ferait un conflit. Le statut d'une pièce existante se change sur /factures/importees.
+  const unknownStatus = analyzed.filter((a) => { const d = drafts.get(a.row.id) as Draft; return !d.excluded && d.kind !== "SUPPLIER" && d.status === "UNKNOWN" && !a.conflict && (a.outcome === "IMPORT" || a.outcome === "BLOCKED") }).map((a) => a.row.id)
   function bulk(patches: { id: string; patch: Partial<Draft> }[], message: string) {
     setDrafts((prev) => { const next = new Map(prev); for (const { id, patch } of patches) next.set(id, { ...(prev.get(id) as Draft), ...patch }); return next })
     setDirty((prev) => { const next = new Set(prev); for (const { id } of patches) next.add(id); return next })

@@ -127,10 +127,27 @@ describe("changement de statut en masse — application", () => {
 
 describe("totaux /factures après application", () => {
   it("encaissé importé = factures payées − avoir payé ; dû = pièce ISSUED ; société B non comptée", async () => {
-    const t = computeImportedTotals(await loadImportedTotalsRows(db, A.companyId), TODAY)
+    const t = computeImportedTotals(await loadImportedTotalsRows(db, A.companyId, TODAY), TODAY)
     assert.equal(t.collectedCents, BigInt(5000000 + 1000000 - 1380000))
     assert.equal(t.dueCents, BigInt(700000))
     assert.deepEqual(t.excluded, { unknown: 0, partial: 0, cancelled: 0 })
+  })
+})
+
+describe("agrégation en base des totaux", () => {
+  it("loadImportedTotalsRows (groupBy) donne exactement le calcul pièce par pièce, retard compris", async () => {
+    await db.importedInvoice.update({ where: { id: "stI3" }, data: { dueDate: new Date("2026-10-01T00:00:00Z") } })
+    await seedImported(A, batchA, "stClA2", { id: "stI4", kind: "INVOICE", number: "2026-06-000023", ttc: 300000, status: "ISSUED" })
+    await seedImported(A, batchA, "stClA2", { id: "stI5", kind: "INVOICE", number: "2026-06-000024", ttc: 120000, status: "CANCELLED" })
+    await seedImported(A, batchA, "stClA2", { id: "stC2", kind: "CREDIT_NOTE", number: "2026-06-000026", ttc: 50000, status: "ISSUED" })
+    const perRow = (await db.importedInvoice.findMany({ where: { companyId: A.companyId }, select: { kind: true, status: true, totalTTCCents: true, dueDate: true } }))
+    const expected = computeImportedTotals(perRow, TODAY)
+    const aggregated = computeImportedTotals(await loadImportedTotalsRows(db, A.companyId, TODAY), TODAY)
+    assert.deepEqual(aggregated, expected)
+    assert.equal(aggregated.overdueCents, BigInt(700000))
+    assert.equal(aggregated.overdueCount, 1)
+    assert.equal(aggregated.dueCents, BigInt(700000 + 300000 - 50000))
+    assert.equal(aggregated.excluded.cancelled, 1)
   })
 })
 

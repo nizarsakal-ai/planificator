@@ -11,7 +11,7 @@
 import type { Prisma, PrismaClient } from "@prisma/client"
 import type { LifecycleResult } from "@/lib/billing/quotes/quote-lifecycle.core"
 import { contentHash, numberKey } from "./normalize"
-import { signedTTCCents } from "./imported-totals"
+import { signedTTCCents, type ImportedTotalsRow } from "./imported-totals"
 import type { ImportStatus } from "./types"
 
 type Db = PrismaClient
@@ -132,9 +132,31 @@ class StaleStatusError extends Error {
   constructor() { super("stale"); this.name = "StaleStatusError" }
 }
 
-/** Totaux des pièces importées d'une société (lecture minimale pour les cartes /factures). */
-export async function loadImportedTotalsRows(db: Db, companyId: string) {
-  return db.importedInvoice.findMany({ where: { companyId }, select: { kind: true, status: true, totalTTCCents: true, dueDate: true } })
+/**
+ * Lignes agrégées pour les cartes /factures : sommes par (nature, statut) calculées en base, sans charger chaque pièce.
+ * Les factures ISSUED dont l'échéance est dépassée sont agrégées à part (échéance fixée à la veille de `today`) pour que
+ * `computeImportedTotals` les classe « en retard » ; le reste des ISSUED reçoit une échéance nulle (jamais en retard).
+ * Le résultat de `computeImportedTotals` sur ces lignes est identique à celui obtenu pièce par pièce.
+ */
+export async function loadImportedTotalsRows(db: Db, companyId: string, today: Date): Promise<ImportedTotalsRow[]> {
+  const [byStatus, lateIssued] = await Promise.all([
+    db.importedInvoice.groupBy({ by: ["kind", "status"], where: { companyId }, _sum: { totalTTCCents: true }, _count: { _all: true } }),
+    db.importedInvoice.groupBy({ by: ["kind"], where: { companyId, kind: "INVOICE", status: "ISSUED", dueDate: { lt: today } }, _sum: { totalTTCCents: true }, _count: { _all: true } }),
+  ])
+  const late = lateIssued[0]
+  const lateCount = late?._count._all ?? 0
+  const lateSum = late?._sum.totalTTCCents ?? BigInt(0)
+  const yesterday = new Date(today.getTime() - 86_400_000)
+  const rows: ImportedTotalsRow[] = []
+  for (const g of byStatus) {
+    let count = g._count._all, sum = g._sum.totalTTCCents ?? BigInt(0)
+    if (g.kind === "INVOICE" && g.status === "ISSUED" && lateCount > 0) {
+      rows.push({ kind: "INVOICE", status: "ISSUED", totalTTCCents: lateSum, dueDate: yesterday, count: lateCount })
+      count -= lateCount; sum -= lateSum
+    }
+    if (count > 0) rows.push({ kind: g.kind, status: g.status, totalTTCCents: sum, dueDate: null, count })
+  }
+  return rows
 }
 
 /** Lots validés contenant des pièces au statut `status` (proposés pour le changement en masse). */

@@ -11,8 +11,11 @@ import type { ImportStatus } from "./types"
 export interface ImportedTotalsRow {
   kind: "INVOICE" | "CREDIT_NOTE"
   status: ImportStatus
+  /** Montant de la ligne ; pour une ligne agrégée, somme des `count` pièces. */
   totalTTCCents: bigint
   dueDate: Date | null
+  /** Nombre de pièces représentées (ligne agrégée en base) ; 1 par défaut. */
+  count?: number
 }
 
 export interface ImportedTotals {
@@ -56,26 +59,28 @@ export function computeImportedTotals(rows: readonly ImportedTotalsRow[], today:
   const t: ImportedTotals = { collectedCents: ZERO, dueCents: ZERO, overdueCents: ZERO, openCount: 0, overdueCount: 0, countedCount: 0, excluded: { unknown: 0, partial: 0, cancelled: 0 } }
   for (const row of rows) {
     const signed = signedTTCCents(row)
+    const n = row.count ?? 1
+    if (!Number.isInteger(n) || n < 1) throw new ImportedTotalsError("Nombre de pièces invalide sur une ligne agrégée.")
     switch (row.status) {
       case "PAID":
         t.collectedCents += signed
-        t.countedCount++
+        t.countedCount += n
         break
       case "ISSUED":
       case "OVERDUE":
         t.dueCents += signed
-        t.countedCount++
-        if (row.kind === "INVOICE") t.openCount++
-        if (isImportedOverdue(row, today)) { t.overdueCents += signed; t.overdueCount++ }
+        t.countedCount += n
+        if (row.kind === "INVOICE") t.openCount += n
+        if (isImportedOverdue(row, today)) { t.overdueCents += signed; t.overdueCount += n }
         break
       case "PARTIALLY_PAID":
-        t.excluded.partial++
+        t.excluded.partial += n
         break
       case "CANCELLED":
-        t.excluded.cancelled++
+        t.excluded.cancelled += n
         break
       case "UNKNOWN":
-        t.excluded.unknown++
+        t.excluded.unknown += n
         break
       default: {
         const never: never = row.status

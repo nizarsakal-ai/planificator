@@ -161,11 +161,37 @@ describe("réimport après passage en « Payée »", () => {
     assert.equal(a.outcome, "BLOCKED")
     assert.deepEqual(a.conflict?.differences.map((d) => d.field), ["Statut"])
   })
+  it("facture avec « facture d'origine » dans l'export (non stockée) : reconnue après recalcul de l'empreinte en base", () => {
+    const r = row({ creditedNumber: "2026-05-000001" })
+    const stored = { kind: "INVOICE" as const, numberKey: numberKey(r.number), clientId: "c1", issueDate: new Date("2026-06-10T00:00:00Z"), dueDate: new Date("2026-07-10T00:00:00Z"), totalHTCents: BigInt(1150000), vatCents: BigInt(230000), totalTTCCents: BigInt(1380000), creditedNumber: null }
+    const e = { ...existingPaid(row({})), contentHash: hashWithStatus(stored, "PAID") }
+    const [a] = analyzeBatch([r], state(e))
+    assert.equal(a.outcome, "SKIP")
+    assert.ok(a.anomalies.some((x) => x.code === "ALREADY_IMPORTED"))
+  })
+  it("empreinte d'origine (avec « facture d'origine ») toujours reconnue : compatibilité ascendante", () => {
+    const r = row({ creditedNumber: "2026-05-000001", status: "PAID" })
+    const e = { ...existingPaid(row({})), contentHash: rowContentHash(r, "c1") }
+    const [a] = analyzeBatch([r], state(e))
+    assert.equal(a.outcome, "SKIP")
+  })
   it("statut « non précisé » mais montant différent : conflit sur le montant seulement (pas sur le statut)", () => {
     const r = row({ htCents: "1150001", ttcCents: "1380001" })
     const [a] = analyzeBatch([r], state(existingPaid(row({}))))
     assert.ok(a.anomalies.some((x) => x.code === "CONFLICT"))
     assert.deepEqual(a.conflict?.differences.map((d) => d.field), ["Montant HT", "Montant TTC"])
+  })
+})
+
+describe("lignes agrégées (count)", () => {
+  it("une ligne agrégée équivaut à ses pièces : sommes et compteurs", () => {
+    const agg = computeImportedTotals([{ ...inv(30000, "ISSUED", "2026-11-01"), count: 3 }, { ...cn(500, "UNKNOWN"), count: 4 }, { ...inv(9000, "PAID"), count: 2 }], TODAY)
+    const each = computeImportedTotals([inv(10000, "ISSUED", "2026-11-01"), inv(10000, "ISSUED", "2026-11-01"), inv(10000, "ISSUED", "2026-11-01"), cn(500, "UNKNOWN"), cn(0, "UNKNOWN"), cn(0, "UNKNOWN"), cn(0, "UNKNOWN"), inv(4500, "PAID"), inv(4500, "PAID")], TODAY)
+    assert.deepEqual(agg, each)
+  })
+  it("nombre de pièces invalide refusé", () => {
+    assert.throws(() => computeImportedTotals([{ ...inv(1, "PAID"), count: 0 }], TODAY), ImportedTotalsError)
+    assert.throws(() => computeImportedTotals([{ ...inv(1, "PAID"), count: 1.5 }], TODAY), ImportedTotalsError)
   })
 })
 

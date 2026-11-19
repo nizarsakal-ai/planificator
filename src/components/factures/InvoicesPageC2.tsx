@@ -28,7 +28,7 @@ export async function InvoicesPageC2({ ctx, searchParams }: { ctx: BillingContex
     listInvoices(prisma, ctx.companyId, f), invoiceSummary(prisma, ctx.companyId, now),
     prisma.client.findMany({ where: { companyId: ctx.companyId, active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
     importEnabled ? prisma.importedInvoice.count({ where: { companyId: ctx.companyId } }) : Promise.resolve(0),
-    importEnabled ? loadImportedTotalsRows(prisma, ctx.companyId) : Promise.resolve(null),
+    importEnabled ? loadImportedTotalsRows(prisma, ctx.companyId, todayUtc(now)) : Promise.resolve(null),
   ])
   // Amendement SPEC-INVOICE-IMPORT-001 §5 : les pièces importées « Payée » / « Émise » / « En retard » entrent dans les totaux,
   // affichés séparément (Planificator / Importées). Statuts non précisés, partiels et annulés : hors totaux, comptés à part.
