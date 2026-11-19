@@ -12,7 +12,7 @@ import { MAX_OCR_FILE_BYTES, sniffMime } from "@/lib/accounting/c5/ocr-provider"
 import { analyzeBatch, rowContentHash, summarize, type AnalysisState, type ExistingImported } from "./analyze"
 import { nameKey, numberKey } from "./normalize"
 import { extractDocument, type ExtractedDocument, type OwnCompany } from "./pdf-extract"
-import { clientNameFromFileName, existingClientByName } from "./client-hint"
+import { clientNameFromFileName, existingClientByName, invoiceNumberFromFileName, isPlausibleNumber } from "./client-hint"
 import { TabularError, guessMapping, headerLabels, headerSignature, readTable, tableToPreviewRows, validateMapping, type Cell } from "./tabular"
 import { ZipError, isZip, readZip } from "./zip"
 import type { AnalyzedRow, BatchSummary, ColumnMapping, ImportRowKind, ImportSourceSystem, ImportStatus, PreviewRow } from "./types"
@@ -200,7 +200,9 @@ export async function addFileToBatch(db: Db, ctx: ImportContext, batchId: string
       knownFiles.add(stored.value.id)
       const target = findRowForFile(doc.rows, d.name)
       if (target) { target.fileId = stored.value.id; target.fileName = baseName(d.name).slice(0, 200); result.attached++; continue }
-      const x = await extract({ data: d.data, mime: stored.value.mime }, company)
+      const raw = await extract({ data: d.data, mime: stored.value.mime }, company)
+      // Numéro illisible dans le PDF (« um ») : celui du nom du fichier (ex. « 2603-F-2026-001 »), à vérifier dans l'aperçu.
+      const x = isPlausibleNumber(raw.number) ? raw : { ...raw, number: invoiceNumberFromFileName(d.name, company.name) || null }
       const k = x.number ? numberKey(x.number) : ""
       const byNumber = k && x.kind !== "SUPPLIER" ? doc.rows.filter((r) => r.origin.type === "table" && !r.fileId && numberKey(r.number) === k) : []
       if (byNumber.length === 1) { byNumber[0].fileId = stored.value.id; byNumber[0].fileName = baseName(d.name).slice(0, 200); result.attached++; continue }

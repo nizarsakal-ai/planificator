@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { cancelInvoiceImportAction, commitInvoiceImportAction, updateInvoiceImportMappingAction, updateInvoiceImportRowsAction } from "@/lib/actions/invoice-import.actions"
 import { KIND_LABEL, STATUS_LABEL, centsToEuros, eurosToCents } from "@/lib/invoice-import/format"
-import { clientKey, clientNameFromFileName, existingClientByName } from "@/lib/invoice-import/client-hint"
+import { clientKey, clientNameFromFileName, existingClientByName, invoiceNumberFromFileName, isPlausibleNumber } from "@/lib/invoice-import/client-hint"
 import { IMPORT_FIELDS, IMPORT_FIELD_LABEL, type AnalyzedRow, type BatchSummary, type ColumnMapping, type ImportField, type ImportRowKind, type ImportStatus, type PreviewRow } from "@/lib/invoice-import/types"
 
 interface Option { id: string; name: string }
@@ -62,6 +62,35 @@ export function InvoiceImportPreview({ batchId, version, analyzed, summary, tabl
     setDirty((prev) => { const next = new Set(prev); for (const m of missing) next.add(m.id); return next })
     setReviewingClients(false); setConfirming(false)
     toast.success("Clients complétés : enregistrez les corrections. Les nouveaux clients ne seront créés qu’à la validation de l’import.")
+  }
+
+  // Raisons de blocage regroupées (lisibles d'un coup d'œil sur un gros lot).
+  const reasons = [...analyzed.filter((a) => a.outcome === "BLOCKED").flatMap((a) => a.anomalies.filter((x) => x.blocking).map((x) => x.message))
+    .reduce((m, msg) => m.set(msg, (m.get(msg) ?? 0) + 1), new Map<string, number>())].sort((x, y) => y[1] - x[1])
+  // Numéros illisibles (« um ») : numéro repris du nom du fichier.
+  const badNumbers = analyzed.flatMap((a) => {
+    const d = drafts.get(a.row.id) as Draft
+    if (d.excluded || isPlausibleNumber(d.number) || !a.row.fileName) return []
+    const number = invoiceNumberFromFileName(a.row.fileName, companyName)
+    return number ? [{ id: a.row.id, number }] : []
+  })
+  // Doublons identiques dans le lot (même nature, numéro, date et TTC) : une seule ligne gardée, de préférence avec son PDF.
+  const numKey = (n: string) => n.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "")
+  const identicalExtras = (() => {
+    const groups = new Map<string, AnalyzedRow[]>()
+    for (const a of analyzed) {
+      const d = drafts.get(a.row.id) as Draft
+      if (d.excluded || !numKey(d.number)) continue
+      const k = [d.kind, numKey(d.number), d.issueDate ?? "", d.ttc.replace(/\s/g, "")].join("|")
+      groups.set(k, [...(groups.get(k) ?? []), a])
+    }
+    return [...groups.values()].filter((g) => g.length > 1).flatMap((g) => { const keep = g.find((a) => a.row.fileId) ?? g[0]; return g.filter((a) => a !== keep).map((a) => a.row.id) })
+  })()
+  function bulk(patches: { id: string; patch: Partial<Draft> }[], message: string) {
+    setDrafts((prev) => { const next = new Map(prev); for (const { id, patch } of patches) next.set(id, { ...(prev.get(id) as Draft), ...patch }); return next })
+    setDirty((prev) => { const next = new Set(prev); for (const { id } of patches) next.add(id); return next })
+    setConfirming(false)
+    toast.success(message)
   }
 
   const edit = (id: string, patch: Partial<Draft>) => {
@@ -143,6 +172,15 @@ export function InvoiceImportPreview({ batchId, version, analyzed, summary, tabl
         <span><strong>{summary.skipped}</strong> ignorée(s)</span>
         {summary.supplier > 0 && <span className="text-amber-700"><strong>{summary.supplier}</strong> facture(s) fournisseur (non importées ici)</span>}
       </CardContent></Card>
+
+      {(reasons.length > 0 || badNumbers.length > 0 || identicalExtras.length > 0) && <Card><CardContent className="space-y-3 p-4 text-sm">
+        {reasons.length > 0 && <div><p className="font-medium">Pourquoi des lignes restent à corriger :</p><ul className="mt-1 list-disc pl-5">{reasons.map(([msg, n]) => <li key={msg}><strong>{n}</strong> × {msg}</li>)}</ul></div>}
+        <div className="flex flex-wrap gap-2">
+          {badNumbers.length > 0 && <Button type="button" variant="outline" disabled={busy} onClick={() => bulk(badNumbers.map((b) => ({ id: b.id, patch: { number: b.number } })), `${badNumbers.length} numéro(s) repris du nom du fichier : vérifiez-les puis enregistrez les corrections.`)}>Reprendre {badNumbers.length} numéro(s) illisible(s) depuis les noms de fichiers</Button>}
+          {identicalExtras.length > 0 && <Button type="button" variant="outline" disabled={busy} onClick={() => bulk(identicalExtras.map((id) => ({ id, patch: { excluded: true } })), `${identicalExtras.length} doublon(s) identique(s) exclu(s) : enregistrez les corrections.`)}>Exclure {identicalExtras.length} doublon(s) identique(s)</Button>}
+        </div>
+        {(badNumbers.length > 0 || identicalExtras.length > 0) && <p className="text-xs text-slate-500">Rien n’est enregistré avant « Enregistrer les corrections » ; l’analyse est alors recalculée et les compteurs mis à jour.</p>}
+      </CardContent></Card>}
 
       {missing.length > 0 && <Card><CardContent className="space-y-2 p-4 text-sm">
         <p><strong>{missing.length}</strong> pièce(s) sans client mais dont le nom du client est connu (fichier ou source) : {missing.length - missing.filter((m) => !m.existing).length} client(s) existant(s) à associer, <strong>{newNames.length}</strong> nouveau(x) client(s) à créer.</p>

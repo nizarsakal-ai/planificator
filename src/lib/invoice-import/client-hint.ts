@@ -42,3 +42,24 @@ export function existingClientByName<T extends { name: string }>(name: string, c
   const hits = clients.filter(c => clientKey(c.name) === key)
   return hits.length === 1 ? hits[0] : null
 }
+
+/** Un numéro de pièce plausible contient au moins un chiffre (« um », « de » : lecture erronée du PDF). */
+export function isPlausibleNumber(raw: string | null | undefined): boolean {
+  return !!raw && /\d/.test(raw) && raw.trim().length >= 2
+}
+
+/**
+ * Numéro de pièce lu dans un nom de fichier : « 2026-03-05_2603-F-2026-001-GALYA-EVENTS.pdf » → « 2603-F-2026-001 »,
+ * « 2026-03-16_Facture_000002_GALYA_EVENTS_HALL_EXPO.pdf » → « 000002 ». Date d'en-tête, mot « Facture » et nom de la
+ * société retirés ; "" si aucun groupe contenant un chiffre ne reste.
+ */
+export function invoiceNumberFromFileName(fileName: string, ownCompanyName: string): string {
+  const base = fileName.split(/[\\/]/).pop() ?? ""
+  let stem = base.replace(/\.[a-z0-9]{2,5}$/i, "").replace(/\s*\(\d+\)\s*$/, "")
+  stem = stem.replace(/^(\d{4}-\d{2}-\d{2}|\d{8})[_\s-]+/, "")
+  const own = clientKey(ownCompanyName).split(" ").filter(Boolean)
+  if (own.length) stem = stem.replace(new RegExp(`[_\\s-]*${own.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[_\\s-]+")}([_\\s-]|$).*$`, "i"), "")
+  const parts = stem.split(/[_\s]+/).filter(p => !DOC_WORDS.has(clientKey(p)))
+  const hit = parts.find(p => /\d/.test(p) && !DATE.test(p))
+  return hit ? hit.replace(/^[-/]+|[-/]+$/g, "").slice(0, 64) : ""
+}
