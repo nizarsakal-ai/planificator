@@ -5,6 +5,8 @@
 // Accueil-v3 : accueil « par outils » (recherche, trois groupes, rail « Accès rapides »), composition propre à Planificator.
 // Vues de choix bornées (?vue=generer|validation|pdf, une seule valeur) au-dessus des listes complètes, toujours présentes ;
 // sections à ancres stables : #outils, #nouveau-modele, #modeles, #documents, #generer, #validation, #pdf.
+// Espace PDF (lots 1 et 2, 20/11/2026) : #importer (dépôt d'un PDF reçu) et #fichiers (PDF importés, vers leur fiche).
+// Lot 3 : #combiner (plusieurs PDF importés en un nouveau PDF ; les PDF chiffrés ne sont pas proposés).
 import { FilePenLine } from "lucide-react"
 import { prisma } from "@/lib/prisma"
 import { studioPageAccess } from "@/lib/document-studio/access"
@@ -12,7 +14,10 @@ import { AdminOnlyNotice } from "@/components/stock/AdminOnlyNotice"
 import { CATEGORIES, CATEGORY_LABEL, type Category } from "@/lib/document-studio/studio.core"
 import { listGeneratedDocuments, listPdfDocuments, listPendingDocuments, listPublishedTemplates, listTemplates } from "@/lib/document-studio/queries"
 import { lireVue } from "@/lib/document-studio/tool-hub"
-import { createTemplateAction } from "@/lib/actions/document-studio.actions"
+import { createTemplateAction, importPdfAction } from "@/lib/actions/document-studio.actions"
+import { listStudioPdfs } from "@/lib/document-studio/pdf-workspace.queries"
+import { PDF_UPLOAD_LABEL } from "@/lib/document-studio/pdf-workspace.core"
+import { StudioPdfCombiner } from "@/components/document-studio/StudioPdfCombiner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -30,6 +35,9 @@ const ACCES_RAPIDES = [
   { href: "/studio-documents#documents", label: "Documents générés" },
   { href: "/studio-documents?vue=validation#validation", label: "En attente de validation" },
   { href: "/studio-documents?vue=pdf#pdf", label: "Télécharger un PDF" },
+  { href: "/studio-documents#importer", label: "Importer un PDF" },
+  { href: "/studio-documents#fichiers", label: "PDF importés" },
+  { href: "/studio-documents#combiner", label: "Combiner des PDF" },
 ] as const
 
 export default async function StudioPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -38,7 +46,7 @@ export default async function StudioPage({ searchParams }: { searchParams: Promi
   if (!ctx) return <AdminOnlyNotice />
   const params = await searchParams
   const vue = lireVue(params.vue)
-  const [templates, docs] = await Promise.all([listTemplates(prisma, ctx.companyId), listGeneratedDocuments(prisma, ctx.companyId)])
+  const [templates, docs, fichiers] = await Promise.all([listTemplates(prisma, ctx.companyId), listGeneratedDocuments(prisma, ctx.companyId), listStudioPdfs(prisma, ctx.companyId)])
   const publies = vue === "generer" ? await listPublishedTemplates(prisma, ctx.companyId) : []
   const enAttente = vue === "validation" ? await listPendingDocuments(prisma, ctx.companyId) : []
   const pdfs = vue === "pdf" ? await listPdfDocuments(prisma, ctx.companyId) : []
@@ -138,6 +146,49 @@ export default async function StudioPage({ searchParams }: { searchParams: Promi
           </CardContent></Card>
         </section>
       )}
+
+      <section id="importer" aria-labelledby="importer-titre" className="scroll-mt-4">
+      <Card><CardContent className="space-y-3 p-4">
+        <h2 id="importer-titre" className="text-sm font-semibold text-slate-900">Importer un PDF</h2>
+        <p className="text-xs text-slate-600">Avis de paiement, bon de commande, contrat reçu… Le fichier est conservé tel quel : remplir ou signer crée une nouvelle version, l&apos;original reste intact. {PDF_UPLOAD_LABEL} au maximum.</p>
+        <FormulaireRetour action={importPdfAction} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+          <label className="grid gap-1 text-xs text-slate-600">Fichier PDF
+            <input type="file" name="file" required accept="application/pdf,.pdf" className="block w-full text-sm text-slate-800 file:mr-3 file:rounded-md file:border-0 file:bg-[#0f3460] file:px-3 file:py-2 file:text-sm file:font-medium file:text-white" />
+          </label>
+          <label className="grid gap-1 text-xs text-slate-600">Titre (facultatif)
+            <Input name="title" maxLength={160} placeholder="Par défaut : nom du fichier" />
+          </label>
+          <div><Button type="submit">Importer</Button></div>
+        </FormulaireRetour>
+      </CardContent></Card>
+      </section>
+
+      <section id="fichiers" aria-label="PDF importés" className="scroll-mt-4">
+      <Card><CardContent className="overflow-x-auto p-0">
+        <table className="w-full text-sm">
+          <caption className="px-3 py-2 text-left text-sm font-semibold text-slate-900">PDF importés</caption>
+          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th scope="col" className="px-3 py-2">Document</th><th scope="col" className="px-3 py-2">Pages</th><th scope="col" className="px-3 py-2">Dernière version</th><th scope="col" className="px-3 py-2">Mis à jour</th></tr></thead>
+          <tbody>
+            {fichiers.length === 0 && <tr><td colSpan={4} className="px-3 py-6 text-center text-slate-400">Aucun PDF importé.</td></tr>}
+            {fichiers.map((f) => (
+              <tr key={f.id} className="border-t">
+                <td className="px-3 py-2"><a href={`/studio-documents/fichiers/${f.id}`} className="font-medium text-[#0f3460] underline">{f.title}</a> <span className="text-xs text-slate-500">{f.originalName}</span></td>
+                <td className="px-3 py-2 tabular-nums">{f.latest?.pageCount ?? "—"}</td>
+                <td className="px-3 py-2 text-xs">{f.latest ? `v${f.latest.revision} · ${f.latest.kind === "ORIGINAL" ? (f.origin === "COMBINED" ? "combiné" : f.origin === "EXTRACTED" ? "extrait" : "original") : f.latest.kind === "ORGANIZED" ? "pages organisées" : f.latest.signerName ? `signée par ${f.latest.signerName}` : "remplie"}` : "—"}</td>
+                <td className="px-3 py-2 tabular-nums">{fmtInstant(f.updatedAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent></Card>
+      </section>
+
+      <section id="combiner" aria-labelledby="combiner-titre" className="scroll-mt-4">
+      <Card><CardContent className="space-y-3 p-4">
+        <h2 id="combiner-titre" className="text-sm font-semibold text-slate-900">Combiner des PDF</h2>
+        <StudioPdfCombiner pdfs={fichiers.filter((f) => f.latest && !f.latest.encrypted).map((f) => ({ id: f.id, title: f.title, pageCount: f.latest!.pageCount, revision: f.latest!.revision }))} />
+      </CardContent></Card>
+      </section>
 
       <section id="modeles" aria-label="Modèles et versions" className="scroll-mt-4">
       <Card><CardContent className="overflow-x-auto p-0">

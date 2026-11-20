@@ -448,6 +448,8 @@ model Company {
   documentTemplates DocumentTemplate[] // Lot G V2
   documentTemplateVersions DocumentTemplateVersion[]
   generatedDocuments GeneratedDocument[]
+  studioPdfs StudioPdf[] // Document Studio : espace PDF (lots 1 et 2)
+  studioPdfRevisions StudioPdfRevision[]
   payrollPeriods PayrollPeriod[] // Lot H V2
   payrollManualVariables PayrollManualVariable[]
   marketingSources MarketingSource[] // Lot I V2
@@ -4617,6 +4619,78 @@ model GeneratedDocument {
   @@index([clientId, companyId])
   @@index([worksiteId, companyId])
   @@map("generated_documents")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Document Studio, espace PDF (lots 1 à 3, 20/11/2026). Un PDF reçu est importé tel quel (révision 1, ORIGINAL) et
+// n'est jamais modifié ; « Remplir et signer » ajoute une révision FILLED construite depuis la dernière, avec la liste
+// des éléments posés (empreinte) et, si une signature est posée, le nom du signataire et l'empreinte du tracé.
+// Lot 3 : « Organiser » ajoute une révision ORGANIZED (pages réordonnées, pivotées ou retirées, plan empreint) ;
+// « Combiner » et « Extraire » créent un NOUVEAU PDF (origine COMBINED ou EXTRACTED, sources figées).
+// Révisions immuables et jamais supprimées (garanti en base). Même drapeau que le Studio (DOCUMENT_STUDIO_ENABLED).
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum StudioPdfRevisionKind {
+  ORIGINAL
+  FILLED
+  ORGANIZED
+}
+
+enum StudioPdfOrigin {
+  IMPORTED
+  COMBINED
+  EXTRACTED
+}
+
+model StudioPdf {
+  id           String   @id @default(cuid())
+  companyId    String
+  title        String
+  originalName String
+  origin       StudioPdfOrigin @default(IMPORTED)
+  /// Combiné ou extrait : [{ pdfId, revisionId, revision, title, pages: [n…] }] figés à la création.
+  sources      Json?
+  createdById  String
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  company   Company             @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  revisions StudioPdfRevision[]
+
+  @@unique([companyId, id])
+  @@index([companyId, createdAt])
+  @@map("studio_pdfs")
+}
+
+model StudioPdfRevision {
+  id               String                @id @default(cuid())
+  companyId        String
+  pdfId            String
+  revision         Int
+  kind             StudioPdfRevisionKind
+  sha256           String
+  size             Int
+  data             Bytes
+  pageCount        Int
+  /// Boîte visible et rotation de chaque page : [{ x, y, width, height, rotation }].
+  pages            Json
+  /// Texte de chaque page (recherche), tronqué par page.
+  pageTexts        Json
+  encrypted        Boolean               @default(false)
+  operations       Json?
+  operationsSha256 String?
+  signerName       String?
+  signatureSha256  String?
+  createdById      String
+  createdAt        DateTime              @default(now())
+
+  company Company   @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  pdf     StudioPdf @relation(fields: [companyId, pdfId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([companyId, id])
+  @@unique([pdfId, revision])
+  @@index([companyId, pdfId])
+  @@map("studio_pdf_revisions")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
