@@ -131,3 +131,38 @@ export async function fillSignPdfAction(a: RetourAction | FormData, b?: FormData
     return r.ok ? { ok: true, okMessage: `Version ${r.value.revision} enregistrée.`, cible: fichePdf(pdfId) } : r
   })
 }
+
+// ── Espace PDF, lot 3 : organiser, extraire, combiner ────────────────────────────────────────────────────────────────
+
+/** Organiser : nouvelle version (ordre, rotation, pages retirées) depuis la dernière. */
+export async function organizePdfAction(a: RetourAction | FormData, b?: FormData) {
+  const form = formulaireDe(a, b)
+  return run(async (ctx) => {
+    const pdfId = reqId(form, "pdfId")
+    if (!pdfId) return { ok: false, error: PDF_ERRORS.notFound }
+    const r = await pdfSvc.organizePdf(prisma, ctx, pdfId, { baseRevisionId: reqId(form, "baseRevisionId"), plan: str(form, "plan", 50_000) })
+    return r.ok ? { ok: true, okMessage: `Version ${r.value.revision} enregistrée.`, cible: fichePdf(pdfId) } : r
+  })
+}
+
+/** Extraire : nouveau PDF fait des pages choisies ; ouvre sa fiche. */
+export async function extractPagesAction(a: RetourAction | FormData, b?: FormData) {
+  const form = formulaireDe(a, b)
+  return run(async (ctx) => {
+    const pdfId = reqId(form, "pdfId")
+    if (!pdfId) return { ok: false, error: PDF_ERRORS.notFound }
+    const r = await pdfSvc.extractPages(prisma, ctx, pdfId, { revisionId: reqId(form, "revisionId"), plan: str(form, "plan", 50_000), title: str(form, "title", 1000) })
+    if (!r.ok) return r
+    return { ok: true, okMessage: r.value.duplicate ? "Ces pages existaient déjà en PDF : voici sa fiche." : "Pages extraites dans un nouveau PDF.", cible: fichePdf(r.value.pdfId) }
+  })
+}
+
+/** Combiner : nouveau PDF fait des PDF choisis, dans l'ordre ; ouvre sa fiche. */
+export async function combinePdfsAction(a: RetourAction | FormData, b?: FormData) {
+  const form = formulaireDe(a, b)
+  return run(async (ctx) => {
+    const r = await pdfSvc.combinePdfs(prisma, ctx, { ids: str(form, "ids", 5_000), title: str(form, "title", 1000) })
+    if (!r.ok) return r
+    return { ok: true, okMessage: r.value.duplicate ? "Cette combinaison existait déjà : voici sa fiche." : "PDF combinés dans un nouveau document.", cible: fichePdf(r.value.pdfId) }
+  })
+}

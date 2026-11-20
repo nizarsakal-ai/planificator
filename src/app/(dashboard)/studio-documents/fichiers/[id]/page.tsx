@@ -1,7 +1,8 @@
 // Document Studio — espace PDF (lots 1 et 2) : fiche d'un PDF importé. Visionneuse (pages, vignettes, zoom), recherche
 // dans le texte des pages (côté serveur, lien vers la page trouvée), versions successives (original puis versions
 // remplies ou signées, chacune téléchargeable) et « Remplir et signer » sur la dernière version. Drapeau
-// DOCUMENT_STUDIO_ENABLED + ADMIN/SUPER_ADMIN ; PDF d'une autre entreprise ⇒ 404. Aucun octet du fichier dans les
+// DOCUMENT_STUDIO_ENABLED + ADMIN/SUPER_ADMIN ; PDF d'une autre entreprise ⇒ 404. Lot 3 : « Organiser les pages » (nouvelle
+// version) et « Extraire » (nouveau PDF) ; un PDF combiné ou extrait affiche ses sources figées (liens vers leurs fiches). Aucun octet du fichier dans les
 // propriétés de la page : la visionneuse lit la route protégée de la révision.
 import { notFound } from "next/navigation"
 import { FileText, Search } from "lucide-react"
@@ -9,7 +10,7 @@ import { prisma } from "@/lib/prisma"
 import { studioPageAccess } from "@/lib/document-studio/access"
 import { AdminOnlyNotice } from "@/components/stock/AdminOnlyNotice"
 import { getStudioPdfView } from "@/lib/document-studio/pdf-workspace.queries"
-import { PDF_ERRORS, displaySize, searchPages } from "@/lib/document-studio/pdf-workspace.core"
+import { PDF_ERRORS, displaySize, pageRanges, searchPages } from "@/lib/document-studio/pdf-workspace.core"
 import { Card, CardContent } from "@/components/ui/card"
 import { StockFlash } from "@/components/stock/StockFlash"
 import { MessageRetour, ZoneRetour } from "@/components/crm/RetourFormulaire"
@@ -46,11 +47,23 @@ export default async function StudioPdfPage({ params, searchParams }: { params: 
         <a href="/studio-documents#fichiers" className={`text-xs ${LIEN}`}>← PDF importés</a>
         <h1 className="mt-1 flex items-center gap-2 text-2xl font-bold text-slate-900"><FileText aria-hidden="true" className="h-6 w-6 shrink-0 text-[#0f3460]" /><span className="min-w-0 break-words">{v.title}</span></h1>
         <p className="text-sm text-slate-600">
-          {v.originalName} · importé le {fmtInstant(v.createdAt)} · {v.shown.pageCount} page{v.shown.pageCount > 1 ? "s" : ""} ·{" "}
+          {v.origin === "IMPORTED" ? `${v.originalName} · importé le ` : `${v.origin === "COMBINED" ? "combiné" : "extrait"} le `}{fmtInstant(v.createdAt)} · {v.shown.pageCount} page{v.shown.pageCount > 1 ? "s" : ""} ·{" "}
           version {v.shown.revision}{isLatest ? "" : ` (la plus récente est la ${v.latest.revision})`}
         </p>
       </div>
       <MessageRetour><StockFlash params={sp} /></MessageRetour>
+      {v.sources.length > 0 && (
+        <p className="text-sm text-slate-700">
+          {v.origin === "COMBINED" ? "Combiné depuis : " : "Extrait de : "}
+          {v.sources.map((src, i) => (
+            <span key={`${src.pdfId}-${i}`}>
+              {i > 0 && " · "}
+              <a href={`/studio-documents/fichiers/${src.pdfId}?r=${src.revision}`} className={LIEN}>{src.title}</a>
+              <span className="text-xs text-slate-500"> v{src.revision}{v.origin === "EXTRACTED" ? `, pages ${pageRanges(src.pages)}` : ""}</span>
+            </span>
+          ))}
+        </p>
+      )}
 
       <form method="get" action={base} role="search" className="flex max-w-xl items-center gap-2">
         {!isLatest && <input type="hidden" name="r" value={v.shown.revision} />}
@@ -92,18 +105,19 @@ export default async function StudioPdfPage({ params, searchParams }: { params: 
         pages={v.pages.map(displaySize)}
         editable={blocked === null}
         editBlockedReason={blocked}
+        extractable={!v.shown.encrypted}
       />
 
       <Card><CardContent className="p-4">
         <h2 className="text-sm font-semibold text-slate-900">Versions</h2>
-        <p className="mt-0.5 text-xs text-slate-600">Chaque enregistrement crée une nouvelle version ; l&apos;original n&apos;est jamais modifié.</p>
+        <p className="mt-0.5 text-xs text-slate-600">Chaque enregistrement (remplir, signer, organiser) crée une nouvelle version ; l&apos;original n&apos;est jamais modifié.</p>
         <ol className="mt-2 divide-y divide-slate-200 text-sm">
           {v.revisions.map((r) => (
             <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
               <span className="min-w-0">
                 <span className="font-medium text-slate-800">Version {r.revision}</span>{" "}
                 <span className="text-xs text-slate-600">
-                  · {r.kind === "ORIGINAL" ? "original importé" : r.signerName ? `remplie et signée par ${r.signerName}` : "remplie"} · {fmtInstant(r.createdAt)} · {sizeFr(r.size)} · empreinte {r.sha256.slice(0, 12)}
+                  · {r.kind === "ORIGINAL" ? (v.origin === "IMPORTED" ? "original importé" : v.origin === "COMBINED" ? "PDF combiné" : "pages extraites") : r.kind === "ORGANIZED" ? "pages organisées" : r.signerName ? `remplie et signée par ${r.signerName}` : "remplie"} · {fmtInstant(r.createdAt)} · {sizeFr(r.size)} · empreinte {r.sha256.slice(0, 12)}
                 </span>
                 {r.id === v.shown.id && <span className="ml-2 rounded-full bg-[#0f3460]/10 px-2 py-0.5 text-xs font-medium text-[#0f3460]">affichée</span>}
               </span>

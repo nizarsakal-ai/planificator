@@ -4,6 +4,8 @@
  * Lot 1 : un PDF reçu est importé tel quel (révision 1, « original »), jamais modifié ; il est affiché page par page.
  * Lot 2 : « Remplir et signer » produit une NOUVELLE révision à partir de la dernière : textes, dates, coches et
  * signature manuscrite posés à des positions de page. L'original et chaque révision restent intacts et empreints.
+ * Lot 3 : « Organiser » produit une nouvelle révision selon un plan de pages (ordre, rotation, pages retirées) ;
+ * « Combiner » (plusieurs PDF) et « Extraire » (des pages d'un PDF) créent un NOUVEAU PDF dont les sources sont figées.
  *
  * Coordonnées des éléments : entiers en dix-millièmes de la page TELLE QU'AFFICHÉE (rotation appliquée), origine en haut
  * à gauche, point d'ancrage = coin haut-gauche de l'élément. Tailles de texte en points PDF entiers. Des entiers seulement :
@@ -13,8 +15,13 @@
 export const PDF_LIMITS = {
   /** Corps de requête : Vercel refuse au-delà de 4,5 Mo ; 4 Mo laissent la marge de l'enveloppe multipart. */
   maxUploadBytes: 4 * 1024 * 1024,
-  /** Révision stockée (original + éléments posés). */
-  maxStoredBytes: 12 * 1024 * 1024,
+  /**
+   * Révision stockée (remplie, réorganisée, combinée) : elle doit rester TÉLÉCHARGEABLE, or Vercel refuse aussi toute
+   * réponse de fonction au-delà de 4,5 Mo. Au-delà de cette borne, l'enregistrement est refusé avec un message clair.
+   */
+  maxStoredBytes: 4_400_000,
+  /** Combiner : nombre de PDF assemblés en une fois. */
+  maxCombineParts: 20,
   maxPages: 300,
   /** Texte conservé par page pour la recherche (au-delà : tronqué, la page reste trouvable sur son début). */
   maxTextPerPage: 20_000,
@@ -55,6 +62,16 @@ export const PDF_ERRORS = {
   tooManyRevisions: `Nombre maximal de versions atteint (${PDF_LIMITS.maxRevisions}).`,
   outputTooLarge: "Le PDF obtenu serait trop lourd.",
   writeFailed: "Ce PDF n'a pas pu être modifié (structure non prise en charge). L'original est intact.",
+  plan: "Plan de pages invalide : rechargez la page et recommencez.",
+  planEmpty: "Gardez au moins une page.",
+  planUnchanged: "Aucun changement : déplacez, pivotez ou retirez au moins une page.",
+  combineParts: `Choisissez de 2 à ${PDF_LIMITS.maxCombineParts} PDF à combiner.`,
+  combineDuplicate: "Un même PDF est choisi deux fois.",
+  extractEmpty: "Sélectionnez au moins une page à extraire.",
+  extractAll: "Toutes les pages sont sélectionnées, dans l'ordre et sans rotation : rien à extraire.",
+  sourceMissing: "Un des PDF choisis est introuvable : rechargez la page.",
+  sourceEncrypted: "Un des PDF choisis est protégé (chiffré) : ses pages ne peuvent pas être reprises.",
+  tooManyPagesOut: `Le PDF obtenu dépasserait ${PDF_LIMITS.maxPages} pages.`,
 } as const
 
 export type Plan<T> = { ok: true; value: T } | { ok: false; error: string }
@@ -299,4 +316,90 @@ export function searchPages(texts: readonly string[], query: string, maxHits = 1
     hits.push({ page: i + 1, count, snippet: `${start > 0 ? "…" : ""}${flat.slice(start, end).trim()}${end < flat.length ? "…" : ""}` })
   })
   return hits
+}
+
+// ── Lot 3 : organiser, extraire, combiner ───────────────────────────────────────────────────────────────────────────
+
+/** Une page du PDF obtenu : numéro de page SOURCE (1 à n) et rotation AJOUTÉE (quart de tour horaire). */
+export interface PlannedPage { page: number; rotate: Rotation }
+export type PagePlan = PlannedPage[]
+
+const ROTATIONS: readonly number[] = [0, 90, 180, 270]
+
+/**
+ * Plan de pages envoyé par le navigateur : ordre voulu, rotation ajoutée ; une page absente du plan est retirée. Chaque
+ * page source au plus une fois ; au moins une page ; aucune clé supplémentaire conservée.
+ */
+export function parsePagePlan(json: string, pageCount: number): Plan<PagePlan> {
+  let raw: unknown
+  try { raw = JSON.parse(json) } catch { return ko(PDF_ERRORS.plan) }
+  if (!Array.isArray(raw)) return ko(PDF_ERRORS.plan)
+  if (raw.length === 0) return ko(PDF_ERRORS.planEmpty)
+  if (raw.length > pageCount) return ko(PDF_ERRORS.plan)
+  const seen = new Set<number>()
+  const out: PagePlan = []
+  for (const o of raw) {
+    if (!o || typeof o !== "object" || Array.isArray(o)) return ko(PDF_ERRORS.plan)
+    const { page, rotate } = o as Record<string, unknown>
+    if (!isInt(page, 1, pageCount) || seen.has(page as number)) return ko(PDF_ERRORS.plan)
+    if (typeof rotate !== "number" || !ROTATIONS.includes(rotate)) return ko(PDF_ERRORS.plan)
+    seen.add(page as number)
+    out.push({ page: page as number, rotate: rotate as Rotation })
+  }
+  return okv(out)
+}
+
+/** Plan identique au document (toutes les pages, dans l'ordre, sans rotation). */
+export const isIdentityPlan = (plan: readonly PlannedPage[], pageCount: number) =>
+  plan.length === pageCount && plan.every((p, i) => p.page === i + 1 && p.rotate === 0)
+
+/** Résumé lisible d'un plan (journal, liste des versions). */
+export function summarizePlan(plan: readonly PlannedPage[], pageCount: number): string {
+  const removed = pageCount - plan.length
+  const rotated = plan.filter((p) => p.rotate !== 0).length
+  const kept = plan.map((p) => p.page)
+  const moved = kept.some((n, i) => i > 0 && n < kept[i - 1])
+  const parts: string[] = []
+  if (moved) parts.push("pages réordonnées")
+  if (rotated) parts.push(`${rotated} page${rotated > 1 ? "s" : ""} pivotée${rotated > 1 ? "s" : ""}`)
+  if (removed) parts.push(`${removed} page${removed > 1 ? "s" : ""} retirée${removed > 1 ? "s" : ""}`)
+  return parts.join(", ") || "aucun changement"
+}
+
+const ID_RE = /^[A-Za-z0-9_-]{1,64}$/
+/** Liste des PDF à combiner (identifiants, dans l'ordre voulu) : 2 à 20, sans doublon. */
+export function parseCombineIds(json: string): Plan<string[]> {
+  let raw: unknown
+  try { raw = JSON.parse(json) } catch { return ko(PDF_ERRORS.combineParts) }
+  if (!Array.isArray(raw) || raw.length < 2 || raw.length > PDF_LIMITS.maxCombineParts) return ko(PDF_ERRORS.combineParts)
+  if (!raw.every((v) => typeof v === "string" && ID_RE.test(v))) return ko(PDF_ERRORS.combineParts)
+  if (new Set(raw).size !== raw.length) return ko(PDF_ERRORS.combineDuplicate)
+  return okv(raw as string[])
+}
+
+/** Rotation résultante d'une page : rotation d'origine + quart(s) de tour ajouté(s). */
+export const addRotation = (current: number, delta: number): Rotation => normalizeRotation(current + delta)
+
+/** Source figée d'un PDF combiné ou extrait. */
+export interface PdfSource { pdfId: string; revisionId: string; revision: number; title: string; pages: number[] }
+
+/** Lecture prudente des sources stockées. */
+export function readSources(raw: unknown): PdfSource[] {
+  if (!Array.isArray(raw)) return []
+  return raw.filter((s): s is PdfSource => !!s && typeof s === "object" && typeof (s as PdfSource).pdfId === "string"
+    && typeof (s as PdfSource).revisionId === "string" && Number.isSafeInteger((s as PdfSource).revision)
+    && typeof (s as PdfSource).title === "string" && Array.isArray((s as PdfSource).pages))
+}
+
+/** « 1-3, 5, 7-8 » : pages d'une source, en plages lisibles (ordre conservé). */
+export function pageRanges(pages: readonly number[]): string {
+  const out: string[] = []
+  let i = 0
+  while (i < pages.length) {
+    let j = i
+    while (j + 1 < pages.length && pages[j + 1] === pages[j] + 1) j++
+    out.push(j > i ? `${pages[i]}-${pages[j]}` : String(pages[i]))
+    i = j + 1
+  }
+  return out.join(", ")
 }

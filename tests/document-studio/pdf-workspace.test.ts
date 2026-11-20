@@ -1,5 +1,6 @@
 /**
- * Document Studio — espace PDF (lots 1 et 2) : contrôles sans base. Règles pures (titre, éléments posés, police WinAnsi,
+ * Document Studio — espace PDF (lots 1 à 3) : contrôles sans base. Lot 3 : plan de pages (ordre, rotation, retrait),
+ * liste de PDF à combiner, assemblage réel (organiser, extraire, combiner) et garanties de la migration. Règles pures (titre, éléments posés, police WinAnsi,
  * géométrie des pages tournées, recherche), état de l'éditeur, et aller-retour RÉEL sur des PDF construits ici avec
  * pdf-lib : lecture à l'import (pages, rotation, texte), écriture des éléments sur une copie (original intact), texte
  * posé retrouvé dans la nouvelle version, PDF chiffré refusé à l'écriture. Contrôles statiques : drapeau et accès sur la
@@ -11,12 +12,12 @@ import { describe, it } from "node:test"
 import { PDFDocument, StandardFonts, degrees } from "pdf-lib"
 import { extractText, getDocumentProxy } from "unpdf"
 import {
-  COORD_MAX, PDF_ERRORS, PDF_LIMITS, cleanOriginalName, dayText, displaySize, displayToPdf, downloadName, isValidDay, looksLikePdf,
+  COORD_MAX, PDF_ERRORS, PDF_LIMITS, addRotation, cleanOriginalName, isIdentityPlan, pageRanges, parseCombineIds, parsePagePlan, readSources, summarizePlan, dayText, displaySize, displayToPdf, downloadName, isValidDay, looksLikePdf,
   normalizeRotation, parseOperations, readPageGeometries, searchPages, summarizeOperations, unsupportedChars, validatePdfTitle,
   type PageGeometry,
 } from "@/lib/document-studio/pdf-workspace.core"
 import { moveItem, newItem, parisToday, resizeItem, toPayload } from "@/lib/document-studio/pdf-workspace.editor"
-import { applyOperations, inspectPdf } from "@/lib/document-studio/pdf-workspace.pdf"
+import { applyOperations, assemblePdf, inspectPdf } from "@/lib/document-studio/pdf-workspace.pdf"
 import { adresseApresSucces, retour } from "@/lib/actions/retour-action"
 
 const read = (f: string) => readFileSync(f, "utf8")
@@ -266,5 +267,75 @@ describe("contrôles statiques", () => {
     assert.match(sql, /IF TG_OP <> 'INSERT' THEN\s+RAISE EXCEPTION 'studio pdf revision immutable'/)
     assert.match(sql, /"revision" = NEW\."revision" - 1/)
     assert.match(sql, /"size" = octet_length\("data"\)/)
+  })
+})
+
+describe("lot 3 : organiser, extraire, combiner (règles pures)", () => {
+  it("plan de pages : ordre, rotation ajoutée, retrait ; doublons, pages absentes et rotations libres refusés", () => {
+    assert.deepEqual(ok(parsePagePlan(JSON.stringify([{ page: 3, rotate: 90 }, { page: 1, rotate: 0, x: "ignoré" }]), 3)), [{ page: 3, rotate: 90 }, { page: 1, rotate: 0 }])
+    assert.equal(ko(parsePagePlan("[]", 3)), PDF_ERRORS.planEmpty)
+    for (const bad of ["{", "{}", JSON.stringify([{ page: 1, rotate: 0 }, { page: 1, rotate: 90 }]), JSON.stringify([{ page: 4, rotate: 0 }]),
+      JSON.stringify([{ page: 1, rotate: 45 }]), JSON.stringify([{ page: 1.5, rotate: 0 }]), JSON.stringify([1, 2])]) assert.equal(ko(parsePagePlan(bad, 3)), PDF_ERRORS.plan, bad)
+  })
+  it("plan identique, résumé lisible, rotation résultante, plages de pages", () => {
+    assert.ok(isIdentityPlan([{ page: 1, rotate: 0 }, { page: 2, rotate: 0 }], 2))
+    assert.ok(!isIdentityPlan([{ page: 2, rotate: 0 }, { page: 1, rotate: 0 }], 2))
+    assert.ok(!isIdentityPlan([{ page: 1, rotate: 90 }, { page: 2, rotate: 0 }], 2))
+    assert.ok(!isIdentityPlan([{ page: 1, rotate: 0 }], 2))
+    assert.equal(summarizePlan([{ page: 3, rotate: 90 }, { page: 1, rotate: 0 }], 4), "pages réordonnées, 1 page pivotée, 2 pages retirées")
+    assert.deepEqual([addRotation(270, 90), addRotation(0, -90), addRotation(90, 180)], [0, 270, 270])
+    assert.equal(pageRanges([1, 2, 3, 5, 7, 8]), "1-3, 5, 7-8")
+    assert.equal(pageRanges([3, 2, 1]), "3, 2, 1")
+  })
+  it("liste à combiner : 2 à 20 identifiants sûrs, sans doublon ; sources stockées relues prudemment", () => {
+    assert.deepEqual(ok(parseCombineIds(JSON.stringify(["a1", "b_2"]))), ["a1", "b_2"])
+    for (const bad of ["[]", JSON.stringify(["a"]), JSON.stringify(Array.from({ length: 21 }, (_, i) => `p${i}`)), JSON.stringify(["a", "../b"]), "x"]) assert.equal(ko(parseCombineIds(bad)), PDF_ERRORS.combineParts, bad)
+    assert.equal(ko(parseCombineIds(JSON.stringify(["a", "a"]))), PDF_ERRORS.combineDuplicate)
+    assert.deepEqual(readSources([{ pdfId: "a", revisionId: "r", revision: 1, title: "T", pages: [1] }, { pdfId: 3 }, null]), [{ pdfId: "a", revisionId: "r", revision: 1, title: "T", pages: [1] }])
+  })
+  it("taille stockée bornée sous la limite de réponse Vercel (4,5 Mo) : tout PDF enregistré reste téléchargeable", () => {
+    assert.ok(PDF_LIMITS.maxStoredBytes < 4.5 * 1024 * 1024)
+    assert.ok(PDF_LIMITS.maxUploadBytes <= PDF_LIMITS.maxStoredBytes)
+  })
+})
+
+describe("lot 3 : assemblage réel (pdf-lib)", () => {
+  it("organiser : ordre, rotation ajoutée à l'existante, page retirée ; originaux intacts", async () => {
+    const bytes = await samplePdf()
+    const before = Buffer.from(bytes).toString("base64")
+    const out = ok(await assemblePdf([{ bytes, pages: [{ page: 2, rotate: 90 }, { page: 1, rotate: 270 }] }], { title: "Réorganisé" }))
+    assert.equal(Buffer.from(bytes).toString("base64"), before)
+    const info = ok(await inspectPdf(out))
+    assert.equal(info.pageCount, 2)
+    assert.deepEqual(info.pages.map((p) => p.rotation), [180, 270], "page 2 (déjà à 90°) + 90° ; page 1 + 270°")
+    assert.match(info.pageTexts[0], /Annexe paysage/)
+    assert.match(info.pageTexts[1], /Avis de paiement/)
+    const single = ok(await inspectPdf(ok(await assemblePdf([{ bytes, pages: [{ page: 1, rotate: 0 }] }], { title: "Extrait" }))))
+    assert.equal(single.pageCount, 1)
+  })
+  it("combiner : pages de plusieurs PDF dans l'ordre des parties ; refus : page absente, aucune page, source chiffrée", async () => {
+    const a = await samplePdf()
+    const b = await PDFDocument.create()
+    b.addPage([300, 300]).drawText("Second document", { x: 20, y: 150, size: 12, font: await b.embedFont(StandardFonts.Helvetica) })
+    const bBytes = await b.save()
+    const out = ok(await assemblePdf([{ bytes: bBytes, pages: [{ page: 1, rotate: 0 }] }, { bytes: a, pages: [{ page: 1, rotate: 0 }, { page: 2, rotate: 0 }] }], { title: "Dossier" }))
+    const texts = await textOf(out)
+    assert.equal(texts.length, 3)
+    assert.match(texts[0], /Second document/)
+    assert.match(texts[1], /Avis de paiement/)
+    assert.equal((await PDFDocument.load(out)).getTitle(), "Dossier")
+    assert.equal(ko(await assemblePdf([{ bytes: a, pages: [{ page: 3, rotate: 0 }] }], { title: "x" })), PDF_ERRORS.page)
+    assert.equal(ko(await assemblePdf([{ bytes: a, pages: [] }], { title: "x" })), PDF_ERRORS.planEmpty)
+    const doc = await PDFDocument.load(a)
+    doc.context.trailerInfo.Encrypt = doc.context.obj({ Filter: "Standard", V: 1, R: 2, O: "x", U: "y", P: -4 })
+    assert.equal(ko(await assemblePdf([{ bytes: await doc.save(), pages: [{ page: 1, rotate: 0 }] }], { title: "x" })), PDF_ERRORS.sourceEncrypted)
+  })
+  it("migration : révision réorganisée sans signataire, origine et sources cohérentes et figées", () => {
+    const sql = read("prisma/migrations/20261120120000_v2_studio_pdf_workspace/migration.sql")
+    assert.match(sql, /CREATE TYPE "StudioPdfRevisionKind" AS ENUM \('ORIGINAL', 'FILLED', 'ORGANIZED'\);/)
+    assert.match(sql, /CREATE TYPE "StudioPdfOrigin" AS ENUM \('IMPORTED', 'COMBINED', 'EXTRACTED'\);/)
+    assert.match(sql, /AND \("kind" <> 'ORGANIZED' OR "signerName" IS NULL\)/)
+    assert.match(sql, /\("origin" = 'IMPORTED' AND "sources" IS NULL\)/)
+    assert.match(sql, /NEW\."origin", NEW\."sources"/)
   })
 })

@@ -3,7 +3,7 @@
  * téléchargement (`getRevisionBytes`) ; les écrans ne reçoivent jamais le contenu du fichier dans leurs propriétés.
  */
 import type { PrismaClient } from "@prisma/client"
-import { readPageGeometries, readPageTexts, type PageGeometry } from "@/lib/document-studio/pdf-workspace.core"
+import { readPageGeometries, readPageTexts, readSources, type PageGeometry } from "@/lib/document-studio/pdf-workspace.core"
 
 type Db = PrismaClient
 
@@ -12,15 +12,15 @@ export async function listStudioPdfs(db: Db, companyId: string, take = 100) {
   const rows = await db.studioPdf.findMany({
     where: { companyId }, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take,
     select: {
-      id: true, title: true, originalName: true, createdAt: true, updatedAt: true,
-      revisions: { orderBy: { revision: "desc" }, take: 1, select: { revision: true, kind: true, pageCount: true, signerName: true } },
+      id: true, title: true, originalName: true, origin: true, createdAt: true, updatedAt: true,
+      revisions: { orderBy: { revision: "desc" }, take: 1, select: { revision: true, kind: true, pageCount: true, signerName: true, encrypted: true } },
     },
   })
   return rows.map(({ revisions, ...p }) => ({ ...p, latest: revisions[0] ?? null }))
 }
 
 export interface StudioPdfRevisionMeta {
-  id: string; revision: number; kind: "ORIGINAL" | "FILLED"; size: number; sha256: string; pageCount: number
+  id: string; revision: number; kind: "ORIGINAL" | "FILLED" | "ORGANIZED"; size: number; sha256: string; pageCount: number
   encrypted: boolean; signerName: string | null; createdAt: Date; createdById: string
 }
 
@@ -29,7 +29,7 @@ export async function getStudioPdfView(db: Db, companyId: string, id: string, re
   const pdf = await db.studioPdf.findFirst({
     where: { id, companyId },
     select: {
-      id: true, title: true, originalName: true, createdAt: true,
+      id: true, title: true, originalName: true, origin: true, sources: true, createdAt: true,
       revisions: {
         orderBy: { revision: "desc" },
         select: { id: true, revision: true, kind: true, size: true, sha256: true, pageCount: true, encrypted: true, signerName: true, createdAt: true, createdById: true },
@@ -43,7 +43,7 @@ export async function getStudioPdfView(db: Db, companyId: string, id: string, re
   const pages: PageGeometry[] | null = detail ? readPageGeometries(detail.pages) : null
   if (!detail || !pages || pages.length !== shown.pageCount) return null
   return {
-    id: pdf.id, title: pdf.title, originalName: pdf.originalName, createdAt: pdf.createdAt,
+    id: pdf.id, title: pdf.title, originalName: pdf.originalName, createdAt: pdf.createdAt, origin: pdf.origin, sources: readSources(pdf.sources),
     revisions: pdf.revisions as StudioPdfRevisionMeta[], latest: latest as StudioPdfRevisionMeta, shown: shown as StudioPdfRevisionMeta,
     pages, pageTexts: readPageTexts(detail.pageTexts, shown.pageCount),
   }

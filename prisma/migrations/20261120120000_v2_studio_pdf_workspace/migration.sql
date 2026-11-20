@@ -1,16 +1,20 @@
--- Document Studio, espace PDF (lots 1 et 2, 20/11/2026). Migration EXPAND, additive : 1 type et 2 tables nouveaux,
+-- Document Studio, espace PDF (lots 1 à 3, 20/11/2026). Migration EXPAND, additive : 2 types et 2 tables nouveaux,
 -- leurs index et clés. Aucun objet existant modifié, aucune ligne existante lue ni écrite. Corps généré par
 -- `prisma migrate diff` (schéma précédent vers ce lot), puis CHECK, index partiel et déclencheurs à la main en fin de
 -- fichier. Module désactivé par défaut (DOCUMENT_STUDIO_ENABLED).
 -- Garanties portées par la base : un PDF n'est jamais supprimé ; ses révisions sont numérotées sans trou à partir de 1,
 -- la révision 1 est l'original importé et elle seule ; une révision ne se modifie ni ne se supprime ; une révision
--- remplie porte la liste empreinte de ses éléments ; une signature posée porte le nom du signataire et l'empreinte du
--- tracé ; un même original n'est importé qu'une fois par entreprise.
+-- remplie porte la liste empreinte de ses éléments, une révision réorganisée son plan de pages empreint (sans
+-- signataire) ; une signature posée porte le nom du signataire et l'empreinte du tracé ; un PDF combiné ou extrait porte
+-- ses sources figées, un PDF importé n'en a pas ; un même original n'est importé qu'une fois par entreprise.
 
 BEGIN;
 
 -- CreateEnum
-CREATE TYPE "StudioPdfRevisionKind" AS ENUM ('ORIGINAL', 'FILLED');
+CREATE TYPE "StudioPdfRevisionKind" AS ENUM ('ORIGINAL', 'FILLED', 'ORGANIZED');
+
+-- CreateEnum
+CREATE TYPE "StudioPdfOrigin" AS ENUM ('IMPORTED', 'COMBINED', 'EXTRACTED');
 
 -- CreateTable
 CREATE TABLE "studio_pdfs" (
@@ -18,6 +22,8 @@ CREATE TABLE "studio_pdfs" (
     "companyId" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "originalName" TEXT NOT NULL,
+    "origin" "StudioPdfOrigin" NOT NULL DEFAULT 'IMPORTED',
+    "sources" JSONB,
     "createdById" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -73,7 +79,6 @@ ALTER TABLE "studio_pdf_revisions" ADD CONSTRAINT "studio_pdf_revisions_companyI
 -- AddForeignKey
 ALTER TABLE "studio_pdf_revisions" ADD CONSTRAINT "studio_pdf_revisions_companyId_pdfId_fkey" FOREIGN KEY ("companyId", "pdfId") REFERENCES "studio_pdfs"("companyId", "id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
-
 -- ── Contraintes (ajouts manuels) ───────────────────────────────────────────────────────────────────────────────────
 ALTER TABLE "studio_pdf_revisions" ADD CONSTRAINT "studio_pdf_revisions_shape_check" CHECK (
   "revision" >= 1 AND "size" > 0 AND "size" = octet_length("data") AND "pageCount" >= 1
@@ -81,12 +86,17 @@ ALTER TABLE "studio_pdf_revisions" ADD CONSTRAINT "studio_pdf_revisions_shape_ch
   AND jsonb_typeof("pages") = 'array' AND jsonb_array_length("pages") = "pageCount"
   AND jsonb_typeof("pageTexts") = 'array'
   AND (("revision" = 1 AND "kind" = 'ORIGINAL' AND "operations" IS NULL AND "operationsSha256" IS NULL AND "signerName" IS NULL AND "signatureSha256" IS NULL)
-    OR ("revision" > 1 AND "kind" = 'FILLED' AND "operations" IS NOT NULL AND jsonb_typeof("operations") = 'array'
-        AND "operationsSha256" IS NOT NULL AND "operationsSha256" ~ '^[0-9a-f]{64}$'))
+    OR ("revision" > 1 AND "kind" IN ('FILLED', 'ORGANIZED') AND "operations" IS NOT NULL AND jsonb_typeof("operations") = 'array'
+        AND jsonb_array_length("operations") > 0 AND "operationsSha256" IS NOT NULL AND "operationsSha256" ~ '^[0-9a-f]{64}$'))
+  AND ("kind" <> 'ORGANIZED' OR "signerName" IS NULL)
   AND (("signerName" IS NULL AND "signatureSha256" IS NULL)
     OR ("signerName" IS NOT NULL AND length("signerName") BETWEEN 2 AND 120 AND "signatureSha256" IS NOT NULL AND "signatureSha256" ~ '^[0-9a-f]{64}$'))
 );
 ALTER TABLE "studio_pdfs" ADD CONSTRAINT "studio_pdfs_title_check" CHECK (length("title") BETWEEN 3 AND 160 AND length("originalName") BETWEEN 1 AND 160);
+ALTER TABLE "studio_pdfs" ADD CONSTRAINT "studio_pdfs_origin_check" CHECK (
+  ("origin" = 'IMPORTED' AND "sources" IS NULL)
+  OR ("origin" IN ('COMBINED', 'EXTRACTED') AND "sources" IS NOT NULL AND jsonb_typeof("sources") = 'array' AND jsonb_array_length("sources") > 0)
+);
 
 -- Un même original (mêmes octets) n'est importé qu'une fois par entreprise.
 CREATE UNIQUE INDEX "studio_pdf_revisions_one_original_per_content" ON "studio_pdf_revisions"("companyId", "sha256") WHERE "kind" = 'ORIGINAL';
@@ -101,14 +111,14 @@ CREATE TRIGGER studio_pdfs_no_truncate BEFORE TRUNCATE ON "studio_pdfs"
 CREATE TRIGGER studio_pdf_revisions_no_truncate BEFORE TRUNCATE ON "studio_pdf_revisions"
   FOR EACH STATEMENT EXECUTE FUNCTION studio_pdf_no_truncate();
 
--- PDF : jamais supprimé ; identité figée (le titre reste modifiable).
+-- PDF : jamais supprimé ; identité, origine et sources figées (le titre reste modifiable).
 CREATE FUNCTION studio_pdf_guard() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
     RAISE EXCEPTION 'studio pdf cannot be deleted' USING ERRCODE = '23514';
   END IF;
-  IF (NEW."id", NEW."companyId", NEW."originalName", NEW."createdById", NEW."createdAt")
-     IS DISTINCT FROM (OLD."id", OLD."companyId", OLD."originalName", OLD."createdById", OLD."createdAt") THEN
+  IF (NEW."id", NEW."companyId", NEW."originalName", NEW."origin", NEW."sources", NEW."createdById", NEW."createdAt")
+     IS DISTINCT FROM (OLD."id", OLD."companyId", OLD."originalName", OLD."origin", OLD."sources", OLD."createdById", OLD."createdAt") THEN
     RAISE EXCEPTION 'studio pdf identity immutable' USING ERRCODE = '23514';
   END IF;
   RETURN NEW;

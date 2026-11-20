@@ -5,7 +5,7 @@
  * - Six outils, tous adossés à une capacité réellement présente : formulaire de création, modèles publiés, listes,
  *   file de validation filtrée côté serveur, choix d'un document avec la route PDF protégée existante.
  * - Espace PDF (lots 1 et 2, 20/11/2026) : deux outils de plus, « Importer un PDF » et « PDF importés » (visionneuse,
- *   recherche, remplir et signer, versions).
+ *   recherche, remplir et signer, versions). Lot 3 : « Combiner des PDF » (troisième outil de la famille).
  * - Recherche : filtre à la frappe sur le titre, la description et quelques mots-clés concrets ; insensible à la casse
  *   et aux accents (« generer » trouve « Générer un document ») ; tous les mots saisis doivent être présents.
  * - Vues de choix bornées à `generer`, `validation` et `pdf` : une seule valeur texte admise, sinon listes existantes.
@@ -15,7 +15,7 @@ export type ToolFamilyId = "creer" | "retrouver" | "valider" | "pdf"
 
 export interface ToolFamily { id: ToolFamilyId; label: string }
 export interface StudioTool {
-  id: "nouveau-modele" | "generer" | "modeles" | "documents" | "validation" | "pdf" | "importer-pdf" | "pdf-importes"
+  id: "nouveau-modele" | "generer" | "modeles" | "documents" | "validation" | "pdf" | "importer-pdf" | "pdf-importes" | "combiner-pdf"
   family: ToolFamilyId
   title: string
   description: string
@@ -39,7 +39,8 @@ export const STUDIO_TOOLS: readonly StudioTool[] = [
   { id: "validation", family: "valider", title: "En attente de validation", description: "Documents à valider ou refuser par un autre administrateur.", href: "/studio-documents?vue=validation#validation", keywords: ["valider", "validation", "signature", "refus", "attente"] },
   { id: "pdf", family: "valider", title: "Télécharger un PDF", description: "Choisir un document et ouvrir son PDF.", href: "/studio-documents?vue=pdf#pdf", keywords: ["pdf", "télécharger", "exporter", "imprimer"] },
   { id: "importer-pdf", family: "pdf", title: "Importer un PDF", description: "Déposer un PDF reçu pour le consulter, le remplir et le signer.", href: "/studio-documents#importer", keywords: ["importer", "déposer", "ouvrir", "pdf", "reçu", "avis", "fichier"] },
-  { id: "pdf-importes", family: "pdf", title: "PDF importés", description: "Visionneuse, recherche, remplir et signer, versions.", href: "/studio-documents#fichiers", keywords: ["pdf", "visionneuse", "remplir", "signer", "signature", "versions", "rechercher"] },
+  { id: "pdf-importes", family: "pdf", title: "PDF importés", description: "Visionneuse, recherche, remplir et signer, organiser les pages, versions.", href: "/studio-documents#fichiers", keywords: ["pdf", "visionneuse", "remplir", "signer", "signature", "versions", "rechercher", "organiser", "pivoter", "extraire", "pages"] },
+  { id: "combiner-pdf", family: "pdf", title: "Combiner des PDF", description: "Assembler plusieurs PDF importés en un seul, dans l'ordre choisi.", href: "/studio-documents#combiner", keywords: ["combiner", "fusionner", "assembler", "regrouper", "pdf"] },
 ]
 
 /** Minuscules, sans diacritiques, espaces réduits. */

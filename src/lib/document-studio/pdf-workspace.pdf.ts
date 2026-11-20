@@ -7,14 +7,18 @@
  * - `applyOperations` (lot 2) : écrit textes, dates, coches et signature sur une COPIE du PDF. Les octets d'entrée ne sont
  *   jamais modifiés ; les métadonnées d'origine sont conservées (aucune date de modification inventée).
  *
+ * - `assemblePdf` (lot 3) : construit un NOUVEAU PDF à partir de pages d'un ou plusieurs PDF (ordre, rotation ajoutée,
+ *   pages retirées) : sert à organiser, extraire et combiner. Les pages sont copiées avec leur contenu et leurs
+ *   annotations ; les champs de formulaire interactifs, signets et pièces jointes du document d'origine ne sont pas repris.
+ *
  * Aucun réseau, aucun fichier temporaire, aucune police téléchargée (Helvetica standard, codage WinAnsi vérifié en amont).
  */
 import { PDFDocument, StandardFonts, degrees, rgb, type PDFPage } from "pdf-lib"
 import { extractText } from "unpdf"
 import { withPdfDocument } from "@/lib/acquisition/extraction/pdf-text-extract"
 import {
-  COORD_MAX, PDF_ERRORS, PDF_LIMITS, TEXT_BASELINE_EM, dayText, displaySize, displayToPdf, looksLikePdf, normalizeRotation, roundGeometry,
-  type PageGeometry, type PdfOperation, type Plan,
+  COORD_MAX, PDF_ERRORS, PDF_LIMITS, TEXT_BASELINE_EM, addRotation, dayText, displaySize, displayToPdf, looksLikePdf, normalizeRotation, roundGeometry,
+  type PageGeometry, type PdfOperation, type PlannedPage, type Plan,
 } from "@/lib/document-studio/pdf-workspace.core"
 
 export interface PdfInspection { pageCount: number; pages: PageGeometry[]; pageTexts: string[]; encrypted: boolean }
@@ -122,6 +126,46 @@ export async function applyOperations(bytes: Uint8Array, ops: readonly PdfOperat
     const out = await doc.save({ updateFieldAppearances: false })
     if (out.length > PDF_LIMITS.maxStoredBytes) return { ok: false, error: PDF_ERRORS.outputTooLarge }
     return { ok: true, value: out }
+  } catch {
+    return { ok: false, error: PDF_ERRORS.writeFailed }
+  }
+}
+
+/** Pages à reprendre d'un PDF source : octets et plan (numéros de page source, rotation ajoutée). */
+export interface AssemblyPart { bytes: Uint8Array; pages: readonly PlannedPage[] }
+
+/**
+ * Nouveau PDF fait des pages demandées, dans l'ordre des parties puis de leurs plans. Refus si une source est chiffrée,
+ * illisible, si une page n'existe pas, ou si le résultat dépasse les bornes (pages, taille téléchargeable).
+ */
+export async function assemblePdf(parts: readonly AssemblyPart[], meta: { title: string }): Promise<Plan<Uint8Array>> {
+  const total = parts.reduce((n, p) => n + p.pages.length, 0)
+  if (total < 1) return { ok: false, error: PDF_ERRORS.planEmpty }
+  if (total > PDF_LIMITS.maxPages) return { ok: false, error: PDF_ERRORS.tooManyPagesOut }
+  try {
+    const out = await PDFDocument.create({ updateMetadata: false })
+    out.setTitle(meta.title)
+    out.setProducer("Planificator")
+    out.setCreator("Planificator — Document Studio")
+    for (const part of parts) {
+      let src: PDFDocument
+      try {
+        src = await PDFDocument.load(part.bytes, { updateMetadata: false, ignoreEncryption: true })
+      } catch {
+        return { ok: false, error: PDF_ERRORS.writeFailed }
+      }
+      if (src.isEncrypted) return { ok: false, error: PDF_ERRORS.sourceEncrypted }
+      const count = src.getPageCount()
+      if (part.pages.some((p) => p.page < 1 || p.page > count)) return { ok: false, error: PDF_ERRORS.page }
+      const copied = await out.copyPages(src, part.pages.map((p) => p.page - 1))
+      copied.forEach((page, i) => {
+        page.setRotation(degrees(addRotation(page.getRotation().angle, part.pages[i].rotate)))
+        out.addPage(page)
+      })
+    }
+    const bytes = await out.save()
+    if (bytes.length > PDF_LIMITS.maxStoredBytes) return { ok: false, error: PDF_ERRORS.outputTooLarge }
+    return { ok: true, value: bytes }
   } catch {
     return { ok: false, error: PDF_ERRORS.writeFailed }
   }

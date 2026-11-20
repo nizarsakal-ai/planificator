@@ -1,8 +1,9 @@
 /**
- * Document Studio — espace PDF (lots 1 et 2) sur une base PostgreSQL JETABLE : import (empreinte, géométrie, texte),
+ * Document Studio — espace PDF (lots 1 à 3) sur une base PostgreSQL JETABLE : import (empreinte, géométrie, texte),
  * original déjà importé rouvert, remplir et signer (nouvelle version, original intact, signataire et empreintes), version
  * périmée refusée, enregistrements concurrents (un seul gagne), isolation entre entreprises, journal, et garanties de la
- * base (révisions immuables, jamais supprimées, numérotation sans trou, original unique par contenu).
+ * base (révisions immuables, jamais supprimées, numérotation sans trou, original unique par contenu). Lot 3 : organiser
+ * (nouvelle version, plan empreint), extraire et combiner (nouveau PDF, sources figées), refus et isolation.
  * Exécution : TEST_PG_ADMIN_URL=postgresql://postgres@127.0.0.1:5432/postgres \
  *   sh tests/billing/pg/with-disposable-db.sh studio_pdf npm run test:studio-pdf:pg
  */
@@ -161,5 +162,84 @@ describe("garanties de la base", () => {
     await assert.rejects(db.studioPdfRevision.create({ data: { ...base, revision: 4, ...filled, signerName: "Seul" } }), /shape_check/, "signataire sans empreinte du tracé")
     const other = await db.studioPdf.create({ data: { companyId: "coA", title: "Doublon", originalName: "d.pdf", createdById: "uA" } })
     await assert.rejects(db.studioPdfRevision.create({ data: { ...base, pdfId: other.id, revision: 1, kind: "ORIGINAL" } }), /Unique constraint|one_original_per_content/)
+  })
+})
+
+describe("lot 3 : organiser, extraire, combiner", () => {
+  let base = "", second = ""
+  before(async () => {
+    const r = ok(await svc.importPdf(db, A, { title: "Dossier lot 3", originalName: "l3.pdf", bytes: await pdf("L3") }))
+    base = r.pdfId
+    second = ok(await svc.importPdf(db, A, { title: "Annexe lot 3", originalName: "annexe.pdf", bytes: await pdf("ANNEXE") })).pdfId
+  })
+  const head = async (id: string) => (await getStudioPdfView(db, "coA", id, null))!.latest
+  it("organiser : version ORGANIZED (pages inversées, une pivotée), plan empreint, sans signataire ; journal", async () => {
+    const h = await head(base)
+    const r = ok(await svc.organizePdf(db, A, base, { baseRevisionId: h.id, plan: JSON.stringify([{ page: 2, rotate: 90 }, { page: 1, rotate: 0 }]) }))
+    assert.equal(r.revision, 2)
+    const row = await db.studioPdfRevision.findUnique({ where: { id: r.revisionId } })
+    assert.equal(row!.kind, "ORGANIZED")
+    assert.equal(row!.signerName, null)
+    assert.deepEqual(row!.operations, [{ page: 2, rotate: 90 }, { page: 1, rotate: 0 }])
+    assert.match((row!.pageTexts as string[])[0], /Page deux/)
+    assert.deepEqual((row!.pages as { rotation: number }[]).map((p) => p.rotation), [90, 0])
+    const log = await db.historyLog.findFirst({ where: { entityId: base, action: "UPDATED" } })
+    assert.match(log!.detail!, /version 2 enregistrée \(pages réordonnées, 1 page pivotée\)/)
+  })
+  it("organiser : refus d'un plan inchangé, vide, invalide, d'une version périmée et d'une autre entreprise", async () => {
+    const h = await head(base)
+    const id2 = JSON.stringify([{ page: 1, rotate: 0 }, { page: 2, rotate: 0 }])
+    assert.equal(ko(await svc.organizePdf(db, A, base, { baseRevisionId: h.id, plan: id2 })), PDF_ERRORS.planUnchanged)
+    assert.equal(ko(await svc.organizePdf(db, A, base, { baseRevisionId: h.id, plan: "[]" })), PDF_ERRORS.planEmpty)
+    assert.equal(ko(await svc.organizePdf(db, A, base, { baseRevisionId: h.id, plan: JSON.stringify([{ page: 9, rotate: 0 }]) })), PDF_ERRORS.plan)
+    const v1 = (await getStudioPdfView(db, "coA", base, 1))!.shown.id
+    assert.equal(ko(await svc.organizePdf(db, A, base, { baseRevisionId: v1, plan: JSON.stringify([{ page: 1, rotate: 0 }]) })), PDF_ERRORS.notLatest)
+    assert.equal(ko(await svc.organizePdf(db, B, base, { baseRevisionId: h.id, plan: JSON.stringify([{ page: 1, rotate: 0 }]) })), PDF_ERRORS.notFound)
+    assert.equal(await db.studioPdfRevision.count({ where: { pdfId: base } }), 2)
+  })
+  it("extraire : nouveau PDF (EXTRACTED) d'une page, sources figées, PDF d'origine inchangé ; titre par défaut", async () => {
+    const v1 = (await getStudioPdfView(db, "coA", base, 1))!.shown
+    const r = ok(await svc.extractPages(db, A2, base, { revisionId: v1.id, plan: JSON.stringify([{ page: 2, rotate: 0 }]), title: "" }))
+    assert.equal(r.duplicate, false)
+    const v = (await getStudioPdfView(db, "coA", r.pdfId, null))!
+    assert.equal(v.origin, "EXTRACTED")
+    assert.equal(v.title, "Dossier lot 3 - pages 2")
+    assert.deepEqual(v.sources, [{ pdfId: base, revisionId: v1.id, revision: 1, title: "Dossier lot 3", pages: [2] }])
+    assert.equal(v.shown.pageCount, 1)
+    assert.match(v.pageTexts[0], /Page deux/)
+    assert.equal(await db.studioPdfRevision.count({ where: { pdfId: base } }), 2, "source inchangée")
+    const again = ok(await svc.extractPages(db, A, base, { revisionId: v1.id, plan: JSON.stringify([{ page: 2, rotate: 0 }]), title: "Dossier lot 3 - pages 2" }))
+    // Assemblage déterministe (aucune date ni identifiant aléatoire écrits) : même extraction ⇒ fiche existante rouverte.
+    assert.deepEqual(again, { pdfId: r.pdfId, duplicate: true })
+    assert.equal(ko(await svc.extractPages(db, A, base, { revisionId: v1.id, plan: "[]", title: "" })), PDF_ERRORS.extractEmpty)
+    assert.equal(ko(await svc.extractPages(db, A, base, { revisionId: v1.id, plan: JSON.stringify([{ page: 1, rotate: 0 }, { page: 2, rotate: 0 }]), title: "" })), PDF_ERRORS.extractAll)
+    assert.equal(ko(await svc.extractPages(db, B, base, { revisionId: v1.id, plan: JSON.stringify([{ page: 1, rotate: 0 }]), title: "" })), PDF_ERRORS.notFound)
+  })
+  it("combiner : dernière version de chaque PDF, dans l'ordre ; refus : un seul PDF, doublon, PDF d'une autre entreprise", async () => {
+    const r = ok(await svc.combinePdfs(db, A, { ids: JSON.stringify([second, base]), title: "Dossier complet" }))
+    const v = (await getStudioPdfView(db, "coA", r.pdfId, null))!
+    assert.equal(v.origin, "COMBINED")
+    assert.equal(v.shown.pageCount, 4)
+    assert.match(v.pageTexts[0], /ANNEXE/)
+    assert.match(v.pageTexts[2], /Page deux/, "dernière version (réorganisée) du second PDF")
+    assert.deepEqual(v.sources.map((x) => [x.pdfId, x.revision]), [[second, 1], [base, 2]])
+    const log = await db.historyLog.findFirst({ where: { entityId: r.pdfId, action: "CREATED" } })
+    assert.match(log!.detail!, /combiné depuis « Annexe lot 3 » v1, « Dossier lot 3 » v2/)
+    assert.equal(ko(await svc.combinePdfs(db, A, { ids: JSON.stringify([base]), title: "" })), PDF_ERRORS.combineParts)
+    assert.equal(ko(await svc.combinePdfs(db, A, { ids: JSON.stringify([base, base]), title: "" })), PDF_ERRORS.combineDuplicate)
+    const bPdf = (await listStudioPdfs(db, "coB"))[0].id
+    assert.equal(ko(await svc.combinePdfs(db, A, { ids: JSON.stringify([base, bPdf]), title: "" })), PDF_ERRORS.sourceMissing)
+  })
+  it("base : origine et sources figées ; importé sans sources ; dérivé avec sources ; réorganisée sans signataire", async () => {
+    await assert.rejects(db.studioPdf.update({ where: { id: base }, data: { origin: "COMBINED" } }), /identity immutable|origin_check/)
+    await assert.rejects(db.studioPdf.create({ data: { companyId: "coA", title: "Sans source", originalName: "x.pdf", origin: "COMBINED", createdById: "uA" } }), /origin_check/)
+    await assert.rejects(db.studioPdf.create({ data: { companyId: "coA", title: "Importé sourcé", originalName: "x.pdf", sources: [{ pdfId: "x" }], createdById: "uA" } }), /origin_check/)
+    const h = await head(base)
+    const rowData = await db.studioPdfRevision.findUnique({ where: { id: h.id } })
+    await assert.rejects(db.studioPdfRevision.create({ data: {
+      companyId: "coA", pdfId: base, revision: h.revision + 1, kind: "ORGANIZED", sha256: rowData!.sha256, size: rowData!.size, data: rowData!.data,
+      pageCount: rowData!.pageCount, pages: rowData!.pages as object, pageTexts: [], operations: [{ page: 1, rotate: 0 }], operationsSha256: "b".repeat(64),
+      signerName: "Intrus", signatureSha256: "c".repeat(64), createdById: "uA",
+    } }), /shape_check/)
   })
 })

@@ -5,11 +5,11 @@
 // rendues par le serveur et restent utilisables. Aucune animation obligatoire (léger décalage de la flèche au survol,
 // seulement si le mouvement n'est pas réduit).
 import { useId, useRef, useState } from "react"
-import { ArrowRight, Download, FilePlus2, FileSearch, FileUp, Files, PenLine, Search, ShieldCheck, Sparkles, X, type LucideIcon } from "lucide-react"
+import { ArrowRight, Combine, Download, FilePlus2, FileSearch, FileUp, Files, PenLine, Search, ShieldCheck, Sparkles, X, type LucideIcon } from "lucide-react"
 import { STUDIO_TOOLS, TOOL_FAMILIES, filtrerOutils, type StudioTool, type ToolFamilyId } from "@/lib/document-studio/tool-hub"
 
 const ICONES: Record<StudioTool["id"], LucideIcon> = {
-  "nouveau-modele": FilePlus2, generer: Sparkles, modeles: Files, documents: FileSearch, validation: ShieldCheck, pdf: Download, "importer-pdf": FileUp, "pdf-importes": PenLine,
+  "nouveau-modele": FilePlus2, generer: Sparkles, modeles: Files, documents: FileSearch, validation: ShieldCheck, pdf: Download, "importer-pdf": FileUp, "pdf-importes": PenLine, "combiner-pdf": Combine,
 }
 /** Couleur par famille : bleu Planificator, sarcelle, violet, carmin (espace PDF) (pastilles claires assombries par l'apparence sombre). */
 const FAMILLE: Record<ToolFamilyId, { tuile: string; point: string }> = {

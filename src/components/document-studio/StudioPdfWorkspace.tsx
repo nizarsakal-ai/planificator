@@ -10,16 +10,19 @@
  * Lot 2 (remplir et signer) : un calque par page reçoit textes, dates, coches et signature, déplaçables à la souris, au
  * doigt ou au clavier (flèches ; Suppr pour retirer). Rien n'est écrit dans le navigateur : la liste des éléments et le
  * tracé de la signature sont envoyés au serveur, qui revalide tout et écrit une NOUVELLE version ; l'original reste intact.
+ *
+ * Lot 3 (organiser les pages) : grille des pages ; déplacer (boutons, clavier, glisser-déposer), pivoter, retirer ;
+ * « Enregistrer » envoie le plan (nouvelle version) ; « Extraire » envoie les pages sélectionnées (nouveau PDF).
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react"
-import { Calendar, Check, Download, Eye, Minus, Move, PenLine, Plus, Signature, Trash2, Type, ZoomIn, ZoomOut } from "lucide-react"
+import { ArrowLeft, ArrowRight, Calendar, Check, Download, Eye, LayoutGrid, Minus, Move, PenLine, Plus, RotateCcw, RotateCw, Scissors, Signature, Trash2, Type, Undo2, ZoomIn, ZoomOut } from "lucide-react"
 import { loadPdfDocument, type PdfDocument, type PdfLoadingTask, type PdfRenderTask } from "@/components/hr-documents/PdfCanvasPreview"
 import { StudioSignatureField } from "@/components/document-studio/StudioSignatureField"
 import { FormulaireRetour } from "@/components/crm/RetourFormulaire"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { fillSignPdfAction } from "@/lib/actions/document-studio.actions"
-import { COORD_MAX, OPERATION_LABEL, PDF_LIMITS, dayText, unsupportedChars, type OperationKind } from "@/lib/document-studio/pdf-workspace.core"
+import { extractPagesAction, fillSignPdfAction, organizePdfAction } from "@/lib/actions/document-studio.actions"
+import { COORD_MAX, OPERATION_LABEL, PDF_LIMITS, addRotation, dayText, isIdentityPlan, pageRanges, unsupportedChars, type OperationKind, type PlannedPage, type Rotation } from "@/lib/document-studio/pdf-workspace.core"
 import { moveItem, newItem, parisToday, resizeItem, toPayload, type EditorItem } from "@/lib/document-studio/pdf-workspace.editor"
 
 export interface WorkspacePage { width: number; height: number }
@@ -34,6 +37,8 @@ export interface StudioPdfWorkspaceProps {
   /** Remplir et signer possible (dernière version, PDF non chiffré) ; sinon motif affiché. */
   editable: boolean
   editBlockedReason: string | null
+  /** Lot 3 : extraire possible (PDF non chiffré, toute version). Organiser suit `editable`. */
+  extractable: boolean
 }
 
 const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const
@@ -173,7 +178,7 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
   const load = usePdfDocument(p.fileUrl)
   const doc = load.status === "ready" ? load.doc : null
   const [zoom, setZoom] = useState<number>(1)
-  const [mode, setMode] = useState<"view" | "edit">("view")
+  const [mode, setMode] = useState<"view" | "edit" | "organize">("view")
   const [tool, setTool] = useState<OperationKind | null>(null)
   const [items, setItems] = useState<EditorItem[]>([])
   const [selected, setSelected] = useState<string | null>(null)
@@ -199,7 +204,7 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
     }, { root, threshold: [0, 0.25, 0.5] })
     els.forEach((el) => io.observe(el))
     return () => io.disconnect()
-  }, [p.pages.length])
+  }, [p.pages.length, mode])
 
   const goTo = (n: number) => {
     const el = scroller.current?.querySelector<HTMLElement>(`#page-${n}`)
@@ -304,13 +309,15 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
   }
 
   const editing = mode === "edit"
+  const organizing = mode === "organize"
   return (
     <div className="space-y-3">
       {/* Barre d'outils */}
       <div role="toolbar" aria-label="Outils de la visionneuse" className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
         <div className="flex items-center gap-1" role="group" aria-label="Mode">
-          <Button type="button" size="sm" variant={editing ? "outline" : "default"} aria-pressed={!editing} onClick={() => { setMode("view"); setTool(null) }}><Eye aria-hidden="true" className="mr-1 h-4 w-4" />Consulter</Button>
+          <Button type="button" size="sm" variant={mode === "view" ? "default" : "outline"} aria-pressed={mode === "view"} onClick={() => { setMode("view"); setTool(null) }}><Eye aria-hidden="true" className="mr-1 h-4 w-4" />Consulter</Button>
           <Button type="button" size="sm" variant={editing ? "default" : "outline"} aria-pressed={editing} disabled={!p.editable} onClick={() => setMode("edit")} title={p.editBlockedReason ?? undefined}><PenLine aria-hidden="true" className="mr-1 h-4 w-4" />Remplir et signer</Button>
+          <Button type="button" size="sm" variant={organizing ? "default" : "outline"} aria-pressed={organizing} disabled={!p.extractable} onClick={() => { setMode("organize"); setTool(null) }}><LayoutGrid aria-hidden="true" className="mr-1 h-4 w-4" />Organiser les pages</Button>
         </div>
         <span className="mx-1 hidden h-6 w-px bg-slate-200 sm:block" aria-hidden="true" />
         <div className="flex items-center gap-1" role="group" aria-label="Zoom">
@@ -330,7 +337,11 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
       </div>
       {!p.editable && p.editBlockedReason && <p className="text-xs text-slate-600">{p.editBlockedReason}</p>}
 
-      <div className={`grid gap-3 ${editing ? "lg:grid-cols-[8rem_minmax(0,1fr)_19rem]" : "lg:grid-cols-[8rem_minmax(0,1fr)]"}`}>
+      {organizing && (
+        <OrganizePanel doc={doc} pages={p.pages} pdfId={p.pdfId} revisionId={p.revisionId} revisionNumber={p.revisionNumber}
+          canSave={p.editable} saveBlockedReason={p.editBlockedReason} title={p.title} />
+      )}
+      <div className={`${organizing ? "hidden" : "grid"} gap-3 ${editing ? "lg:grid-cols-[8rem_minmax(0,1fr)_19rem]" : "lg:grid-cols-[8rem_minmax(0,1fr)]"}`}>
         {/* Vignettes */}
         <nav aria-label="Pages" className="hidden max-h-[78vh] overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-2 lg:block">
           <ol className="space-y-2">
@@ -436,5 +447,126 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
         )}
       </div>
     </div>
+  )
+}
+
+// ── Lot 3 : organiser les pages ─────────────────────────────────────────────────────────────────────────────────────
+
+interface OrganizeItem { page: number; rotate: Rotation; removed: boolean; selected: boolean }
+
+/** Vignette d'une page pivotée de `rotate` dans un carré : la page entière reste visible quelle que soit la rotation. */
+function RotatedThumb({ doc, n, pg, rotate, label }: { doc: PdfDocument | null; n: number; pg: WorkspacePage; rotate: number; label: string }) {
+  const max = Math.max(pg.width, pg.height)
+  return (
+    <span className="relative block aspect-square w-full overflow-hidden rounded bg-slate-100">
+      <span className="absolute left-1/2 top-1/2 block bg-white shadow-sm transition-transform motion-reduce:transition-none"
+        style={{ width: `${(pg.width / max) * 100}%`, aspectRatio: `${pg.width} / ${pg.height}`, transform: `translate(-50%, -50%) rotate(${rotate}deg)` }}>
+        <LazyCanvas doc={doc} n={n} label={label} />
+      </span>
+    </span>
+  )
+}
+
+function OrganizePanel({ doc, pages, pdfId, revisionId, revisionNumber, canSave, saveBlockedReason, title }: {
+  doc: PdfDocument | null; pages: WorkspacePage[]; pdfId: string; revisionId: string; revisionNumber: number
+  canSave: boolean; saveBlockedReason: string | null; title: string
+}) {
+  const uid = useId()
+  const initial = useCallback((): OrganizeItem[] => pages.map((_, i) => ({ page: i + 1, rotate: 0, removed: false, selected: false })), [pages])
+  const [items, setItems] = useState<OrganizeItem[]>(initial)
+  const [dragFrom, setDragFrom] = useState<number | null>(null)
+  const [announce, setAnnounce] = useState("")
+  const plan: PlannedPage[] = items.filter((it) => !it.removed).map(({ page, rotate }) => ({ page, rotate }))
+  const extract: PlannedPage[] = items.filter((it) => it.selected).map(({ page, rotate }) => ({ page, rotate }))
+  const unchanged = isIdentityPlan(plan, pages.length)
+  const extractAll = isIdentityPlan(extract, pages.length)
+
+  const set = (i: number, f: (it: OrganizeItem) => OrganizeItem) => setItems((xs) => xs.map((x, j) => (j === i ? f(x) : x)))
+  const move = (from: number, to: number) => {
+    if (to < 0 || to >= items.length || from === to) return
+    setItems((xs) => { const c = [...xs]; const [it] = c.splice(from, 1); c.splice(to, 0, it); return c })
+    setAnnounce(`Page ${items[from].page} déplacée en position ${to + 1}.`)
+    requestAnimationFrame(() => document.getElementById(`${uid}-card-${to}`)?.focus())
+  }
+  const onKey = (e: ReactKeyboardEvent<HTMLElement>, i: number) => {
+    if (e.target !== e.currentTarget) return
+    if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); move(i, i - 1) }
+    else if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); move(i, i + 1) }
+    else if (e.key === "r" || e.key === "R") { e.preventDefault(); set(i, (x) => ({ ...x, rotate: addRotation(x.rotate, e.shiftKey ? -90 : 90) })) }
+    else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); set(i, (x) => ({ ...x, removed: !x.removed })) }
+    else if (e.key === " ") { e.preventDefault(); set(i, (x) => ({ ...x, selected: !x.selected })) }
+  }
+  const allSelected = items.every((x) => x.selected)
+  const iconBtn = `inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:border-slate-300 disabled:opacity-40 ${FOCUS}`
+
+  return (
+    <section aria-labelledby={`${uid}-titre`} className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 id={`${uid}-titre`} className="text-sm font-semibold text-slate-900">Organiser les pages · version {revisionNumber}</h2>
+        <p className="text-xs text-slate-600">Glisser-déposer, ou au clavier sur une page : flèches pour déplacer, R pour pivoter (Maj+R : sens inverse), Suppr pour retirer, Espace pour sélectionner.</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" size="sm" variant="outline" onClick={() => setItems((xs) => xs.map((x) => ({ ...x, selected: !allSelected })))}>{allSelected ? "Tout désélectionner" : "Tout sélectionner"}</Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => setItems((xs) => xs.map((x) => (x.selected ? { ...x, rotate: addRotation(x.rotate, 90) } : x)))} disabled={extract.length === 0}><RotateCw aria-hidden="true" className="mr-1 h-4 w-4" />Pivoter la sélection</Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => setItems((xs) => xs.map((x) => (x.selected ? { ...x, removed: true } : x)))} disabled={extract.length === 0}><Trash2 aria-hidden="true" className="mr-1 h-4 w-4" />Retirer la sélection</Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => { setItems(initial()); setAnnounce("Organisation d'origine rétablie.") }}><Undo2 aria-hidden="true" className="mr-1 h-4 w-4" />Tout annuler</Button>
+      </div>
+      <p className="sr-only" aria-live="polite">{announce}</p>
+
+      <ol className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6">
+        {items.map((it, i) => {
+          const pg = pages[it.page - 1]
+          return (
+            <li key={it.page}
+              draggable onDragStart={(e) => { setDragFrom(i); e.dataTransfer.effectAllowed = "move" }} onDragEnd={() => setDragFrom(null)}
+              onDragOver={(e) => { if (dragFrom !== null) e.preventDefault() }} onDrop={(e) => { e.preventDefault(); if (dragFrom !== null) move(dragFrom, i); setDragFrom(null) }}
+              className={`rounded-lg border p-2 ${it.removed ? "border-dashed border-slate-300 bg-slate-50 opacity-60" : it.selected ? "border-[#0f3460] bg-[#0f3460]/5 ring-1 ring-[#0f3460]" : "border-slate-200 bg-white"} ${dragFrom === i ? "opacity-40" : ""}`}>
+              <div id={`${uid}-card-${i}`} tabIndex={0} role="group" onKeyDown={(e) => onKey(e, i)}
+                aria-label={`Position ${i + 1} : page ${it.page}${it.rotate ? `, pivotée de ${it.rotate} degrés` : ""}${it.removed ? ", retirée" : ""}${it.selected ? ", sélectionnée" : ""}`}
+                className={`cursor-grab rounded ${FOCUS}`}>
+                <RotatedThumb doc={doc} n={it.page} pg={pg} rotate={it.rotate} label="" />
+              </div>
+              <div className="mt-1.5 flex items-center justify-between gap-1">
+                <label className="flex items-center gap-1 text-xs text-slate-700">
+                  <input type="checkbox" checked={it.selected} onChange={() => set(i, (x) => ({ ...x, selected: !x.selected }))} className="h-3.5 w-3.5" />
+                  Page {it.page}
+                </label>
+                {it.removed ? <span className="text-[11px] font-medium text-red-700">retirée</span> : it.rotate ? <span className="text-[11px] text-slate-500">{it.rotate}°</span> : null}
+              </div>
+              <div className="mt-1 flex items-center justify-between gap-0.5">
+                <button type="button" className={iconBtn} onClick={() => move(i, i - 1)} disabled={i === 0} aria-label={`Déplacer la page ${it.page} avant`}><ArrowLeft aria-hidden="true" className="h-3.5 w-3.5" /></button>
+                <button type="button" className={iconBtn} onClick={() => set(i, (x) => ({ ...x, rotate: addRotation(x.rotate, -90) }))} aria-label={`Pivoter la page ${it.page} à gauche`}><RotateCcw aria-hidden="true" className="h-3.5 w-3.5" /></button>
+                <button type="button" className={iconBtn} onClick={() => set(i, (x) => ({ ...x, rotate: addRotation(x.rotate, 90) }))} aria-label={`Pivoter la page ${it.page} à droite`}><RotateCw aria-hidden="true" className="h-3.5 w-3.5" /></button>
+                <button type="button" className={`${iconBtn} ${it.removed ? "" : "text-red-700"}`} onClick={() => set(i, (x) => ({ ...x, removed: !x.removed }))} aria-label={it.removed ? `Remettre la page ${it.page}` : `Retirer la page ${it.page}`}>{it.removed ? <Undo2 aria-hidden="true" className="h-3.5 w-3.5" /> : <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />}</button>
+                <button type="button" className={iconBtn} onClick={() => move(i, i + 1)} disabled={i === items.length - 1} aria-label={`Déplacer la page ${it.page} après`}><ArrowRight aria-hidden="true" className="h-3.5 w-3.5" /></button>
+              </div>
+            </li>
+          )
+        })}
+      </ol>
+
+      <div className="grid gap-3 border-t border-slate-200 pt-3 lg:grid-cols-2">
+        <FormulaireRetour action={organizePdfAction} className="space-y-2 rounded-lg border border-slate-200 p-3">
+          <h3 className="text-sm font-semibold text-slate-900">Enregistrer l&apos;organisation</h3>
+          <input type="hidden" name="pdfId" value={pdfId} />
+          <input type="hidden" name="baseRevisionId" value={revisionId} />
+          <input type="hidden" name="plan" value={JSON.stringify(plan)} />
+          <p className="text-xs text-slate-600" aria-live="polite">{plan.length === 0 ? "Toutes les pages sont retirées : gardez-en au moins une." : unchanged ? "Aucun changement pour l'instant." : `${plan.length} page${plan.length > 1 ? "s" : ""} dans la version ${revisionNumber + 1}.`}</p>
+          {!canSave && saveBlockedReason && <p className="text-xs text-amber-800">{saveBlockedReason}</p>}
+          <Button type="submit" disabled={!canSave || plan.length === 0 || unchanged}>Enregistrer la version {revisionNumber + 1}</Button>
+        </FormulaireRetour>
+        <FormulaireRetour action={extractPagesAction} className="space-y-2 rounded-lg border border-slate-200 p-3">
+          <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900"><Scissors aria-hidden="true" className="h-4 w-4" />Extraire dans un nouveau PDF</h3>
+          <input type="hidden" name="pdfId" value={pdfId} />
+          <input type="hidden" name="revisionId" value={revisionId} />
+          <input type="hidden" name="plan" value={JSON.stringify(extract)} />
+          <label className="grid gap-1 text-xs text-slate-600">Titre (facultatif)
+            <Input name="title" maxLength={160} placeholder={extract.length ? `${title} - pages ${pageRanges(extract.map((x) => x.page))}` : "Sélectionnez des pages"} />
+          </label>
+          <p className="text-xs text-slate-600" aria-live="polite">{extract.length === 0 ? "Cochez les pages à extraire (ordre et rotation affichés conservés)." : extractAll ? "Toutes les pages sont sélectionnées, sans changement : rien à extraire." : `${extract.length} page${extract.length > 1 ? "s" : ""} sélectionnée${extract.length > 1 ? "s" : ""}.`}</p>
+          <Button type="submit" variant="outline" disabled={extract.length === 0 || extractAll}>Extraire {extract.length || ""} page{extract.length > 1 ? "s" : ""}</Button>
+        </FormulaireRetour>
+      </div>
+    </section>
   )
 }

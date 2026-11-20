@@ -4622,15 +4622,24 @@ model GeneratedDocument {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Document Studio, espace PDF (lots 1 et 2, 20/11/2026). Un PDF reçu est importé tel quel (révision 1, ORIGINAL) et
+// Document Studio, espace PDF (lots 1 à 3, 20/11/2026). Un PDF reçu est importé tel quel (révision 1, ORIGINAL) et
 // n'est jamais modifié ; « Remplir et signer » ajoute une révision FILLED construite depuis la dernière, avec la liste
 // des éléments posés (empreinte) et, si une signature est posée, le nom du signataire et l'empreinte du tracé.
+// Lot 3 : « Organiser » ajoute une révision ORGANIZED (pages réordonnées, pivotées ou retirées, plan empreint) ;
+// « Combiner » et « Extraire » créent un NOUVEAU PDF (origine COMBINED ou EXTRACTED, sources figées).
 // Révisions immuables et jamais supprimées (garanti en base). Même drapeau que le Studio (DOCUMENT_STUDIO_ENABLED).
 // ═══════════════════════════════════════════════════════════════════════════
 
 enum StudioPdfRevisionKind {
   ORIGINAL
   FILLED
+  ORGANIZED
+}
+
+enum StudioPdfOrigin {
+  IMPORTED
+  COMBINED
+  EXTRACTED
 }
 
 model StudioPdf {
@@ -4638,9 +4647,12 @@ model StudioPdf {
   companyId    String
   title        String
   originalName String
+  origin       StudioPdfOrigin @default(IMPORTED)
+  /// Combiné ou extrait : [{ pdfId, revisionId, revision, title, pages: [n…] }] figés à la création.
+  sources      Json?
   createdById  String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
 
   company   Company             @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   revisions StudioPdfRevision[]
