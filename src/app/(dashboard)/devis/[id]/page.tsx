@@ -55,7 +55,7 @@ export default async function DevisDetailPage({ params }: { params: Promise<{ id
           Identité juridique de l&apos;émetteur incomplète : {identityBlocking.join(", ")}. Complétez-la dans <Link href="/parametres" className="underline">Paramètres</Link> et <Link href="/factures/parametres" className="underline">Paramètres de facturation</Link> avant d&apos;envoyer ce devis ; le pied de page du PDF ne contient que les données présentes.
         </p>
       )}
-      {quoteDesign && <DocumentDesignCard kind="quote" id={q.id} documentDesign={designFromStored(quoteDesign)} companyDesign={settings.pdfDesign} bankAvailable={!!settings.iban} pdfHref={`/api/pdf/devis/${q.id}`} />}
+      {quoteDesign && <DocumentDesignCard key={JSON.stringify([quoteDesign, settings.pdfDesign])} kind="quote" id={q.id} documentDesign={designFromStored(quoteDesign)} companyDesign={settings.pdfDesign} bankAvailable={!!settings.iban} pdfHref={`/api/pdf/devis/${q.id}`} />}
       {clientVatInvalid && (
         <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
           Le numéro de TVA enregistré pour ce client ({q.client.vatNumber}) n&apos;a pas la forme d&apos;un numéro intracommunautaire : il n&apos;est pas imprimé sur le devis. Corrigez-le ci-dessous (un SIRET se saisit dans le champ SIRET / SIREN).

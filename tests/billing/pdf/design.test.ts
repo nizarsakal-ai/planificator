@@ -133,7 +133,8 @@ describe("rendu réel des 4 modèles", () => {
       for (const needle of ["GALYA EVENTS", "CLIENT EXEMPLE", "Prestation électrique", "9 077,60 €", "1 512,93 €", "Total TTC", "EXEMPLE-0001 — page 1 / 1", "pénalités"]) assert.ok(txt.includes(needle), `${template} : « ${needle} » absent`)
     }
   })
-  it("Classique avec le design par défaut = rendu historique (texte identique avec ou sans design)", async () => {
+  // Le rendu historique lui-même est prouvé par document-pdf.test.ts (20 tests inchangés, au vert).
+  it("design absent = design par défaut (Classique) : texte identique avec ou sans design", async () => {
     const data = sample(DEFAULT_PDF_DESIGN)
     const { design: _d, stamp: _s, ...legacy } = data
     void _d; void _s

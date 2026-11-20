@@ -11,7 +11,7 @@ import { createDraftInvoice, issueInvoice } from "@/lib/billing/invoices/invoice
 import { buildInvoicePdfData } from "@/lib/billing/pdf/invoice-pdf"
 import { buildQuotePdfData } from "@/lib/billing/pdf/quote-pdf"
 import { parseQuoteForm } from "@/lib/billing/quotes/quote-schemas"
-import { createQuote, sendQuote } from "@/lib/billing/quotes/quote.service"
+import { acceptQuoteManually, convertQuote, createQuote, sendQuote } from "@/lib/billing/quotes/quote.service"
 import { DEFAULT_PDF_DESIGN, designToStored, type PdfDesign } from "@/lib/billing/pdf/design"
 
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL requis (base PostgreSQL jetable migrée)")
@@ -89,6 +89,10 @@ describe("devis", () => {
     assert.deepEqual([row.pdfTemplate, row.pdfPrimaryColor, row.pdfLayout], ["BAND", "#047857", "COMPLETE"])
     await setCompanyDesign(MODERN)
     assert.deepEqual((await buildQuotePdfData(db, A.companyId, cq.value.id))?.design, BAND, "réglage modifié après l'envoi : sans effet")
+    // Conversion : la facture de solde reprend le design du devis, pas le réglage courant de la société.
+    assert.ok((await acceptQuoteManually(db, A, cq.value.id, now)).ok)
+    const conv = await convertQuote(db, A, cq.value.id, now); assert.ok(conv.ok, conv.ok ? "" : conv.error); if (!conv.ok) return
+    assert.deepEqual((await buildInvoicePdfData(db, A.companyId, conv.value.invoiceId, now))?.design, BAND)
   })
   it("devis envoyé avant les modèles (colonnes vides) ⇒ Classique historique", async () => {
     const q = parseQuoteForm({ worksiteId: "dsW", issueDate: "2026-11-20", lines: [{ designation: "Pose", quantity: "1", unitPrice: "50", vatRate: "20" }] })

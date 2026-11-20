@@ -177,6 +177,7 @@ export async function convertQuoteCore(tx: Prisma.TransactionClient, input: Conv
     select: {
       id: true, status: true, number: true, worksiteId: true, clientId: true, notes: true, paymentTerms: true,
       totalHT: true, totalVAT: true, totalTTC: true, globalDiscountBp: true, vatReverseCharge: true, subject: true, clientPurchaseOrderRef: true,
+      pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true,
       worksite: { select: { startDate: true, endDate: true } },
       lines: { orderBy: { position: "asc" }, select: { articleId: true, designation: true, description: true, unit: true, quantity: true, unitPrice: true, vatRate: true, lineHT: true, discountBp: true, position: true } },
     },
@@ -198,6 +199,8 @@ export async function convertQuoteCore(tx: Prisma.TransactionClient, input: Conv
   }
 
   const number = await input.nextDraftNumber(tx)
+  // 20/11/2026 — la facture de solde reprend le design du devis (figé à l'envoi) ; devis sans design ⇒ réglage de la société.
+  const quoteDesign = designFromStored(quote)
   const dueDate = new Date(input.now.getTime() + input.paymentTermsDays * 86_400_000)
   const invoice = await tx.invoice.create({
     data: {
@@ -208,6 +211,7 @@ export async function convertQuoteCore(tx: Prisma.TransactionClient, input: Conv
       globalDiscountBp: quote.globalDiscountBp, vatReverseCharge: quote.vatReverseCharge,
       notes: quote.notes, paymentTerms: quote.paymentTerms, createdById: input.actorId,
       subject: quote.subject, clientPurchaseOrderRef: poRef,
+      ...(quoteDesign ? designToStored(quoteDesign) : {}),
       lines: { create: quote.lines.map((l) => ({ ...l })) },
     },
     select: { id: true, number: true },

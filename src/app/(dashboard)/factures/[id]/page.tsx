@@ -48,7 +48,7 @@ export default async function FactureDetailPage({ params }: { params: Promise<{ 
           <InvoiceActions id={inv.id} status={inv.status} kind={inv.kind} hasEmail={!!inv.client.email} payable={inv.payable} hasQuote={!!inv.quoteId} />
         </div>
       </div>
-      {invDesign && settings && <DocumentDesignCard kind="invoice" id={inv.id} documentDesign={designFromStored(invDesign)} companyDesign={settings.pdfDesign} bankAvailable={!!settings.iban} pdfHref={`/api/pdf/facture/${inv.id}`} />}
+      {invDesign && settings && <DocumentDesignCard key={JSON.stringify([invDesign, settings.pdfDesign])} kind="invoice" id={inv.id} documentDesign={designFromStored(invDesign)} companyDesign={settings.pdfDesign} bankAvailable={!!settings.iban} pdfHref={`/api/pdf/facture/${inv.id}`} />}
       {blockers.length > 0 && <Card className="border-amber-300"><CardContent className="p-4 text-sm text-amber-800"><p className="font-medium">Avant émission, corrigez :</p><ul className="list-disc pl-5">{blockers.map((b) => <li key={b.code}>{b.message}</li>)}</ul></CardContent></Card>}
 
       <div className="grid gap-3 md:grid-cols-3">

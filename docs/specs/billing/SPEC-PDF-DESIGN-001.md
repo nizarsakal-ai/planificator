@@ -22,6 +22,8 @@
 - Brouillon : choix du document (tout ou rien) ?? réglage de la société ?? Classique historique.
 - **Facture émise** : design et coordonnées bancaires figés dans `invoice_document_snapshots.document` (immuable). Snapshot antérieur sans design ⇒ Classique.
 - **Devis envoyé** : design effectif écrit sur le devis à l'envoi (`transitionQuoteCore`). Devis envoyé avant ⇒ Classique.
+- Conversion devis → facture : la facture de solde reprend le design du devis (devis sans design ⇒ réglage de la société).
+- Limite connue : un devis n'a pas de snapshot documentaire ; l'encadré bancaire d'un devis déjà envoyé affiche l'IBAN actuel des paramètres.
 - Tampon « Payée » / « Annulée » (modèles récents) : calculé à chaque rendu depuis le statut, jamais figé ; jamais sur un avoir ni sur Classique.
 
 ## 4. Hors périmètre (à arbitrer)
