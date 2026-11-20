@@ -87,6 +87,6 @@ describe("gardes et périmètre", () => {
       assert.doesNotMatch(c, /api\/pdf\/paie/, f)
     }
     assert.match(read("src/lib/payroll-prep/prepay-feature-flag.ts"), /ne calcule ni salaire,\n\/\/ ni cotisation/)
-    assert.ok(read("src/app/(dashboard)/layout.tsx").includes(`const payrollPrepNavVisible = isPayrollPrepEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`))
+    assert.ok(read("src/app/(dashboard)/layout.tsx").includes(`const payrollPrepNavVisible = isPayrollPrepEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`))
   })
 })

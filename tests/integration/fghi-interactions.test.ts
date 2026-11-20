@@ -56,10 +56,17 @@ describe("cinq drapeaux serveur indépendants", () => {
       FLAGS.forEach(([name, fn], i) => assert.equal(fn(env), !!(n & (1 << i)), `${name} ${n}`))
     }
   })
-  it("layout : cinq visibilités calculées côté serveur, rôle ADMIN/SUPER_ADMIN et société, chacune de son seul drapeau", () => {
+  it("layout : cinq visibilités calculées côté serveur, rôle ADMIN/SUPER_ADMIN et société, chacune de son seul drapeau (H : société pilote en plus)", () => {
     const layout = read("src/app/(dashboard)/layout.tsx")
-    for (const [v, fn] of [["connectorsNavVisible", "isConnectorCenterEnabled"], ["assistantNavVisible", "isAssistantEnabled"], ["documentStudioNavVisible", "isDocumentStudioEnabled"], ["payrollPrepNavVisible", "isPayrollPrepEnabled"], ["marketingShopNavVisible", "isMarketingShopEnabled"]]) {
-      assert.ok(layout.includes(`const ${v} = ${fn}() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`), v)
+    // Pilote H (20/11/2026) : la visibilité H exige aussi la société pilote (configuration serveur partagée avec la garde H).
+    for (const [v, expr] of [
+      ["connectorsNavVisible", `isConnectorCenterEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`],
+      ["assistantNavVisible", `isAssistantEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`],
+      ["documentStudioNavVisible", `isDocumentStudioEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`],
+      ["payrollPrepNavVisible", `isPayrollPrepEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`],
+      ["marketingShopNavVisible", `isMarketingShopEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`],
+    ]) {
+      assert.ok(layout.includes(`const ${v} = ${expr}`), v)
       const user = layout.slice(layout.indexOf("const user = {"), layout.indexOf("\n", layout.indexOf("const user = {")))
       assert.equal((user.match(new RegExp(`\\b${v}\\b`, "g")) ?? []).length, 1, `${v} transmis une fois`)
     }

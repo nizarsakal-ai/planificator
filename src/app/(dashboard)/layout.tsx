@@ -21,7 +21,7 @@ import { isAutomationsEnabled } from "@/lib/automation/automation-feature-flag"
 import { isAssistantEnabled } from "@/lib/assistant/assistant-feature-flag"
 import { isConnectorCenterEnabled } from "@/lib/connectors/connector-feature-flag"
 import { isDocumentStudioEnabled } from "@/lib/document-studio/studio-feature-flag"
-import { isPayrollPrepEnabled } from "@/lib/payroll-prep/prepay-feature-flag"
+import { isPayrollPrepEnabledForCompany } from "@/lib/payroll-prep/prepay-feature-flag"
 import { isMarketingShopEnabled } from "@/lib/marketing-shop/marketing-shop-feature-flag"
 import type { Role } from "@prisma/client"
 
@@ -68,8 +68,9 @@ export default async function DashboardLayout({
   const connectorsNavVisible = isConnectorCenterEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
   // Lot G V2 : Document Studio ; même règle d'affichage, drapeau distinct.
   const documentStudioNavVisible = isDocumentStudioEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
-  // Lot H V2 : pré-paie ; même règle d'affichage, drapeau distinct (lu côté serveur seulement).
-  const payrollPrepNavVisible = isPayrollPrepEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
+  // Lot H V2 : pré-paie ; drapeau strict ET société active exactement égale à la société pilote (configuration serveur
+  // partagée avec la garde H) ; rôle ADMIN/SUPER_ADMIN. Affichage seulement : pages, actions et export refusent côté serveur.
+  const payrollPrepNavVisible = isPayrollPrepEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")
   // Lot I V2 : marketing et boutique (un seul drapeau) ; même règle d'affichage, drapeau lu côté serveur seulement.
   const marketingShopNavVisible = isMarketingShopEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
   const company = companyId ? await prisma.company.findUnique({
