@@ -5,17 +5,18 @@
 // rendues par le serveur et restent utilisables. Aucune animation obligatoire (léger décalage de la flèche au survol,
 // seulement si le mouvement n'est pas réduit).
 import { useId, useRef, useState } from "react"
-import { ArrowRight, Download, FilePlus2, FileSearch, Files, Search, ShieldCheck, Sparkles, X, type LucideIcon } from "lucide-react"
+import { ArrowRight, Download, FilePlus2, FileSearch, FileUp, Files, PenLine, Search, ShieldCheck, Sparkles, X, type LucideIcon } from "lucide-react"
 import { STUDIO_TOOLS, TOOL_FAMILIES, filtrerOutils, type StudioTool, type ToolFamilyId } from "@/lib/document-studio/tool-hub"
 
 const ICONES: Record<StudioTool["id"], LucideIcon> = {
-  "nouveau-modele": FilePlus2, generer: Sparkles, modeles: Files, documents: FileSearch, validation: ShieldCheck, pdf: Download,
+  "nouveau-modele": FilePlus2, generer: Sparkles, modeles: Files, documents: FileSearch, validation: ShieldCheck, pdf: Download, "importer-pdf": FileUp, "pdf-importes": PenLine,
 }
-/** Couleur par famille : bleu Planificator, sarcelle, violet (pastilles claires assombries par l'apparence sombre). */
+/** Couleur par famille : bleu Planificator, sarcelle, violet, carmin (espace PDF) (pastilles claires assombries par l'apparence sombre). */
 const FAMILLE: Record<ToolFamilyId, { tuile: string; point: string }> = {
   creer: { tuile: "bg-blue-50 text-[#0f3460]", point: "bg-[#0f3460]" },
   retrouver: { tuile: "bg-teal-50 text-[#0d766d]", point: "bg-[#0d766d]" },
   valider: { tuile: "bg-violet-50 text-[#6d4acb]", point: "bg-[#6d4acb]" },
+  pdf: { tuile: "bg-rose-50 text-[#b4233c]", point: "bg-[#b4233c]" },
 }
 
 export function StudioToolHub() {

@@ -7,7 +7,8 @@
 import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 
-export function StudioSignatureField({ name = "signature", label }: { name?: string; label: string }) {
+// Espace PDF (lot 2) : `onChange` facultatif (tracé courant ou chaîne vide après effacement) ; usage existant inchangé.
+export function StudioSignatureField({ name = "signature", label, onChange }: { name?: string; label: string; onChange?: (dataUrl: string) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const drawing = useRef(false)
   const last = useRef<{ x: number; y: number } | null>(null)
@@ -48,12 +49,15 @@ export function StudioSignatureField({ name = "signature", label }: { name?: str
     if (!drawing.current) return
     drawing.current = false
     last.current = null
-    setValue(canvasRef.current?.toDataURL("image/png") ?? "")
+    const v = canvasRef.current?.toDataURL("image/png") ?? ""
+    setValue(v)
+    onChange?.(v)
   }
   const clear = () => {
     const c = canvasRef.current
     c?.getContext("2d")?.clearRect(0, 0, c.width, c.height)
     setValue("")
+    onChange?.("")
   }
 
   return (

@@ -23,28 +23,32 @@ describe("recherche d'outils", () => {
     for (const q of ["generer", "Générer", "GENERER", " générer "]) assert.deepEqual(ids(filtrerOutils(q)), ["generer"], q)
   })
   it("libellés, descriptions et mots-clés concrets ; tous les mots exigés", () => {
-    assert.deepEqual(ids(filtrerOutils("pdf")), ["pdf"])
+    // Espace PDF (lots 1 et 2) : « pdf » trouve aussi l'import et la liste des PDF importés.
+    assert.deepEqual(ids(filtrerOutils("pdf")), ["pdf", "importer-pdf", "pdf-importes"])
     assert.deepEqual(ids(filtrerOutils("telecharger pdf")), ["pdf"])
-    assert.deepEqual(ids(filtrerOutils("signature")), ["validation"])
+    assert.deepEqual(ids(filtrerOutils("signature")), ["validation", "pdf-importes"])
+    assert.deepEqual(ids(filtrerOutils("importer")), ["importer-pdf"])
+    assert.deepEqual(ids(filtrerOutils("remplir signer")), ["importer-pdf", "pdf-importes"])
     assert.deepEqual(ids(filtrerOutils("brouillon")), ["nouveau-modele"])
-    assert.deepEqual(ids(filtrerOutils("versions")), ["modeles"])
-    assert.deepEqual(ids(filtrerOutils("pdf signature")), [])
+    assert.deepEqual(ids(filtrerOutils("versions")), ["modeles", "pdf-importes"])
+    assert.deepEqual(ids(filtrerOutils("pdf signature")), ["pdf-importes"])
+    assert.deepEqual(ids(filtrerOutils("telecharger signature")), [])
   })
-  it("saisie vide ⇒ les six outils ; sans résultat ⇒ liste vide", () => {
-    assert.equal(filtrerOutils("").length, 6)
-    assert.equal(filtrerOutils("   ").length, 6)
+  it("saisie vide ⇒ les huit outils ; sans résultat ⇒ liste vide", () => {
+    assert.equal(filtrerOutils("").length, 8)
+    assert.equal(filtrerOutils("   ").length, 8)
     assert.deepEqual(filtrerOutils("photoshop"), [])
   })
 })
 
 describe("outils et vues", () => {
-  it("trois groupes de deux outils, dans l'ordre demandé", () => {
-    assert.deepEqual(TOOL_FAMILIES.map((f) => f.label), ["Créer et générer", "Retrouver", "Valider et exporter"])
-    assert.deepEqual(TOOL_FAMILIES.map((f) => ids(STUDIO_TOOLS.filter((o) => o.family === f.id))), [["nouveau-modele", "generer"], ["modeles", "documents"], ["validation", "pdf"]])
-    assert.deepEqual(STUDIO_TOOLS.map((o) => o.title), ["Nouveau modèle", "Générer un document", "Modèles et versions", "Documents générés", "En attente de validation", "Télécharger un PDF"])
+  it("quatre groupes de deux outils, dans l'ordre demandé", () => {
+    assert.deepEqual(TOOL_FAMILIES.map((f) => f.label), ["Créer et générer", "Retrouver", "Valider et exporter", "Travailler sur un PDF"])
+    assert.deepEqual(TOOL_FAMILIES.map((f) => ids(STUDIO_TOOLS.filter((o) => o.family === f.id))), [["nouveau-modele", "generer"], ["modeles", "documents"], ["validation", "pdf"], ["importer-pdf", "pdf-importes"]])
+    assert.deepEqual(STUDIO_TOOLS.map((o) => o.title), ["Nouveau modèle", "Générer un document", "Modèles et versions", "Documents générés", "En attente de validation", "Télécharger un PDF", "Importer un PDF", "PDF importés"])
   })
   it("chaque outil pointe une section réelle de l'accueil ou une vue bornée ; aucune adresse externe", () => {
-    const sections = ["nouveau-modele", "modeles", "documents"]
+    const sections = ["nouveau-modele", "modeles", "documents", "importer", "fichiers"]
     for (const o of STUDIO_TOOLS) {
       const m = /^\/studio-documents(?:\?vue=(generer|validation|pdf))?#([a-z-]+)$/.exec(o.href)
       assert.ok(m, o.href)
@@ -64,7 +68,7 @@ describe("écran d'accueil", () => {
     const c = code(read(PAGE))
     const garde = c.indexOf("if (!ctx) return <AdminOnlyNotice />")
     assert.ok(garde > 0 && garde < c.indexOf("const vue = lireVue(params.vue)"))
-    for (const a of ["outils", "nouveau-modele", "modeles", "documents"]) assert.ok(c.includes(`id="${a}"`), a)
+    for (const a of ["outils", "nouveau-modele", "modeles", "documents", "importer", "fichiers"]) assert.ok(c.includes(`id="${a}"`), a)
     for (const v of ["generer", "validation", "pdf"]) {
       assert.ok(c.includes(`{vue === "${v}" && (`), v)
       assert.ok(c.includes(`<section id="${v}"`), v)
@@ -87,7 +91,9 @@ describe("écran d'accueil", () => {
     assert.ok(c.includes(`<nav aria-labelledby="acces-rapides-titre"`))
     assert.ok(c.includes("lg:grid-cols-[minmax(0,1fr)_15rem]"), "rail à droite sur grand écran seulement, dans le flux sinon")
     assert.ok(c.includes("<StudioToolHub />"))
-    assert.equal((c.match(/<FormulaireRetour /g) ?? []).length, 1)
+    // Deux formulaires : nouveau modèle, et import d'un PDF (espace PDF, lot 1).
+    assert.equal((c.match(/<FormulaireRetour /g) ?? []).length, 2)
+    assert.ok(c.includes("<FormulaireRetour action={importPdfAction}"))
     assert.ok(c.includes("Nouveau modèle (version 1 en brouillon)") && c.includes("Créer le modèle"))
     assert.doesNotMatch(c, /from "next\/link"|<Link[\s>]|<img|https?:\/\//)
   })
