@@ -26,7 +26,9 @@ describe("migration du lot I", () => {
   it("unique, nommée comme demandé, dernière migration du dépôt", () => {
     const dirs = readdirSync("prisma/migrations").filter((d) => /^\d{14}_/.test(d)).sort()
     assert.deepEqual(dirs.filter((d) => d.includes("lot_i")), [MIGRATION_DIR])
-    assert.equal(dirs[dirs.length - 1], MIGRATION_DIR)
+    // Dernière migration de LOT du dépôt ; les migrations ultérieures hors lots (photos, espace PDF du Studio…) ne comptent pas.
+    const lots = dirs.filter((d) => /_v2_lot_/.test(d))
+    assert.equal(lots[lots.length - 1], MIGRATION_DIR)
     assert.ok(dirs.includes("20261117120000_vehicle_tour_auto_km"), "dernière migration de main 90ae644 présente")
   })
   it("additive : aucun objet existant modifié, aucune donnée lue ni écrite hors déclencheurs des tables I", () => {
