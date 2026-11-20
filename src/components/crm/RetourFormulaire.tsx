@@ -135,9 +135,15 @@ export function MessageRetour({ children }: { children?: ReactNode }) {
  *    l'admission (verrou de page), appelle l'action, puis ouvre la page suivante par navigation native dès la réponse. */
 export function FormulaireRetour({ action, className, children }: { action: (etat: RetourAction, form: FormData) => Promise<RetourAction>; className?: string; children: ReactNode }) {
   const zone = useContext(ContexteRetour)
+  const chemin = usePathname()
   const publier = zone?.publier
   const verrou = zone?.verrou
   const refuser = zone?.refuser
+  // Page rouverte depuis l'historique : formulaire désactivé ET expliqué sur place (le bandeau de MessageRetour peut être hors
+  // de vue, en haut d'une longue page : sans ce rappel, un clic sur le bouton semblait ne rien faire).
+  const restauree = !!zone?.restauree
+  // Envoi de CE formulaire refusé (opération en cours ou déjà enregistrée) : dit à côté du bouton, pas seulement en haut de page.
+  const [refuseIci, setRefuseIci] = useState(false)
   // Mutation de CE formulaire réussie sans que la page suivante ait pu être ouverte : aucun nouvel envoi de ce formulaire.
   const consomme = useRef(false)
   const precedent = useRef<RetourAction>(RETOUR_INITIAL)
@@ -179,10 +185,18 @@ export function FormulaireRetour({ action, className, children }: { action: (eta
   // Admission À LA SOUMISSION (synchrone) : un envoi refusé n'est jamais transmis ; le refus est affiché.
   const soumettre = useCallback((e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (natifCree || consomme.current || (verrou && !verrou.prendre())) { refuser?.(); return }
+    if (natifCree || consomme.current || (verrou && !verrou.prendre())) { refuser?.(); setRefuseIci(true); return }
+    setRefuseIci(false)
     const soumetteur = (e.nativeEvent as SubmitEvent).submitter
     void envoyer(new FormData(e.currentTarget, soumetteur instanceof HTMLElement ? soumetteur : null))
   }, [envoyer, verrou, refuser, natifCree])
+  const local = restauree
+    ? <p role="alert" data-retour="restauree-local" className="col-span-full w-full rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+        Formulaire désactivé : page rouverte depuis l&apos;historique. <a href={chemin} className="font-medium underline">Actualiser la page</a>
+      </p>
+    : refuseIci
+      ? <p role="status" data-retour="refus-local" className="col-span-full w-full text-xs text-slate-500">Envoi non transmis : une opération de cette page est déjà en cours ou enregistrée.</p>
+      : null
   return (
     <form action={envoyerNatif} onSubmit={soumettre} autoComplete="off" className={className}>
       {etatNatif.etat !== "initial" && (
@@ -191,7 +205,8 @@ export function FormulaireRetour({ action, className, children }: { action: (eta
           {etatNatif.message}{ficheNative && <> <a href={ficheNative} className="font-medium underline">Ouvrir la fiche</a></>}
         </p>
       )}
-      <fieldset disabled={!monte || natifCree} data-hydrate={monte ? "oui" : "non"} className="contents">{children}</fieldset>
+      {local}
+      <fieldset disabled={!monte || natifCree || restauree} data-hydrate={monte ? "oui" : "non"} className="contents">{children}</fieldset>
     </form>
   )
 }
