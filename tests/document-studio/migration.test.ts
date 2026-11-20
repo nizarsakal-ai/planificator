@@ -24,7 +24,8 @@ describe("migration du lot G", () => {
     const dirs = readdirSync("prisma/migrations").filter((d) => /^\d{14}_/.test(d)).sort()
     assert.deepEqual(dirs.filter((d) => d.includes("lot_g")), [MIGRATION_DIR])
     // Intégration FGHI : G reste après F et toutes les migrations de la base ; seules H et I la suivent.
-    assert.deepEqual(dirs.filter((d) => d > MIGRATION_DIR), ["20261119140000_v2_lot_h_payroll_prep", "20261119150000_v2_lot_i_marketing_shop"], "seules H, I après G")
+    // Seuls les lots H et I suivent G ; les migrations ultérieures (photos, espace PDF du Studio…) ne sont pas des lots.
+    assert.deepEqual(dirs.filter((d) => d > MIGRATION_DIR && /_v2_lot_/.test(d)), ["20261119140000_v2_lot_h_payroll_prep", "20261119150000_v2_lot_i_marketing_shop"], "seules H, I après G")
     assert.ok(dirs.includes("20261119120000_v2_lot_f_connectors_assistant") && "20261119120000_v2_lot_f_connectors_assistant" < MIGRATION_DIR, "F avant G")
     assert.ok(dirs.includes("20261117120000_vehicle_tour_auto_km"), "dernière migration de main ef36578f présente")
   })

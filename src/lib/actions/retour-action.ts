@@ -39,10 +39,12 @@ const PAGES_LOT_F_ASSISTANT = /^\/assistant$/
 
 // Lot G Planificator V2 (portage sur ef36578f) : Document Studio, listes DISTINCTES (la liste FICHE du CRM est inchangée).
 // Identifiants bornés (1 à 64 caractères sûrs) ; « documents » n'est jamais lu comme un identifiant de modèle.
-/** Cibles G calculées côté serveur : fiche d'un modèle (création) ou d'un document généré (génération). */
-const FICHES_LOT_G = /^\/studio-documents\/(?:documents\/[A-Za-z0-9_-]{1,64}|(?!documents$)[A-Za-z0-9_-]{1,64})$/
-/** Pages G pouvant être rouvertes après une action sans cible : liste, modèle, document généré. */
-const PAGES_LOT_G = /^\/studio-documents(?:\/(?:documents\/[A-Za-z0-9_-]{1,64}|(?!documents$)[A-Za-z0-9_-]{1,64}))?$/
+// Espace PDF (lots 1 et 2, 20/11/2026) : fiche d'un PDF importé « /studio-documents/fichiers/<id> », même règle ; « fichiers »
+// n'est jamais lu comme un identifiant de modèle ; la route de téléchargement (« …/revisions/<id> ») n'est jamais admise.
+/** Cibles G calculées côté serveur : fiche d'un modèle (création), d'un document généré (génération) ou d'un PDF importé. */
+const FICHES_LOT_G = /^\/studio-documents\/(?:(?:documents|fichiers)\/[A-Za-z0-9_-]{1,64}|(?!(?:documents|fichiers)$)[A-Za-z0-9_-]{1,64})$/
+/** Pages G pouvant être rouvertes après une action sans cible : liste, modèle, document généré, PDF importé. */
+const PAGES_LOT_G = /^\/studio-documents(?:\/(?:(?:documents|fichiers)\/[A-Za-z0-9_-]{1,64}|(?!(?:documents|fichiers)$)[A-Za-z0-9_-]{1,64}))?$/
 
 // Lot H Planificator V2 (portage sur 90ae644) : pré-paie, liste DISTINCTE (FICHE du CRM et pages E inchangées).
 /** Pages H, admises comme cible calculée côté serveur ou comme page rouverte : liste « /pre-paie » ou fiche d'une période
