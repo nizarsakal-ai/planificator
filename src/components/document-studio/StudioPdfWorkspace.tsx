@@ -446,7 +446,7 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
     <div className="space-y-3">
       {/* Barre d'outils */}
       <div role="toolbar" aria-label="Outils de la visionneuse" className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-        <div className="flex items-center gap-1" role="group" aria-label="Mode">
+        <div className="flex min-w-0 flex-wrap items-center gap-1" role="group" aria-label="Mode">
           <Button type="button" size="sm" variant={mode === "view" ? "default" : "outline"} aria-pressed={mode === "view"} onClick={() => { setMode("view"); setTool(null) }}><Eye aria-hidden="true" className="mr-1 h-4 w-4" />Consulter</Button>
           <Button type="button" size="sm" variant={editing ? "default" : "outline"} aria-pressed={editing} disabled={!p.editable} onClick={() => setMode("edit")} title={p.editBlockedReason ?? undefined}><PenLine aria-hidden="true" className="mr-1 h-4 w-4" />Remplir et signer</Button>
           <Button type="button" size="sm" variant={organizing ? "default" : "outline"} aria-pressed={organizing} disabled={!p.extractable} onClick={() => { setMode("organize"); setTool(null) }}><LayoutGrid aria-hidden="true" className="mr-1 h-4 w-4" />Organiser les pages</Button>
@@ -535,7 +535,7 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
 
         {/* Panneau « Biffer » (lot 4) */}
         {redacting && (
-          <aside aria-labelledby={`${uid}-bf`} className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm lg:max-h-[78vh] lg:overflow-y-auto">
+          <aside aria-labelledby={`${uid}-bf`} className="order-first space-y-3 lg:order-none rounded-xl border border-slate-200 bg-white p-3 shadow-sm lg:max-h-[78vh] lg:overflow-y-auto">
             <h2 id={`${uid}-bf`} className="text-sm font-semibold text-slate-900">Biffer</h2>
             <p className="text-xs text-slate-600">Glissez sur la page pour tracer une zone noire. Cliquez une zone pour la sélectionner ; Suppr la retire.</p>
             <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
@@ -575,7 +575,7 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
 
         {/* Panneau « Remplir et signer » */}
         {editing && (
-          <aside aria-labelledby={`${uid}-fs`} className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm lg:max-h-[78vh] lg:overflow-y-auto">
+          <aside aria-labelledby={`${uid}-fs`} className="order-first space-y-4 lg:order-none rounded-xl border border-slate-200 bg-white p-3 shadow-sm lg:max-h-[78vh] lg:overflow-y-auto">
             <h2 id={`${uid}-fs`} className="text-sm font-semibold text-slate-900">Remplir, signer, annoter</h2>
             <div>
               <p className="mb-1.5 text-xs text-slate-600">Choisissez un outil puis cliquez sur la page à l&apos;endroit voulu ; pour surligner ou encadrer, glissez sur la zone.</p>
