@@ -11,13 +11,17 @@
  *   pages retirées) : sert à organiser, extraire et combiner. Les pages sont copiées avec leur contenu et leurs
  *   annotations ; les champs de formulaire interactifs, signets et pièces jointes du document d'origine ne sont pas repris.
  *
+ * - `redactPdf` (lot 4) : nouveau PDF où chaque page biffée est REMPLACÉE par une page neuve ne contenant que son image
+ *   (rectangles noirs déjà peints) ; les autres pages sont copiées telles quelles. Les objets des pages biffées ne sont
+ *   jamais copiés (pdf-lib ne reprend que les objets référencés) : ni texte, ni polices, ni annotations d'origine.
+ *
  * Aucun réseau, aucun fichier temporaire, aucune police téléchargée (Helvetica standard, codage WinAnsi vérifié en amont).
  */
 import { PDFDocument, StandardFonts, degrees, rgb, type PDFPage } from "pdf-lib"
 import { extractText } from "unpdf"
 import { withPdfDocument } from "@/lib/acquisition/extraction/pdf-text-extract"
 import {
-  COORD_MAX, PDF_ERRORS, PDF_LIMITS, TEXT_BASELINE_EM, addRotation, dayText, displaySize, displayToPdf, looksLikePdf, normalizeRotation, roundGeometry,
+  COORD_MAX, PDF_ERRORS, PDF_LIMITS, TEXT_BASELINE_EM, addRotation, imageFitsPage, type PageRedaction, dayText, displaySize, displayToPdf, looksLikePdf, normalizeRotation, roundGeometry,
   type PageGeometry, type PdfOperation, type PlannedPage, type Plan,
 } from "@/lib/document-studio/pdf-workspace.core"
 
@@ -25,6 +29,16 @@ export interface PdfInspection { pageCount: number; pages: PageGeometry[]; pageT
 
 const TEXT_TIMEOUT_MS = 8_000
 const INK = rgb(0.06, 0.13, 0.33)
+const HIGHLIGHT = rgb(1, 0.86, 0.2)
+const BOX = rgb(0.78, 0.1, 0.17)
+const NOTE_BG = rgb(1, 0.96, 0.66)
+const NOTE_BORDER = rgb(0.85, 0.68, 0.1)
+
+/** Rectangle AFFICHÉ (points, origine en haut à gauche) → rectangle de l'espace PDF (les quarts de tour gardent les axes). */
+function displayRectToPdf(g: PageGeometry, dx: number, dy: number, w: number, h: number) {
+  const a = displayToPdf(g, dx, dy), b = displayToPdf(g, dx + w, dy + h)
+  return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y) }
+}
 
 function geometryOf(page: PDFPage): PageGeometry {
   const box = page.getCropBox()
@@ -115,7 +129,18 @@ export async function applyOperations(bytes: Uint8Array, ops: readonly PdfOperat
         const thickness = Math.max(1, s * 0.12)
         page.drawLine({ start: a, end: b, thickness, color: INK })
         page.drawLine({ start: b, end: c, thickness, color: INK })
-      } else if (image) {
+      } else if (op.kind === "highlight" || op.kind === "box") {
+        const r = displayRectToPdf(g, dx, dy, (op.w / COORD_MAX) * W, (op.h / COORD_MAX) * H)
+        if (op.kind === "highlight") page.drawRectangle({ ...r, color: HIGHLIGHT, opacity: 0.38, borderWidth: 0 })
+        else page.drawRectangle({ ...r, borderColor: BOX, borderWidth: 1.5, opacity: 0, borderOpacity: 1 })
+      } else if (op.kind === "note") {
+        // Note : texte sur fond jaune, boîte ajustée au texte (marge 0,35 em), lisible à l'impression.
+        const pad = op.size * 0.35
+        const r = displayRectToPdf(g, dx, dy, font.widthOfTextAtSize(op.text, op.size) + pad * 2, op.size * 1.25 + pad)
+        page.drawRectangle({ ...r, color: NOTE_BG, borderColor: NOTE_BORDER, borderWidth: 0.75 })
+        const p = displayToPdf(g, dx + pad, dy + pad / 2 + op.size * TEXT_BASELINE_EM)
+        page.drawText(op.text, { x: p.x, y: p.y, size: op.size, font, color: INK, rotate: degrees(g.rotation) })
+      } else if (op.kind === "signature" && image) {
         const w = (op.width / COORD_MAX) * W
         const h = w * (image.height / image.width)
         // Coin bas-gauche AFFICHÉ de l'image, puis rotation autour de ce coin : l'image reste droite à l'écran.
@@ -166,6 +191,63 @@ export async function assemblePdf(parts: readonly AssemblyPart[], meta: { title:
     const bytes = await out.save()
     if (bytes.length > PDF_LIMITS.maxStoredBytes) return { ok: false, error: PDF_ERRORS.outputTooLarge }
     return { ok: true, value: bytes }
+  } catch {
+    return { ok: false, error: PDF_ERRORS.writeFailed }
+  }
+}
+
+// ── Lot 4 : biffer ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+const JPEG_DATA_URL = /^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/
+/** Image JPEG d'une page biffée (URL de données) : octets vérifiés (signature JPEG, taille bornée). */
+export function parseJpegDataUrl(raw: string | null | undefined): Uint8Array | null {
+  const m = JPEG_DATA_URL.exec((raw ?? "").trim())
+  if (!m) return null
+  const b = Buffer.from(m[1], "base64")
+  if (b.length < 1000 || b.length > PDF_LIMITS.maxRedactImageBytes) return null
+  if (!(b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff)) return null
+  return new Uint8Array(b)
+}
+
+
+/**
+ * Biffer : chaque page de `redactions` est remplacée par une page neuve de même taille AFFICHÉE ne contenant que son
+ * image (rotation déjà appliquée dans l'image, page neuve sans rotation) ; les autres pages sont copiées. Refus si une
+ * image manque, n'est pas un JPEG lisible, ne couvre pas la page (proportion) ou est trop peu définie.
+ */
+export async function redactPdf(bytes: Uint8Array, redactions: readonly PageRedaction[], images: ReadonlyMap<number, Uint8Array>, meta: { title: string }): Promise<Plan<Uint8Array>> {
+  let src: PDFDocument
+  try {
+    src = await PDFDocument.load(bytes, { updateMetadata: false, ignoreEncryption: true })
+  } catch {
+    return { ok: false, error: PDF_ERRORS.writeFailed }
+  }
+  if (src.isEncrypted) return { ok: false, error: PDF_ERRORS.encrypted }
+  const redacted = new Set(redactions.map((r) => r.page))
+  if (images.size !== redacted.size || [...redacted].some((n) => !images.has(n))) return { ok: false, error: PDF_ERRORS.redactImages }
+  try {
+    const out = await PDFDocument.create({ updateMetadata: false })
+    out.setTitle(meta.title)
+    out.setProducer("Planificator")
+    out.setCreator("Planificator — Document Studio")
+    const srcPages = src.getPages()
+    for (let i = 0; i < srcPages.length; i++) {
+      const n = i + 1
+      if (!redacted.has(n)) {
+        const [copied] = await out.copyPages(src, [i])
+        out.addPage(copied)
+        continue
+      }
+      const size = displaySize(geometryOf(srcPages[i]))
+      let img
+      try { img = await out.embedJpg(images.get(n)!) } catch { return { ok: false, error: PDF_ERRORS.redactImages } }
+      if (!imageFitsPage(img, size)) return { ok: false, error: PDF_ERRORS.redactImages }
+      const page = out.addPage([size.width, size.height])
+      page.drawImage(img, { x: 0, y: 0, width: size.width, height: size.height })
+    }
+    const result = await out.save()
+    if (result.length > PDF_LIMITS.maxStoredBytes) return { ok: false, error: PDF_ERRORS.outputTooLarge }
+    return { ok: true, value: result }
   } catch {
     return { ok: false, error: PDF_ERRORS.writeFailed }
   }

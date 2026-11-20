@@ -6,6 +6,9 @@
  * signature manuscrite posés à des positions de page. L'original et chaque révision restent intacts et empreints.
  * Lot 3 : « Organiser » produit une nouvelle révision selon un plan de pages (ordre, rotation, pages retirées) ;
  * « Combiner » (plusieurs PDF) et « Extraire » (des pages d'un PDF) créent un NOUVEAU PDF dont les sources sont figées.
+ * Lot 4 : annoter (surligner, encadrer, note) rejoint « Remplir et signer » ; « Biffer » produit une révision où chaque
+ * page biffée est REMPLACÉE par son image (rectangles noirs peints dans l'image) : aucun contenu d'origine de ces pages
+ * ne subsiste dans la nouvelle version (texte, polices, annotations). Les versions précédentes restent dans l'historique.
  *
  * Coordonnées des éléments : entiers en dix-millièmes de la page TELLE QU'AFFICHÉE (rotation appliquée), origine en haut
  * à gauche, point d'ancrage = coin haut-gauche de l'élément. Tailles de texte en points PDF entiers. Des entiers seulement :
@@ -22,6 +25,14 @@ export const PDF_LIMITS = {
   maxStoredBytes: 4_400_000,
   /** Combiner : nombre de PDF assemblés en une fois. */
   maxCombineParts: 20,
+  /** Biffer : pages biffées par enregistrement, zones par page, image par page et en tout (corps de requête Vercel). */
+  maxRedactPages: 8,
+  maxRedactRectsPerPage: 50,
+  // Envoyées en base64 (+33 %) : 2,8 Mo d'images ≈ 3,7 Mo de requête, sous la limite Vercel de 4,5 Mo.
+  maxRedactImageBytes: 1_000_000,
+  maxRedactImagesBytes: 2_800_000,
+  /** Résolution minimale d'une page biffée (largeur en pixels) : lisible à l'impression. */
+  minRedactImageWidth: 800,
   maxPages: 300,
   /** Texte conservé par page pour la recherche (au-delà : tronqué, la page reste trouvable sur son début). */
   maxTextPerPage: 20_000,
@@ -72,6 +83,12 @@ export const PDF_ERRORS = {
   sourceMissing: "Un des PDF choisis est introuvable : rechargez la page.",
   sourceEncrypted: "Un des PDF choisis est protégé (chiffré) : ses pages ne peuvent pas être reprises.",
   tooManyPagesOut: `Le PDF obtenu dépasserait ${PDF_LIMITS.maxPages} pages.`,
+  redactions: "Zones à biffer invalides : rechargez la page et recommencez.",
+  redactEmpty: "Tracez au moins une zone à biffer.",
+  redactTooManyPages: `${PDF_LIMITS.maxRedactPages} pages biffées au plus par enregistrement : enregistrez, puis continuez.`,
+  redactImages: "Images des pages biffées absentes ou invalides : cliquez sur « Préparer le biffage », vérifiez l'aperçu, puis enregistrez.",
+  redactImagesTooLarge: "Images des pages biffées trop lourdes : biffez moins de pages à la fois.",
+  redactLeak: "Vérification du biffage en échec : du texte subsiste sur une page biffée. Rien n'a été enregistré.",
 } as const
 
 export type Plan<T> = { ok: true; value: T } | { ok: false; error: string }
@@ -167,10 +184,17 @@ export type PdfOperation =
   | { kind: "date"; page: number; x: number; y: number; size: number; date: string }
   | { kind: "check"; page: number; x: number; y: number; size: number }
   | { kind: "signature"; page: number; x: number; y: number; width: number }
+  | { kind: "highlight"; page: number; x: number; y: number; w: number; h: number }
+  | { kind: "box"; page: number; x: number; y: number; w: number; h: number }
+  | { kind: "note"; page: number; x: number; y: number; size: number; text: string }
 
-export const OPERATION_KINDS = ["text", "date", "check", "signature"] as const
+export const OPERATION_KINDS = ["text", "date", "check", "signature", "highlight", "box", "note"] as const
 export type OperationKind = (typeof OPERATION_KINDS)[number]
-export const OPERATION_LABEL: Record<OperationKind, string> = { text: "Texte", date: "Date", check: "Coche", signature: "Signature" }
+export const OPERATION_LABEL: Record<OperationKind, string> = { text: "Texte", date: "Date", check: "Coche", signature: "Signature", highlight: "Surligner", box: "Encadrer", note: "Note" }
+/** Outils tracés à la souris (rectangle) plutôt que posés d'un clic. */
+export const RECT_KINDS: readonly OperationKind[] = ["highlight", "box"]
+/** Plus petit rectangle tracé : 0,5 % de la page dans chaque sens. */
+export const MIN_RECT = 50
 
 /**
  * Caractères que la police standard Helvetica (codage WinAnsi) sait écrire : ASCII imprimable, Latin-1 imprimable, et
@@ -240,6 +264,16 @@ export function parseOperations(json: string, pageCount: number): Plan<PdfOperat
     } else if (r.kind === "signature") {
       if (!isInt(r.width, PDF_LIMITS.minSignatureWidth, PDF_LIMITS.maxSignatureWidth)) return ko(PDF_ERRORS.operations)
       out.push({ kind: "signature", page, x, y, width: r.width as number })
+    } else if (r.kind === "highlight" || r.kind === "box") {
+      if (!isInt(r.w, MIN_RECT, COORD_MAX - x) || !isInt(r.h, MIN_RECT, COORD_MAX - y)) return ko(PDF_ERRORS.operations)
+      out.push({ kind: r.kind, page, x, y, w: r.w as number, h: r.h as number })
+    } else if (r.kind === "note") {
+      if (!isInt(r.size, PDF_LIMITS.minFontSize, PDF_LIMITS.maxFontSize) || typeof r.text !== "string") return ko(PDF_ERRORS.operations)
+      const text = cleanFieldText(r.text)
+      if (!text || text.length > PDF_LIMITS.maxTextLength) return ko(PDF_ERRORS.text)
+      const bad = unsupportedChars(text)
+      if (bad.length) return ko(PDF_ERRORS.unsupportedChars(bad))
+      out.push({ kind: "note", page, x, y, size: r.size as number, text })
     } else return ko(PDF_ERRORS.operations)
   }
   return okv(out)
@@ -251,11 +285,14 @@ export const hasSignature = (ops: readonly PdfOperation[]) => ops.some((o) => o.
 export function summarizeOperations(ops: readonly PdfOperation[]): string {
   const n = (k: OperationKind) => ops.filter((o) => o.kind === k).length
   const parts: string[] = []
-  const t = n("text"), d = n("date"), c = n("check"), s = n("signature")
+  const t = n("text"), d = n("date"), c = n("check"), s = n("signature"), hl = n("highlight"), b = n("box"), no = n("note")
   if (t) parts.push(`${t} texte${t > 1 ? "s" : ""}`)
   if (d) parts.push(`${d} date${d > 1 ? "s" : ""}`)
   if (c) parts.push(`${c} coche${c > 1 ? "s" : ""}`)
   if (s) parts.push(`${s} signature${s > 1 ? "s" : ""}`)
+  if (hl) parts.push(`${hl} surlignage${hl > 1 ? "s" : ""}`)
+  if (b) parts.push(`${b} cadre${b > 1 ? "s" : ""}`)
+  if (no) parts.push(`${no} note${no > 1 ? "s" : ""}`)
   return parts.join(", ")
 }
 
@@ -402,4 +439,49 @@ export function pageRanges(pages: readonly number[]): string {
     i = j + 1
   }
   return out.join(", ")
+}
+
+// ── Lot 4 : biffer ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+export interface RedactRect { x: number; y: number; w: number; h: number }
+export interface PageRedaction { page: number; rects: RedactRect[] }
+
+/** Zones à biffer : par page (une fois chacune), 1 à 50 rectangles dans la page, au moins 0,5 % de côté. */
+export function parseRedactions(json: string, pageCount: number): Plan<PageRedaction[]> {
+  let raw: unknown
+  try { raw = JSON.parse(json) } catch { return ko(PDF_ERRORS.redactions) }
+  if (!Array.isArray(raw)) return ko(PDF_ERRORS.redactions)
+  if (raw.length === 0) return ko(PDF_ERRORS.redactEmpty)
+  if (raw.length > PDF_LIMITS.maxRedactPages) return ko(PDF_ERRORS.redactTooManyPages)
+  const seen = new Set<number>()
+  const out: PageRedaction[] = []
+  for (const o of raw) {
+    if (!o || typeof o !== "object" || Array.isArray(o)) return ko(PDF_ERRORS.redactions)
+    const { page, rects } = o as Record<string, unknown>
+    if (!isInt(page, 1, pageCount) || seen.has(page as number)) return ko(PDF_ERRORS.redactions)
+    if (!Array.isArray(rects) || rects.length === 0 || rects.length > PDF_LIMITS.maxRedactRectsPerPage) return ko(PDF_ERRORS.redactions)
+    const rs: RedactRect[] = []
+    for (const r of rects) {
+      if (!r || typeof r !== "object") return ko(PDF_ERRORS.redactions)
+      const { x, y, w, h } = r as Record<string, unknown>
+      if (!isInt(x, 0, COORD_MAX) || !isInt(y, 0, COORD_MAX)) return ko(PDF_ERRORS.redactions)
+      if (!isInt(w, MIN_RECT, COORD_MAX - (x as number)) || !isInt(h, MIN_RECT, COORD_MAX - (y as number))) return ko(PDF_ERRORS.redactions)
+      rs.push({ x: x as number, y: y as number, w: w as number, h: h as number })
+    }
+    seen.add(page as number)
+    out.push({ page: page as number, rects: rs })
+  }
+  return okv(out.sort((a, b) => a.page - b.page))
+}
+
+/** L'image couvre bien la page : même proportion (à 2 % près) et résolution minimale. */
+export function imageFitsPage(img: { width: number; height: number }, page: { width: number; height: number }): boolean {
+  if (img.width < PDF_LIMITS.minRedactImageWidth || img.height < 1) return false
+  const a = img.width / img.height, b = page.width / page.height
+  return Math.abs(a - b) / b <= 0.02
+}
+
+export function summarizeRedactions(rs: readonly PageRedaction[]): string {
+  const zones = rs.reduce((n, r) => n + r.rects.length, 0)
+  return `${zones} zone${zones > 1 ? "s" : ""} biffée${zones > 1 ? "s" : ""} sur ${rs.length} page${rs.length > 1 ? "s" : ""} (pages ${pageRanges(rs.map((r) => r.page))})`
 }

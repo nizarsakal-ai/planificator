@@ -20,7 +20,7 @@ export async function listStudioPdfs(db: Db, companyId: string, take = 100) {
 }
 
 export interface StudioPdfRevisionMeta {
-  id: string; revision: number; kind: "ORIGINAL" | "FILLED" | "ORGANIZED"; size: number; sha256: string; pageCount: number
+  id: string; revision: number; kind: "ORIGINAL" | "FILLED" | "ORGANIZED" | "REDACTED"; size: number; sha256: string; pageCount: number
   encrypted: boolean; signerName: string | null; createdAt: Date; createdById: string
 }
 

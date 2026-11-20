@@ -3,7 +3,9 @@
  * original déjà importé rouvert, remplir et signer (nouvelle version, original intact, signataire et empreintes), version
  * périmée refusée, enregistrements concurrents (un seul gagne), isolation entre entreprises, journal, et garanties de la
  * base (révisions immuables, jamais supprimées, numérotation sans trou, original unique par contenu). Lot 3 : organiser
- * (nouvelle version, plan empreint), extraire et combiner (nouveau PDF, sources figées), refus et isolation.
+ * (nouvelle version, plan empreint), extraire et combiner (nouveau PDF, sources figées), refus et isolation. Lot 4 :
+ * annotations enregistrées, biffage (version REDACTED, texte d'origine introuvable sur la page biffée, empreintes des
+ * images), refus et garanties de la base (aucun signataire sur une version biffée).
  * Exécution : TEST_PG_ADMIN_URL=postgresql://postgres@127.0.0.1:5432/postgres \
  *   sh tests/billing/pg/with-disposable-db.sh studio_pdf npm run test:studio-pdf:pg
  */
@@ -240,6 +242,71 @@ describe("lot 3 : organiser, extraire, combiner", () => {
       companyId: "coA", pdfId: base, revision: h.revision + 1, kind: "ORGANIZED", sha256: rowData!.sha256, size: rowData!.size, data: rowData!.data,
       pageCount: rowData!.pageCount, pages: rowData!.pages as object, pageTexts: [], operations: [{ page: 1, rotate: 0 }], operationsSha256: "b".repeat(64),
       signerName: "Intrus", signatureSha256: "c".repeat(64), createdById: "uA",
+    } }), /shape_check/)
+  })
+})
+
+describe("lot 4 : annoter et biffer", () => {
+  let id = ""
+  const jpeg = (w: number, h: number) => {
+    const sof = [0xff, 0xc0, 0x00, 0x11, 0x08, h >> 8, h & 255, w >> 8, w & 255, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01]
+    const sos = [0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3f, 0x00]
+    return `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, ...sof, ...sos, ...new Array(1500).fill(0x55), 0xff, 0xd9]).toString("base64")}`
+  }
+  before(async () => { id = ok(await svc.importPdf(db, A, { title: "Avis à biffer", originalName: "biffer.pdf", bytes: await pdf("SECRET-IBAN") })).pdfId })
+  const head = async () => (await getStudioPdfView(db, "coA", id, null))!.latest
+
+  it("annoter : surlignage, cadre et note dans une version FILLED", async () => {
+    const h = await head()
+    const ops = JSON.stringify([{ kind: "highlight", page: 1, x: 500, y: 500, w: 3000, h: 300 }, { kind: "note", page: 2, x: 500, y: 500, size: 10, text: "Vu le 20/11" }])
+    const r = ok(await svc.fillAndSignPdf(db, A, id, { baseRevisionId: h.id, operations: ops, signerName: null, signature: null }))
+    const row = await db.studioPdfRevision.findUnique({ where: { id: r.revisionId } })
+    assert.equal(row!.kind, "FILLED")
+    assert.match((row!.pageTexts as string[])[1], /Vu le 20\/11/)
+  })
+  it("biffer : version REDACTED, page 1 sans aucun texte, page 2 intacte, empreintes des images, journal", async () => {
+    const h = await head()
+    const before = (await db.studioPdfRevision.findUnique({ where: { id: h.id } }))!
+    assert.match((before.pageTexts as string[])[0], /SECRET-IBAN/)
+    const r = ok(await svc.redactPdfRevision(db, A2, id, {
+      baseRevisionId: h.id, redactions: JSON.stringify([{ page: 1, rects: [{ x: 500, y: 500, w: 6000, h: 600 }] }]), images: { "1": jpeg(1700, 2404) },
+    }))
+    const row = await db.studioPdfRevision.findUnique({ where: { id: r.revisionId } })
+    assert.equal(row!.kind, "REDACTED")
+    assert.equal(row!.signerName, null)
+    assert.deepEqual((row!.pageTexts as string[])[0], "")
+    assert.match((row!.pageTexts as string[])[1], /Page deux/)
+    const op = (row!.operations as { page: number; imageSha256: string }[])[0]
+    assert.equal(op.page, 1)
+    assert.match(op.imageSha256, /^[0-9a-f]{64}$/)
+    const bytes = await getRevisionBytes(db, "coA", id, r.revisionId)
+    assert.ok(!bytes!.data.toString("latin1").includes("SECRET-IBAN"))
+    const log = await db.historyLog.findFirst({ where: { entityId: id, action: "UPDATED" }, orderBy: { createdAt: "desc" } })
+    assert.match(log!.detail!, /1 zone biffée sur 1 page \(pages 1\)/)
+    const v = await getStudioPdfView(db, "coA", id, null)
+    assert.equal(v!.latest.kind, "REDACTED")
+    assert.match((await getStudioPdfView(db, "coA", id, 1))!.pageTexts[0], /SECRET-IBAN/, "historique : versions précédentes conservées")
+  })
+  it("refus : image absente, en trop ou mal proportionnée, version périmée, autre entreprise ; rien d'enregistré", async () => {
+    const h = await head()
+    const red = JSON.stringify([{ page: 2, rects: [{ x: 0, y: 0, w: 100, h: 100 }] }])
+    assert.equal(ko(await svc.redactPdfRevision(db, A, id, { baseRevisionId: h.id, redactions: red, images: {} })), PDF_ERRORS.redactImages)
+    assert.equal(ko(await svc.redactPdfRevision(db, A, id, { baseRevisionId: h.id, redactions: red, images: { "2": jpeg(1700, 2404), "1": jpeg(1700, 2404) } })), PDF_ERRORS.redactImages)
+    assert.equal(ko(await svc.redactPdfRevision(db, A, id, { baseRevisionId: h.id, redactions: red, images: { "2": jpeg(1700, 1700) } })), PDF_ERRORS.redactImages)
+    assert.equal(ko(await svc.redactPdfRevision(db, A, id, { baseRevisionId: h.id, redactions: red, images: { "2": "data:image/jpeg;base64,AAAA" } })), PDF_ERRORS.redactImages)
+    const v1 = (await getStudioPdfView(db, "coA", id, 1))!.shown.id
+    assert.equal(ko(await svc.redactPdfRevision(db, A, id, { baseRevisionId: v1, redactions: red, images: { "2": jpeg(1700, 2404) } })), PDF_ERRORS.notLatest)
+    assert.equal(ko(await svc.redactPdfRevision(db, B, id, { baseRevisionId: h.id, redactions: red, images: { "2": jpeg(1700, 2404) } })), PDF_ERRORS.notFound)
+    assert.equal(ko(await svc.redactPdfRevision(db, A, id, { baseRevisionId: h.id, redactions: "[]", images: {} })), PDF_ERRORS.redactEmpty)
+    assert.equal((await head()).id, h.id)
+  })
+  it("base : une version biffée ne porte jamais de signataire", async () => {
+    const h = await head()
+    const row = (await db.studioPdfRevision.findUnique({ where: { id: h.id } }))!
+    await assert.rejects(db.studioPdfRevision.create({ data: {
+      companyId: "coA", pdfId: id, revision: h.revision + 1, kind: "REDACTED", sha256: row.sha256, size: row.size, data: row.data,
+      pageCount: row.pageCount, pages: row.pages as object, pageTexts: [], operations: [{ page: 1 }], operationsSha256: "d".repeat(64),
+      signerName: "Intrus", signatureSha256: "e".repeat(64), createdById: "uA",
     } }), /shape_check/)
   })
 })

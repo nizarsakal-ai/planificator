@@ -166,3 +166,21 @@ export async function combinePdfsAction(a: RetourAction | FormData, b?: FormData
     return { ok: true, okMessage: r.value.duplicate ? "Cette combinaison existait déjà : voici sa fiche." : "PDF combinés dans un nouveau document.", cible: fichePdf(r.value.pdfId) }
   })
 }
+
+// ── Espace PDF, lot 4 : biffer ───────────────────────────────────────────────────────────────────────────────────────
+
+/** Biffer : nouvelle version où les pages biffées sont remplacées par leur image ; images lues dans les champs « img_<page> ». */
+export async function redactPdfAction(a: RetourAction | FormData, b?: FormData) {
+  const form = formulaireDe(a, b)
+  return run(async (ctx) => {
+    const pdfId = reqId(form, "pdfId")
+    if (!pdfId) return { ok: false, error: PDF_ERRORS.notFound }
+    const images: Record<string, string> = {}
+    for (const [k, v] of form.entries()) {
+      const m = /^img_(\d{1,3})$/.exec(k)
+      if (m && typeof v === "string") images[String(Number(m[1]))] = v.slice(0, PDF_LIMITS.maxRedactImageBytes * 2)
+    }
+    const r = await pdfSvc.redactPdfRevision(prisma, ctx, pdfId, { baseRevisionId: reqId(form, "baseRevisionId"), redactions: str(form, "redactions", 100_000), images })
+    return r.ok ? { ok: true, okMessage: `Version ${r.value.revision} enregistrée : pages biffées.`, cible: fichePdf(pdfId) } : r
+  })
+}
