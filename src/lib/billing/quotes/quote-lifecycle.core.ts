@@ -4,6 +4,8 @@
 // (UPDATE … WHERE status = attendu) et tracée dans HistoryLog, dans la même transaction.
 // ═══════════════════════════════════════════════════════════════════════════
 import type { Prisma } from "@prisma/client"
+import { designFromStored, designToStored } from "@/lib/billing/pdf/design"
+import { getBillingSettings } from "@/lib/billing/settings"
 
 export type QuoteStatusValue = "DRAFT" | "SENT" | "ACCEPTED" | "REFUSED" | "EXPIRED" | "CONVERTED"
 
@@ -53,7 +55,7 @@ export interface QuoteTransitionInput {
 export async function transitionQuoteCore(tx: Prisma.TransactionClient, input: QuoteTransitionInput): Promise<LifecycleResult<{ from: QuoteStatusValue }>> {
   const quote = await tx.quote.findFirst({
     where: { id: input.quoteId, companyId: input.companyId },
-    select: { id: true, status: true, number: true, worksiteId: true },
+    select: { id: true, status: true, number: true, worksiteId: true, pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true },
   })
   if (!quote) return { ok: false, error: QUOTE_ERRORS.notFound }
   const from = quote.status as QuoteStatusValue
@@ -65,9 +67,11 @@ export async function transitionQuoteCore(tx: Prisma.TransactionClient, input: Q
     : input.to === "REFUSED" ? { refusedAt: input.now }
     : input.to === "EXPIRED" ? { expiredAt: input.now }
     : { convertedAt: input.now }
+  // 20/11/2026 — à l'envoi, le design effectif (choix du devis ?? réglage société) est écrit sur le devis : il ne change plus.
+  const design = input.to === "SENT" && from === "DRAFT" ? designToStored(designFromStored(quote) ?? (await getBillingSettings(tx, input.companyId)).pdfDesign) : {}
   const updated = await tx.quote.updateMany({
     where: { ...(input.guard ?? {}), id: quote.id, companyId: input.companyId, status: from },
-    data: { status: input.to, ...stamps, ...(input.data ?? {}) },
+    data: { status: input.to, ...stamps, ...(input.data ?? {}), ...(design as Prisma.QuoteUpdateManyMutationInput) },
   })
   if (updated.count !== 1) return { ok: false, error: QUOTE_ERRORS.conflict }
 

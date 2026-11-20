@@ -6,6 +6,7 @@ import { buyerParty, fmtDate, legalMentions, linesAndTotals, sellerParty, type D
 import { readDocumentSnapshot } from "./document-snapshot"
 import { issuerLegalFooter } from "@/lib/billing/company-identity"
 import { logoForPdf } from "@/lib/company-logo"
+import { DEFAULT_PDF_DESIGN, designFromSnapshot, designFromStored, invoiceStamp, type PdfDesign } from "./design"
 
 /** 29/10/2026 — pied de page d'une pièce figée : identité du snapshot (lignes d'identité juridique de `sellerParty`, sans contact). */
 function legalFooterFromSnapshotSeller(seller: PdfParty): string | null {
@@ -28,7 +29,7 @@ export async function buildInvoicePdfData(db: Db, companyId: string, invoiceId: 
   const inv = await db.invoice.findFirst({
     where: { id: invoiceId, companyId },
     select: {
-      number: true, status: true, kind: true, clientPurchaseOrderRef: true, issueDate: true, dueDate: true, periodStart: true, periodEnd: true, subject: true, notes: true, paymentTerms: true, globalDiscountBp: true, vatReverseCharge: true, totalHT: true, totalVAT: true, totalTTC: true, creditReason: true, depositBp: true,
+      number: true, status: true, kind: true, clientPurchaseOrderRef: true, pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true, issueDate: true, dueDate: true, periodStart: true, periodEnd: true, subject: true, notes: true, paymentTerms: true, globalDiscountBp: true, vatReverseCharge: true, totalHT: true, totalVAT: true, totalTTC: true, creditReason: true, depositBp: true,
       depositDeductions: { select: { amountTTCCents: true, deposit: { select: { number: true, issueDate: true } } } },
       creditNotes: { where: { creditScope: "PARTIAL", status: { not: "CANCELLED" } }, select: { number: true, totalTTC: true } },
       company: { select: { name: true, address: true, siret: true, email: true, phone: true, logoUrl: true } },
@@ -77,11 +78,16 @@ export async function buildInvoicePdfData(db: Db, companyId: string, invoiceId: 
   if (inv.depositDeductions.length > 0) extraBlocks.push({ title: "Acomptes déduits", rows: inv.depositDeductions.map((d) => `Facture d'acompte ${d.deposit.number} du ${fmtDate(d.deposit.issueDate)} : ${formatEuro(d.amountTTCCents)} TTC`) })
   if (isDeposit && quoteNumber) extraBlocks.push({ title: "Acompte", rows: [`${inv.depositBp ? `Acompte de ${inv.depositBp / 100} %` : "Acompte"} sur le devis ${quoteNumber}. Le solde sera facturé à l'issue des prestations, déduction faite du présent acompte.`] })
   let seller: DocumentPdfData["seller"], buyer: DocumentPdfData["buyer"], mentions: string[], footer: string | null, legalFooter: string | null
+  // 20/11/2026 — design : brouillon = choix du document ?? réglage société ; émise = design FIGÉ au snapshot (absent ⇒ Classique).
+  let design: PdfDesign, bank: DocumentPdfData["bank"]
   if (snapshot) {
     seller = snapshot.seller; buyer = snapshot.buyer; mentions = [...snapshot.document.mentions]; footer = snapshot.document.footer
     legalFooter = legalFooterFromSnapshotSeller(snapshot.seller)
+    design = designFromSnapshot(snapshot.document.design); bank = snapshot.document.bank ?? null
   } else {
     const settings = await getBillingSettings(db, companyId)
+    design = draft ? designFromStored(inv) ?? settings.pdfDesign : DEFAULT_PDF_DESIGN
+    bank = settings.iban ? { iban: settings.iban, bic: settings.bic } : null
     seller = sellerParty(inv.company, settings); buyer = buyerParty(inv.client); footer = settings.invoiceFooter
     mentions = legalMentions(settings, { vatReverseCharge: inv.vatReverseCharge, paymentTerms: inv.paymentTerms, kind: isCredit ? "credit" : "invoice", vatExempt: !settings.vatNumber && raw.totalVATCents === BigInt(0) && !inv.vatReverseCharge })
     if (!draft) mentions.push(NO_SNAPSHOT_MENTION)
@@ -96,5 +102,7 @@ export async function buildInvoicePdfData(db: Db, companyId: string, invoiceId: 
     // 29/10/2026 — présentation : logo géré courant (le contenu documentaire figé n'est pas modifié) et pied de page d'identité.
     logoDataUrl: logoForPdf(inv.company.logoUrl),
     legalFooter,
+    design, bank,
+    stamp: draft ? null : invoiceStamp(inv.status, inv.kind),
   }
 }

@@ -13,6 +13,9 @@ import { InvoiceStatusBadge } from "@/components/factures/InvoiceStatusBadge"
 import { InvoiceActions, ReversePaymentButton } from "@/components/factures/InvoiceActions"
 import { PaymentDialog } from "@/components/factures/PaymentDialog"
 import { CreditNoteDialog } from "@/components/factures/CreditNoteDialog"
+import { DocumentDesignCard } from "@/components/factures/DocumentDesignCard"
+import { designFromStored } from "@/lib/billing/pdf/design"
+import { getBillingSettings } from "@/lib/billing/settings"
 
 export const metadata: Metadata = { title: "Facture" }
 const MAIL_KIND: Record<string, string> = { INVOICE_SENT: "Envoi de la facture", CREDIT_NOTE_SENT: "Envoi de l'avoir", INVOICE_REMINDER_30: "Relance J+30", INVOICE_REMINDER_45: "Relance J+45", INVOICE_REMINDER_60: "Relance J+60", INVOICE_REMINDER_MANUAL: "Relance manuelle" }
@@ -26,6 +29,10 @@ export default async function FactureDetailPage({ params }: { params: Promise<{ 
   if (!inv) notFound()
   const { pdfLines, totals } = linesAndTotals(inv.lines, inv.globalDiscountBp, inv.vatReverseCharge)
   const blockers = inv.status === "DRAFT" && inv.kind !== "CREDIT_NOTE" ? issueBlockers({ company: inv.company, client: inv.client, lineCount: inv.lines.length }) : []
+  // 20/11/2026 — apparence du PDF : modifiable sur le brouillon seulement (figée au snapshot d'émission).
+  const [invDesign, settings] = inv.status === "DRAFT"
+    ? await Promise.all([prisma.invoice.findFirst({ where: { id: inv.id, companyId: ctx.companyId }, select: { pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true } }), getBillingSettings(prisma, ctx.companyId)])
+    : [null, null]
   const progress = inv.status === "PAID" ? 100 : inv.totalTTCCents > BigInt(0) ? Number((inv.paidCents * BigInt(100)) / inv.totalTTCCents) : 0
 
   return (
@@ -41,6 +48,7 @@ export default async function FactureDetailPage({ params }: { params: Promise<{ 
           <InvoiceActions id={inv.id} status={inv.status} kind={inv.kind} hasEmail={!!inv.client.email} payable={inv.payable} hasQuote={!!inv.quoteId} />
         </div>
       </div>
+      {invDesign && settings && <DocumentDesignCard kind="invoice" id={inv.id} documentDesign={designFromStored(invDesign)} companyDesign={settings.pdfDesign} bankAvailable={!!settings.iban} pdfHref={`/api/pdf/facture/${inv.id}`} />}
       {blockers.length > 0 && <Card className="border-amber-300"><CardContent className="p-4 text-sm text-amber-800"><p className="font-medium">Avant émission, corrigez :</p><ul className="list-disc pl-5">{blockers.map((b) => <li key={b.code}>{b.message}</li>)}</ul></CardContent></Card>}
 
       <div className="grid gap-3 md:grid-cols-3">

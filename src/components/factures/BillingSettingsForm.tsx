@@ -9,10 +9,12 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent } from "@/components/ui/card"
 import { saveBillingSettingsAction } from "@/lib/actions/billing-settings.actions"
+import { PdfDesignPicker, type PdfDesignValue } from "@/components/factures/PdfDesignPicker"
 
 export interface BillingSettingsFormValues {
   vatNumber: string; legalForm: string; shareCapital: string; rcs: string; iban: string; bic: string; quoteValidityDays: number; paymentTermsDays: number
   latePenaltyText: string; quoteFooter: string; invoiceFooter: string; vatRegime: "DEBITS" | "ENCAISSEMENTS"; defaultDepositPercent: number
+  pdfDesign: PdfDesignValue
 }
 
 export function BillingSettingsForm({ initial, defaultPenalty }: { initial: BillingSettingsFormValues; defaultPenalty: string }) {
@@ -47,6 +49,13 @@ export function BillingSettingsForm({ initial, defaultPenalty }: { initial: Bill
         <div className="sm:col-span-2"><Label htmlFor="latePenaltyText">Mention pénalités de retard (vide = mention légale par défaut)</Label><Textarea id="latePenaltyText" value={v.latePenaltyText} onChange={set("latePenaltyText")} placeholder={defaultPenalty} /></div>
         <div><Label htmlFor="quoteFooter">Pied de page des devis</Label><Textarea id="quoteFooter" value={v.quoteFooter} onChange={set("quoteFooter")} /></div>
         <div><Label htmlFor="invoiceFooter">Pied de page des factures</Label><Textarea id="invoiceFooter" value={v.invoiceFooter} onChange={set("invoiceFooter")} /></div>
+      </CardContent></Card>
+      <Card><CardContent className="space-y-3 p-4">
+        <div>
+          <h2 className="text-base font-semibold text-slate-800">Apparence des PDF</h2>
+          <p className="text-sm text-slate-500">Design par défaut des devis, factures, acomptes et avoirs. Modifiable sur chaque brouillon ; une pièce déjà émise garde son apparence.</p>
+        </div>
+        <PdfDesignPicker value={v.pdfDesign} onChange={(pdfDesign) => setV({ ...v, pdfDesign })} bankAvailable={!!v.iban.trim()} />
       </CardContent></Card>
       <div className="flex justify-end"><Button type="submit" disabled={loading}>{loading && <Loader2 className="h-4 w-4 animate-spin" />} Enregistrer</Button></div>
     </form>

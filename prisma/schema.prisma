@@ -436,27 +436,27 @@ model Company {
   equipmentMaintenances           EquipmentMaintenance[]
   goodsReceipts                   GoodsReceipt[]
 
-  opportunities Opportunity[] // Lot E V2
-  opportunityEvents OpportunityEvent[]
-  automationRules AutomationRule[]
-  automationRuns AutomationRun[]
-  connectorSettings ConnectorSetting[] // Lot F V2
-  connectorSyncRuns ConnectorSyncRun[]
-  connectorStagedRecords ConnectorStagedRecord[]
-  assistantProposals AssistantProposal[]
-  assistantActionLogs AssistantActionLog[]
-  documentTemplates DocumentTemplate[] // Lot G V2
+  opportunities            Opportunity[] // Lot E V2
+  opportunityEvents        OpportunityEvent[]
+  automationRules          AutomationRule[]
+  automationRuns           AutomationRun[]
+  connectorSettings        ConnectorSetting[] // Lot F V2
+  connectorSyncRuns        ConnectorSyncRun[]
+  connectorStagedRecords   ConnectorStagedRecord[]
+  assistantProposals       AssistantProposal[]
+  assistantActionLogs      AssistantActionLog[]
+  documentTemplates        DocumentTemplate[] // Lot G V2
   documentTemplateVersions DocumentTemplateVersion[]
-  generatedDocuments GeneratedDocument[]
-  payrollPeriods PayrollPeriod[] // Lot H V2
-  payrollManualVariables PayrollManualVariable[]
-  marketingSources MarketingSource[] // Lot I V2
-  marketingCampaigns MarketingCampaign[]
-  marketingConsents MarketingConsent[]
-  marketingConversions MarketingConversion[]
-  shopPromotions ShopPromotion[]
-  shopOrders ShopOrder[]
-  shopOrderLines ShopOrderLine[]
+  generatedDocuments       GeneratedDocument[]
+  payrollPeriods           PayrollPeriod[] // Lot H V2
+  payrollManualVariables   PayrollManualVariable[]
+  marketingSources         MarketingSource[] // Lot I V2
+  marketingCampaigns       MarketingCampaign[]
+  marketingConsents        MarketingConsent[]
+  marketingConversions     MarketingConversion[]
+  shopPromotions           ShopPromotion[]
+  shopOrders               ShopOrder[]
+  shopOrderLines           ShopOrderLine[]
 
   // Véhicules V3 — ajouts des lots isolés.
   vehicleCartographyCache        VehicleCartographyCache[]
@@ -559,8 +559,8 @@ model Quote {
 
   // Lot C1 (SPEC-BILLING-C1) — colonnes additives, calculs en centimes (BigInt) côté service.
   subject                 String?
-  globalDiscountBp        Int       @default(0) // remise globale en points de base (250 = 2,50 %)
-  vatReverseCharge        Boolean   @default(false) // autoliquidation (art. 283-2 nonies CGI)
+  globalDiscountBp        Int          @default(0) // remise globale en points de base (250 = 2,50 %)
+  vatReverseCharge        Boolean      @default(false) // autoliquidation (art. 283-2 nonies CGI)
   acceptedAt              DateTime?
   refusedAt               DateTime?
   refusalReason           String?
@@ -569,7 +569,7 @@ model Quote {
   signerName              String?
   signedAt                DateTime?
   signatureIpHash         String? // sha256 de l'adresse IP du signataire (jamais en clair)
-  signatureTokenHash      String?   @unique // sha256 du jeton de signature (jeton jamais stocké)
+  signatureTokenHash      String?      @unique // sha256 du jeton de signature (jeton jamais stocké)
   signatureTokenExpiresAt DateTime?
   reminderJ3SentAt        DateTime?
   reminderJ7SentAt        DateTime?
@@ -582,6 +582,14 @@ model Quote {
   recipientSource         String? // CONSULTATION | PREVIOUS | CLIENT | MANUAL (CHECK SQL)
   // V2 06/11/2026 (devis → facture) : numéro du bon de commande CLIENT, facultatif, jamais inventé ; copié dans la facture.
   clientPurchaseOrderRef  String?
+  // 20/11/2026 — design du PDF : brouillon = choix du devis (tout à null = réglage de la société) ; à l'envoi, le design
+  // effectif est écrit ici et ne change plus (un devis envoyé garde son apparence). Devis envoyé sans valeur = « Classique ».
+  pdfTemplate             PdfTemplate?
+  pdfPrimaryColor         String?
+  pdfSecondaryColor       String?
+  pdfLayout               PdfLayout?
+  pdfShowClientIds        Boolean?
+  pdfShowBankDetails      Boolean?
 
   // Relations
   company  Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -591,6 +599,7 @@ model Quote {
   invoices Invoice[] // factures issues de ce devis
 
   opportunities Opportunity[] // Lot E V2 : opportunités liées
+
   @@unique([companyId, number])
   @@unique([id, companyId])
   @@unique([companyId, importRef])
@@ -670,6 +679,13 @@ model Invoice {
   bankTransactions       BankTransaction[]         @relation("BankMatchedInvoice")
   // V2 06/11/2026 : numéro du bon de commande CLIENT (copié du devis à la conversion, modifiable en brouillon, figé à l'émission).
   clientPurchaseOrderRef String?
+  // 20/11/2026 — design choisi pour CE brouillon (tout à null = réglage de la société). Figé dans le snapshot à l'émission.
+  pdfTemplate            PdfTemplate?
+  pdfPrimaryColor        String?
+  pdfSecondaryColor      String?
+  pdfLayout              PdfLayout?
+  pdfShowClientIds       Boolean?
+  pdfShowBankDetails     Boolean?
 
   // Relations
   // Lot B : pièces conservées — aucune suppression en cascade depuis la société ou le chantier.
@@ -810,29 +826,50 @@ enum BankCollisionResolution {
 // FACTURATION COMPLÈTE — Lot C1 (SPEC-BILLING-C1) : paramètres de facturation et journal des courriers.
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// 20/11/2026 — modèle de design des PDF (devis, factures, acomptes, avoirs). Voir src/lib/billing/pdf/design.ts.
+enum PdfTemplate {
+  CLASSIC
+  MODERN
+  BAND
+  MINIMAL
+}
+
+/// 20/11/2026 — format du tableau des lignes (QUICK n'est rendu que si toutes les lignes ont une quantité de 1 sans remise).
+enum PdfLayout {
+  COMPLETE
+  QUICK
+}
+
 enum VatRegime {
   DEBITS // TVA sur les débits (facturation)
   ENCAISSEMENTS // TVA sur les encaissements (prestations de services)
 }
 
 model BillingSettings {
-  id                String    @id @default(cuid())
-  companyId         String    @unique
-  vatNumber         String? // TVA intracommunautaire du vendeur
-  legalForm         String? // SARL, SAS, EI…
-  shareCapital      String? // "10 000 €"
-  rcs               String? // "RCS Paris 123 456 789"
-  iban              String?
-  bic               String?
-  quoteValidityDays Int       @default(30)
-  paymentTermsDays  Int       @default(30)
-  latePenaltyText   String? // remplace la mention par défaut (pénalités, indemnité forfaitaire 40 €)
-  quoteFooter       String?
-  invoiceFooter     String?
-  vatRegime         VatRegime @default(DEBITS)
-  defaultDepositBp  Int       @default(3000) // 30 %
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id                 String      @id @default(cuid())
+  companyId          String      @unique
+  vatNumber          String? // TVA intracommunautaire du vendeur
+  legalForm          String? // SARL, SAS, EI…
+  shareCapital       String? // "10 000 €"
+  rcs                String? // "RCS Paris 123 456 789"
+  iban               String?
+  bic                String?
+  quoteValidityDays  Int         @default(30)
+  paymentTermsDays   Int         @default(30)
+  latePenaltyText    String? // remplace la mention par défaut (pénalités, indemnité forfaitaire 40 €)
+  quoteFooter        String?
+  invoiceFooter      String?
+  vatRegime          VatRegime   @default(DEBITS)
+  defaultDepositBp   Int         @default(3000) // 30 %
+  // 20/11/2026 — design par défaut des PDF (défaut = rendu historique « Classique »).
+  pdfTemplate        PdfTemplate @default(CLASSIC)
+  pdfPrimaryColor    String      @default("#0f3460")
+  pdfSecondaryColor  String      @default("#0f3460")
+  pdfLayout          PdfLayout   @default(COMPLETE)
+  pdfShowClientIds   Boolean     @default(true)
+  pdfShowBankDetails Boolean     @default(false)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
@@ -967,9 +1004,10 @@ model Employee {
   assignedTasks       Task[]               @relation("TaskAssignee")
   equipmentBookings   EquipmentBooking[]   @relation("EquipmentBookingResponsible")
 
-  ownedOpportunities  Opportunity[]        @relation("OpportunityOwner") // Lot E V2
-  automationTaskRules AutomationRule[]     @relation("AutomationTaskAssignee")
+  ownedOpportunities     Opportunity[]           @relation("OpportunityOwner") // Lot E V2
+  automationTaskRules    AutomationRule[]        @relation("AutomationTaskAssignee")
   payrollManualVariables PayrollManualVariable[] // Lot H V2 : variables de pré-paie saisies
+
   @@unique([id, companyId])
   @@unique([userId, companyId])
   @@index([companyId])
@@ -1057,10 +1095,11 @@ model Client {
   /// PLAN-ACQ-CONSULTATIONS-FIX-001 — partenaires liés (FK composite tenant-safe)
   acquisitionPartners AcquisitionPartner[]
 
-  opportunities       Opportunity[] // Lot E V2
-  generatedDocuments  GeneratedDocument[] @relation("GeneratedDocumentClient") // Lot G V2 : documents générés liés
-  marketingConsents   MarketingConsent[] // Lot I V2 : consentement d'attribution marketing
-  shopOrders          ShopOrder[] // Lot I V2 : commandes boutique (simulation interne)
+  opportunities      Opportunity[] // Lot E V2
+  generatedDocuments GeneratedDocument[] @relation("GeneratedDocumentClient") // Lot G V2 : documents générés liés
+  marketingConsents  MarketingConsent[] // Lot I V2 : consentement d'attribution marketing
+  shopOrders         ShopOrder[] // Lot I V2 : commandes boutique (simulation interne)
+
   // Cible FK composite AcquisitionPartner.(clientId, companyId)
   @@unique([id, companyId])
   @@index([companyId])
@@ -1132,8 +1171,9 @@ model Worksite {
   equipmentBookings EquipmentBooking[]
   equipmentRentals  EquipmentRentalContract[]
 
-  opportunities     Opportunity[] // Lot E V2
+  opportunities      Opportunity[] // Lot E V2
   generatedDocuments GeneratedDocument[] @relation("GeneratedDocumentWorksite") // Lot G V2 : documents générés liés
+
   @@unique([id, companyId])
   @@index([companyId])
   @@index([clientId])
@@ -4203,6 +4243,7 @@ model BankVerificationSession {
   @@index([companyId, accountId])
   @@map("bank_verification_sessions")
 }
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Lot E Planificator V2 (04/11/2026, reporté sur main 12debffa le 15/11/2026 ; déclencheur réserve retiré) : opportunités commerciales (évolution 5) et automatisations bornées (6).
 // Opportunité : étape, probabilité, montant, relance ; liens facultatifs vers un client, un chantier, un devis (clés
@@ -4311,24 +4352,24 @@ model OpportunityEvent {
 }
 
 model AutomationRule {
-  id                   String               @id @default(cuid())
-  companyId            String
-  name                 String
-  trigger              AutomationTrigger
-  stageFilter          OpportunityStage?
-  action               AutomationAction
-  taskTitle            String?
-  taskAssigneeId       String?
-  taskDueInDays        Int?
-  message              String?
-  status               AutomationRuleStatus @default(DRAFT)
-  approvedById         String?
-  approvedAt           DateTime?
-  activatedAt          DateTime?
-  disabledAt           DateTime?
-  createdById          String
-  createdAt            DateTime             @default(now())
-  updatedAt            DateTime             @updatedAt
+  id             String               @id @default(cuid())
+  companyId      String
+  name           String
+  trigger        AutomationTrigger
+  stageFilter    OpportunityStage?
+  action         AutomationAction
+  taskTitle      String?
+  taskAssigneeId String?
+  taskDueInDays  Int?
+  message        String?
+  status         AutomationRuleStatus @default(DRAFT)
+  approvedById   String?
+  approvedAt     DateTime?
+  activatedAt    DateTime?
+  disabledAt     DateTime?
+  createdById    String
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
   company      Company         @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   taskAssignee Employee?       @relation("AutomationTaskAssignee", fields: [taskAssigneeId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
@@ -4340,15 +4381,15 @@ model AutomationRule {
 }
 
 model AutomationRun {
-  id          String              @id @default(cuid())
-  companyId   String
-  ruleId      String
-  eventKey    String
-  status      AutomationRunStatus
-  detail      String
-  taskId      String?
-  notified    Int                 @default(0)
-  createdAt   DateTime            @default(now())
+  id        String              @id @default(cuid())
+  companyId String
+  ruleId    String
+  eventKey  String
+  status    AutomationRunStatus
+  detail    String
+  taskId    String?
+  notified  Int                 @default(0)
+  createdAt DateTime            @default(now())
 
   company Company        @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   rule    AutomationRule @relation(fields: [companyId, ruleId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
