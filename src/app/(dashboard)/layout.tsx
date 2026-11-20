@@ -18,8 +18,8 @@ import { isEquipmentRentalEnabled } from "@/lib/equipment/equipment-feature-flag
 import { isVehiclesV3Enabled } from "@/lib/vehicules/v3/v3-feature-flag"
 import { isCrmEnabled } from "@/lib/crm/crm-feature-flag"
 import { isAutomationsEnabled } from "@/lib/automation/automation-feature-flag"
-import { isAssistantEnabled } from "@/lib/assistant/assistant-feature-flag"
-import { isConnectorCenterEnabled } from "@/lib/connectors/connector-feature-flag"
+import { isAssistantEnabledForCompany } from "@/lib/assistant/assistant-feature-flag"
+import { isConnectorCenterEnabledForCompany } from "@/lib/connectors/connector-feature-flag"
 import { isDocumentStudioEnabled } from "@/lib/document-studio/studio-feature-flag"
 import { isPayrollPrepEnabledForCompany } from "@/lib/payroll-prep/prepay-feature-flag"
 import { isMarketingShopEnabledForCompany } from "@/lib/marketing-shop/marketing-shop-feature-flag"
@@ -63,9 +63,10 @@ export default async function DashboardLayout({
   // Lot E V2 : opportunités CRM et automatisations ; même règle d'affichage, drapeaux distincts.
   const crmNavVisible = isCrmEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
   const automationNavVisible = isAutomationsEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
-  // Lot F V2 : assistant et centre de connecteurs ; même règle d'affichage, drapeaux distincts.
-  const assistantNavVisible = isAssistantEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
-  const connectorsNavVisible = isConnectorCenterEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
+  // Lot F V2 : assistant et centre de connecteurs ; société active exactement égale à la cible de chaque module (même
+  // lecture que sa garde, côté serveur seulement) ; rôle ADMIN/SUPER_ADMIN. Affichage seulement : pages et actions refusent.
+  const assistantNavVisible = isAssistantEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")
+  const connectorsNavVisible = isConnectorCenterEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")
   // Lot G V2 : Document Studio ; même règle d'affichage, drapeau distinct.
   const documentStudioNavVisible = isDocumentStudioEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
   // Lot H V2 : pré-paie ; drapeau strict ET société active exactement égale à la société pilote (configuration serveur

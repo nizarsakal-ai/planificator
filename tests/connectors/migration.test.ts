@@ -105,8 +105,8 @@ describe("gardes et menus", () => {
   it("layout : menus conditionnés par drapeau, rôle ADMIN/SUPER_ADMIN et société", () => {
     const layout = read("src/app/(dashboard)/layout.tsx")
     for (const v of [
-      `const assistantNavVisible = isAssistantEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`,
-      `const connectorsNavVisible = isConnectorCenterEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`,
+      `const assistantNavVisible = isAssistantEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`,
+      `const connectorsNavVisible = isConnectorCenterEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`,
       "crmNavVisible, automationNavVisible, assistantNavVisible, connectorsNavVisible }",
     ]) assert.ok(layout.includes(v), v)
   })

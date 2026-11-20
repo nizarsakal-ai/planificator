@@ -2,10 +2,13 @@
  * Garde d'accès du module centre de connecteurs (Lot F V2). Même règle que les lots A, B et E (ADMIN ou SUPER_ADMIN avec
  * la société active de la session) : la logique pure `resolveStockAccessCore` est réutilisée telle quelle, seul le
  * drapeau diffère. Le `companyId` vient TOUJOURS de la session. Ne jamais importer depuis un composant client.
+ * Pilote du 20/11/2026 : la société ACTIVE de la session doit être exactement la cible du module ; toute autre société,
+ * Super Admin compris, voit le module inexistant (MODULE_DISABLED). Aucune garde sans cible.
  */
 import { notFound, redirect } from "next/navigation"
 import { auth } from "@/auth"
-import { isConnectorCenterEnabled } from "@/lib/connectors/connector-feature-flag"
+import { readConnectorCenterPilotCompanyId } from "@/lib/connectors/connector-feature-flag"
+import { matchesLotFPilot } from "@/lib/lot-f/pilot-target"
 import { pageDecision, resolveStockAccessCore, stockAccessMessage, type StockAccessResult, type StockContext, type StockDenial, type StockSessionLike } from "@/lib/stock/access"
 
 export type ConnectorAccessContext = StockContext
@@ -18,16 +21,22 @@ export class ConnectorAccessError extends Error {
   }
 }
 
-/** Logique pure (testable) : drapeau → session → rôle → société. */
-export function resolveConnectorAccessCore(enabled: boolean, session: StockSessionLike | null): StockAccessResult {
-  return resolveStockAccessCore(enabled, session)
+/** Logique pure (testable) : cible → session → société de session exactement égale à la cible (sinon MODULE_DISABLED,
+ * quel que soit le rôle) → règle commune ADMIN/SUPER_ADMIN (`resolveStockAccessCore`, inchangée). */
+export function resolveConnectorAccessCore(pilotCompanyId: string | null, session: StockSessionLike | null): StockAccessResult {
+  if (!pilotCompanyId) return { ok: false, reason: "MODULE_DISABLED" }
+  const base = resolveStockAccessCore(true, session)
+  if (!base.ok && base.reason === "UNAUTHENTICATED") return base
+  if (!matchesLotFPilot(session?.user?.companyId, pilotCompanyId)) return { ok: false, reason: "MODULE_DISABLED" }
+  return base
 }
 
 export async function resolveConnectorAccess(): Promise<StockAccessResult> {
-  if (!isConnectorCenterEnabled()) return { ok: false, reason: "MODULE_DISABLED" }
+  const pilotCompanyId = readConnectorCenterPilotCompanyId()
+  if (pilotCompanyId === null) return { ok: false, reason: "MODULE_DISABLED" }
   let session: StockSessionLike | null
   try { session = await auth() } catch { return { ok: false, reason: "UNAUTHENTICATED" } }
-  return resolveConnectorAccessCore(true, session)
+  return resolveConnectorAccessCore(pilotCompanyId, session)
 }
 
 export async function requireConnectorAdmin(): Promise<ConnectorAccessContext> {

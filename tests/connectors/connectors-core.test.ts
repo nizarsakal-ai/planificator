@@ -47,18 +47,20 @@ describe("catalogue et drapeau", () => {
   })
 })
 
-describe("accès : deux profils autorisés (ADMIN, SUPER_ADMIN) avec société de session", () => {
+describe("accès : deux profils autorisés (ADMIN, SUPER_ADMIN) dans la seule société pilote", () => {
   for (const [name, resolve] of [["connecteurs", resolveConnectorAccessCore], ["assistant", resolveAssistantAccessCore]] as const) {
-    it(`${name} : ADMIN et SUPER_ADMIN avec société admis ; autres rôles, sans société, sans session ou drapeau coupé refusés`, () => {
+    it(`${name} : ADMIN et SUPER_ADMIN de la société pilote admis ; autres rôles refusés ; hors cible, sans cible ou sans société MODULE_DISABLED ; sans session UNAUTHENTICATED`, () => {
       for (const role of ["ADMIN", "SUPER_ADMIN"]) {
-        assert.deepEqual(resolve(true, { user: { id: "u1", role, companyId: "c1" } }), { ok: true, context: { userId: "u1", companyId: "c1", role } }, role)
+        assert.deepEqual(resolve("c1", { user: { id: "u1", role, companyId: "c1" } }), { ok: true, context: { userId: "u1", companyId: "c1", role } }, role)
       }
       for (const role of ["TEAM_LEADER", "EMPLOYEE", "CLIENT", null]) {
-        assert.deepEqual(resolve(true, { user: { id: "u1", role, companyId: "c1" } }), { ok: false, reason: "FORBIDDEN" }, String(role))
+        assert.deepEqual(resolve("c1", { user: { id: "u1", role, companyId: "c1" } }), { ok: false, reason: "FORBIDDEN" }, String(role))
       }
-      assert.deepEqual(resolve(true, { user: { id: "u1", role: "ADMIN", companyId: " " } }), { ok: false, reason: "NO_COMPANY" })
-      assert.deepEqual(resolve(true, null), { ok: false, reason: "UNAUTHENTICATED" })
-      assert.deepEqual(resolve(false, { user: { id: "u1", role: "ADMIN", companyId: "c1" } }), { ok: false, reason: "MODULE_DISABLED" }, "drapeau contrôlé avant la session")
+      for (const companyId of ["c2", " ", " c1", null]) {
+        assert.deepEqual(resolve("c1", { user: { id: "u1", role: "SUPER_ADMIN", companyId } }), { ok: false, reason: "MODULE_DISABLED" }, `société ${JSON.stringify(companyId)}`)
+      }
+      assert.deepEqual(resolve("c1", null), { ok: false, reason: "UNAUTHENTICATED" })
+      assert.deepEqual(resolve(null, { user: { id: "u1", role: "ADMIN", companyId: "c1" } }), { ok: false, reason: "MODULE_DISABLED" }, "cible contrôlée avant la session")
     })
   }
 })

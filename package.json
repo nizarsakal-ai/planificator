@@ -64,7 +64,7 @@
     "test:crm:pg": "node --import tsx --test --test-concurrency=1 tests/crm/pg/crm-service.pg.test.ts",
     "test:automation:pg": "node --import tsx --test --test-concurrency=1 tests/automation/pg/automation.pg.test.ts",
     "test:lot-e:pg": "sh tests/billing/pg/with-disposable-db.sh lote_crm npm run test:crm:pg && sh tests/billing/pg/with-disposable-db.sh lote_automation npm run test:automation:pg",
-    "test:lot-f": "node --import tsx --test tests/connectors/connectors-core.test.ts tests/connectors/migration.test.ts tests/assistant/assistant-core.test.ts tests/navigation/nav-lot-f.test.ts tests/connectors/retour-connecteurs.test.ts",
+    "test:lot-f": "node --import tsx --test tests/connectors/connectors-core.test.ts tests/connectors/migration.test.ts tests/assistant/assistant-core.test.ts tests/navigation/nav-lot-f.test.ts tests/connectors/retour-connecteurs.test.ts tests/connectors/lot-f-pilot.test.ts",
     "test:connectors:pg": "node --import tsx --test --test-concurrency=1 tests/connectors/pg/connectors.pg.test.ts",
     "test:assistant:pg": "node --import tsx --test --test-concurrency=1 tests/assistant/pg/assistant.pg.test.ts",
     "test:lot-f:pg": "sh tests/billing/pg/with-disposable-db.sh lotf_connectors npm run test:connectors:pg && sh tests/billing/pg/with-disposable-db.sh lotf_assistant npm run test:assistant:pg",

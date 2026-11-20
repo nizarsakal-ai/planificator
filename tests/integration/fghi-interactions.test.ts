@@ -60,8 +60,8 @@ describe("cinq drapeaux serveur indépendants", () => {
     const layout = read("src/app/(dashboard)/layout.tsx")
     // Pilote H (20/11/2026) : la visibilité H exige aussi la société pilote (configuration serveur partagée avec la garde H).
     for (const [v, expr] of [
-      ["connectorsNavVisible", `isConnectorCenterEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`],
-      ["assistantNavVisible", `isAssistantEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`],
+      ["connectorsNavVisible", `isConnectorCenterEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`],
+      ["assistantNavVisible", `isAssistantEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`],
       ["documentStudioNavVisible", `isDocumentStudioEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`],
       ["payrollPrepNavVisible", `isPayrollPrepEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`],
       ["marketingShopNavVisible", `isMarketingShopEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`],
