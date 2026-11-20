@@ -64,7 +64,7 @@ describe("cinq drapeaux serveur indépendants", () => {
       ["assistantNavVisible", `isAssistantEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`],
       ["documentStudioNavVisible", `isDocumentStudioEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`],
       ["payrollPrepNavVisible", `isPayrollPrepEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`],
-      ["marketingShopNavVisible", `isMarketingShopEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`],
+      ["marketingShopNavVisible", `isMarketingShopEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`],
     ]) {
       assert.ok(layout.includes(`const ${v} = ${expr}`), v)
       const user = layout.slice(layout.indexOf("const user = {"), layout.indexOf("\n", layout.indexOf("const user = {")))

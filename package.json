@@ -76,7 +76,7 @@
     "test:lot-h": "node --import tsx --test tests/payroll-prep/prepay-core.test.ts tests/payroll-prep/prepay-pilot.test.ts tests/payroll-prep/migration.test.ts tests/payroll-prep/portage-h.test.ts tests/navigation/nav-lot-h.test.ts",
     "test:prepay:pg": "node --import tsx --test --test-concurrency=1 tests/payroll-prep/pg/prepay.pg.test.ts",
     "test:lot-h:pg": "sh tests/billing/pg/with-disposable-db.sh loth_prepay npm run test:prepay:pg",
-    "test:lot-i": "node --import tsx --test tests/marketing-shop/lot-i-core.test.ts tests/marketing-shop/lot-i-static.test.ts tests/navigation/nav-lot-i.test.ts",
+    "test:lot-i": "node --import tsx --test tests/marketing-shop/lot-i-core.test.ts tests/marketing-shop/lot-i-static.test.ts tests/marketing-shop/lot-i-pilot.test.ts tests/navigation/nav-lot-i.test.ts",
     "test:marketing-shop:pg": "node --import tsx --test --test-concurrency=1 tests/marketing-shop/pg/marketing-shop.pg.test.ts",
     "test:lot-i:pg": "sh tests/billing/pg/with-disposable-db.sh loti_marketing_shop npm run test:marketing-shop:pg",
     "test:fghi": "node --import tsx --test tests/integration/fghi-interactions.test.ts tests/assistant/retour-assistant.test.ts",

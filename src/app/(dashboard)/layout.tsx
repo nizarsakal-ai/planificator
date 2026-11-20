@@ -22,7 +22,7 @@ import { isAssistantEnabled } from "@/lib/assistant/assistant-feature-flag"
 import { isConnectorCenterEnabled } from "@/lib/connectors/connector-feature-flag"
 import { isDocumentStudioEnabled } from "@/lib/document-studio/studio-feature-flag"
 import { isPayrollPrepEnabledForCompany } from "@/lib/payroll-prep/prepay-feature-flag"
-import { isMarketingShopEnabled } from "@/lib/marketing-shop/marketing-shop-feature-flag"
+import { isMarketingShopEnabledForCompany } from "@/lib/marketing-shop/marketing-shop-feature-flag"
 import type { Role } from "@prisma/client"
 
 export default async function DashboardLayout({
@@ -71,8 +71,9 @@ export default async function DashboardLayout({
   // Lot H V2 : pré-paie ; drapeau strict ET société active exactement égale à la société pilote (configuration serveur
   // partagée avec la garde H) ; rôle ADMIN/SUPER_ADMIN. Affichage seulement : pages, actions et export refusent côté serveur.
   const payrollPrepNavVisible = isPayrollPrepEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")
-  // Lot I V2 : marketing et boutique (un seul drapeau) ; même règle d'affichage, drapeau lu côté serveur seulement.
-  const marketingShopNavVisible = isMarketingShopEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
+  // Lot I V2 : marketing et boutique ; société active exactement égale à la société pilote d'un module activé (même cible
+  // que la garde I, lue côté serveur seulement) ; rôle ADMIN/SUPER_ADMIN. Affichage seulement : pages et actions refusent.
+  const marketingShopNavVisible = isMarketingShopEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")
   const company = companyId ? await prisma.company.findUnique({
     where: { id: companyId }, select: { name: true, logoUrl: true },
   }) : null
