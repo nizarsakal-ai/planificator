@@ -110,14 +110,14 @@ export default async function StudioPdfPage({ params, searchParams }: { params: 
 
       <Card><CardContent className="p-4">
         <h2 className="text-sm font-semibold text-slate-900">Versions</h2>
-        <p className="mt-0.5 text-xs text-slate-600">Chaque enregistrement (remplir, signer, organiser) crée une nouvelle version ; l&apos;original n&apos;est jamais modifié.</p>
+        <p className="mt-0.5 text-xs text-slate-600">Chaque enregistrement (remplir, signer, annoter, organiser, biffer) crée une nouvelle version ; l&apos;original n&apos;est jamais modifié.</p>
         <ol className="mt-2 divide-y divide-slate-200 text-sm">
           {v.revisions.map((r) => (
             <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
               <span className="min-w-0">
                 <span className="font-medium text-slate-800">Version {r.revision}</span>{" "}
                 <span className="text-xs text-slate-600">
-                  · {r.kind === "ORIGINAL" ? (v.origin === "IMPORTED" ? "original importé" : v.origin === "COMBINED" ? "PDF combiné" : "pages extraites") : r.kind === "ORGANIZED" ? "pages organisées" : r.signerName ? `remplie et signée par ${r.signerName}` : "remplie"} · {fmtInstant(r.createdAt)} · {sizeFr(r.size)} · empreinte {r.sha256.slice(0, 12)}
+                  · {r.kind === "ORIGINAL" ? (v.origin === "IMPORTED" ? "original importé" : v.origin === "COMBINED" ? "PDF combiné" : "pages extraites") : r.kind === "ORGANIZED" ? "pages organisées" : r.kind === "REDACTED" ? "pages biffées" : r.signerName ? `remplie et signée par ${r.signerName}` : "remplie"} · {fmtInstant(r.createdAt)} · {sizeFr(r.size)} · empreinte {r.sha256.slice(0, 12)}
                 </span>
                 {r.id === v.shown.id && <span className="ml-2 rounded-full bg-[#0f3460]/10 px-2 py-0.5 text-xs font-medium text-[#0f3460]">affichée</span>}
               </span>

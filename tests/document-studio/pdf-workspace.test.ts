@@ -1,6 +1,7 @@
 /**
  * Document Studio — espace PDF (lots 1 à 3) : contrôles sans base. Lot 3 : plan de pages (ordre, rotation, retrait),
- * liste de PDF à combiner, assemblage réel (organiser, extraire, combiner) et garanties de la migration. Règles pures (titre, éléments posés, police WinAnsi,
+ * liste de PDF à combiner, assemblage réel (organiser, extraire, combiner) et garanties de la migration. Lot 4 :
+ * annotations (surligner, encadrer, note) et biffage réel (page remplacée par son image, texte d'origine introuvable). Règles pures (titre, éléments posés, police WinAnsi,
  * géométrie des pages tournées, recherche), état de l'éditeur, et aller-retour RÉEL sur des PDF construits ici avec
  * pdf-lib : lecture à l'import (pages, rotation, texte), écriture des éléments sur une copie (original intact), texte
  * posé retrouvé dans la nouvelle version, PDF chiffré refusé à l'écriture. Contrôles statiques : drapeau et accès sur la
@@ -12,12 +13,12 @@ import { describe, it } from "node:test"
 import { PDFDocument, StandardFonts, degrees } from "pdf-lib"
 import { extractText, getDocumentProxy } from "unpdf"
 import {
-  COORD_MAX, PDF_ERRORS, PDF_LIMITS, addRotation, cleanOriginalName, isIdentityPlan, pageRanges, parseCombineIds, parsePagePlan, readSources, summarizePlan, dayText, displaySize, displayToPdf, downloadName, isValidDay, looksLikePdf,
+  COORD_MAX, MIN_RECT, PDF_ERRORS, PDF_LIMITS, addRotation, imageFitsPage, parseRedactions, summarizeRedactions, cleanOriginalName, isIdentityPlan, pageRanges, parseCombineIds, parsePagePlan, readSources, summarizePlan, dayText, displaySize, displayToPdf, downloadName, isValidDay, looksLikePdf,
   normalizeRotation, parseOperations, readPageGeometries, searchPages, summarizeOperations, unsupportedChars, validatePdfTitle,
   type PageGeometry,
 } from "@/lib/document-studio/pdf-workspace.core"
-import { moveItem, newItem, parisToday, resizeItem, toPayload } from "@/lib/document-studio/pdf-workspace.editor"
-import { applyOperations, assemblePdf, inspectPdf } from "@/lib/document-studio/pdf-workspace.pdf"
+import { moveItem, newItem, parisToday, rectFromCorners, resizeItem, toPayload } from "@/lib/document-studio/pdf-workspace.editor"
+import { applyOperations, assemblePdf, inspectPdf, parseJpegDataUrl, redactPdf } from "@/lib/document-studio/pdf-workspace.pdf"
 import { adresseApresSucces, retour } from "@/lib/actions/retour-action"
 
 const read = (f: string) => readFileSync(f, "utf8")
@@ -337,5 +338,122 @@ describe("lot 3 : assemblage réel (pdf-lib)", () => {
     assert.match(sql, /AND \("kind" <> 'ORGANIZED' OR "signerName" IS NULL\)/)
     assert.match(sql, /\("origin" = 'IMPORTED' AND "sources" IS NULL\)/)
     assert.match(sql, /NEW\."origin", NEW\."sources"/)
+  })
+})
+
+/** JPEG synthétique : marqueurs SOI, SOF0 (dimensions, 3 composantes), SOS, données de remplissage, EOI. pdf-lib n'en lit
+ * que les dimensions (aucun décodage) ; suffisant pour vérifier la construction de la page biffée. */
+function fakeJpeg(width: number, height: number, pad = 1500): Uint8Array {
+  const sof = [0xff, 0xc0, 0x00, 0x11, 0x08, height >> 8, height & 255, width >> 8, width & 255, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01]
+  const sos = [0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3f, 0x00]
+  return new Uint8Array([0xff, 0xd8, ...sof, ...sos, ...new Array(pad).fill(0x55), 0xff, 0xd9])
+}
+const jpegUrl = (b: Uint8Array) => `data:image/jpeg;base64,${Buffer.from(b).toString("base64")}`
+
+describe("lot 4 : annoter (règles et rendu)", () => {
+  const P = (ops: unknown) => parseOperations(JSON.stringify(ops), 2)
+  it("surligner, encadrer : rectangle dans la page, côté minimal ; note : texte WinAnsi borné", () => {
+    const v = ok(P([
+      { kind: "highlight", page: 1, x: 100, y: 200, w: 3000, h: 300 },
+      { kind: "box", page: 2, x: 9000, y: 9000, w: 1000, h: 1000 },
+      { kind: "note", page: 1, x: 500, y: 500, size: 10, text: " À vérifier " },
+    ]))
+    assert.deepEqual(v[2], { kind: "note", page: 1, x: 500, y: 500, size: 10, text: "À vérifier" })
+    assert.equal(summarizeOperations(v), "1 surlignage, 1 cadre, 1 note")
+    assert.equal(ko(P([{ kind: "box", page: 1, x: 9500, y: 0, w: 600, h: 100 }])), PDF_ERRORS.operations, "déborde à droite")
+    assert.equal(ko(P([{ kind: "highlight", page: 1, x: 0, y: 0, w: MIN_RECT - 1, h: 100 }])), PDF_ERRORS.operations, "trop étroit")
+    assert.match(ko(P([{ kind: "note", page: 1, x: 0, y: 0, size: 10, text: "OK ✓" }]))!, /« ✓ »/)
+  })
+  it("rendu réel : note écrite (texte extractible), surlignage et cadre dessinés, page tournée comprise", async () => {
+    const bytes = await samplePdf()
+    const ops = ok(P([
+      { kind: "highlight", page: 1, x: 700, y: 600, w: 4000, h: 300 },
+      { kind: "box", page: 1, x: 600, y: 1100, w: 6000, h: 500 },
+      { kind: "note", page: 1, x: 600, y: 2000, size: 11, text: "Paiement reçu le 05/08" },
+      { kind: "note", page: 2, x: 1000, y: 1000, size: 11, text: "Annexe vue" },
+    ]))
+    const out = ok(await applyOperations(bytes, ops, null))
+    const texts = await textOf(out)
+    assert.match(texts[0], /Paiement reçu le 05\/08/)
+    assert.match(texts[1], /Annexe vue/)
+    assert.match(texts[0], /Avis de paiement/, "surlignage par-dessus : texte d'origine toujours lisible")
+  })
+  it("éditeur : rectangle depuis deux coins (tout sens), borné ; déplacement qui reste dans la page ; note envoyée", () => {
+    assert.deepEqual(rectFromCorners(5000, 6000, 4000, 5500), { x: 4000, y: 5500, w: 1000, h: 500 })
+    assert.deepEqual(rectFromCorners(9800, 0, 12000, 400), { x: 9800, y: 0, w: 200, h: 400 })
+    assert.equal(rectFromCorners(100, 100, 120, 900), null, "trop étroit : simple clic ignoré")
+    const box = { ...newItem("box", 1, 0, 0, "b", "2026-11-20"), w: 2000, h: 1000 }
+    assert.deepEqual([moveItem(box, 9500, 9800).x, moveItem(box, 9500, 9800).y], [8000, 9000])
+    const note = { ...newItem("note", 1, 10, 10, "n", "2026-11-20"), text: " Vu " }
+    assert.deepEqual(toPayload([box, note, { ...note, id: "vide", text: " " }]).map((o) => o.kind), ["box", "note"])
+    assert.ok(parseOperations(JSON.stringify(toPayload([box, note])), 1).ok)
+  })
+})
+
+describe("lot 4 : biffer", () => {
+  it("zones : par page une fois, dans la page, côté minimal, bornes de pages et de zones ; triées par page", () => {
+    const v = ok(parseRedactions(JSON.stringify([{ page: 2, rects: [{ x: 0, y: 0, w: 100, h: 100 }] }, { page: 1, rects: [{ x: 10, y: 10, w: 500, h: 60, z: 1 }] }]), 2))
+    assert.deepEqual(v.map((r) => r.page), [1, 2])
+    assert.deepEqual(v[0].rects[0], { x: 10, y: 10, w: 500, h: 60 })
+    assert.equal(summarizeRedactions(v), "2 zones biffées sur 2 pages (pages 1-2)")
+    assert.equal(ko(parseRedactions("[]", 2)), PDF_ERRORS.redactEmpty)
+    for (const bad of [
+      [{ page: 1, rects: [] }], [{ page: 3, rects: [{ x: 0, y: 0, w: 100, h: 100 }] }],
+      [{ page: 1, rects: [{ x: 0, y: 0, w: 100, h: 100 }] }, { page: 1, rects: [{ x: 0, y: 0, w: 100, h: 100 }] }],
+      [{ page: 1, rects: [{ x: 9990, y: 0, w: 100, h: 100 }] }], [{ page: 1, rects: [{ x: 0, y: 0, w: 10, h: 100 }] }],
+    ]) assert.equal(ko(parseRedactions(JSON.stringify(bad), 2)), PDF_ERRORS.redactions, JSON.stringify(bad))
+    const many = Array.from({ length: PDF_LIMITS.maxRedactPages + 1 }, (_, i) => ({ page: i + 1, rects: [{ x: 0, y: 0, w: 100, h: 100 }] }))
+    assert.equal(ko(parseRedactions(JSON.stringify(many), 20)), PDF_ERRORS.redactTooManyPages)
+  })
+  it("image : JPEG vérifié (signature, poids) ; proportion de la page à 2 % près et définition minimale", () => {
+    assert.ok(parseJpegDataUrl(jpegUrl(fakeJpeg(1700, 2404))))
+    assert.equal(parseJpegDataUrl(`data:image/png;base64,${Buffer.from(fakeJpeg(10, 10)).toString("base64")}`), null)
+    assert.equal(parseJpegDataUrl(`data:image/jpeg;base64,${Buffer.alloc(2000, 1).toString("base64")}`), null, "pas un JPEG")
+    assert.equal(parseJpegDataUrl(jpegUrl(fakeJpeg(10, 10, 10))), null, "trop petit")
+    assert.equal(parseJpegDataUrl(jpegUrl(fakeJpeg(10, 10, PDF_LIMITS.maxRedactImageBytes))), null, "trop lourd")
+    const a4 = { width: 595.28, height: 841.89 }
+    assert.ok(imageFitsPage({ width: 1700, height: 2404 }, a4))
+    assert.ok(!imageFitsPage({ width: 1700, height: 1700 }, a4), "proportion différente")
+    assert.ok(!imageFitsPage({ width: 600, height: 849 }, a4), "définition insuffisante")
+  })
+  it("page biffée remplacée par son image seule : texte d'origine introuvable, autres pages intactes, page tournée prise en compte", async () => {
+    const bytes = await samplePdf()
+    const red = ok(parseRedactions(JSON.stringify([{ page: 1, rects: [{ x: 500, y: 500, w: 5000, h: 800 }] }, { page: 2, rects: [{ x: 0, y: 0, w: 100, h: 100 }] }]), 2))
+    const images = new Map([[1, fakeJpeg(1700, 2404)], [2, fakeJpeg(1700, 1202)]])
+    const out = ok(await redactPdf(bytes, red, images, { title: "Biffé" }))
+    const texts = await textOf(out)
+    assert.equal(texts[0].trim(), "", "plus aucun texte extractible sur la page biffée")
+    assert.equal(texts[1].trim(), "")
+    assert.ok(!Buffer.from(out).toString("latin1").includes("Avis de paiement"))
+    const info = ok(await inspectPdf(out))
+    assert.equal(info.pageCount, 2)
+    assert.deepEqual(info.pages.map((p) => p.rotation), [0, 0], "rotation déjà appliquée dans l'image")
+    assert.deepEqual(displaySize(info.pages[1]), { width: 841.89, height: 595.28 }, "page tournée : taille affichée conservée")
+    // Une seule page biffée : l'autre est copiée telle quelle.
+    const one = ok(await redactPdf(bytes, [red[0]], new Map([[1, fakeJpeg(1700, 2404)]]), { title: "x" }))
+    const t2 = await textOf(one)
+    assert.equal(t2[0].trim(), "")
+    assert.match(t2[1], /Annexe paysage/)
+  })
+  it("refus : image manquante ou en trop, proportion fausse, PDF chiffré", async () => {
+    const bytes = await samplePdf()
+    const red = ok(parseRedactions(JSON.stringify([{ page: 1, rects: [{ x: 0, y: 0, w: 100, h: 100 }] }]), 2))
+    assert.equal(ko(await redactPdf(bytes, red, new Map(), { title: "x" })), PDF_ERRORS.redactImages)
+    assert.equal(ko(await redactPdf(bytes, red, new Map([[1, fakeJpeg(1700, 2404)], [2, fakeJpeg(1700, 1202)]]), { title: "x" })), PDF_ERRORS.redactImages)
+    assert.equal(ko(await redactPdf(bytes, red, new Map([[1, fakeJpeg(1700, 1700)]]), { title: "x" })), PDF_ERRORS.redactImages)
+    const doc = await PDFDocument.load(bytes)
+    doc.context.trailerInfo.Encrypt = doc.context.obj({ Filter: "Standard", V: 1, R: 2, O: "x", U: "y", P: -4 })
+    assert.equal(ko(await redactPdf(await doc.save(), red, new Map([[1, fakeJpeg(1700, 2404)]]), { title: "x" })), PDF_ERRORS.encrypted)
+  })
+  it("requête d'enregistrement sous la limite Vercel ; migrations : valeur ajoutée seule, puis contrainte qui l'emploie", () => {
+    assert.ok(Math.ceil(PDF_LIMITS.maxRedactImagesBytes * 4 / 3) < 4.5 * 1024 * 1024 * 0.9, "images en base64 + champs < 4,5 Mo")
+    const kind = read("prisma/migrations/20261120160000_v2_studio_pdf_redacted_kind/migration.sql")
+    assert.match(kind, /ALTER TYPE "StudioPdfRevisionKind" ADD VALUE IF NOT EXISTS 'REDACTED';/)
+    assert.doesNotMatch(kind.replace(/^--.*$/gm, ""), /CHECK|CREATE|DROP/)
+    const check = read("prisma/migrations/20261120160100_v2_studio_pdf_redacted_check/migration.sql")
+    assert.match(check, /DROP CONSTRAINT "studio_pdf_revisions_shape_check";/)
+    assert.match(check, /"kind" IN \('FILLED', 'ORGANIZED', 'REDACTED'\)/)
+    assert.match(check, /\("kind" NOT IN \('ORGANIZED', 'REDACTED'\) OR "signerName" IS NULL\)/)
+    for (const m of check.matchAll(/ALTER TABLE "([a-z_]+)"/g)) assert.equal(m[1], "studio_pdf_revisions")
   })
 })

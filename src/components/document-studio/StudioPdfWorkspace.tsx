@@ -13,17 +13,21 @@
  *
  * Lot 3 (organiser les pages) : grille des pages ; déplacer (boutons, clavier, glisser-déposer), pivoter, retirer ;
  * « Enregistrer » envoie le plan (nouvelle version) ; « Extraire » envoie les pages sélectionnées (nouveau PDF).
+ *
+ * Lot 4 : annoter (surligner et encadrer se tracent en glissant, la note se pose d'un clic) dans « Remplir et signer » ;
+ * « Biffer » : zones noires tracées sur les pages, puis « Préparer » dessine chaque page biffée en image dans le
+ * navigateur (PDF.js, zones peintes en noir) et montre le résultat ; seul ce rendu remplace la page à l'enregistrement.
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react"
-import { ArrowLeft, ArrowRight, Calendar, Check, Download, Eye, LayoutGrid, Minus, Move, PenLine, Plus, RotateCcw, RotateCw, Scissors, Signature, Trash2, Type, Undo2, ZoomIn, ZoomOut } from "lucide-react"
+import { ArrowLeft, ArrowRight, Calendar, Check, Download, Eye, EyeOff, Highlighter, LayoutGrid, Minus, Move, PenLine, Plus, RotateCcw, RotateCw, Scissors, Signature, Square, StickyNote, Trash2, Type, Undo2, ZoomIn, ZoomOut } from "lucide-react"
 import { loadPdfDocument, type PdfDocument, type PdfLoadingTask, type PdfRenderTask } from "@/components/hr-documents/PdfCanvasPreview"
 import { StudioSignatureField } from "@/components/document-studio/StudioSignatureField"
 import { FormulaireRetour } from "@/components/crm/RetourFormulaire"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { extractPagesAction, fillSignPdfAction, organizePdfAction } from "@/lib/actions/document-studio.actions"
-import { COORD_MAX, OPERATION_LABEL, PDF_LIMITS, addRotation, dayText, isIdentityPlan, pageRanges, unsupportedChars, type OperationKind, type PlannedPage, type Rotation } from "@/lib/document-studio/pdf-workspace.core"
-import { moveItem, newItem, parisToday, resizeItem, toPayload, type EditorItem } from "@/lib/document-studio/pdf-workspace.editor"
+import { extractPagesAction, fillSignPdfAction, organizePdfAction, redactPdfAction } from "@/lib/actions/document-studio.actions"
+import { COORD_MAX, OPERATION_LABEL, PDF_LIMITS, RECT_KINDS, addRotation, dayText, isIdentityPlan, pageRanges, unsupportedChars, type OperationKind, type PlannedPage, type Rotation } from "@/lib/document-studio/pdf-workspace.core"
+import { moveItem, newItem, parisToday, rectFromCorners, resizeItem, toPayload, type EditorItem } from "@/lib/document-studio/pdf-workspace.editor"
 
 export interface WorkspacePage { width: number; height: number }
 export interface StudioPdfWorkspaceProps {
@@ -45,7 +49,7 @@ const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const
 const MAX_PAGE_PIXELS = 8_000_000
 const LOAD_TIMEOUT_MS = 30_000
 const INK = "#0f2154"
-const TOOL_ICON: Record<OperationKind, typeof Type> = { text: Type, date: Calendar, check: Check, signature: Signature }
+const TOOL_ICON: Record<OperationKind, typeof Type> = { text: Type, date: Calendar, check: Check, signature: Signature, highlight: Highlighter, box: Square, note: StickyNote }
 const FOCUS = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f3460] focus-visible:ring-offset-1"
 
 type LoadState = { status: "loading" } | { status: "ready"; doc: PdfDocument } | { status: "error"; message: string }
@@ -170,6 +174,62 @@ async function trimSignature(dataUrl: string): Promise<{ dataUrl: string; ratio:
   return { dataUrl: out.toDataURL("image/png"), ratio: out.height / out.width }
 }
 
+// ── Lot 4 : biffer ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+interface RedRect { id: string; page: number; x: number; y: number; w: number; h: number }
+interface Prepared { images: Record<number, string>; key: string }
+
+/** Zones regroupées par page (ordre des pages), forme attendue par le serveur. */
+function groupRedactions(rects: readonly RedRect[]): { page: number; rects: { x: number; y: number; w: number; h: number }[] }[] {
+  const by = new Map<number, { x: number; y: number; w: number; h: number }[]>()
+  for (const r of rects) by.set(r.page, [...(by.get(r.page) ?? []), { x: r.x, y: r.y, w: r.w, h: r.h }])
+  return [...by.entries()].sort((a, b) => a[0] - b[0]).map(([page, rs]) => ({ page, rects: rs }))
+}
+
+const REDACT_TARGET_WIDTH = 1700
+const REDACT_MAX_PIXELS = 5_000_000
+/** Poids estimé (octets) d'une URL de données base64. */
+const dataUrlBytes = (u: string) => Math.floor((u.length - u.indexOf(",") - 1) * 0.75)
+
+/**
+ * Rendu des pages biffées : chaque page est dessinée par PDF.js (rotation comprise), les zones sont peintes en noir
+ * opaque (débord d'un pixel), puis l'image est encodée en JPEG ; la qualité baisse si le poids dépasse les bornes du
+ * serveur. Aucune donnée ne quitte le navigateur avant l'enregistrement.
+ */
+async function rasterizeRedactions(doc: PdfDocument, redactions: ReturnType<typeof groupRedactions>): Promise<{ images: Record<number, string> }> {
+  const images: Record<number, string> = {}
+  let total = 0
+  for (const r of redactions) {
+    const page = await doc.getPage(r.page)
+    const base = page.getViewport({ scale: 1 })
+    const scale = Math.min(REDACT_TARGET_WIDTH / base.width, Math.sqrt(REDACT_MAX_PIXELS / (base.width * base.height)))
+    const viewport = page.getViewport({ scale })
+    const canvas = document.createElement("canvas")
+    canvas.width = Math.max(1, Math.floor(viewport.width)); canvas.height = Math.max(1, Math.floor(viewport.height))
+    const ctx = canvas.getContext("2d")
+    if (!ctx) throw new Error("CANVAS")
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, canvas.width, canvas.height)
+    await page.render({ canvas, canvasContext: ctx, viewport }).promise
+    ctx.fillStyle = "#000000"
+    for (const z of r.rects) {
+      const x = Math.floor((z.x / COORD_MAX) * canvas.width) - 1, y = Math.floor((z.y / COORD_MAX) * canvas.height) - 1
+      ctx.fillRect(x, y, Math.ceil((z.w / COORD_MAX) * canvas.width) + 2, Math.ceil((z.h / COORD_MAX) * canvas.height) + 2)
+    }
+    let url = ""
+    for (const q of [0.85, 0.75, 0.62, 0.5]) {
+      url = canvas.toDataURL("image/jpeg", q)
+      if (dataUrlBytes(url) <= PDF_LIMITS.maxRedactImageBytes * 0.95) break
+    }
+    canvas.width = 0; canvas.height = 0
+    const bytes = dataUrlBytes(url)
+    if (bytes > PDF_LIMITS.maxRedactImageBytes * 0.95) throw new Error("TOO_LARGE")
+    total += bytes
+    if (total > PDF_LIMITS.maxRedactImagesBytes * 0.95) throw new Error("TOO_LARGE")
+    images[r.page] = url
+  }
+  return { images }
+}
+
 let seq = 0
 const nextId = () => `el${Date.now().toString(36)}${(seq++).toString(36)}`
 
@@ -178,7 +238,15 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
   const load = usePdfDocument(p.fileUrl)
   const doc = load.status === "ready" ? load.doc : null
   const [zoom, setZoom] = useState<number>(1)
-  const [mode, setMode] = useState<"view" | "edit" | "organize">("view")
+  const [mode, setMode] = useState<"view" | "edit" | "organize" | "redact">("view")
+  // Lot 4 : zones à biffer, rectangle en cours de tracé, rendu préparé des pages biffées.
+  const [redRects, setRedRects] = useState<RedRect[]>([])
+  const [selRed, setSelRed] = useState<string | null>(null)
+  const [draft, setDraft] = useState<{ page: number; x: number; y: number; w: number; h: number } | null>(null)
+  const [prepared, setPrepared] = useState<Prepared | null>(null)
+  const [preparing, setPreparing] = useState(false)
+  const [prepError, setPrepError] = useState<string | null>(null)
+  const creating = useRef<{ page: number; x0: number; y0: number; left: number; top: number; w: number; h: number; target: "item" | "redact"; kind: OperationKind | null } | null>(null)
   const [tool, setTool] = useState<OperationKind | null>(null)
   const [items, setItems] = useState<EditorItem[]>([])
   const [selected, setSelected] = useState<string | null>(null)
@@ -191,7 +259,10 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
   const sel = items.find((i) => i.id === selected) ?? null
   const payload = useMemo(() => toPayload(items), [items])
   const usesSignature = payload.some((o) => o.kind === "signature")
-  const badChars = useMemo(() => [...new Set(items.filter((i) => i.kind === "text").flatMap((i) => unsupportedChars(i.text)))], [items])
+  const badChars = useMemo(() => [...new Set(items.filter((i) => i.kind === "text" || i.kind === "note").flatMap((i) => unsupportedChars(i.text)))], [items])
+  const redactions = useMemo(() => groupRedactions(redRects), [redRects])
+  const redKey = JSON.stringify(redactions)
+  const preparedOk = prepared !== null && prepared.key === redKey
 
   // Page courante : celle dont le haut est le plus proche du haut de la zone de lecture.
   useEffect(() => {
@@ -215,8 +286,46 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
   const update = useCallback((id: string, f: (it: EditorItem) => EditorItem) => setItems((xs) => xs.map((x) => (x.id === id ? f(x) : x))), [])
   const remove = useCallback((id: string) => { setItems((xs) => xs.filter((x) => x.id !== id)); setSelected(null) }, [])
 
+  /** Début d'un rectangle tracé (surligner, encadrer, zone à biffer) : le calque capte le pointeur jusqu'au relâchement. */
+  const startCreate = (e: ReactPointerEvent<HTMLDivElement>, page: number, target: "item" | "redact", kind: OperationKind | null) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    const x0 = ((e.clientX - r.left) / r.width) * COORD_MAX, y0 = ((e.clientY - r.top) / r.height) * COORD_MAX
+    e.currentTarget.setPointerCapture(e.pointerId)
+    e.preventDefault()
+    creating.current = { page, x0, y0, left: r.left, top: r.top, w: r.width, h: r.height, target, kind }
+    setDraft({ page, x: x0, y: y0, w: 0, h: 0 })
+  }
+  const moveCreate = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const c = creating.current
+    if (!c) return
+    const x = ((e.clientX - c.left) / c.w) * COORD_MAX, y = ((e.clientY - c.top) / c.h) * COORD_MAX
+    setDraft({ page: c.page, x: Math.min(x, c.x0), y: Math.min(y, c.y0), w: Math.abs(x - c.x0), h: Math.abs(y - c.y0) })
+  }
+  const endCreate = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const c = creating.current
+    creating.current = null
+    setDraft(null)
+    if (!c) return
+    const rect = rectFromCorners(c.x0, c.y0, ((e.clientX - c.left) / c.w) * COORD_MAX, ((e.clientY - c.top) / c.h) * COORD_MAX)
+    if (!rect) return
+    if (c.target === "redact") {
+      if (redRects.filter((r) => r.page === c.page).length >= PDF_LIMITS.maxRedactRectsPerPage) return
+      const id = nextId()
+      setRedRects((xs) => [...xs, { id, page: c.page, ...rect }])
+      setSelRed(id)
+    } else if (c.kind) {
+      if (items.length >= PDF_LIMITS.maxOperations) return
+      const it = { ...newItem(c.kind, c.page, rect.x, rect.y, nextId(), today), w: rect.w, h: rect.h }
+      setItems((xs) => [...xs, it])
+      setSelected(it.id)
+      setTool(null)
+    }
+  }
+
   const placeAt = (e: ReactPointerEvent<HTMLDivElement>, page: number) => {
+    if (mode === "redact") { if (e.target === e.currentTarget) { setSelRed(null); startCreate(e, page, "redact", null) } return }
     if (mode !== "edit" || !tool || e.target !== e.currentTarget) { if (e.target === e.currentTarget) setSelected(null); return }
+    if (RECT_KINDS.includes(tool)) { startCreate(e, page, "item", tool); return }
     const r = e.currentTarget.getBoundingClientRect()
     const x = ((e.clientX - r.left) / r.width) * COORD_MAX
     const y = ((e.clientY - r.top) / r.height) * COORD_MAX
@@ -274,12 +383,20 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
       "data-item": it.id, tabIndex: 0, "aria-label": `${OPERATION_LABEL[it.kind]} page ${it.page}`, onKeyDown: (e: ReactKeyboardEvent<HTMLElement>) => onItemKey(e, it),
       onFocus: () => setSelected(it.id),
     }
-    if (it.kind === "text") {
+    if (it.kind === "highlight" || it.kind === "box") {
+      const size = { width: `${(it.w / COORD_MAX) * 100}%`, height: `${(it.h / COORD_MAX) * 100}%` }
       return (
-        <div key={it.id} {...common} className={`absolute rounded-sm bg-sky-100/40 ${ring} ${FOCUS}`} style={{ ...pos, fontSize, lineHeight: 1 }}>
+        <div key={it.id} {...common} onPointerDown={(e) => startDrag(e, it)} onPointerMove={onDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
+          className={`absolute cursor-move touch-none ${it.kind === "highlight" ? "bg-yellow-300/40" : "border-2 border-[#c71a2b]"} ${isSel ? "ring-2 ring-[#0f3460] ring-offset-1" : ""} ${FOCUS}`} style={{ ...pos, ...size }} />
+      )
+    }
+    if (it.kind === "text" || it.kind === "note") {
+      const note = it.kind === "note"
+      return (
+        <div key={it.id} {...common} className={`absolute rounded-sm ${note ? "border border-yellow-600 bg-yellow-100 px-[0.35em] py-[0.17em]" : "bg-sky-100/40"} ${ring} ${FOCUS}`} style={{ ...pos, fontSize, lineHeight: 1 }}>
           <button type="button" aria-label="Déplacer" title="Déplacer" onPointerDown={(e) => startDrag(e, it)} onPointerMove={onDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
             className="absolute -left-5 top-0 flex h-4 w-4 cursor-move touch-none items-center justify-center rounded bg-[#0f3460] text-white"><Move aria-hidden="true" className="h-3 w-3" /></button>
-          <input value={it.text} maxLength={PDF_LIMITS.maxTextLength} aria-label={`Texte page ${it.page}`} placeholder="Saisir…"
+          <input value={it.text} maxLength={PDF_LIMITS.maxTextLength} aria-label={`${note ? "Note" : "Texte"} page ${it.page}`} placeholder={note ? "Note…" : "Saisir…"}
             onChange={(e) => update(it.id, (x) => ({ ...x, text: e.target.value }))} onFocus={() => setSelected(it.id)}
             size={Math.max(6, it.text.length + 1)}
             className="block border-0 bg-transparent p-0 outline-none placeholder:text-slate-400"
@@ -309,6 +426,21 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
   }
 
   const editing = mode === "edit"
+  const redacting = mode === "redact"
+  const prepare = async () => {
+    if (!doc || redactions.length === 0) return
+    setPreparing(true); setPrepError(null)
+    try {
+      const r = await rasterizeRedactions(doc, redactions)
+      setPrepared({ ...r, key: redKey })
+    } catch (e) {
+      setPrepared(null)
+      setPrepError(e instanceof Error && e.message === "TOO_LARGE" ? "Rendu trop lourd : biffez moins de pages à la fois." : "Le rendu des pages biffées a échoué : réessayez.")
+    } finally {
+      setPreparing(false)
+    }
+  }
+  const removeRed = (id: string) => { setRedRects((xs) => xs.filter((x) => x.id !== id)); setSelRed(null) }
   const organizing = mode === "organize"
   return (
     <div className="space-y-3">
@@ -318,6 +450,7 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
           <Button type="button" size="sm" variant={mode === "view" ? "default" : "outline"} aria-pressed={mode === "view"} onClick={() => { setMode("view"); setTool(null) }}><Eye aria-hidden="true" className="mr-1 h-4 w-4" />Consulter</Button>
           <Button type="button" size="sm" variant={editing ? "default" : "outline"} aria-pressed={editing} disabled={!p.editable} onClick={() => setMode("edit")} title={p.editBlockedReason ?? undefined}><PenLine aria-hidden="true" className="mr-1 h-4 w-4" />Remplir et signer</Button>
           <Button type="button" size="sm" variant={organizing ? "default" : "outline"} aria-pressed={organizing} disabled={!p.extractable} onClick={() => { setMode("organize"); setTool(null) }}><LayoutGrid aria-hidden="true" className="mr-1 h-4 w-4" />Organiser les pages</Button>
+          <Button type="button" size="sm" variant={redacting ? "default" : "outline"} aria-pressed={redacting} disabled={!p.editable} onClick={() => { setMode("redact"); setTool(null) }} title={p.editBlockedReason ?? undefined}><EyeOff aria-hidden="true" className="mr-1 h-4 w-4" />Biffer</Button>
         </div>
         <span className="mx-1 hidden h-6 w-px bg-slate-200 sm:block" aria-hidden="true" />
         <div className="flex items-center gap-1" role="group" aria-label="Zoom">
@@ -341,7 +474,7 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
         <OrganizePanel doc={doc} pages={p.pages} pdfId={p.pdfId} revisionId={p.revisionId} revisionNumber={p.revisionNumber}
           canSave={p.editable} saveBlockedReason={p.editBlockedReason} title={p.title} />
       )}
-      <div className={`${organizing ? "hidden" : "grid"} gap-3 ${editing ? "lg:grid-cols-[8rem_minmax(0,1fr)_19rem]" : "lg:grid-cols-[8rem_minmax(0,1fr)]"}`}>
+      <div className={`${organizing ? "hidden" : "grid"} gap-3 ${editing || redacting ? "lg:grid-cols-[8rem_minmax(0,1fr)_19rem]" : "lg:grid-cols-[8rem_minmax(0,1fr)]"}`}>
         {/* Vignettes */}
         <nav aria-label="Pages" className="hidden max-h-[78vh] overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-2 lg:block">
           <ol className="space-y-2">
@@ -372,9 +505,26 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
                 <div key={n} id={`page-${n}`} data-page={n} tabIndex={-1} className="relative mx-auto scroll-mt-2 bg-white shadow-md outline-none"
                   style={{ width: `${widthPct}%`, aspectRatio: `${pg.width} / ${pg.height}`, containerType: "inline-size" }}>
                   <LazyCanvas doc={doc} n={n} label={`Page ${n} sur ${p.pages.length}`} eager={n === 1} />
-                  {editing && (
-                    <div data-overlay="" onPointerDown={(e) => placeAt(e, n)} className={`absolute inset-0 ${tool ? "cursor-crosshair" : ""}`} style={{ containerType: "inline-size" }}>
-                      {items.filter((it) => it.page === n).map((it) => renderItem(it, pg))}
+                  {(editing || redacting) && (
+                    <div data-overlay="" onPointerDown={(e) => placeAt(e, n)} onPointerMove={moveCreate} onPointerUp={endCreate} onPointerCancel={endCreate}
+                      className={`absolute inset-0 touch-none ${tool || redacting ? "cursor-crosshair" : ""}`} style={{ containerType: "inline-size" }}>
+                      {editing && items.filter((it) => it.page === n).map((it) => renderItem(it, pg))}
+                      {redacting && redRects.filter((r) => r.page === n).map((r) => (
+                        <div key={r.id} tabIndex={0} role="img" aria-label={`Zone à biffer, page ${n}`}
+                          onPointerDown={(e) => { e.stopPropagation(); setSelRed(r.id) }} onFocus={() => setSelRed(r.id)}
+                          onKeyDown={(e) => { if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); removeRed(r.id) } }}
+                          className={`absolute bg-black ${selRed === r.id ? "ring-2 ring-red-500 ring-offset-1" : ""} ${FOCUS}`}
+                          style={{ left: `${(r.x / COORD_MAX) * 100}%`, top: `${(r.y / COORD_MAX) * 100}%`, width: `${(r.w / COORD_MAX) * 100}%`, height: `${(r.h / COORD_MAX) * 100}%` }}>
+                          {selRed === r.id && (
+                            <button type="button" aria-label="Retirer cette zone" onPointerDown={(e) => e.stopPropagation()} onClick={() => removeRed(r.id)}
+                              className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-white text-red-700 shadow"><Trash2 aria-hidden="true" className="h-3 w-3" /></button>
+                          )}
+                        </div>
+                      ))}
+                      {draft && draft.page === n && (
+                        <div aria-hidden="true" className={`pointer-events-none absolute border-2 border-dashed ${redacting ? "border-red-600 bg-black/60" : "border-[#0f3460] bg-[#0f3460]/10"}`}
+                          style={{ left: `${(draft.x / COORD_MAX) * 100}%`, top: `${(draft.y / COORD_MAX) * 100}%`, width: `${(draft.w / COORD_MAX) * 100}%`, height: `${(draft.h / COORD_MAX) * 100}%` }} />
+                      )}
                     </div>
                   )}
                 </div>
@@ -383,12 +533,52 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
           </div>
         </div>
 
+        {/* Panneau « Biffer » (lot 4) */}
+        {redacting && (
+          <aside aria-labelledby={`${uid}-bf`} className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm lg:max-h-[78vh] lg:overflow-y-auto">
+            <h2 id={`${uid}-bf`} className="text-sm font-semibold text-slate-900">Biffer</h2>
+            <p className="text-xs text-slate-600">Glissez sur la page pour tracer une zone noire. Cliquez une zone pour la sélectionner ; Suppr la retire.</p>
+            <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+              Chaque page biffée est remplacée par son image : le texte caché est réellement supprimé de la nouvelle version, mais le texte de ces pages n&apos;y est plus sélectionnable. Les versions précédentes restent dans l&apos;historique du document.
+            </p>
+            <p className="text-xs text-slate-700" aria-live="polite">
+              {redRects.length === 0 ? "Aucune zone tracée." : `${redRects.length} zone${redRects.length > 1 ? "s" : ""} sur ${redactions.length} page${redactions.length > 1 ? "s" : ""}${redactions.length > PDF_LIMITS.maxRedactPages ? ` : ${PDF_LIMITS.maxRedactPages} pages au plus par enregistrement` : ""}.`}
+            </p>
+            <Button type="button" variant="outline" className="w-full" onClick={() => void prepare()} disabled={!doc || preparing || redactions.length === 0 || redactions.length > PDF_LIMITS.maxRedactPages}>
+              {preparing ? "Préparation…" : preparedOk ? "Préparer à nouveau" : "Préparer le biffage"}
+            </Button>
+            {prepError && <p className="text-xs text-red-700">{prepError}</p>}
+            {prepared && !preparedOk && <p className="text-xs text-amber-800">Les zones ont changé depuis la préparation : préparez à nouveau.</p>}
+            {preparedOk && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-slate-700">Aperçu des pages biffées : seul ce rendu sera conservé.</p>
+                <ul className="grid grid-cols-2 gap-2">
+                  {redactions.map((r) => (
+                    <li key={r.page} className="text-center">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={prepared.images[r.page]} alt={`Page ${r.page} biffée`} className="w-full rounded border border-slate-200" />
+                      <span className="text-[11px] text-slate-600">Page {r.page}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <FormulaireRetour action={redactPdfAction} className="space-y-2 border-t border-slate-200 pt-3">
+              <input type="hidden" name="pdfId" value={p.pdfId} />
+              <input type="hidden" name="baseRevisionId" value={p.revisionId} />
+              <input type="hidden" name="redactions" value={preparedOk ? redKey : ""} />
+              {preparedOk && redactions.map((r) => <input key={r.page} type="hidden" name={`img_${r.page}`} value={prepared.images[r.page]} />)}
+              <Button type="submit" className="w-full" disabled={!preparedOk}>Enregistrer la version {p.revisionNumber + 1} biffée</Button>
+            </FormulaireRetour>
+          </aside>
+        )}
+
         {/* Panneau « Remplir et signer » */}
         {editing && (
           <aside aria-labelledby={`${uid}-fs`} className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm lg:max-h-[78vh] lg:overflow-y-auto">
-            <h2 id={`${uid}-fs`} className="text-sm font-semibold text-slate-900">Remplir et signer</h2>
+            <h2 id={`${uid}-fs`} className="text-sm font-semibold text-slate-900">Remplir, signer, annoter</h2>
             <div>
-              <p className="mb-1.5 text-xs text-slate-600">Choisissez un outil puis cliquez sur la page à l&apos;endroit voulu.</p>
+              <p className="mb-1.5 text-xs text-slate-600">Choisissez un outil puis cliquez sur la page à l&apos;endroit voulu ; pour surligner ou encadrer, glissez sur la zone.</p>
               <div className="grid grid-cols-2 gap-1.5" role="group" aria-label="Éléments à poser">
                 {(Object.keys(OPERATION_LABEL) as OperationKind[]).map((k) => {
                   const Icon = TOOL_ICON[k]
@@ -413,7 +603,7 @@ export function StudioPdfWorkspace(p: StudioPdfWorkspaceProps) {
                 <div className="flex items-center gap-1">
                   <span className="text-xs text-slate-600">Taille</span>
                   <Button type="button" size="sm" variant="outline" onClick={() => update(sel.id, (x) => resizeItem(x, -1))} aria-label="Réduire"><Minus aria-hidden="true" className="h-3.5 w-3.5" /></Button>
-                  <span className="min-w-10 text-center text-xs tabular-nums text-slate-700">{sel.kind === "signature" ? `${Math.round(sel.width / 100)} %` : sel.kind === "check" ? `${Math.round(sel.size / 10) / 10} %` : `${sel.size} pt`}</span>
+                  <span className="min-w-10 text-center text-xs tabular-nums text-slate-700">{sel.kind === "signature" ? `${Math.round(sel.width / 100)} %` : sel.kind === "check" ? `${Math.round(sel.size / 10) / 10} %` : sel.kind === "highlight" || sel.kind === "box" ? `${Math.round(sel.w / 100)} %` : `${sel.size} pt`}</span>
                   <Button type="button" size="sm" variant="outline" onClick={() => update(sel.id, (x) => resizeItem(x, 1))} aria-label="Agrandir"><Plus aria-hidden="true" className="h-3.5 w-3.5" /></Button>
                   <Button type="button" size="sm" variant="outline" className="ml-auto text-red-700" onClick={() => remove(sel.id)}><Trash2 aria-hidden="true" className="mr-1 h-3.5 w-3.5" />Retirer</Button>
                 </div>

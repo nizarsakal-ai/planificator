@@ -105,7 +105,7 @@ describe("actions G : retour par état", () => {
     assert.doesNotMatch(c, /revalidatePath|from "next\/cache"/)
     assert.equal((c.match(/redirect\(/g) ?? []).length, 1)
     assert.ok(c.includes(`if (e instanceof StudioAccessError && e.reason === "UNAUTHENTICATED") redirect("/login")`))
-    for (const n of ["createTemplateAction", "updateDraftAction", "createDraftAction", "publishVersionAction", "generateDocumentAction", "approveDocumentAction", "rejectDocumentAction", "importPdfAction", "fillSignPdfAction", "organizePdfAction", "extractPagesAction", "combinePdfsAction"]) {
+    for (const n of ["createTemplateAction", "updateDraftAction", "createDraftAction", "publishVersionAction", "generateDocumentAction", "approveDocumentAction", "rejectDocumentAction", "importPdfAction", "fillSignPdfAction", "organizePdfAction", "extractPagesAction", "combinePdfsAction", "redactPdfAction"]) {
       assert.match(c, new RegExp(`export async function ${n}\\(a: RetourAction \\| FormData, b\\?: FormData\\) \\{\\n  const form = formulaireDe\\(a, b\\)\\n  return run\\(`), n)
     }
     assert.ok(c.includes("cible: ficheModele(r.value.templateId)"), "cible du modèle issue du service")
@@ -113,7 +113,8 @@ describe("actions G : retour par état", () => {
     // Espace PDF (lots 1 et 2) : l'import et l'enregistrement d'une version ouvrent la fiche du PDF (identifiant issu du service).
     assert.ok(c.includes("cible: fichePdf(r.value.pdfId)") && c.includes("cible: fichePdf(pdfId)"), "cible de la fiche PDF")
     // Lot 3 : organiser (fiche du PDF), extraire et combiner (fiche du NOUVEAU PDF, identifiant issu du service).
-    assert.equal((c.match(/cible: /g) ?? []).length, 7, "modèle, génération, import, remplir, organiser, extraire, combiner")
+    // Lot 4 : biffer (fiche du PDF).
+    assert.equal((c.match(/cible: /g) ?? []).length, 8, "modèle, génération, import, remplir, organiser, extraire, combiner, biffer")
     assert.ok(c.includes(`if (str(form, "confirm", 5) !== "oui") return { ok: false, error: "Cochez la confirmation de publication." }`))
     assert.ok(c.includes(`if (str(form, "confirm", 5) !== "oui") return { ok: false, error: "Cochez la confirmation de validation." }`))
     assert.ok(c.includes("await requireStudioAdmin()"))
