@@ -22,6 +22,7 @@ import type { PrismaClient } from "@prisma/client"
 import { ConnectorSourceError, SYNC_ERROR_LABEL, toErrorCode, type SyncErrorCode } from "@/lib/connectors/connectors.core"
 import type { ConnectorContext } from "@/lib/connectors/connectors.service"
 import { liveGetJson, nativeFetch, type FetchLike } from "@/lib/integration/connectors/live/live-http"
+import { checkCredentialAttemptLimit } from "@/lib/integration/connectors/live/live-rate-limits"
 import {
   activateCredential, assignCredentialsRef, failCredential, resolveCredential, storeCredential, type SecretProviderDeps,
 } from "@/lib/integration/persistence/secret-provider.service"
@@ -211,6 +212,9 @@ export async function completeGoogleCalendarOAuth(
   const conn = await d.ensureConnection({ calendarId: "primary" })
   if (!conn.ok) return { ok: false, message: conn.error }
   const connectionId = conn.value
+  // LOT-8D (§25) : même verrou et même borne que la saisie d'identifiants.
+  const limited = await checkCredentialAttemptLimit(db, ctx, connectionId, now)
+  if (limited) return { ok: false, message: limited }
   if (!tokens.refreshToken) {
     // §11 : pas de refresh token ⇒ état clair, reconnexion demandée ; rien n'est stocké.
     await db.integrationConnection.updateMany({ where: { id: connectionId, companyId: ctx.companyId, status: { not: "ACTIVE" } }, data: { status: "PENDING_AUTH", lastStableErrorCode: "AUTH_FAILED" } })
