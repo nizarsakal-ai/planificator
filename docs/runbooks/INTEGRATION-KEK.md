@@ -40,6 +40,13 @@ Va dans Vercel, projet **planificator**, puis Settings → Environment Variables
 4. Ajoute `INTEGRATION_KEK_K2026A` = cette seconde clé, pour **Preview** seulement, en type *Sensitive*.
 5. Relance le dernier déploiement pour que les variables soient prises en compte.
 
+## 2 bis. Activer les connexions réelles (LOT-8B)
+
+- Après les KEK, poser `CONNECTOR_LIVE_ENABLED=true` (Production) dans Vercel, puis redéployer.
+- Sans ce drapeau, le formulaire d'identifiants n'apparaît pas et aucun connecteur ne peut passer en connexion réelle.
+- Sans KEK valides, l'enregistrement est refusé avec « Le coffre à secrets n'est pas configuré sur ce serveur ».
+- Retour arrière : retirer le drapeau ; les connecteurs déjà en connexion réelle refusent alors de se synchroniser.
+
 ## 3. Rotation d'une KEK (§6.2)
 
 1. Génère une nouvelle clé et ajoute-la sous un nouvel identifiant, par exemple `INTEGRATION_KEK_K2027A`. **Ne retire pas** l'ancienne.

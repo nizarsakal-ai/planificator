@@ -42,9 +42,10 @@ describe("migration du lot F", () => {
     assert.match(sql, /^COMMIT;$/m)
     assert.doesNotMatch(sql, /integration_connections|integration_inbound_envelopes|agent_principals/, "plateforme existante intacte")
   })
-  it("aucun mode de connexion réelle : l'énumération n'a que DISABLED et SIMULATION ; journal en simulation seulement", () => {
+  it("lot F d'origine : l'énumération créée n'a que DISABLED et SIMULATION ; journal en simulation seulement", () => {
     assert.match(sql, /CREATE TYPE "ConnectorMode" AS ENUM \('DISABLED', 'SIMULATION'\);/)
-    assert.match(schema, /enum ConnectorMode \{\n  DISABLED\n  SIMULATION\n\}/)
+    // LOT-8B : LIVE ajouté par une migration dédiée (voir le bloc « connexion réelle » ci-dessous).
+    assert.match(schema, /enum ConnectorMode \{\n  DISABLED\n  SIMULATION\n(?:  \/\/\/[^\n]*\n)?  LIVE\n\}/)
     assert.match(sql, /"mode" = 'SIMULATION'\n  AND "connectorKey" IN/)
     assert.match(sql, /connector is not in simulation mode/)
     assert.ok(schema.includes(MARKER), "marqueur du lot F présent")
