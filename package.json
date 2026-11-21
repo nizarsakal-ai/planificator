@@ -38,6 +38,8 @@
     "test:secrets:pg": "node --import tsx --test --test-concurrency=1 tests/integration/secrets/pg/secret-provider.pg.test.ts",
     "test:live-connectors": "node --import tsx --test tests/integration/connectors/live/live-connectors.test.ts",
     "test:live-connectors:pg": "node --import tsx --test --test-concurrency=1 tests/integration/connectors/live/pg/live-connectors.pg.test.ts",
+    "test:google-calendar": "node --import tsx --test tests/integration/connectors/live/google-calendar.test.ts",
+    "test:google-calendar:pg": "node --import tsx --test --test-concurrency=1 tests/integration/connectors/live/pg/google-calendar.pg.test.ts",
     "test:billing:pdf": "node --import tsx --test tests/billing/pdf/document-pdf.test.ts tests/billing/pdf/design.test.ts tests/billing/pdf/options.test.ts",
     "test:billing:pdf:pg": "node --import tsx --test --test-concurrency=1 tests/billing/pdf/pg/design.pg.test.ts",
     "test:billing:commercial": "node --import tsx --test tests/billing/commercial/delivery-unit.test.ts",

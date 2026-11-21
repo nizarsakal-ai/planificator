@@ -99,6 +99,8 @@ jobs:
           sh tests/billing/pg/with-disposable-db.sh ci_secrets npm run -s test:secrets:pg | tee ci-evidence/secrets-pg.log
           npm run -s test:live-connectors | tee ci-evidence/live-connectors.log
           sh tests/billing/pg/with-disposable-db.sh ci_live_connectors npm run -s test:live-connectors:pg | tee ci-evidence/live-connectors-pg.log
+          npm run -s test:google-calendar | tee ci-evidence/google-calendar.log
+          sh tests/billing/pg/with-disposable-db.sh ci_google_calendar npm run -s test:google-calendar:pg | tee ci-evidence/google-calendar-pg.log
       - name: PostgreSQL non-regression
         env:
           NODE_ENV: test

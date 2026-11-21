@@ -49,7 +49,9 @@ export class ConnectorSourceError extends Error {
 }
 export const toErrorCode = (e: unknown): SyncErrorCode => (e instanceof ConnectorSourceError ? e.code : "INTERNAL_ERROR")
 
-const CURSOR = /^[A-Za-z0-9:_-]{1,200}$/
+// LOT-8C : 1 000 caractères au plus (les jetons de page et de synchronisation de Google Agenda, encodés en base64url,
+// dépassent parfois 200) ; même alphabet fermé, et la base borne toujours le curseur entier à 4 000 caractères.
+const CURSOR = /^[A-Za-z0-9:_-]{1,1000}$/
 export type Watermark = Record<string, string>
 
 /** Lit un curseur stocké ; toute forme inattendue est refusée (jamais d'interprétation tolérante). */
@@ -117,7 +119,11 @@ export const emptyCounts = (): SyncCounts => ({ received: 0, created: 0, updated
  * La base porte la même liste (CHECK `connector_settings_live_check`). Le réseau et les identifiants ne vivent pas dans
  * ce module : voir `src/lib/integration/connectors/live/`.
  */
-export const LIVE_CONNECTOR_KEYS = ["shopify", "mailchimp", "slack"] as const
+// LOT-8C : Google Agenda, par OAuth (refresh token dans le coffre, jeton d'accès en mémoire seulement).
+export const LIVE_CONNECTOR_KEYS = ["shopify", "mailchimp", "slack", "google_calendar"] as const
+/** Connexions réelles autorisées par OAuth (bouton « Se connecter avec Google ») plutôt que par saisie d'identifiants. */
+export const OAUTH_LIVE_KEYS = ["google_calendar"] as const
+export const isOAuthLiveKey = (k: string): k is (typeof OAUTH_LIVE_KEYS)[number] => (OAUTH_LIVE_KEYS as readonly string[]).includes(k)
 export type LiveConnectorKey = (typeof LIVE_CONNECTOR_KEYS)[number]
 export const isLiveConnectorKey = (k: string): k is LiveConnectorKey => (LIVE_CONNECTOR_KEYS as readonly string[]).includes(k)
 export type ConnectorModeValue = "DISABLED" | "SIMULATION" | "LIVE"

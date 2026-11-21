@@ -12,7 +12,8 @@ import { SYNC_ERROR_CODES, SYNC_ERROR_LABEL, type SyncErrorCode } from "@/lib/co
 import { listStagedRecords, loadConnectorCenter } from "@/lib/connectors/queries"
 import { configureLiveConnectorAction, resetConnectorWatermarkAction, revokeLiveConnectorAction, setConnectorModeAction, syncConnectorAction } from "@/lib/actions/connector.actions"
 import { isConnectorLiveEnabled } from "@/lib/connectors/connector-feature-flag"
-import { isLiveConnectorKey } from "@/lib/connectors/connectors.core"
+import { isLiveConnectorKey, isOAuthLiveKey } from "@/lib/connectors/connectors.core"
+import { isGoogleCalendarOAuthConfigured } from "@/lib/integration/connectors/oauth/google-calendar-oauth"
 import { LIVE_FIELDS } from "@/lib/integration/connectors/live/live-catalog"
 import { loadLiveStatus } from "@/lib/integration/connectors/live/live-connection.service"
 import { Button } from "@/components/ui/button"
@@ -34,6 +35,7 @@ export default async function ConnectorCenterPage({ searchParams }: { searchPara
   // LOT-8B : état des identifiants (indice et configuration non secrète seulement), si le drapeau est actif.
   const liveEnabled = isConnectorLiveEnabled()
   const live = liveEnabled ? await loadLiveStatus(prisma, ctx.companyId) : null
+  const googleOAuthReady = liveEnabled && isGoogleCalendarOAuthConfigured()
   const preview = typeof params.apercu === "string" && isConnectorKey(params.apercu) ? params.apercu : null
   const records = preview ? await listStagedRecords(prisma, ctx.companyId, preview) : []
 
@@ -42,7 +44,7 @@ export default async function ConnectorCenterPage({ searchParams }: { searchPara
     <div className="space-y-4">
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900"><PlugZap className="h-6 w-6 text-[#0f3460]" /> Centre de connecteurs</h1>
-        <p className="mt-1 text-sm text-slate-500">Services externes (commerce, paiement, marketing, messagerie, ChatGPT, agenda, e-mail, documents). Chacun peut être testé avec des données fictives{liveEnabled ? " ; Shopify, Mailchimp et Slack peuvent aussi être branchés pour de vrai, en lecture seule" : ""}. Les données reçues sont mises de côté sans toucher à vos données.</p>
+        <p className="mt-1 text-sm text-slate-500">Services externes (commerce, paiement, marketing, messagerie, ChatGPT, agenda, e-mail, documents). Chacun peut être testé avec des données fictives{liveEnabled ? " ; Shopify, Mailchimp, Slack et Google Agenda peuvent aussi être branchés pour de vrai, en lecture seule" : ""}. Les données reçues sont mises de côté sans toucher à vos données.</p>
       </div>
       <MessageRetour><StockFlash params={params} /></MessageRetour>
       <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -67,6 +69,14 @@ export default async function ConnectorCenterPage({ searchParams }: { searchPara
             {ls ? (
               <div className="space-y-2 rounded-md border border-slate-200 p-2">
                 <p className="text-xs text-slate-600">Connexion réelle (lecture seule) : {ls.usable ? <strong>identifiants vérifiés{ls.hint ? `, se terminant par ${ls.hint}` : ""}</strong> : ls.configured ? <strong>identifiants à renouveler ({ls.credentialStatus === "REVOKED" ? "révoqués" : "non valides"})</strong> : <strong>aucun identifiant enregistré</strong>}{Object.keys(ls.config).length > 0 ? ` · ${Object.values(ls.config).join(" · ")}` : ""}.</p>
+                {isOAuthLiveKey(c.def.key) ? (
+                  googleOAuthReady ? (
+                    // LOT-8C : lien HTML natif vers le démarrage OAuth (navigation du document, aucune saisie d'identifiant).
+                    <p className="text-xs"><a href="/api/connecteurs/google-agenda/connect" className="font-medium text-[#0f3460] underline">{ls.usable ? "Reconnecter avec Google" : "Se connecter avec Google"}</a> <span className="text-slate-500">· lecture seule de votre agenda principal (titre, début, fin, lieu) ; aucun participant, aucune description, aucun envoi.</span></p>
+                  ) : (
+                    <p className="text-xs text-slate-500">Connexion Google indisponible : le client OAuth dédié n&apos;est pas configuré sur ce serveur.</p>
+                  )
+                ) : (
                 <details>
                   <summary className="cursor-pointer text-xs text-[#0f3460] underline">{ls.usable ? "Remplacer les identifiants" : "Enregistrer les identifiants"}</summary>
                   <FormulaireRetour action={configureLiveConnectorAction} className="mt-2 space-y-2"><input type="hidden" name="connectorKey" value={c.def.key} />
@@ -79,6 +89,7 @@ export default async function ConnectorCenterPage({ searchParams }: { searchPara
                     <Button type="submit" size="sm" variant="outline">Vérifier et enregistrer</Button>
                   </FormulaireRetour>
                 </details>
+                )}
                 {ls.configured && ls.credentialStatus === "ACTIVE" && (
                   <FormulaireRetour action={revokeLiveConnectorAction} className="flex items-center gap-1"><input type="hidden" name="connectorKey" value={c.def.key} />
                     <Button type="submit" size="sm" variant="outline">Révoquer les identifiants</Button>

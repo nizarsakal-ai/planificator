@@ -91,7 +91,7 @@ describe("curseurs", () => {
   it("lecture stricte : ressources du connecteur seulement, curseurs bornés ; sérialisation canonique", () => {
     assert.deepEqual(parseWatermark(shopify, null), {})
     assert.deepEqual(parseWatermark(shopify, '{"orders":"seq:12","customers":"seq:3"}'), { orders: "seq:12", customers: "seq:3" })
-    for (const bad of ["{", "[]", "null", '{"payments":"seq:1"}', '{"orders":12}', '{"orders":"seq 1"}', `{"orders":"${"x".repeat(201)}"}`]) {
+    for (const bad of ["{", "[]", "null", '{"payments":"seq:1"}', '{"orders":12}', '{"orders":"seq 1"}', `{"orders":"${"x".repeat(1001)}"}`]) { // LOT-8C : curseurs bornés à 1 000 caractères (jetons Google)
       assert.throws(() => parseWatermark(shopify, bad), (e: unknown) => e instanceof ConnectorSourceError && e.code === "WATERMARK_INVALID", bad)
     }
     assert.equal(serializeWatermark({ orders: "seq:2", customers: "seq:1" }), '{"customers":"seq:1","orders":"seq:2"}')

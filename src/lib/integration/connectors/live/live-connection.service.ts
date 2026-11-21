@@ -10,7 +10,8 @@
  * révoquée et la connexion désactivée.
  */
 import type { PrismaClient } from "@prisma/client"
-import { CONNECTOR_ERRORS, LIVE_CONNECTOR_KEYS, SYNC_ERROR_LABEL, isLiveConnectorKey, toErrorCode, type LiveConnectorKey } from "@/lib/connectors/connectors.core"
+import { CONNECTOR_ERRORS, LIVE_CONNECTOR_KEYS, SYNC_ERROR_LABEL, isLiveConnectorKey, isOAuthLiveKey, toErrorCode, type LiveConnectorKey } from "@/lib/connectors/connectors.core"
+import { revokeGoogleCalendarRemotely, type TokenPost } from "@/lib/integration/connectors/oauth/google-calendar-oauth"
 import { linkConnectorConnection, readConnectorSetting, setConnectorMode, type ConnectorContext, type ConnectorResult } from "@/lib/connectors/connectors.service"
 import { parseLiveCredentials } from "@/lib/integration/connectors/live/live-catalog"
 import { nativeFetch, type FetchLike } from "@/lib/integration/connectors/live/live-http"
@@ -19,14 +20,19 @@ import { activateCredential, assignCredentialsRef, failCredential, revokeCredent
 import { SecretProviderError } from "@/lib/integration/secrets/secret-errors"
 
 type Db = PrismaClient
-export interface LiveDeps { fetch?: FetchLike; secrets?: SecretProviderDeps; now?: () => Date; sleep?: (ms: number) => Promise<void> }
+export interface LiveDeps { fetch?: FetchLike; secrets?: SecretProviderDeps; now?: () => Date; sleep?: (ms: number) => Promise<void>; tokenPost?: TokenPost; env?: Record<string, string | undefined> }
 
 export const LIVE_ERRORS = {
   vaultUnavailable: "Le coffre à secrets n'est pas configuré sur ce serveur : enregistrement impossible.",
   notConfigured: "Aucun identifiant enregistré pour ce service.",
 } as const
 
-const DISPLAY_NAME: Record<LiveConnectorKey, string> = { shopify: "Shopify (lecture seule)", mailchimp: "Mailchimp (lecture seule)", slack: "Slack (lecture seule)" }
+const DISPLAY_NAME: Record<LiveConnectorKey, string> = { shopify: "Shopify (lecture seule)", mailchimp: "Mailchimp (lecture seule)", slack: "Slack (lecture seule)", google_calendar: "Google Agenda (lecture seule)" }
+
+/** Connexion de plateforme du connecteur : créée une fois, liée une fois au réglage (aussi utilisée par l'OAuth, LOT-8C). */
+export async function ensureLiveConnection(db: Db, ctx: ConnectorContext, key: LiveConnectorKey, config: Record<string, string>, now: Date): Promise<ConnectorResult<string>> {
+  return ensureConnection(db, ctx, key, config, now)
+}
 
 async function ensureConnection(db: Db, ctx: ConnectorContext, key: LiveConnectorKey, config: Record<string, string>, now: Date): Promise<ConnectorResult<string>> {
   const s = await readConnectorSetting(db, ctx, key)
@@ -85,6 +91,8 @@ export async function revokeLiveConnector(db: Db, ctx: ConnectorContext, rawKey:
     const r = await setConnectorMode(db, ctx, rawKey, "DISABLED", (d.now ?? (() => new Date()))())
     if (!r.ok) return r
   }
+  // LOT-8C : pour Google Agenda, l'autorisation est aussi retirée chez Google, au mieux, AVANT la révocation locale.
+  if (isOAuthLiveKey(rawKey)) await revokeGoogleCalendarRemotely(db, ctx, s.connectionId, { post: d.tokenPost, secrets: d.secrets })
   try {
     await revokeCredential(db, { companyId: ctx.companyId, connectionId: s.connectionId, actorId: ctx.userId, reasonCode: "ADMIN_REVOKED" }, d.secrets)
   } catch (e) {
