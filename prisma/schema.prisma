@@ -2371,11 +2371,85 @@ model IntegrationConnection {
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   inboundEnvelopes InboundEnvelope[]
+  credentialVersions IntegrationCredentialVersion[]
 
   @@unique([id, companyId])
   @@index([companyId, status])
   @@index([companyId, connectorType])
   @@map("integration_connections")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INTEGRATION PLATFORM — LOT-8A (21/11/2026) — Coffre à secrets PLATFORM_ENCRYPTED (SECURITY-SPEC §5 à §12, §18).
+// Chiffrement d'enveloppe : une DEK aléatoire par version (AES-256-GCM), enveloppée par une KEK hors base (env serveur).
+// La base seule ne permet aucun déchiffrement. AAD figé à la création (companyId, connectionId, credentialsRef,
+// secretKind, environment, secretVersion). Au plus une version ACTIVE par credentialsRef (index partiel, migration).
+// Matériel chiffré immuable ; aucune suppression ; journal d'audit en ajout seul, sans aucune valeur secrète.
+// ═══════════════════════════════════════════════════════════════════════════
+enum IntegrationCredentialVersionStatus {
+  PENDING
+  ACTIVE
+  REVOKED
+  RETIRED
+  FAILED
+  DESTROYED
+}
+
+enum IntegrationSecretKind {
+  API_KEY
+  OAUTH_REFRESH_TOKEN
+  CONNECTOR_OTHER
+}
+
+model IntegrationCredentialVersion {
+  id             String                             @id @default(cuid())
+  companyId      String
+  connectionId   String
+  credentialsRef String
+  secretKind     IntegrationSecretKind
+  environment    String
+  secretVersion  Int
+  status         IntegrationCredentialVersionStatus @default(PENDING)
+  keyId          String
+  encVersion     Int
+  wrappedDek     Bytes
+  dekNonce       Bytes
+  dekTag         Bytes
+  ciphertext     Bytes
+  nonce          Bytes
+  tag            Bytes
+  hint           String?
+  createdById    String
+  createdAt      DateTime                           @default(now())
+  activatedAt    DateTime?
+  retiredAt      DateTime?
+  revokedAt      DateTime?
+  revokedReason  String?
+  failedAt       DateTime?
+
+  connection IntegrationConnection @relation(fields: [connectionId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([companyId, id])
+  @@unique([companyId, credentialsRef, secretVersion])
+  @@index([companyId, connectionId])
+  @@map("integration_credential_versions")
+}
+
+model IntegrationSecretAuditLog {
+  id             String   @id @default(cuid())
+  companyId      String
+  connectionId   String
+  credentialsRef String?
+  action         String
+  outcome        String
+  reasonCode     String?
+  secretVersion  Int?
+  environment    String
+  actorId        String
+  createdAt      DateTime @default(now())
+
+  @@index([companyId, connectionId, createdAt])
+  @@map("integration_secret_audit_logs")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
