@@ -44,9 +44,15 @@ export async function cancelClientOrderAction(orderId: unknown): Promise<Result>
   return run(async (ctx) => {
     const r = await cancelClientOrder(prisma, ctx, p.data, new Date())
     if (!r.ok) return r
-    revalidatePath(`/bons-de-commande/${p.data}`); revalidatePath("/bons-de-commande")
+    revalidatePath(`/bons-de-commande/${p.data}`); revalidatePath("/bons-de-commande"); revalidatePath("/devis/[id]", "page")
     return { ok: true }
   })
+}
+
+/** Liste des BL et fiches d'origine (devis, facture, bon de commande) dont l'encart liste les bons. */
+function revalidateDeliverySources() {
+  revalidatePath("/bons-de-livraison")
+  for (const p of ["/devis/[id]", "/factures/[id]", "/bons-de-commande/[id]"]) revalidatePath(p, "page")
 }
 
 const deliverySchema = z.object({
@@ -59,7 +65,7 @@ export async function createDeliveryNoteAction(raw: unknown): Promise<Result<{ i
   return run(async (ctx) => {
     const r = await createDeliveryNote(prisma, ctx, p.data.sourceType, p.data.sourceId, { deliveryDate: toDate(p.data.deliveryDate), deliveryAddress: p.data.deliveryAddress, notes: p.data.notes, delivered: p.data.delivered })
     if (!r.ok) return r
-    revalidatePath("/bons-de-livraison")
+    revalidateDeliverySources()
     return { ok: true, ...r.value }
   })
 }
@@ -71,7 +77,7 @@ export async function recordDeliveryReceiptAction(raw: unknown): Promise<Result>
   return run(async (ctx) => {
     const r = await recordDeliveryReceipt(prisma, ctx, p.data.noteId, p.data.receivedByName, toDate(p.data.receivedAt))
     if (!r.ok) return r
-    revalidatePath(`/bons-de-livraison/${p.data.noteId}`); revalidatePath("/bons-de-livraison")
+    revalidatePath(`/bons-de-livraison/${p.data.noteId}`); revalidateDeliverySources()
     return { ok: true }
   })
 }
@@ -82,7 +88,7 @@ export async function cancelDeliveryNoteAction(noteId: unknown): Promise<Result>
   return run(async (ctx) => {
     const r = await cancelDeliveryNote(prisma, ctx, p.data, new Date())
     if (!r.ok) return r
-    revalidatePath(`/bons-de-livraison/${p.data}`); revalidatePath("/bons-de-livraison")
+    revalidatePath(`/bons-de-livraison/${p.data}`); revalidateDeliverySources()
     return { ok: true }
   })
 }

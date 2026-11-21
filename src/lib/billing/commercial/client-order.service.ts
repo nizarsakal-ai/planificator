@@ -73,8 +73,14 @@ export async function createClientOrderFromQuote(db: Db, ctx: CommercialContext,
   }
 }
 
+/** Verrou de ligne (FOR UPDATE) sur un bon de commande de la société ; sans effet s'il n'existe pas. */
+export async function lockClientOrder(tx: Prisma.TransactionClient, companyId: string, orderId: string): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM client_orders WHERE id = ${orderId} AND "companyId" = ${companyId} FOR UPDATE`
+}
+
 export async function cancelClientOrder(db: Db, ctx: CommercialContext, orderId: string, now: Date): Promise<LifecycleResult> {
   return db.$transaction(async (tx) => {
+    await lockClientOrder(tx, ctx.companyId, orderId)
     const o = await tx.clientOrder.findFirst({ where: { id: orderId, companyId: ctx.companyId }, select: { id: true, number: true, status: true } })
     if (!o) return { ok: false as const, error: CLIENT_ORDER_ERRORS.notFound }
     if (o.status === "CANCELLED") return { ok: false as const, error: CLIENT_ORDER_ERRORS.notCancellable }

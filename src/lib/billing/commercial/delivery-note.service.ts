@@ -8,7 +8,7 @@ import type { Prisma, PrismaClient } from "@prisma/client"
 import type { LifecycleResult } from "@/lib/billing/quotes/quote-lifecycle.core"
 import { nextDocumentNumber } from "@/lib/billing/numbering"
 import { MoneyError, decimalToCents, hundredthsToDecimalString, parseQuantityToHundredths } from "@/lib/billing/money"
-import type { CommercialContext } from "./client-order.service"
+import { lockClientOrder, type CommercialContext } from "./client-order.service"
 
 type Db = PrismaClient
 type Tx = Prisma.TransactionClient
@@ -17,7 +17,7 @@ export type DeliverySourceType = "QUOTE" | "INVOICE" | "CLIENT_ORDER"
 export const DELIVERY_ERRORS = {
   sourceNotFound: "Document d'origine introuvable.",
   quoteNotAccepted: "Seul un devis accepté (ou converti) peut être livré.",
-  invoiceNotIssued: "Seule une facture émise (hors avoir et brouillon) peut être livrée.",
+  invoiceNotIssued: "Seule une facture émise (hors avoir, acompte et brouillon) peut être livrée.",
   orderCancelled: "Ce bon de commande est annulé.",
   noLines: "Le document d'origine ne comporte aucune ligne à livrer.",
   quantityInvalid: "Quantité livrée invalide (nombre positif, deux décimales au plus).",
@@ -43,7 +43,7 @@ async function loadSource(tx: Tx | Db, companyId: string, type: DeliverySourceTy
   if (type === "INVOICE") {
     const inv = await tx.invoice.findFirst({ where: { id, companyId }, select: { id: true, number: true, status: true, kind: true, clientId: true, worksiteId: true, deliveryAddress: true, client: { select: { deliveryAddress: true } }, lines: { ...lineSelect, where: { deductsDepositId: null } } } })
     if (!inv) return { ok: false, error: DELIVERY_ERRORS.sourceNotFound }
-    if (inv.kind === "CREDIT_NOTE" || inv.status === "DRAFT" || inv.status === "CANCELLED") return { ok: false, error: DELIVERY_ERRORS.invoiceNotIssued }
+    if (inv.kind !== "INVOICE" || inv.status === "DRAFT" || inv.status === "CANCELLED") return { ok: false, error: DELIVERY_ERRORS.invoiceNotIssued }
     return { ok: true, value: { type, id: inv.id, label: `facture ${inv.number}`, clientId: inv.clientId, worksiteId: inv.worksiteId, clientDeliveryAddress: inv.client.deliveryAddress, preferredAddress: inv.deliveryAddress, lines: inv.lines } }
   }
   const o = await tx.clientOrder.findFirst({ where: { id, companyId }, select: { id: true, number: true, status: true, clientId: true, worksiteId: true, deliveryAddress: true, client: { select: { deliveryAddress: true } }, lines: lineSelect } })
@@ -80,6 +80,8 @@ export interface DeliveryNoteInput { deliveryDate: Date; deliveryAddress: string
 
 export async function createDeliveryNote(db: Db, ctx: CommercialContext, type: DeliverySourceType, sourceId: string, input: DeliveryNoteInput): Promise<LifecycleResult<{ id: string; number: string }>> {
   return db.$transaction(async (tx) => {
+    // Verrou du bon de commande : sérialise avec son annulation (jamais de BL actif sur un BC annulé).
+    if (type === "CLIENT_ORDER") await lockClientOrder(tx, ctx.companyId, sourceId)
     const src = await loadSource(tx, ctx.companyId, type, sourceId)
     if (!src.ok) return src
     const s = src.value

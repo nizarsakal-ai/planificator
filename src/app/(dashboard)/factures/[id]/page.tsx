@@ -50,8 +50,8 @@ export default async function FactureDetailPage({ params }: { params: Promise<{ 
         </div>
       </div>
       {invDesign && settings && <DocumentDesignCard key={JSON.stringify([invDesign, settings.pdfDesign])} kind="invoice" id={inv.id} documentDesign={designFromStored(invDesign)} companyDesign={settings.pdfDesign} bankAvailable={!!settings.iban} pdfHref={`/api/pdf/facture/${inv.id}`} />}
-      {/* 21/11/2026 — bons de livraison : sur une facture émise (hors avoir). */}
-      <CommercialLinksCard companyId={ctx.companyId} source="INVOICE" id={inv.id} canDeliver={inv.kind !== "CREDIT_NOTE" && inv.status !== "DRAFT" && inv.status !== "CANCELLED"} canOrder={false} defaultAddress="" />
+      {/* 21/11/2026 — bons de livraison : sur une facture émise (hors avoir et acompte). */}
+      <CommercialLinksCard companyId={ctx.companyId} source="INVOICE" id={inv.id} canDeliver={inv.kind === "INVOICE" && inv.status !== "DRAFT" && inv.status !== "CANCELLED"} canOrder={false} defaultAddress="" />
       {blockers.length > 0 && <Card className="border-amber-300"><CardContent className="p-4 text-sm text-amber-800"><p className="font-medium">Avant émission, corrigez :</p><ul className="list-disc pl-5">{blockers.map((b) => <li key={b.code}>{b.message}</li>)}</ul></CardContent></Card>}
 
       <div className="grid gap-3 md:grid-cols-3">

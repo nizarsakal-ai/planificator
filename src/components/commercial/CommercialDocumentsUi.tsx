@@ -10,7 +10,8 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
 import { cancelClientOrderAction, cancelDeliveryNoteAction, createClientOrderAction, createDeliveryNoteAction, recordDeliveryReceiptAction } from "@/lib/actions/commercial-documents.actions"
 
-const today = () => new Date().toISOString().slice(0, 10)
+/** Jour civil LOCAL (pas UTC : après minuit à Paris, toISOString donnerait la veille). */
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}` }
 const area = "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
 
 /** Création d'un bon de commande client depuis un devis accepté (formulaire repliable). */
