@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/build-vehicle-ocr-worker.mjs && next dev",
-    "build": "prisma generate && node scripts/build-vehicle-ocr-worker.mjs && next build",
+    "build": "node scripts/migrate-on-production-build.mjs && prisma generate && node scripts/build-vehicle-ocr-worker.mjs && next build",
+    "test:build:migrations": "node --import tsx --test tests/build/migrate-on-production-build.test.ts",
     "build:vehicle-ocr-worker": "node scripts/build-vehicle-ocr-worker.mjs",
     "verify:vehicle-ocr-worker": "node --import tsx scripts/verification/vehicle-ocr-worker-closure.ts",
     "test:vehicules:v3:ocr": "node --import tsx --test tests/vehicules/v3/ocr-isolation.test.ts tests/vehicules/v3/ocr-packaging.test.ts",

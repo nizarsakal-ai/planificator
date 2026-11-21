@@ -30,3 +30,9 @@
 - Facture électronique (Factur-X / plateforme agréée, réforme 2026) : chantier distinct.
 - Langue du document (anglais) : toutes les mentions légales à traduire et valider.
 - Adresse de livraison : nouveau champ client et mention à concevoir.
+
+## 5. Déploiement (21/11/2026)
+- Le build Vercel de **production** applique désormais les migrations en attente avant la compilation (`scripts/migrate-on-production-build.mjs`, appelé par `npm run build`).
+- Connexion directe Neon (`DIRECT_URL`, sinon `DATABASE_URL` sans « -pooler ») ; URL jamais journalisée.
+- Échec de migration ⇒ échec du build ⇒ le déploiement précédent reste en ligne. Previews et builds locaux : aucune migration. Secours : `SKIP_BUILD_MIGRATIONS=1`.
+
