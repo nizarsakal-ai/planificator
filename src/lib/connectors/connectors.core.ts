@@ -40,6 +40,7 @@ export const CONNECTOR_ERRORS = {
   sameMode: "Le connecteur est déjà dans ce mode.",
   notSimulation: "Activez d'abord la simulation : le connecteur est désactivé.",
   changedMeanwhile: "Le connecteur a été modifié entre-temps : rechargez la page.",
+  liveCooldown: "Une synchronisation réelle vient d'avoir lieu : patientez une minute avant la suivante.",
 } as const
 
 /** Erreur de source à code stable (le message est le code lui-même, jamais un texte externe). */

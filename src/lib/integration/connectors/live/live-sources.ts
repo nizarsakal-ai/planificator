@@ -1,7 +1,10 @@
 /**
  * PLAN-INTEGRATION-PLATFORM-001 — LOT-8B : sources RÉELLES en lecture seule, au format des éléments du lot F.
  *
- * - Shopify (Admin REST 2024-10) : commandes et clients, lecture incrémentale par `since_id` (curseur `sid:<id>`).
+ * - Shopify (Admin REST 2026-10) : commandes et clients, lecture incrémentale par `since_id` (curseur `sid:<id>`).
+ *   Correctifs du 22/11/2026 : version d'API prise en charge (2024-10 n'était plus servie par Shopify, qui retombe alors
+ *   sur la plus ancienne version supportée) ; commandes SANS donnée personnelle (le champ `customer` n'est plus demandé) ;
+ *   seau de débit lu (`X-Shopify-Shop-Api-Call-Limit`) : au-delà de 75 %, pause d'une seconde avant la requête suivante.
  * - Mailchimp (Marketing API 3.0) : membres d'une audience, relecture complète par pages (`off:<n>`, puis curseur effacé).
  * - Slack (Web API) : canaux publics non archivés, relecture complète (`nc:<curseur base64url>`, puis effacé). Aucun envoi.
  * Chaque élément est réduit aux champs utiles, sans caractère de contrôle, chaînes tronquées : il passe `checkItem` du lot F.
@@ -11,7 +14,20 @@ import { ConnectorSourceError, PAGE_SIZE, isValidCursor, type LiveConnectorKey, 
 import { liveHost, type LiveConfig } from "@/lib/integration/connectors/live/live-catalog"
 import { liveGetJson, type FetchLike } from "@/lib/integration/connectors/live/live-http"
 
-export const SHOPIFY_API_VERSION = "2024-10"
+// Dernière version stable au 22/11/2026, prise en charge au moins 12 mois (documentation Shopify « API versioning »).
+export const SHOPIFY_API_VERSION = "2026-10"
+/** Part du seau de débit Shopify à partir de laquelle on marque une pause avant la requête suivante. */
+export const SHOPIFY_THROTTLE_RATIO = 0.75
+export const SHOPIFY_THROTTLE_PAUSE_MS = 1000
+
+export interface LiveSourceOptions { sleep?: (ms: number) => Promise<void> }
+const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+/** « 32/40 » ⇒ 0,8 ; toute autre forme ⇒ 0. */
+export function bucketUsage(header: string | null): number {
+  const m = header ? /^(\d{1,4})\/(\d{1,4})$/.exec(header.trim()) : null
+  return m && Number(m[2]) > 0 ? Number(m[1]) / Number(m[2]) : 0
+}
 
 export interface LivePage { items: SourceItem[]; cursor: string | null; hasMore: boolean }
 export interface LiveSource {
@@ -44,27 +60,34 @@ function readCursor(prefix: string, cursor: string | null): string | null {
   return cursor.slice(prefix.length + 1)
 }
 
-function shopifySource(secret: string, config: LiveConfig, fetchImpl: FetchLike): LiveSource {
+function shopifySource(secret: string, config: LiveConfig, fetchImpl: FetchLike, opts: LiveSourceOptions): LiveSource {
   const host = liveHost("shopify", config)
   const headers = { "X-Shopify-Access-Token": secret }
   const base = `/admin/api/${SHOPIFY_API_VERSION}`
+  const sleep = opts.sleep ?? defaultSleep
+  let throttle = false
+  const onHeaders = (h: (name: string) => string | null) => { throttle = bucketUsage(h("x-shopify-shop-api-call-limit")) >= SHOPIFY_THROTTLE_RATIO }
+  const get = async (path: string, query: Record<string, string | number | undefined>) => {
+    if (throttle) await sleep(SHOPIFY_THROTTLE_PAUSE_MS)
+    return liveGetJson(fetchImpl, { host, path, query, headers, onHeaders })
+  }
   return {
-    async probe() { await liveGetJson(fetchImpl, { host, path: `${base}/shop.json`, query: { fields: "id" }, headers }) },
+    async probe() { await get(`${base}/shop.json`, { fields: "id" }) },
     async fetchPage(resource, cursor) {
       const since = readCursor("sid", cursor)
       if (since !== null && !/^\d{1,20}$/.test(since)) throw new ConnectorSourceError("WATERMARK_INVALID")
       if (resource === "orders") {
-        const j = await liveGetJson(fetchImpl, { host, path: `${base}/orders.json`, query: { status: "any", limit: PAGE_SIZE, since_id: since ?? undefined, fields: "id,name,created_at,total_price,currency,financial_status,customer" }, headers })
+        // Aucune donnée personnelle dans les commandes : le client est rattaché par la ressource « clients », pas ici.
+        const j = await get(`${base}/orders.json`, { status: "any", limit: PAGE_SIZE, since_id: since ?? undefined, fields: "id,name,created_at,total_price,currency,financial_status" })
         const rows = arrayOf(j.orders)
-        const items = rows.map((o): SourceItem => {
-          const c = (o.customer ?? {}) as Record<string, unknown>
-          const name = [c.first_name, c.last_name].filter((x) => typeof x === "string" && x).join(" ")
-          return { externalId: externalId(o.id), data: { number: text(o.name, 60), customer: text(name), totalCents: cents(o.total_price), currency: text(o.currency, 3), status: text(o.financial_status, 40), orderedOn: day(o.created_at) } }
-        })
+        const items = rows.map((o): SourceItem => ({
+          externalId: externalId(o.id),
+          data: { number: text(o.name, 60), totalCents: cents(o.total_price), currency: text(o.currency, 3), status: text(o.financial_status, 40), orderedOn: day(o.created_at) },
+        }))
         return page(items, since, "sid")
       }
       if (resource === "customers") {
-        const j = await liveGetJson(fetchImpl, { host, path: `${base}/customers.json`, query: { limit: PAGE_SIZE, since_id: since ?? undefined, fields: "id,first_name,last_name,email,orders_count" }, headers })
+        const j = await get(`${base}/customers.json`, { limit: PAGE_SIZE, since_id: since ?? undefined, fields: "id,first_name,last_name,email,orders_count" })
         const items = arrayOf(j.customers).map((c): SourceItem => ({
           externalId: externalId(c.id),
           data: { name: text([c.first_name, c.last_name].filter((x) => typeof x === "string" && x).join(" ")), email: text(c.email, 254), ordersCount: intOrNull(c.orders_count) },
@@ -135,9 +158,9 @@ function slackSource(secret: string, fetchImpl: FetchLike): LiveSource {
 }
 
 /** Source réelle d'un connecteur, à partir du secret résolu par le coffre et de la configuration validée. */
-export function createLiveSource(key: LiveConnectorKey, secret: string, config: LiveConfig, fetchImpl: FetchLike): LiveSource {
+export function createLiveSource(key: LiveConnectorKey, secret: string, config: LiveConfig, fetchImpl: FetchLike, opts: LiveSourceOptions = {}): LiveSource {
   switch (key) {
-    case "shopify": return shopifySource(secret, config, fetchImpl)
+    case "shopify": return shopifySource(secret, config, fetchImpl, opts)
     case "mailchimp": return mailchimpSource(secret, config, fetchImpl)
     case "slack": return slackSource(secret, fetchImpl)
   }

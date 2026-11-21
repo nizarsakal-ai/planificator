@@ -6,6 +6,8 @@
  * 3. Pages lues HORS transaction (au plus MAX_PAGES_PER_RESOURCE × PAGE_SIZE éléments par ressource).
  * 4. Écriture tout ou rien par `commitFetchedSync`, qui revérifie sous verrou le mode et le curseur lus en 1.
  * Tout échec est journalisé avec un code stable ; le message du service distant n'est jamais conservé.
+ * Correctif du 22/11/2026 (SECURITY-SPEC §25) : au plus une synchronisation réelle par minute et par connecteur, échecs
+ * compris (une limite 429 ne se relance pas en boucle) ; un refus pour délai n'est pas journalisé et ne touche à rien.
  */
 import { randomUUID } from "node:crypto"
 import type { PrismaClient } from "@prisma/client"
@@ -21,6 +23,7 @@ import { resolveSecretEnvironment } from "@/lib/integration/secrets/keyring"
 import { SecretProviderError } from "@/lib/integration/secrets/secret-errors"
 
 type Db = PrismaClient
+export const LIVE_SYNC_COOLDOWN_MS = 60_000
 
 const secretFailure = (e: SecretProviderError): SyncErrorCode => (e.code === "CONNECTION_AUTH_REVOKED" ? "AUTH_FAILED" : "REAL_CONNECTION_DISABLED")
 
@@ -32,6 +35,8 @@ export async function runLiveConnectorSync(db: Db, ctx: ConnectorContext, rawKey
   if (!s || s.mode !== "LIVE" || !s.connectionId) return { ok: false, error: CONNECTOR_ERRORS.notLive }
   const runId = randomUUID()
   const startedAt = clock()
+  const recent = await db.connectorSyncRun.findFirst({ where: { companyId: ctx.companyId, connectorKey: key, mode: "LIVE", startedAt: { gt: new Date(startedAt.getTime() - LIVE_SYNC_COOLDOWN_MS) } }, select: { id: true } })
+  if (recent) return { ok: false, error: CONNECTOR_ERRORS.liveCooldown }
   const failWith = async (code: SyncErrorCode): Promise<ConnectorResult<SyncSummary>> => {
     await recordFailedSync(db, ctx, key, "LIVE", code, startedAt, runId, clock)
     await db.integrationConnection.updateMany({ where: { id: s.connectionId!, companyId: ctx.companyId }, data: { lastFailedRunAt: clock(), lastStableErrorCode: code } })
@@ -53,7 +58,7 @@ export async function runLiveConnectorSync(db: Db, ctx: ConnectorContext, rawKey
   const resources: FetchedResource[] = []
   try {
     const wm = parseWatermark(def, s.watermark)
-    const source = createLiveSource(key, secret, config, d.fetch ?? nativeFetch)
+    const source = createLiveSource(key, secret, config, d.fetch ?? nativeFetch, { sleep: d.sleep })
     for (const r of def.resources) {
       let cursor: string | null = wm[r.key] ?? null
       const items: SourceItem[] = []
