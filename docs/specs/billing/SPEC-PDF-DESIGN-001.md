@@ -5,7 +5,7 @@
 | **Statut** | IN_REVIEW |
 | **Date** | 20/11/2026 |
 | **Décideur** | Nizar |
-| **Migration** | `20261120090000_billing_pdf_design` — additive (colonnes + 2 énumérations + CHECK des couleurs) |
+| **Migration** | `20261121100000_billing_pdf_design` — additive (colonnes + 2 énumérations + CHECK des couleurs) |
 
 ## 1. Décisions (validées le 20/11/2026)
 - **Portée** : tous les documents du gabarit commun (devis, factures, acomptes, avoirs).
