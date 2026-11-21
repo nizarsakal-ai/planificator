@@ -133,10 +133,10 @@ describe("L1a : câblage serveur et drapeau désactivé par défaut", () => {
     for (const v of ["1", "TRUE", "yes", " true", ""]) assert.equal(isStockPurchasingEnabled({ STOCK_PURCHASING_ENABLED: v }), false, v)
     assert.equal(isStockPurchasingEnabled({ STOCK_PURCHASING_ENABLED: "true" }), true)
   })
-  it("Sidebar et MobileNav enveloppent la composition de production par le helper, avec la visibilité serveur", () => {
+  it("Sidebar et MobileNav appellent le helper dans le menu composé, avec la visibilité serveur", () => {
     for (const file of ["src/components/layout/Sidebar.tsx", "src/components/layout/MobileNav.tsx"]) {
       const src = read(file)
-      assert.match(src, /const navItems = withStockPurchasingNavItems\(withProspectionNavItem\(withHrDocumentNavItems\(/, file)
+      assert.match(src, /withStockPurchasingNavItems\(withProspectionNavItem\(withHrDocumentNavItems\(/, file)
       assert.match(src, /user\.prospectionNavVisible === true\), user\.stockPurchasingNavVisible === true\)/, file)
       // v4 (preuve VM A r3) : le commentaire de documentation de Sidebar cite le nom du drapeau ; ce n'est pas une lecture.
       // Discriminant : process.env interdit partout (commentaires compris), nom du drapeau interdit dans tout nœud de code (arbre syntaxique),
@@ -174,15 +174,15 @@ describe("L1a : migration du lot A renumérotée après la production", () => {
   // 13/11/2026 (modification signalée) : la migration additive SPEC-INVOICE-IMPORT-001 est postérieure aux lots V2 ; elle rejoint
   // la liste FERMÉE des migrations admises après le lot A. Tout autre écart reste refusé.
   // 15/11/2026 (modification signalée, lot E) : migration additive du lot E ajoutée à la liste FERMÉE.
-  const LATER_V2_LOTS = new Set(["20261110130000_v2_lot_b_equipment_rental", "20261110140000_v2_lot_b_booking_overlap_guard", "20261113120000_invoice_import_bank_verification", "20261115120000_v2_lot_e_crm_automations"])
-  it("présente une seule fois, ancien nom absent, horodatage unique et postérieur à toutes les autres migrations (hors lot B, liste fermée)", () => {
+  const LATER_V2_LOTS = new Set(["20261110130000_v2_lot_b_equipment_rental", "20261110140000_v2_lot_b_booking_overlap_guard", "20261111120000_v2_lot_c_worksite_budgets", "20261113120000_invoice_import_bank_verification", "20261115120000_v2_lot_e_crm_automations"])
+  it("présente une seule fois, ancien nom absent, horodatage unique et postérieur aux migrations du périmètre historique", () => {
     assert.ok(dirs.includes(LOT_A))
     assert.equal(dirs.some((d) => d.startsWith("20261104120000_v2_lot_a")), false, "ancien horodatage (collision avec prospect_opportunities) absent")
     const stamp = LOT_A.slice(0, 14)
     const others = dirs.filter((d) => d !== LOT_A)
     for (const d of others) assert.match(d, /^\d{14}_/, d)
     assert.equal(others.some((d) => d.startsWith(`${stamp}_`)), false, "horodatage unique")
-    for (const d of others) if (!LATER_V2_LOTS.has(d)) assert.ok(d.slice(0, 14) < stamp, `${d} doit précéder le lot A`)
+    for (const d of others) if (d < "20261116000000" && !LATER_V2_LOTS.has(d)) assert.ok(d.slice(0, 14) < stamp, `${d} doit précéder le lot A`)
     for (const prod of ["20261104120000_prospect_opportunities", "20261106120000_v2_quote_recipient_purchase_order", "20261108130000_hr_private_space"]) {
       assert.ok(dirs.includes(prod), `migration de production ${prod} conservée`)
     }

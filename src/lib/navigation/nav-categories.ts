@@ -31,7 +31,7 @@ export const NAV_CATEGORY_DEFINITIONS: readonly NavCategoryDefinition[] = [
     hrefs: ["/mes-documents", "/rh/documents", "/employes", "/equipes", "/planning/equipe", "/absences", "/mes-absences", "/pointages", "/pointage", "/notes-de-frais", "/mes-notes-de-frais"],
   },
   { id: "commercial", label: "Commercial", icon: Handshake, hrefs: ["/clients", "/consultations", "/opportunites", "/articles"] },
-  { id: "finance", label: "Finance", icon: Calculator, hrefs: ["/devis", "/factures", "/factures/avoirs", "/comptabilite", "/factures-fournisseurs"] },
+  { id: "finance", label: "Finance", icon: Calculator, hrefs: ["/devis", "/factures", "/factures/avoirs", "/comptabilite", "/factures-fournisseurs", "/budgets"] },
   { id: "administration", label: "Administration", icon: Settings, hrefs: ["/super-admin/entreprises", "/parametres"] },
 ]
 

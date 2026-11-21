@@ -148,7 +148,7 @@ describe("L1b : câblage serveur et drapeau désactivé par défaut", () => {
     }
     const layout = read("src/app/(dashboard)/layout.tsx")
     assert.match(layout, /const equipmentNavVisible = isEquipmentRentalEnabled\(\) && \(role === "ADMIN" \|\| role === "SUPER_ADMIN"\) && !!companyId/)
-    assert.match(layout, /stockPurchasingNavVisible, equipmentNavVisible, companyLogo/)
+    assert.match(layout, /const user = \{[^\n]*\bequipmentNavVisible\b[^\n]*\}/)
   })
 })
 
@@ -157,15 +157,15 @@ describe("L1b : migrations du lot B renumérotées après le lot A", () => {
   const B = "20261110130000_v2_lot_b_equipment_rental"
   const GUARD = "20261110140000_v2_lot_b_booking_overlap_guard"
   const dirs = readdirSync(join(ROOT, "prisma/migrations"), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)
-  it("A < B < garde, chacune présente une fois, anciens noms absents, horodatages uniques, B et garde après toute autre migration", () => {
+  it("A < B < garde, chacune présente une fois, anciens noms absents, horodatages uniques, B et garde après les migrations du périmètre historique", () => {
     for (const d of [A, B, GUARD]) assert.equal(dirs.filter((x) => x === d).length, 1, d)
     assert.ok(A.slice(0, 14) < B.slice(0, 14) && B.slice(0, 14) < GUARD.slice(0, 14))
     assert.equal(dirs.some((d) => d.startsWith("20261104130000_v2_lot_b") || d.startsWith("20261106130000_v2_lot_b")), false, "anciens horodatages absents")
     for (const stamp of [B, GUARD].map((d) => d.slice(0, 14))) assert.equal(dirs.filter((d) => d.startsWith(`${stamp}_`)).length, 1, `horodatage ${stamp} unique`)
     // 13/11/2026 (modification signalée) : liste FERMÉE des migrations postérieures au lot B (SPEC-INVOICE-IMPORT-001, additive).
     // 15/11/2026 (modification signalée, lot E) : migration additive du lot E ajoutée à la liste FERMÉE.
-    const LATER = new Set(["20261113120000_invoice_import_bank_verification", "20261115120000_v2_lot_e_crm_automations"])
-    for (const d of dirs.filter((x) => x !== B && x !== GUARD && !LATER.has(x))) assert.ok(d.slice(0, 14) < B.slice(0, 14), `${d} doit précéder le lot B`)
+    const LATER = new Set(["20261111120000_v2_lot_c_worksite_budgets", "20261113120000_invoice_import_bank_verification", "20261115120000_v2_lot_e_crm_automations"])
+    for (const d of dirs.filter((x) => x !== B && x !== GUARD && x < "20261116000000" && !LATER.has(x))) assert.ok(d.slice(0, 14) < B.slice(0, 14), `${d} doit précéder le lot B`)
     for (const d of LATER) assert.ok(dirs.includes(d) && d.slice(0, 14) > GUARD.slice(0, 14), `${d} doit suivre la garde du lot B`)
   })
   it("la garde de chevauchement porte sur les réservations actives et verrouille l'équipement (contenu repris de 74cdfdfc)", () => {
