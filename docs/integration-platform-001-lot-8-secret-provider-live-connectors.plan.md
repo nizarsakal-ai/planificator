@@ -181,7 +181,7 @@ Client OAuth : distinct de Gmail et distinct entre production et préproduction 
 2. Écran de consentement : portée `https://www.googleapis.com/auth/calendar.readonly` seulement ; API Google Calendar activée.
 3. Adresse de retour autorisée : `<NEXTAUTH_URL>/api/connecteurs/google-agenda/callback`, pour chaque environnement.
 4. Vercel : `GOOGLE_CALENDAR_CLIENT_ID` et `GOOGLE_CALENDAR_CLIENT_SECRET`, valeurs distinctes en Production et en Preview.
-5. Appliquer la migration sur la base Neon de production (rôle propriétaire), avant ou avec le déploiement.
+5. Appliquer la migration sur la base Neon de production AVANT la fusion : script `docs/runbooks/neon-20261123090000_v2_google_calendar_live.sql` dans l'éditeur SQL de la console Neon (projet `planificator`, branche `production`, rôle `neondb_owner`). Sans elle, la garde de schéma arrête le build de production.
 6. Gates §7 inchangés avant d'allumer `CONNECTOR_LIVE_ENABLED` en production.
 
 ## 6. Hors périmètre
