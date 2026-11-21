@@ -19,3 +19,11 @@ export function readConnectorCenterPilotCompanyId(env: Env = process.env): strin
 export function isConnectorCenterEnabledForCompany(companyId: unknown, env: Env = process.env): boolean {
   return matchesLotFPilot(companyId, readConnectorCenterPilotCompanyId(env))
 }
+/**
+ * LOT-8B : connexions RÉELLES en lecture seule (Shopify, Mailchimp, Slack). Drapeau strict, désactivé par défaut :
+ * sans lui, aucun identifiant ne peut être enregistré et aucun connecteur ne passe en connexion réelle.
+ */
+export const CONNECTOR_LIVE_FLAG_NAME = "CONNECTOR_LIVE_ENABLED"
+export function isConnectorLiveEnabled(env: Env = process.env): boolean {
+  return env[CONNECTOR_LIVE_FLAG_NAME] === "true"
+}

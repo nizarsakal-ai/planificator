@@ -61,7 +61,7 @@ describe("raccordement des Connecteurs aux retours explicites", () => {
     assert.ok(c.includes("await requireConnectorAdmin()"), "garde serveur conservée")
     assert.ok(c.includes(`if (str(form, "confirm", 5) !== "oui") return { ok: false, error: "Cochez la confirmation de réinitialisation." }`), "confirmation serveur conservée")
   })
-  it("écran : ZoneRetour, MessageRetour et trois FormulaireRetour ; aucun <form> brut ; refus d'accès avant la zone", () => {
+  it("écran : ZoneRetour, MessageRetour et FormulaireRetour seulement ; aucun <form> brut ; refus d'accès avant la zone", () => {
     const p = read("src/app/(dashboard)/connecteurs/page.tsx")
     const c = code(p)
     assert.ok(c.includes(`import { FormulaireRetour, MessageRetour, ZoneRetour } from "@/components/crm/RetourFormulaire"`))
@@ -69,7 +69,9 @@ describe("raccordement des Connecteurs aux retours explicites", () => {
     assert.ok(c.includes("<MessageRetour><StockFlash params={params} /></MessageRetour>"))
     assert.doesNotMatch(c, /<form[\s>]/, "aucun formulaire hors retour explicite")
     for (const n of ["setConnectorModeAction", "syncConnectorAction", "resetConnectorWatermarkAction"]) assert.ok(c.includes(`<FormulaireRetour action={${n}}`), n)
-    assert.equal((c.match(/<FormulaireRetour /g) ?? []).length, 3)
+    // LOT-8B : + bascule « connexion réelle », enregistrement et révocation des identifiants (6 au total).
+    for (const n of ["configureLiveConnectorAction", "revokeLiveConnectorAction"]) assert.ok(c.includes(`<FormulaireRetour action={${n}}`), n)
+    assert.equal((c.match(/<FormulaireRetour /g) ?? []).length, 6)
     assert.ok(c.indexOf("if (!ctx) return <AdminOnlyNotice />") < c.indexOf("<ZoneRetour"), "garde de page avant toute lecture et avant la zone")
   })
   it("v5 : « Aperçu des données reçues » est un lien HTML natif (navigation du document), href et filtrage inchangés", () => {

@@ -51,7 +51,8 @@ after(async () => {
 describe("modes", () => {
   it("désactivé par défaut : synchronisation refusée, rien écrit ; mode inconnu ou « réel » refusé", async () => {
     assert.deepEqual(await svc.runConnectorSync(db, A, "shopify"), { ok: false, error: CONNECTOR_ERRORS.notSimulation })
-    assert.deepEqual(await svc.setConnectorMode(db, A, "shopify", "LIVE"), { ok: false, error: CONNECTOR_ERRORS.mode })
+    assert.deepEqual(await svc.setConnectorMode(db, A, "shopify", "LIVE"), { ok: false, error: CONNECTOR_ERRORS.liveUnavailable }, "LOT-8B : LIVE sans drapeau ni identifiants vérifiés")
+    assert.deepEqual(await svc.setConnectorMode(db, A, "shopify", "REAL"), { ok: false, error: CONNECTOR_ERRORS.mode })
     assert.deepEqual(await svc.setConnectorMode(db, A, "shopify", "DISABLED"), { ok: false, error: CONNECTOR_ERRORS.sameMode })
     assert.deepEqual(await svc.setConnectorMode(db, A, "hubspot", "SIMULATION"), { ok: false, error: CONNECTOR_ERRORS.notFound })
     assert.equal(await db.connectorSyncRun.count(), 0)
@@ -129,11 +130,11 @@ describe("synchronisation simulée", () => {
     assert.deepEqual(await svc.runConnectorSync(db, A, "chatgpt"), { ok: false, error: CONNECTOR_ERRORS.notSimulation })
     assert.equal(await db.connectorStagedRecord.count({ where: { connectorKey: "chatgpt" } }), 0)
     // Mode réel : n'existe ni en code ni en base ; un transport non simulé est refusé avant toute écriture.
-    assert.deepEqual(await svc.setConnectorMode(db, A, "chatgpt", "LIVE"), { ok: false, error: CONNECTOR_ERRORS.mode })
+    assert.deepEqual(await svc.setConnectorMode(db, A, "chatgpt", "LIVE", undefined, { liveAllowed: true }), { ok: false, error: CONNECTOR_ERRORS.liveUnavailable }, "aucun adaptateur réel pour ChatGPT")
     ok(await svc.setConnectorMode(db, A, "chatgpt", "SIMULATION"))
     const real = { kind: "REAL", fetchPage: async () => { throw new Error("jamais appelé") } } as unknown as ConnectorTransport
     assert.deepEqual(await svc.runConnectorSync(db, A, "chatgpt", { transport: real }), { ok: false, error: SYNC_ERROR_LABEL.REAL_CONNECTION_DISABLED })
-    await assert.rejects(db.$executeRawUnsafe(`UPDATE connector_settings SET mode = 'LIVE' WHERE "companyId" = 'coA' AND "connectorKey" = 'chatgpt'`), /invalid input value for enum/)
+    await assert.rejects(db.$executeRawUnsafe(`UPDATE connector_settings SET mode = 'LIVE' WHERE "companyId" = 'coA' AND "connectorKey" = 'chatgpt'`), /connector_settings_live_check|live mode requires/)
     // Premier passage : 12 conversations fictives (métadonnées seulement) ; second : rien de nouveau.
     const s1 = ok(await svc.runConnectorSync(db, A, "chatgpt"))
     assert.deepEqual([s1.received, s1.created, s1.updated, s1.unchanged], [SIMULATED_COUNT, SIMULATED_COUNT, 0, 0])
@@ -161,7 +162,7 @@ describe("synchronisation simulée", () => {
     ok(await svc.setConnectorMode(db, A, "mailchimp", "DISABLED"))
     assert.deepEqual(await svc.runConnectorSync(db, A, "mailchimp", { transport: simulationTransport }), { ok: false, error: CONNECTOR_ERRORS.notSimulation })
     assert.deepEqual(await svc.resetConnectorWatermark(db, A, "mailchimp"), { ok: false, error: CONNECTOR_ERRORS.notSimulation })
-    await assert.rejects(db.$executeRawUnsafe(`INSERT INTO connector_staged_records(id,"companyId","connectorKey",resource,"externalId","payloadHash",payload,"firstRunId","lastRunId","updatedAt") VALUES ('x','coA','mailchimp','contacts','e','${"a".repeat(64)}','{}','r','r',now())`), /connector is not in simulation mode/)
+    await assert.rejects(db.$executeRawUnsafe(`INSERT INTO connector_staged_records(id,"companyId","connectorKey",resource,"externalId","payloadHash",payload,"firstRunId","lastRunId","updatedAt") VALUES ('x','coA','mailchimp','contacts','e','${"a".repeat(64)}','{}','r','r',now())`), /connector is not in simulation or live mode/)
     await assert.rejects(db.$executeRawUnsafe(`INSERT INTO connector_staged_records(id,"companyId","connectorKey",resource,"externalId","payloadHash",payload,"firstRunId","lastRunId","updatedAt") VALUES ('x','coA','stripe','payments','e','${"a".repeat(64)}','{}','r','r',now())`).then(() => db.$executeRawUnsafe(`UPDATE connector_staged_records SET payload='{"x":1}' WHERE id='x'`)), /new version of a changed payload/)
   })
 })
@@ -172,7 +173,8 @@ describe("garanties de la base", () => {
     await assert.rejects(db.$executeRawUnsafe(`DELETE FROM connector_sync_runs`), /lot F history immutable/)
     await assert.rejects(db.$executeRawUnsafe(`DELETE FROM connector_settings`), /connector setting cannot be deleted/)
     await assert.rejects(db.$executeRawUnsafe(`DELETE FROM connector_staged_records`), /staged record cannot be deleted/)
-    await assert.rejects(db.$executeRawUnsafe(`UPDATE connector_settings SET mode = 'LIVE'`), /invalid input value for enum/)
+    await assert.rejects(db.$executeRawUnsafe(`UPDATE connector_settings SET mode = 'LIVE'`), /connector_settings_live_check|live mode requires/)
+    await assert.rejects(db.$executeRawUnsafe(`UPDATE connector_settings SET mode = 'REAL'`), /invalid input value for enum/)
     // Revue Codex du 05/11 : un échec journalisé sans code est refusé (IS NOT NULL explicite dans le CHECK).
     const setting = await db.connectorSetting.findFirstOrThrow({ where: { companyId: "coA", connectorKey: "shopify" }, select: { id: true } })
     await assert.rejects(db.$executeRawUnsafe(`INSERT INTO connector_sync_runs(id,"companyId","settingId","connectorKey",mode,status,"triggeredById","startedAt","finishedAt","errorCode") VALUES ('rx','coA','${setting.id}','shopify','SIMULATION','FAILED','uA',now(),now(),NULL)`), /connector_sync_runs_values_check/)

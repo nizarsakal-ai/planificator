@@ -2372,6 +2372,7 @@ model IntegrationConnection {
 
   inboundEnvelopes InboundEnvelope[]
   credentialVersions IntegrationCredentialVersion[]
+  connectorSettings  ConnectorSetting[]
 
   @@unique([id, companyId])
   @@index([companyId, status])
@@ -4521,6 +4522,8 @@ model AutomationRun {
 enum ConnectorMode {
   DISABLED
   SIMULATION
+  /// LOT-8B (21/11/2026) : connexion réelle en lecture seule, identifiants dans le coffre PLATFORM_ENCRYPTED.
+  LIVE
 }
 
 enum ConnectorSyncStatus {
@@ -4556,12 +4559,16 @@ model ConnectorSetting {
   changedById  String
   changedAt    DateTime
   createdAt    DateTime      @default(now())
+  /// LOT-8B : connexion de la plateforme (coffre chiffré PLATFORM_ENCRYPTED) qui porte les identifiants du mode LIVE ; aucune colonne d'identifiant ici.
+  connectionId String?
 
-  company Company            @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  runs    ConnectorSyncRun[]
+  company    Company                @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  connection IntegrationConnection? @relation(fields: [connectionId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  runs       ConnectorSyncRun[]
 
   @@unique([companyId, id])
   @@unique([companyId, connectorKey])
+  @@unique([companyId, connectionId])
   @@map("connector_settings")
 }
 

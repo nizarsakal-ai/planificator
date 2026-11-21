@@ -14,7 +14,7 @@ export interface ConnectorRunView {
 }
 export interface ConnectorView {
   def: ConnectorDefinition
-  mode: "DISABLED" | "SIMULATION"
+  mode: "DISABLED" | "SIMULATION" | "LIVE"
   changedAt: Date | null
   hasWatermark: boolean
   staged: Record<string, number>

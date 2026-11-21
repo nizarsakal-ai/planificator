@@ -120,7 +120,9 @@ describe("fournisseur et réseau", () => {
     // produit jamais ; toute règle du code est admise par la base.
     assert.ok(Object.keys(RULE_LABEL).every((r) => rules.includes(r)), "toute règle du code est admise en base")
     assert.deepEqual(rules.filter((r) => !(r in RULE_LABEL)), ["RESERVE_OVERDUE"], "seul écart : la règle reportée du lot D")
-    const codes = /"errorCode" IN \(([^)]+)\)/.exec(sql)![1].split(",").map((r) => r.trim().replace(/'/g, ""))
+    // LOT-8B : la contrainte du journal est recréée avec AUTH_FAILED et RATE_LIMITED ; c'est la version en vigueur.
+    const liveSql = readFileSync("prisma/migrations/20261122090100_v2_connectors_live/migration.sql", "utf8")
+    const codes = /"errorCode" IN \(([^)]+)\)/.exec(liveSql)![1].split(",").map((r) => r.trim().replace(/'/g, ""))
     assert.deepEqual(codes, [...SYNC_ERROR_CODES], "même liste fermée de codes d'erreur en base")
   })
   it("contrôle statique : aucun module réseau, aucun SDK d'IA, aucune variable d'environnement lue par l'assistant", () => {

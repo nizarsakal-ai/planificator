@@ -2,7 +2,7 @@
 
 | Champ | Valeur |
 |---|---|
-| **Statut** | **VALIDÉ le 21/11/2026 — PR 8A autorisée** |
+| **Statut** | **VALIDÉ le 21/11/2026 — PR 8A fusionnée ; PR 8B livrée (drapeau `CONNECTOR_LIVE_ENABLED`, désactivé par défaut)** |
 | **Date** | 21/11/2026 |
 | **Demande** | Brancher pour de vrai Google Agenda, puis Shopify, Mailchimp et Slack (aujourd'hui en simulation dans le centre de connecteurs, lot F) |
 | **Décision préalable** | Coffre conforme à `docs/integration-platform-001-security.spec.md` (SECURITY SPEC CLOSED) **avant** toute connexion réelle, sans chiffrement simple à clé unique (choix validé le 21/11/2026) |
@@ -125,7 +125,7 @@ Table `integration_secret_audit_logs`, en ajout seul (§18.1) :
     - Slack : `slack.com`.
   - Requêtes bornées : délai d'attente, taille, aucune redirection suivie.
 - **Codes d'erreur stables**
-  - 401 et 403 : `CONNECTION_AUTH_FAILED`.
+  - 401 et 403 : `AUTH_FAILED` (écart assumé : code ajouté à la liste fermée du lot F `SYNC_ERROR_CODES`, que la base contrôle, plutôt qu'un code §21 du coffre).
   - 429 : `RATE_LIMITED`.
   - Autres cas : `SOURCE_UNAVAILABLE`.
 - **Ressources (lecture seule)**
@@ -139,6 +139,14 @@ Table `integration_secret_audit_logs`, en ajout seul (§18.1) :
   - Les données réelles restent en zone de transit : aucune table métier n'est touchée (règle du lot F).
 - **Données personnelles**
   - E-mails des clients et contacts en zone de transit : finalité, durée et accès à valider (RGPD) avant activation.
+
+### 4.1 Implémentation 8B (21/11/2026)
+
+- Migrations : `20261122090000_v2_connectors_live_mode` (valeur `LIVE` seule) puis `20261122090100_v2_connectors_live` (colonne `connectionId`, clé composite `(connectionId, companyId)`, CHECK `connector_settings_live_check`, déclencheur `connector_setting_live_guard` : LIVE exige une connexion de la même société, du même type, `PLATFORM_ENCRYPTED`, `ACTIVE`, identifiants `ACTIVE` ; `connectionId` immuable une fois posé ; journal et zone de transit admettent LIVE ; codes `AUTH_FAILED` et `RATE_LIMITED`).
+- Code : `src/lib/integration/connectors/live/` — `live-catalog.ts` (champs, validation, hôtes), `live-http.ts` (seul appel réseau), `live-sources.ts` (Shopify, Mailchimp, Slack), `live-connection.service.ts` (enregistrer, vérifier, révoquer, état), `live-sync.service.ts` (synchronisation réelle).
+- Lot F : `setConnectorMode` accepte LIVE seulement avec `liveAllowed` ; `commitFetchedSync` et `recordFailedSync` ; le module `src/lib/connectors/` reste sans réseau ni secret.
+- Activation : `CONNECTOR_LIVE_ENABLED=true` côté serveur, KEK posées (runbook `INTEGRATION-KEK.md`), gates du §7.
+- Tests : `test:live-connectors` (14) et `test:live-connectors:pg` (15), dans l'étape CI du coffre.
 
 ## 5. PR 8C — Google Agenda
 

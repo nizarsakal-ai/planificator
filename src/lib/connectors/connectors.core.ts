@@ -19,19 +19,24 @@ export const MAX_PAGES_PER_RESOURCE = 20
 export const MAX_PAYLOAD_BYTES = 6000
 export const MAX_FIELDS = 40
 
-export const SYNC_ERROR_CODES = ["SOURCE_UNAVAILABLE", "SOURCE_ITEM_INVALID", "WATERMARK_INVALID", "REAL_CONNECTION_DISABLED", "INTERNAL_ERROR"] as const
+export const SYNC_ERROR_CODES = ["SOURCE_UNAVAILABLE", "SOURCE_ITEM_INVALID", "WATERMARK_INVALID", "REAL_CONNECTION_DISABLED", "INTERNAL_ERROR", "AUTH_FAILED", "RATE_LIMITED"] as const
 export type SyncErrorCode = (typeof SYNC_ERROR_CODES)[number]
 export const SYNC_ERROR_LABEL: Record<SyncErrorCode, string> = {
   SOURCE_UNAVAILABLE: "Source indisponible : synchronisation annulée, rien n'a été enregistré.",
   SOURCE_ITEM_INVALID: "Élément reçu invalide : synchronisation annulée, rien n'a été enregistré.",
   WATERMARK_INVALID: "Curseur de synchronisation illisible : réinitialisez-le pour repartir du début.",
-  REAL_CONNECTION_DISABLED: "Connexion réelle non autorisée dans cette version.",
+  REAL_CONNECTION_DISABLED: "Connexion réelle indisponible : activez-la et vérifiez les identifiants.",
   INTERNAL_ERROR: "Erreur interne : synchronisation annulée, rien n'a été enregistré.",
+  // LOT-8B : erreurs d'une source réelle (codes stables ; le message du service n'est jamais repris).
+  AUTH_FAILED: "Le service a refusé les identifiants : vérifiez-les ou enregistrez-en de nouveaux. Rien n'a été enregistré.",
+  RATE_LIMITED: "Le service limite temporairement les appels : réessayez dans quelques minutes. Rien n'a été enregistré.",
 }
 
 export const CONNECTOR_ERRORS = {
   notFound: "Connecteur inconnu.",
-  mode: "Mode invalide : seuls « désactivé » et « simulation » existent.",
+  mode: "Mode invalide : seuls « désactivé », « simulation » et « connexion réelle » existent.",
+  liveUnavailable: "Connexion réelle indisponible : enregistrez d'abord des identifiants valides pour ce service.",
+  notLive: "Ce connecteur n'est pas en connexion réelle.",
   sameMode: "Le connecteur est déjà dans ce mode.",
   notSimulation: "Activez d'abord la simulation : le connecteur est désactivé.",
   changedMeanwhile: "Le connecteur a été modifié entre-temps : rechargez la page.",
@@ -105,3 +110,13 @@ export function decideUpsert(knownHash: string | undefined, hash: string): Upser
 
 export interface SyncCounts { received: number; created: number; updated: number; unchanged: number }
 export const emptyCounts = (): SyncCounts => ({ received: 0, created: 0, updated: 0, unchanged: 0 })
+
+/**
+ * LOT-8B : connecteurs dotés d'une connexion RÉELLE en lecture seule (mode LIVE). Les autres restent en simulation.
+ * La base porte la même liste (CHECK `connector_settings_live_check`). Le réseau et les identifiants ne vivent pas dans
+ * ce module : voir `src/lib/integration/connectors/live/`.
+ */
+export const LIVE_CONNECTOR_KEYS = ["shopify", "mailchimp", "slack"] as const
+export type LiveConnectorKey = (typeof LIVE_CONNECTOR_KEYS)[number]
+export const isLiveConnectorKey = (k: string): k is LiveConnectorKey => (LIVE_CONNECTOR_KEYS as readonly string[]).includes(k)
+export type ConnectorModeValue = "DISABLED" | "SIMULATION" | "LIVE"
