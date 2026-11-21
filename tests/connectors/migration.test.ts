@@ -59,7 +59,10 @@ describe("migration du lot F", () => {
       /CREATE UNIQUE INDEX "connector_settings_companyId_connectorKey_key" ON "connector_settings"\("companyId", "connectorKey"\);/,
     ]) assert.match(sql, re)
     assert.doesNotMatch(sql, /ON DELETE CASCADE/)
-    assert.doesNotMatch(schema.split(MARKER)[1], /onDelete: Cascade/)
+    // Section du lot F seulement (jusqu'au bandeau du lot G) : les modèles ajoutés après, hors connecteurs, ont leurs propres règles.
+    const lotF = schema.split(MARKER)[1].split("// Lot G Planificator V2")[0]
+    assert.ok(lotF.includes("model ") && lotF.length < schema.split(MARKER)[1].length, "section du lot F bornée")
+    assert.doesNotMatch(lotF, /onDelete: Cascade/)
   })
   it("CHECK et déclencheurs : décisions définitives, résultat = tâche de la même entreprise, journaux immuables", () => {
     assert.match(sql, /\("status" = 'EXECUTED' AND "decidedById" IS NOT NULL AND "decidedAt" IS NOT NULL AND "resultEntityType" IS NOT NULL AND "resultEntityType" = 'Task' AND "resultEntityId" IS NOT NULL\)/)

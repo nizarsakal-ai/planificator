@@ -62,8 +62,8 @@ export default async function ConnectorCenterPage({ searchParams }: { searchPara
                 <>
                   <FormulaireRetour action={syncConnectorAction}><input type="hidden" name="connectorKey" value={c.def.key} /><Button type="submit" size="sm">Synchroniser (simulation)</Button></FormulaireRetour>
                   <FormulaireRetour action={resetConnectorWatermarkAction} className="flex items-center gap-1"><input type="hidden" name="connectorKey" value={c.def.key} />
-                    <label className="flex items-center gap-1 text-xs"><input type="checkbox" name="confirm" value="oui" required /> Repartir du début</label>
-                    <Button type="submit" size="sm" variant="outline">Réinitialiser le curseur</Button>
+                    <Button type="submit" size="sm" variant="outline">Tout resynchroniser depuis le début</Button>
+                    <label className="flex items-center gap-1 text-xs text-slate-600"><input type="checkbox" name="confirm" value="oui" required /> Je confirme</label>
                   </FormulaireRetour>
                 </>
               )}
