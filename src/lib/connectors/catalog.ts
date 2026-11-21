@@ -44,13 +44,13 @@ export const CONNECTORS: readonly ConnectorDefinition[] = Object.freeze([
   // aucun espace ChatGPT ni à aucun historique utilisateur, et n'appelle aucun fournisseur d'IA. Le mode de connexion réel
   // reste À QUALIFIER (offre, accord et périmètre de données) : aucun accès à un historique ChatGPT par une API tierce n'est
   // promis ici.
-  { key: "chatgpt", label: "ChatGPT", category: "AI_ASSISTANT", description: "Métadonnées de conversations de démonstration (titre, date) ; aucun historique utilisateur importé.",
-    resources: [{ key: "conversations", label: "Conversations" }], credentialsRequired: ["Mode de connexion à qualifier (aucun accès à un historique ChatGPT promis)"], realAdapter: false },
+  { key: "chatgpt", label: "ChatGPT", category: "AI_ASSISTANT", description: "Métadonnées de conversations de démonstration (titre, date)\u00a0; aucun historique utilisateur importé.",
+    resources: [{ key: "conversations", label: "Conversations" }], credentialsRequired: ["Mode de connexion à qualifier, sans accès promis à un historique ChatGPT"], realAdapter: false },
   { key: "google_calendar", label: "Google Agenda", category: "CALENDAR", description: "Événements de planning (début et fin).",
     resources: [{ key: "events", label: "Événements" }], credentialsRequired: ["Autorisation OAuth", "Identifiant d'agenda"], realAdapter: false },
-  { key: "outlook", label: "Microsoft Outlook", category: "EMAIL", description: "Métadonnées d'e-mails de consultation (objet, expéditeur, date) ; aucun envoi.",
+  { key: "outlook", label: "Microsoft Outlook", category: "EMAIL", description: "Métadonnées d'e-mails de consultation (objet, expéditeur, date)\u00a0; aucun envoi.",
     resources: [{ key: "messages", label: "Messages" }], credentialsRequired: ["Autorisation OAuth Microsoft", "Boîte aux lettres"], realAdapter: false },
-  { key: "sharepoint", label: "Microsoft SharePoint", category: "DOCUMENTS", description: "Métadonnées de documents de chantier (nom, type) ; aucun fichier ni téléchargement.",
+  { key: "sharepoint", label: "Microsoft SharePoint", category: "DOCUMENTS", description: "Métadonnées de documents de chantier (nom, type)\u00a0; aucun fichier ni téléchargement.",
     resources: [{ key: "documents", label: "Documents" }], credentialsRequired: ["Autorisation OAuth Microsoft", "Site et bibliothèque"], realAdapter: false },
 ] as const satisfies readonly ConnectorDefinition[])
 
