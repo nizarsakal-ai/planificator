@@ -47,6 +47,6 @@ export async function resetConnectorWatermarkAction(a: RetourAction | FormData, 
   return run(async (ctx) => {
     if (str(form, "confirm", 5) !== "oui") return { ok: false, error: "Cochez la confirmation de réinitialisation." }
     const r = await svc.resetConnectorWatermark(prisma, ctx, str(form, "connectorKey"))
-    return r.ok ? { ok: true, okMessage: "Curseur réinitialisé : la prochaine synchronisation relira tout, sans doublon." } : r
+    return r.ok ? { ok: true, okMessage: "C'est noté : la prochaine synchronisation relira toutes les données depuis le début, sans créer de doublon." } : r
   })
 }
