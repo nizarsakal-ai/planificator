@@ -19,6 +19,7 @@ import { decimalToCents, formatEuro } from "@/lib/billing/money"
 import { assessIssuerIdentity, isPlausibleVatNumber } from "@/lib/billing/company-identity"
 import { DocumentDesignCard } from "@/components/factures/DocumentDesignCard"
 import { designFromStored } from "@/lib/billing/pdf/design"
+import { CommercialLinksCard } from "@/components/commercial/CommercialLinksCard"
 
 export const metadata: Metadata = { title: "Devis" }
 const MAIL_KIND: Record<string, string> = { QUOTE_SENT: "Envoi du devis", QUOTE_REMINDER_J3: "Relance J+3", QUOTE_REMINDER_J7: "Relance J+7", QUOTE_REMINDER_J15: "Relance J+15" }
@@ -70,6 +71,8 @@ export default async function DevisDetailPage({ params }: { params: Promise<{ id
         <QuoteActions id={q.id} status={q.status} invoiceId={invoice?.id ?? null} validityExpired={!isQuoteValidAt(q.validUntil, new Date())} recipientSuggestions={recipientSuggestions} totalTTC={totals.totalTTC} purchaseOrderRef={q.clientPurchaseOrderRef} depositsCount={issuedDeposits} />
       </div>
 
+      {/* 21/11/2026 — bons de commande client et de livraison : sur un devis accepté (ou converti). */}
+      <CommercialLinksCard companyId={ctx.companyId} source="QUOTE" id={q.id} canDeliver={q.status === "ACCEPTED" || q.status === "CONVERTED"} canOrder={q.status === "ACCEPTED" || q.status === "CONVERTED"} defaultAddress={q.client.deliveryAddress ?? ""} />
       <div className="grid gap-3 md:grid-cols-3">
         <Card><CardContent className="p-4 text-sm">
           <p className="text-xs uppercase text-slate-500">Client</p>

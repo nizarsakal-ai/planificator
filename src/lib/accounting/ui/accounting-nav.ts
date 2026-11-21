@@ -38,7 +38,9 @@ export const PLUS_SECTIONS: readonly PlusSection[] = [
     // 21/11/2026 — documents commerciaux (bons de commande et de livraison) accessibles depuis la comptabilité.
     title: "Documents commerciaux",
     links: [
+      { href: "/bons-de-commande", label: "Bons de commande clients", hint: "Confirmations de commande issues des devis acceptés" },
       { href: "/achats", label: "Bons de commande fournisseurs", hint: "Commandes d'achat, réceptions et PDF du bon de commande" },
+      { href: "/bons-de-livraison", label: "Bons de livraison", hint: "Livraisons depuis un devis, une facture ou un bon de commande ; réception signée" },
     ],
   },
   {

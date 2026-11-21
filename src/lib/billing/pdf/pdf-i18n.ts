@@ -26,7 +26,7 @@ const EXACT: Readonly<Record<string, string>> = {
   "Facture d'origine": "Original invoice", "Période": "Period", "Date": "Date", "Valable jusqu'au": "Valid until", "non émise": "not issued",
   "Règlement": "Payment", "à réception": "on receipt", "Date de livraison": "Delivery date", "Livraison prévue": "Expected delivery", "Facture": "Invoice",
   // Tampons et suivi
-  "Payée": "Paid", "Annulée": "Cancelled", "Livré": "Delivered", "Facture acquittée.": "Invoice paid.", "Facture acquittée (règlement constaté).": "Invoice paid (payment recorded).",
+  "Payée": "Paid", "Annulée": "Cancelled", "Annulé": "Cancelled", "Livré": "Delivered", "Facture acquittée.": "Invoice paid.", "Facture acquittée (règlement constaté).": "Invoice paid (payment recorded).",
   "Facture soldée (paiements et avoir).": "Invoice settled (payments and credit note).", "Avoir": "Credit note", "Acomptes déduits": "Deposits deducted", "Acompte": "Deposit",
   // Mentions légales standard (document-data.ts, settings.ts)
   "En cas de retard de paiement, pénalités de retard au taux de 3 fois le taux d'intérêt légal, exigibles sans rappel, et indemnité forfaitaire pour frais de recouvrement de 40 € (art. L441-10 et D441-5 du Code de commerce). Pas d'escompte pour paiement anticipé.":
@@ -36,6 +36,10 @@ const EXACT: Readonly<Record<string, string>> = {
   "Devis gratuit. Pour accord, retourner ce devis daté et signé avec la mention « Bon pour accord », ou signer en ligne via le lien reçu.":
     "Free quote. To accept, return this quote dated and signed with the words \"Approved\", or sign online using the link you received.",
   "Montant à déduire de la prochaine facture ou à rembourser.": "Amount to be deducted from the next invoice or refunded.",
+  "Confirmation de commande établie d'après le devis accepté ; la facture sera émise selon les conditions de ce devis.": "Order confirmation based on the accepted quote; the invoice will be issued under the terms of that quote.",
+  "Toute réserve sur l'état ou les quantités livrées doit être indiquée sur ce bon à la réception.": "Any reservation about the condition or quantities delivered must be noted on this note upon receipt.",
+  "Merci de rappeler le numéro de commande sur le bon de livraison et sur la facture.": "Please quote the order number on the delivery note and the invoice.",
+  "Total de la commande": "Order total",
 }
 
 const PATTERNS: readonly [RegExp, (m: RegExpMatchArray, lang: PdfLanguage) => string][] = [

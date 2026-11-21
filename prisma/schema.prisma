@@ -479,6 +479,9 @@ model Company {
   // Veille prospection (V1) — opportunités publiques (relation inverse, sans effet SQL).
   prospectOpportunities ProspectOpportunity[]
 
+  clientOrders  ClientOrder[] // 21/11/2026
+  deliveryNotes DeliveryNote[] // 21/11/2026
+
   @@map("companies")
 }
 
@@ -604,6 +607,9 @@ model Quote {
 
   opportunities Opportunity[] // Lot E V2 : opportunités liées
 
+  clientOrders  ClientOrder[] // 21/11/2026
+  deliveryNotes DeliveryNote[] // 21/11/2026
+
   @@unique([companyId, number])
   @@unique([id, companyId])
   @@unique([companyId, importRef])
@@ -707,6 +713,8 @@ model Invoice {
   creditedInvoice     Invoice?                  @relation("InvoiceCreditNote", fields: [creditedInvoiceId], references: [id], onDelete: Restrict)
   creditNotes         Invoice[]                 @relation("InvoiceCreditNote") // Lot C4 : plusieurs avoirs partiels ; un seul TOTAL (index partiel SQL)
   importedCreditNotes ImportedInvoice[]         @relation("ImportedCreditOfNative") // SPEC-INVOICE-IMPORT-001
+
+  deliveryNotes DeliveryNote[] // 21/11/2026
 
   @@unique([companyId, number])
   @@unique([id, companyId])
@@ -1119,6 +1127,9 @@ model Client {
   shopOrders         ShopOrder[] // Lot I V2 : commandes boutique (simulation interne)
 
   // Cible FK composite AcquisitionPartner.(clientId, companyId)
+  clientOrders  ClientOrder[] // 21/11/2026
+  deliveryNotes DeliveryNote[] // 21/11/2026
+
   @@unique([id, companyId])
   @@index([companyId])
   @@map("clients")
@@ -1191,6 +1202,9 @@ model Worksite {
 
   opportunities      Opportunity[] // Lot E V2
   generatedDocuments GeneratedDocument[] @relation("GeneratedDocumentWorksite") // Lot G V2 : documents générés liés
+
+  clientOrders  ClientOrder[] // 21/11/2026
+  deliveryNotes DeliveryNote[] // 21/11/2026
 
   @@unique([id, companyId])
   @@index([companyId])
@@ -4994,4 +5008,136 @@ model MarketingConversion {
   @@unique([companyId, orderId])
   @@index([companyId, campaignId])
   @@map("marketing_conversions")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 21/11/2026 — Documents commerciaux : bon de commande client (depuis un devis accepté) et bon de livraison
+// (depuis un devis accepté, une facture émise ou un bon de commande client). Bornés à la société (FK composites).
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum ClientOrderStatus {
+  ISSUED // Émis (confirmation de commande)
+  CANCELLED // Annulé (jamais supprimé)
+}
+
+model ClientOrder {
+  id                   String            @id @default(cuid())
+  companyId            String
+  quoteId              String
+  clientId             String
+  worksiteId           String
+  number               String // "BC-2026-0001" (séquentiel, unique par société)
+  status               ClientOrderStatus @default(ISSUED)
+  issueDate            DateTime          @db.Date
+  expectedDeliveryDate DateTime?         @db.Date
+  clientReference      String? // n° de bon de commande du client (repris du devis)
+  deliveryAddress      String?
+  subject              String?
+  notes                String?
+  globalDiscountBp     Int               @default(0)
+  vatReverseCharge     Boolean           @default(false)
+  totalHT              Decimal           @db.Decimal(10, 2)
+  totalVAT             Decimal           @db.Decimal(10, 2)
+  totalTTC             Decimal           @db.Decimal(10, 2)
+  createdById          String
+  cancelledAt          DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  company       Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  quote         Quote             @relation(fields: [quoteId, companyId], references: [id, companyId], onDelete: Restrict)
+  client        Client            @relation(fields: [clientId, companyId], references: [id, companyId], onDelete: Restrict)
+  worksite      Worksite          @relation(fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict)
+  lines         ClientOrderLine[]
+  deliveryNotes DeliveryNote[]
+
+  @@unique([companyId, number])
+  @@unique([id, companyId])
+  @@index([companyId, quoteId])
+  @@map("client_orders")
+}
+
+model ClientOrderLine {
+  id          String  @id @default(cuid())
+  orderId     String
+  position    Int
+  articleId   String?
+  designation String
+  description String?
+  unit        String  @default("u")
+  quantity    Decimal @db.Decimal(10, 2)
+  unitPrice   Decimal @db.Decimal(10, 2)
+  vatRate     Decimal @db.Decimal(5, 2)
+  lineHT      Decimal @db.Decimal(10, 2)
+  discountBp  Int     @default(0)
+
+  order ClientOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, position])
+  @@map("client_order_lines")
+}
+
+enum DeliveryNoteStatus {
+  ISSUED // Émis, livraison à confirmer
+  DELIVERED // Réception enregistrée (nom et date)
+  CANCELLED // Annulé (jamais supprimé)
+}
+
+enum DeliveryNoteSource {
+  QUOTE
+  INVOICE
+  CLIENT_ORDER
+}
+
+model DeliveryNote {
+  id              String             @id @default(cuid())
+  companyId       String
+  number          String // "BL-2026-0001"
+  status          DeliveryNoteStatus @default(ISSUED)
+  sourceType      DeliveryNoteSource
+  quoteId         String?
+  invoiceId       String?
+  clientOrderId   String?
+  clientId        String
+  worksiteId      String
+  deliveryDate    DateTime           @db.Date
+  deliveryAddress String?
+  notes           String?
+  receivedByName  String?
+  receivedAt      DateTime?          @db.Date
+  createdById     String
+  cancelledAt     DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  company     Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  quote       Quote?             @relation(fields: [quoteId, companyId], references: [id, companyId], onDelete: Restrict)
+  invoice     Invoice?           @relation(fields: [invoiceId, companyId], references: [id, companyId], onDelete: Restrict)
+  clientOrder ClientOrder?       @relation(fields: [clientOrderId, companyId], references: [id, companyId], onDelete: Restrict)
+  client      Client             @relation(fields: [clientId, companyId], references: [id, companyId], onDelete: Restrict)
+  worksite    Worksite           @relation(fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict)
+  lines       DeliveryNoteLine[]
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+  @@index([quoteId])
+  @@index([invoiceId])
+  @@index([clientOrderId])
+  @@map("delivery_notes")
+}
+
+model DeliveryNoteLine {
+  id                String  @id @default(cuid())
+  noteId            String
+  position          Int
+  designation       String
+  description       String?
+  unit              String  @default("u")
+  quantityOrdered   Decimal @db.Decimal(10, 2)
+  quantityDelivered Decimal @db.Decimal(10, 2)
+
+  note DeliveryNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  @@unique([noteId, position])
+  @@map("delivery_note_lines")
 }

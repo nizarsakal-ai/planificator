@@ -11,13 +11,16 @@ import { businessYear } from "@/lib/billing/business-day"
 import { serverNow } from "@/lib/billing/clock"
 
 // Lot C : INVOICE_DRAFT = numéro PROVISOIRE d'un brouillon de facture (le numéro légal FAC est attribué à l'émission).
-export type DocumentType = "QUOTE" | "INVOICE" | "CREDIT_NOTE" | "INVOICE_DRAFT"
+// 21/11/2026 : CLIENT_ORDER = bon de commande client (BC), DELIVERY_NOTE = bon de livraison (BL).
+export type DocumentType = "QUOTE" | "INVOICE" | "CREDIT_NOTE" | "INVOICE_DRAFT" | "CLIENT_ORDER" | "DELIVERY_NOTE"
 
 const PREFIX: Record<DocumentType, string> = {
   QUOTE:   "DEV",
   INVOICE: "FAC",
   CREDIT_NOTE: "AV",
   INVOICE_DRAFT: "PROV",
+  CLIENT_ORDER: "BC",
+  DELIVERY_NOTE: "BL",
 }
 
 /**

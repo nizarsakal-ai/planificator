@@ -77,7 +77,7 @@ export async function getQuoteDetail(db: Db, companyId: string, quoteId: string)
       sentAt: true, acceptedAt: true, refusedAt: true, refusalReason: true, expiredAt: true, convertedAt: true,
       signerName: true, signedAt: true, signatureTokenExpiresAt: true, reminderJ3SentAt: true, reminderJ7SentAt: true, reminderJ15SentAt: true,
       createdAt: true, importRef: true, recipientName: true, recipientEmail: true, recipientSource: true, clientPurchaseOrderRef: true,
-      client: { select: { id: true, name: true, email: true, address: true, siret: true, vatNumber: true, phone: true } },
+      client: { select: { id: true, name: true, email: true, address: true, deliveryAddress: true, siret: true, vatNumber: true, phone: true } },
       worksite: { select: { id: true, name: true, address: true } },
       lines: { orderBy: { position: "asc" }, select: { id: true, articleId: true, designation: true, description: true, unit: true, quantity: true, unitPrice: true, vatRate: true, lineHT: true, discountBp: true, position: true } },
       invoices: { where: { status: { not: "CANCELLED" } }, select: { id: true, number: true, kind: true, status: true }, orderBy: { createdAt: "asc" } },
