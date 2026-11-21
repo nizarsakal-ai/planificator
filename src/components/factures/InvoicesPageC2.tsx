@@ -66,22 +66,25 @@ export async function InvoicesPageC2({ ctx, searchParams }: { ctx: BillingContex
         <Card><CardContent className="p-4"><p className="text-xs uppercase text-slate-500">En retard</p><p className="mt-1 text-2xl font-semibold text-red-700 tabular-nums">{formatEuro(totals.total.overdueCents)}</p><p className="text-xs text-slate-500">{totals.total.overdueCount} facture{totals.total.overdueCount > 1 ? "s" : ""}</p>{split(summary.overdueCents, importedTotals?.overdueCents)}</CardContent></Card>
       </div>
       <Card><CardContent className="p-4">
-        <form method="get" className="grid gap-2 sm:grid-cols-3 lg:grid-cols-7">
-          <Input name="q" placeholder="N° ou client" defaultValue={f.raw.q} className="lg:col-span-2" aria-label="Recherche" />
-          <select name="statut" defaultValue={f.raw.statut} className="h-10 rounded-md border border-input bg-background px-3 text-sm" aria-label="Statut">{STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
-          <select name="client" defaultValue={f.raw.client} className="h-10 rounded-md border border-input bg-background px-3 text-sm" aria-label="Client"><option value="">Tous les clients</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-          <Input name="du" type="date" defaultValue={f.raw.du} aria-label="Du" /><Input name="au" type="date" defaultValue={f.raw.au} aria-label="Au" />
-          <div className="flex items-center gap-2"><label className="flex items-center gap-1 text-sm"><input type="checkbox" name="retard" value="1" defaultChecked={f.raw.retard === "1"} /> En retard</label><Button type="submit" variant="secondary">Filtrer</Button></div>
+        {/* Barre de filtres en flex : chaque champ garde une largeur lisible et passe à la ligne au lieu d'être tronqué. */}
+        <form method="get" className="flex flex-wrap items-end gap-2">
+          <Input name="q" placeholder="N° ou client" defaultValue={f.raw.q} className="min-w-48 flex-[2_1_12rem]" aria-label="Recherche" />
+          <select name="statut" defaultValue={f.raw.statut} className="h-10 min-w-40 flex-[1_1_10rem] rounded-md border border-input bg-background px-3 text-sm" aria-label="Statut">{STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+          <select name="client" defaultValue={f.raw.client} className="h-10 min-w-40 flex-[1_1_10rem] rounded-md border border-input bg-background px-3 text-sm" aria-label="Client"><option value="">Tous les clients</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+          <label className="grid gap-1 text-xs text-slate-500">Du<Input name="du" type="date" defaultValue={f.raw.du} className="w-40" aria-label="Du" /></label>
+          <label className="grid gap-1 text-xs text-slate-500">Au<Input name="au" type="date" defaultValue={f.raw.au} className="w-40" aria-label="Au" /></label>
+          <label className="flex h-10 items-center gap-2 whitespace-nowrap text-sm"><input type="checkbox" name="retard" value="1" defaultChecked={f.raw.retard === "1"} /> En retard</label>
+          <Button type="submit" variant="secondary" className="shrink-0">Filtrer</Button>
         </form>
       </CardContent></Card>
-      <Card><CardContent className="p-0">
+      <Card><CardContent className="overflow-x-auto p-0">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">N°</th><th className="px-3 py-2">Client</th><th className="px-3 py-2">Date</th><th className="hidden px-3 py-2 md:table-cell">Échéance</th><th className="px-3 py-2 text-right">Montant TTC</th><th className="hidden px-3 py-2 text-right md:table-cell">Payé</th><th className="px-3 py-2 text-right">Reste à payer</th><th className="hidden px-3 py-2 lg:table-cell">Paiement</th><th className="px-3 py-2">Statut</th></tr></thead>
           <tbody>
             {list.rows.length === 0 && <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-400">Aucune facture.</td></tr>}
             {list.rows.map((i) => (
               <tr key={i.id} className={`border-t hover:bg-slate-50 ${i.overdue ? "bg-red-50/40" : ""}`}>
-                <td className="px-3 py-2 font-medium"><Link href={`/factures/${i.id}`} className="text-[#0f3460] hover:underline">{i.number}</Link>{i.quoteNumber && <div className="text-xs text-slate-400">devis {i.quoteNumber}</div>}</td>
+                <td className="whitespace-nowrap px-3 py-2 font-medium"><Link href={`/factures/${i.id}`} className="text-[#0f3460] hover:underline">{i.number}</Link>{i.quoteNumber && <div className="text-xs text-slate-400">devis {i.quoteNumber}</div>}</td>
                 <td className="px-3 py-2">{i.clientName}<div className="text-xs text-slate-400">{i.worksiteName}</div></td>
                 <td className="px-3 py-2">{i.status === "DRAFT" ? "—" : dateFr.format(i.issueDate)}</td>
                 <td className="hidden px-3 py-2 md:table-cell">{i.dueDate && i.kind !== "CREDIT_NOTE" ? dateFr.format(i.dueDate) : "—"}</td>
