@@ -49,7 +49,11 @@ function shop(state: { orders: number[]; status?: number }): FetchLike {
     return { status: 404, body: {} }
   })
 }
-const deps = (fetch: FetchLike): LiveDeps => ({ fetch, secrets: { keyring, environment: "test" } })
+// Horloge de test : chaque jeu de dépendances avance d'une minute et une seconde, pour respecter le délai minimal entre
+// deux synchronisations réelles (correctif du 22/11/2026) ; `sameClock` rejoue l'instant courant.
+let clock = Date.parse("2026-12-01T10:00:00Z")
+const deps = (fetch: FetchLike): LiveDeps => { clock += 61_000; return sameClock(fetch) }
+const sameClock = (fetch: FetchLike): LiveDeps => { const at = clock; return { fetch, secrets: { keyring, environment: "test" }, now: () => new Date(at), sleep: async () => undefined } }
 const shopForm = (token = SHOP_TOKEN) => ({ shopDomain: "lv-boutique.myshopify.com", accessToken: token })
 
 before(async () => {
@@ -121,6 +125,20 @@ describe("synchronisation réelle", () => {
     state.orders.push(104)
     const r = ok(await runLiveConnectorSync(db, A, "shopify", deps(shop(state))))
     assert.deepEqual({ received: r.received, created: r.created }, { received: 1, created: 1 })
+  })
+  it("délai d'une minute entre deux synchronisations réelles : refus sans journal ni lecture du service", async () => {
+    const runs = await db.connectorSyncRun.count({ where: { companyId: A.companyId, connectorKey: "shopify" } })
+    let calls = 0
+    const counting: FetchLike = async (...a) => { calls++; return shop(state)(...a) }
+    assert.deepEqual(await runLiveConnectorSync(db, A, "shopify", sameClock(counting)), { ok: false, error: CONNECTOR_ERRORS.liveCooldown })
+    clock += 59_000
+    assert.deepEqual(await runLiveConnectorSync(db, A, "shopify", sameClock(counting)), { ok: false, error: CONNECTOR_ERRORS.liveCooldown }, "59 s plus tard : toujours refusé")
+    assert.equal(calls, 0, "aucune requête vers la boutique")
+    assert.equal(await db.connectorSyncRun.count({ where: { companyId: A.companyId, connectorKey: "shopify" } }), runs)
+  })
+  it("commandes sans donnée personnelle en zone de transit (correctif du 22/11/2026)", async () => {
+    const rec = await db.connectorStagedRecord.findFirstOrThrow({ where: { companyId: A.companyId, connectorKey: "shopify", resource: "orders" } })
+    assert.deepEqual(Object.keys(rec.payload as object).sort(), ["currency", "number", "orderedOn", "status", "totalCents"])
   })
   it("limite et refus du service : échec journalisé par code, curseur et données inchangés", async () => {
     const before = await svc.readConnectorSetting(db, A, "shopify")

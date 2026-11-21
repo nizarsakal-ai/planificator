@@ -19,7 +19,7 @@ import { activateCredential, assignCredentialsRef, failCredential, revokeCredent
 import { SecretProviderError } from "@/lib/integration/secrets/secret-errors"
 
 type Db = PrismaClient
-export interface LiveDeps { fetch?: FetchLike; secrets?: SecretProviderDeps; now?: () => Date }
+export interface LiveDeps { fetch?: FetchLike; secrets?: SecretProviderDeps; now?: () => Date; sleep?: (ms: number) => Promise<void> }
 
 export const LIVE_ERRORS = {
   vaultUnavailable: "Le coffre à secrets n'est pas configuré sur ce serveur : enregistrement impossible.",

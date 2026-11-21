@@ -8,20 +8,20 @@ import { readFileSync, readdirSync } from "node:fs"
 import { describe, it } from "node:test"
 import { ConnectorSourceError, PAGE_SIZE, checkItem, isValidCursor, type SyncErrorCode } from "@/lib/connectors/connectors.core"
 import { LIVE_FIELDS, liveHost, parseLiveCredentials, readLiveConfig } from "@/lib/integration/connectors/live/live-catalog"
-import { LIVE_MAX_RESPONSE_BYTES, buildLiveUrl, liveGetJson, type FetchLike } from "@/lib/integration/connectors/live/live-http"
-import { createLiveSource } from "@/lib/integration/connectors/live/live-sources"
+import { LIVE_MAX_RESPONSE_BYTES, buildLiveUrl, liveGetJson, nativeFetch, readBounded, type FetchLike } from "@/lib/integration/connectors/live/live-http"
+import { SHOPIFY_API_VERSION, bucketUsage, createLiveSource } from "@/lib/integration/connectors/live/live-sources"
 
 const SHOP_TOKEN = "shp" + "at_" + "A".repeat(32)
 const MC_KEY = "0".repeat(32) + "-us" + "21"
 const SLACK_TOKEN = "xox" + "b-" + "1".repeat(24)
 
 interface Call { url: string; headers: Record<string, string>; redirect: string }
-function fakeFetch(responder: (url: URL) => { status?: number; body: unknown }): { fetch: FetchLike; calls: Call[] } {
+function fakeFetch(responder: (url: URL) => { status?: number; body: unknown; headers?: Record<string, string> }): { fetch: FetchLike; calls: Call[] } {
   const calls: Call[] = []
   const fetch: FetchLike = async (input, init) => {
     calls.push({ url: input, headers: init.headers, redirect: init.redirect })
     const r = responder(new URL(input))
-    return { status: r.status ?? 200, text: async () => (typeof r.body === "string" ? r.body : JSON.stringify(r.body)) }
+    return { status: r.status ?? 200, header: (n) => r.headers?.[n] ?? null, text: async () => (typeof r.body === "string" ? r.body : JSON.stringify(r.body)) }
   }
   return { fetch, calls }
 }
@@ -92,23 +92,77 @@ describe("client HTTP borné", () => {
   })
 })
 
+describe("correctifs du 22/11/2026 : lecture bornée au fil de l'eau", () => {
+  const stream = (chunks: number, size: number, headers: Record<string, string> = {}) => {
+    let sent = 0
+    const body = new ReadableStream<Uint8Array>({ pull(c) { if (sent++ >= chunks) c.close(); else c.enqueue(new Uint8Array(size).fill(0x20)) } })
+    return { res: new Response(body, { headers }), pulled: () => sent }
+  }
+  it("taille annoncée trop grande : refusée sans rien lire", async () => {
+    const { res, pulled } = stream(10, 1000, { "content-length": String(LIVE_MAX_RESPONSE_BYTES + 1) })
+    assert.equal(await codeOf(readBounded(res, LIVE_MAX_RESPONSE_BYTES)), "SOURCE_UNAVAILABLE")
+    assert.equal(pulled(), 0, "aucun morceau lu")
+  })
+  it("flux sans taille annoncée : coupé dès le dépassement, le reste n'est jamais lu", async () => {
+    const { res, pulled } = stream(1000, 1000)
+    assert.equal(await codeOf(readBounded(res, 5000)), "SOURCE_UNAVAILABLE")
+    assert.ok(pulled() <= 7, `lecture arrêtée tôt (${pulled()} morceaux sur 1000)`)
+  })
+  it("réponse dans la limite : lue entière ; fetch natif sans cache ni cookie, en-têtes de réponse lisibles", async () => {
+    assert.equal(await readBounded(new Response('{"a":1}'), 100), '{"a":1}')
+    const original = globalThis.fetch
+    let init: RequestInit | undefined
+    globalThis.fetch = (async (_u: string, i: RequestInit) => { init = i; return new Response('{"ok":true}', { headers: { "x-shopify-shop-api-call-limit": "4/40" } }) }) as typeof fetch
+    try {
+      const r = await nativeFetch("https://slack.com/api/x", { method: "GET", headers: {}, redirect: "manual", signal: AbortSignal.timeout(1000) })
+      assert.equal(await r.text(100), '{"ok":true}')
+      assert.equal(r.header?.("x-shopify-shop-api-call-limit"), "4/40")
+      assert.deepEqual([init?.cache, init?.credentials, init?.redirect], ["no-store", "omit", "manual"])
+    } finally { globalThis.fetch = original }
+  })
+  it("la limite de 2 Mo est transmise au lecteur du corps", async () => {
+    let asked = 0
+    const f: FetchLike = async () => ({ status: 200, text: async (max) => { asked = max; return "{}" } })
+    await liveGetJson(f, { host: "slack.com", path: "/api/x", headers: {} })
+    assert.equal(asked, LIVE_MAX_RESPONSE_BYTES)
+  })
+})
+
 describe("sources réelles (fetch simulé)", () => {
   const shopify = { shopDomain: "ma-boutique.myshopify.com" }
   it("Shopify : en-tête d'accès, hôte de la boutique, lecture incrémentale par since_id, éléments valides pour le lot F", async () => {
-    const orders = Array.from({ length: PAGE_SIZE }, (_, i) => ({ id: 1000 + i, name: `#${1000 + i}`, created_at: "2026-11-02T10:00:00+01:00", total_price: "12.5", currency: "EUR", financial_status: "paid", customer: { first_name: "Ana\u0007", last_name: "B" } }))
+    const orders = Array.from({ length: PAGE_SIZE }, (_, i) => ({ id: 1000 + i, name: `#${1000 + i}\u0007`, created_at: "2026-11-02T10:00:00+01:00", total_price: "12.5", currency: "EUR", financial_status: "paid", customer: { first_name: "Ana", last_name: "B", email: "ana@exemple.invalid" } }))
     const f = fakeFetch((u) => ({ body: { orders: u.searchParams.get("since_id") === "1049" ? [] : orders } }))
     const src = createLiveSource("shopify", SHOP_TOKEN, shopify, f.fetch)
     const p1 = await src.fetchPage("orders", null)
     assert.equal(p1.items.length, PAGE_SIZE); assert.equal(p1.hasMore, true); assert.equal(p1.cursor, "sid:1049")
-    assert.deepEqual(p1.items[0].data, { number: "#1000", customer: "Ana  B", totalCents: 1250, currency: "EUR", status: "paid", orderedOn: "2026-11-02" })
+    // Correctif du 22/11/2026 : aucune donnée personnelle dans les commandes, même si le service en renvoie.
+    assert.deepEqual(p1.items[0].data, { number: "#1000", totalCents: 1250, currency: "EUR", status: "paid", orderedOn: "2026-11-02" })
+    assert.doesNotMatch(JSON.stringify(p1.items), /Ana|exemple\.invalid/)
     for (const it of p1.items) checkItem(it)
     const p2 = await src.fetchPage("orders", p1.cursor)
     assert.deepEqual(p2, { items: [], cursor: "sid:1049", hasMore: false }, "curseur conservé quand rien de nouveau")
     const u = new URL(f.calls[0].url)
-    assert.equal(u.host, "ma-boutique.myshopify.com"); assert.equal(u.pathname, "/admin/api/2024-10/orders.json"); assert.equal(u.searchParams.get("status"), "any")
+    assert.equal(u.host, "ma-boutique.myshopify.com"); assert.equal(u.pathname, "/admin/api/2026-10/orders.json"); assert.equal(u.searchParams.get("status"), "any")
+    assert.equal(SHOPIFY_API_VERSION, "2026-10", "version prise en charge par Shopify (2024-10 ne l'est plus)")
+    assert.equal(u.searchParams.get("fields"), "id,name,created_at,total_price,currency,financial_status", "le champ customer n'est plus demandé")
     assert.equal(f.calls[0].headers["X-Shopify-Access-Token"], SHOP_TOKEN)
     assert.equal(await codeOf(src.fetchPage("orders", "off:3")), "WATERMARK_INVALID")
     assert.equal(await codeOf(src.fetchPage("payments", null)), "SOURCE_ITEM_INVALID")
+  })
+  it("Shopify : seau de débit à 75 % ou plus ⇒ pause d'une seconde avant la requête suivante, sinon aucune", async () => {
+    assert.equal(bucketUsage("30/40"), 0.75); assert.equal(bucketUsage("3/40"), 0.075); assert.equal(bucketUsage(null), 0); assert.equal(bucketUsage("x"), 0)
+    let usage = "39/40"
+    const f = fakeFetch(() => ({ body: { orders: [], customers: [] }, headers: { "x-shopify-shop-api-call-limit": usage } }))
+    const pauses: number[] = []
+    const src = createLiveSource("shopify", SHOP_TOKEN, shopify, f.fetch, { sleep: async (ms) => { pauses.push(ms) } })
+    await src.fetchPage("orders", null)
+    assert.deepEqual(pauses, [], "pas de pause avant la première requête")
+    usage = "2/40"
+    await src.fetchPage("customers", null)
+    assert.deepEqual(pauses, [1000], "pause après un seau presque plein")
+    await src.fetchPage("orders", null)
+    assert.deepEqual(pauses, [1000], "plus de pause une fois le seau redescendu")
   })
   it("Mailchimp : Basic auth, audience, pagination par décalage puis curseur effacé ; consentement = abonné", async () => {
     const member = (i: number) => ({ id: `m${i}`, email_address: `c${i}@exemple.invalid`, status: i % 2 ? "unsubscribed" : "subscribed", timestamp_opt: "2026-01-05T00:00:00Z" })
