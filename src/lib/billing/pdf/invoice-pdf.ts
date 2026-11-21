@@ -29,11 +29,11 @@ export async function buildInvoicePdfData(db: Db, companyId: string, invoiceId: 
   const inv = await db.invoice.findFirst({
     where: { id: invoiceId, companyId },
     select: {
-      number: true, status: true, kind: true, clientPurchaseOrderRef: true, pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true, issueDate: true, dueDate: true, periodStart: true, periodEnd: true, subject: true, notes: true, paymentTerms: true, globalDiscountBp: true, vatReverseCharge: true, totalHT: true, totalVAT: true, totalTTC: true, creditReason: true, depositBp: true,
+      number: true, status: true, kind: true, clientPurchaseOrderRef: true, deliveryAddress: true, documentTitle: true, pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true, pdfShowDeliveryAddress: true, pdfLanguage: true, issueDate: true, dueDate: true, periodStart: true, periodEnd: true, subject: true, notes: true, paymentTerms: true, globalDiscountBp: true, vatReverseCharge: true, totalHT: true, totalVAT: true, totalTTC: true, creditReason: true, depositBp: true,
       depositDeductions: { select: { amountTTCCents: true, deposit: { select: { number: true, issueDate: true } } } },
       creditNotes: { where: { creditScope: "PARTIAL", status: { not: "CANCELLED" } }, select: { number: true, totalTTC: true } },
       company: { select: { name: true, address: true, siret: true, email: true, phone: true, logoUrl: true } },
-      client: { select: { name: true, address: true, siret: true, vatNumber: true, email: true } },
+      client: { select: { name: true, address: true, siret: true, vatNumber: true, email: true, deliveryAddress: true } },
       worksite: { select: { name: true } }, quote: { select: { number: true } }, creditedInvoice: { select: { number: true, issueDate: true } },
       lines: { orderBy: { position: "asc" }, select: { designation: true, description: true, unit: true, quantity: true, unitPrice: true, vatRate: true, lineHT: true, discountBp: true, deductsDepositId: true } },
       payments: { where: { reversesPaymentId: null, reversedAt: null }, orderBy: { paidAt: "asc" }, select: { amountCents: true, method: true, paidAt: true } },
@@ -103,6 +103,9 @@ export async function buildInvoicePdfData(db: Db, companyId: string, invoiceId: 
     logoDataUrl: logoForPdf(inv.company.logoUrl),
     legalFooter,
     design, bank,
+    // 21/11/2026 — émise : valeurs figées au snapshot (antérieur ⇒ non affichées) ; brouillon : saisie ?? adresse du client.
+    deliveryAddress: snapshot ? snapshot.document.deliveryAddress ?? null : inv.deliveryAddress ?? inv.client.deliveryAddress ?? null,
+    subtitle: snapshot ? snapshot.document.documentTitle ?? null : inv.documentTitle,
     stamp: draft ? null : invoiceStamp(inv.status, inv.kind),
   }
 }

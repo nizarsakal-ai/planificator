@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label"
 import { createClientSchema, type CreateClientInput } from "@/lib/validations/client"
 import { createClient, updateClient } from "@/lib/actions/client.actions"
 
-export type EditableClient = { id: string; name: string; email: string | null; phone: string | null; address: string | null; notes: string | null }
+export type EditableClient = { id: string; name: string; email: string | null; phone: string | null; address: string | null; deliveryAddress?: string | null; notes: string | null }
 
 type ClientOption = Pick<EditableClient, "id" | "name">
 
@@ -31,7 +31,7 @@ export function ClientForm({ onSuccess, client }: ClientFormProps) {
     reset,
   } = useForm<CreateClientInput>({
     resolver: zodResolver(createClientSchema),
-    defaultValues: { name: client?.name ?? "", email: client?.email ?? "", phone: client?.phone ?? "", address: client?.address ?? "", notes: client?.notes ?? "" },
+    defaultValues: { name: client?.name ?? "", email: client?.email ?? "", phone: client?.phone ?? "", address: client?.address ?? "", deliveryAddress: client?.deliveryAddress ?? "", notes: client?.notes ?? "" },
   })
 
   const onSubmit = async (data: CreateClientInput) => {
@@ -117,6 +117,20 @@ export function ClientForm({ onSuccess, client }: ClientFormProps) {
             />
           )}
         />
+      </div>
+
+      {/* Adresse de livraison (21/11/2026) */}
+      <div className="space-y-1.5">
+        <Label htmlFor={`${formId}-deliveryAddress`}>Adresse de livraison (si différente)</Label>
+        <textarea
+          id={`${formId}-deliveryAddress`}
+          rows={2}
+          maxLength={500}
+          placeholder="Reprise sur les factures et les bons de livraison"
+          {...register("deliveryAddress")}
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+        {errors.deliveryAddress && <p className="text-xs text-red-500">{errors.deliveryAddress.message}</p>}
       </div>
 
       {/* Notes */}

@@ -270,6 +270,9 @@ export interface InvoiceDraftHeader {
   subject: string | null
   /** V2 06/11/2026 : bon de commande client (facultatif ; figé à l'émission par invoices_guard_issued). */
   clientPurchaseOrderRef?: string | null
+  /** 21/11/2026 : adresse de livraison et intitulé (figés au snapshot d'émission). */
+  deliveryAddress?: string | null
+  documentTitle?: string | null
   notes: string | null
   paymentTerms: string | null
   globalDiscountBp: number

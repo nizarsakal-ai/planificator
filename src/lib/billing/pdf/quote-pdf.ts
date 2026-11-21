@@ -17,9 +17,9 @@ export async function buildQuotePdfData(db: Db, companyId: string, quoteId: stri
   const q = await db.quote.findFirst({
     where: { id: quoteId, companyId },
     select: {
-      number: true, status: true, issueDate: true, pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true, validUntil: true, subject: true, notes: true, paymentTerms: true, globalDiscountBp: true, vatReverseCharge: true, signerName: true, signedAt: true,
+      number: true, status: true, issueDate: true, pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true, pdfShowDeliveryAddress: true, pdfLanguage: true, validUntil: true, subject: true, notes: true, paymentTerms: true, globalDiscountBp: true, vatReverseCharge: true, signerName: true, signedAt: true,
       company: { select: { name: true, address: true, siret: true, email: true, phone: true, logoUrl: true } },
-      client: { select: { name: true, address: true, siret: true, vatNumber: true, email: true } },
+      client: { select: { name: true, address: true, siret: true, vatNumber: true, email: true, deliveryAddress: true } },
       worksite: { select: { name: true, address: true } },
       lines: { orderBy: { position: "asc" }, select: { designation: true, description: true, unit: true, quantity: true, unitPrice: true, vatRate: true, lineHT: true, discountBp: true } },
     },
@@ -47,6 +47,7 @@ export async function buildQuotePdfData(db: Db, companyId: string, quoteId: stri
     // 20/11/2026 — brouillon : choix du devis ?? réglage société ; envoyé : design écrit à l'envoi (absent ⇒ Classique historique).
     design: draft ? designFromStored(q) ?? settings.pdfDesign : designFromStored(q) ?? DEFAULT_PDF_DESIGN,
     bank: settings.iban ? { iban: settings.iban, bic: settings.bic } : null,
+    deliveryAddress: q.client.deliveryAddress,
     draftWarnings: draft ? assessIssuerIdentity(identity).blocking.map((label) => `Donnée d'identité manquante ou invalide : ${label} (Paramètres de l'entreprise / de facturation).`) : undefined,
   }
 }

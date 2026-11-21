@@ -37,6 +37,7 @@ export async function createClient(formData: FormData) {
     email:   formData.get("email")   as string,
     phone:   formData.get("phone")   as string,
     address: formData.get("address") as string,
+    deliveryAddress: (formData.get("deliveryAddress") as string | null) ?? undefined,
     notes:   formData.get("notes")   as string,
   }
 
@@ -49,6 +50,7 @@ export async function createClient(formData: FormData) {
       email:     parsed.data.email || null,
       phone:     parsed.data.phone || null,
       address:   parsed.data.address || null,
+      deliveryAddress: parsed.data.deliveryAddress?.trim() || null,
       notes:     parsed.data.notes || null,
       companyId: user.companyId!,
     },
@@ -70,6 +72,7 @@ export async function updateClient(clientId: string, formData: FormData) {
     email:   formData.get("email")   as string,
     phone:   formData.get("phone")   as string,
     address: formData.get("address") as string,
+    deliveryAddress: (formData.get("deliveryAddress") as string | null) ?? undefined,
     notes:   formData.get("notes")   as string,
   }
 
@@ -88,6 +91,8 @@ export async function updateClient(clientId: string, formData: FormData) {
       email:   parsed.data.email || null,
       phone:   parsed.data.phone || null,
       address: parsed.data.address || null,
+      // 21/11/2026 : champ absent du formulaire (ancien écran) ⇒ valeur conservée ; vide ⇒ effacée.
+      ...(parsed.data.deliveryAddress !== undefined ? { deliveryAddress: parsed.data.deliveryAddress.trim() || null } : {}),
       notes:   parsed.data.notes || null,
     },
   })

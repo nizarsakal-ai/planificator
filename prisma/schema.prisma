@@ -479,6 +479,9 @@ model Company {
   // Veille prospection (V1) — opportunités publiques (relation inverse, sans effet SQL).
   prospectOpportunities ProspectOpportunity[]
 
+  clientOrders  ClientOrder[] // 21/11/2026
+  deliveryNotes DeliveryNote[] // 21/11/2026
+
   @@map("companies")
 }
 
@@ -592,6 +595,8 @@ model Quote {
   pdfLayout               PdfLayout?
   pdfShowClientIds        Boolean?
   pdfShowBankDetails      Boolean?
+  pdfShowDeliveryAddress  Boolean?
+  pdfLanguage             PdfLanguage?
 
   // Relations
   company  Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -601,6 +606,9 @@ model Quote {
   invoices Invoice[] // factures issues de ce devis
 
   opportunities Opportunity[] // Lot E V2 : opportunités liées
+
+  clientOrders  ClientOrder[] // 21/11/2026
+  deliveryNotes DeliveryNote[] // 21/11/2026
 
   @@unique([companyId, number])
   @@unique([id, companyId])
@@ -688,6 +696,11 @@ model Invoice {
   pdfLayout              PdfLayout?
   pdfShowClientIds       Boolean?
   pdfShowBankDetails     Boolean?
+  pdfShowDeliveryAddress Boolean?
+  pdfLanguage            PdfLanguage?
+  // 21/11/2026 — adresse de livraison (vide = celle du client) et intitulé libre du document ; figés au snapshot d'émission.
+  deliveryAddress        String?
+  documentTitle          String?
 
   // Relations
   // Lot B : pièces conservées — aucune suppression en cascade depuis la société ou le chantier.
@@ -700,6 +713,8 @@ model Invoice {
   creditedInvoice     Invoice?                  @relation("InvoiceCreditNote", fields: [creditedInvoiceId], references: [id], onDelete: Restrict)
   creditNotes         Invoice[]                 @relation("InvoiceCreditNote") // Lot C4 : plusieurs avoirs partiels ; un seul TOTAL (index partiel SQL)
   importedCreditNotes ImportedInvoice[]         @relation("ImportedCreditOfNative") // SPEC-INVOICE-IMPORT-001
+
+  deliveryNotes DeliveryNote[] // 21/11/2026
 
   @@unique([companyId, number])
   @@unique([id, companyId])
@@ -836,6 +851,12 @@ enum PdfTemplate {
   MINIMAL
 }
 
+/// 21/11/2026 — langue des PDF (libellés et mentions standard).
+enum PdfLanguage {
+  FR
+  EN
+}
+
 /// 20/11/2026 — format du tableau des lignes (QUICK n'est rendu que si toutes les lignes ont une quantité de 1 sans remise).
 enum PdfLayout {
   COMPLETE
@@ -848,30 +869,32 @@ enum VatRegime {
 }
 
 model BillingSettings {
-  id                 String      @id @default(cuid())
-  companyId          String      @unique
-  vatNumber          String? // TVA intracommunautaire du vendeur
-  legalForm          String? // SARL, SAS, EI…
-  shareCapital       String? // "10 000 €"
-  rcs                String? // "RCS Paris 123 456 789"
-  iban               String?
-  bic                String?
-  quoteValidityDays  Int         @default(30)
-  paymentTermsDays   Int         @default(30)
-  latePenaltyText    String? // remplace la mention par défaut (pénalités, indemnité forfaitaire 40 €)
-  quoteFooter        String?
-  invoiceFooter      String?
-  vatRegime          VatRegime   @default(DEBITS)
-  defaultDepositBp   Int         @default(3000) // 30 %
+  id                     String      @id @default(cuid())
+  companyId              String      @unique
+  vatNumber              String? // TVA intracommunautaire du vendeur
+  legalForm              String? // SARL, SAS, EI…
+  shareCapital           String? // "10 000 €"
+  rcs                    String? // "RCS Paris 123 456 789"
+  iban                   String?
+  bic                    String?
+  quoteValidityDays      Int         @default(30)
+  paymentTermsDays       Int         @default(30)
+  latePenaltyText        String? // remplace la mention par défaut (pénalités, indemnité forfaitaire 40 €)
+  quoteFooter            String?
+  invoiceFooter          String?
+  vatRegime              VatRegime   @default(DEBITS)
+  defaultDepositBp       Int         @default(3000) // 30 %
   // 20/11/2026 — design par défaut des PDF (défaut = rendu historique « Classique »).
-  pdfTemplate        PdfTemplate @default(CLASSIC)
-  pdfPrimaryColor    String      @default("#0f3460")
-  pdfSecondaryColor  String      @default("#0f3460")
-  pdfLayout          PdfLayout   @default(COMPLETE)
-  pdfShowClientIds   Boolean     @default(true)
-  pdfShowBankDetails Boolean     @default(false)
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
+  pdfTemplate            PdfTemplate @default(CLASSIC)
+  pdfPrimaryColor        String      @default("#0f3460")
+  pdfSecondaryColor      String      @default("#0f3460")
+  pdfLayout              PdfLayout   @default(COMPLETE)
+  pdfShowClientIds       Boolean     @default(true)
+  pdfShowBankDetails     Boolean     @default(false)
+  pdfShowDeliveryAddress Boolean     @default(true)
+  pdfLanguage            PdfLanguage @default(FR)
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
@@ -1073,18 +1096,19 @@ model TeamMember {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model Client {
-  id        String   @id @default(cuid())
-  name      String
-  email     String?
-  phone     String?
-  address   String?
-  notes     String?
-  companyId String
-  active    Boolean  @default(true)
-  siret     String? // Lot C1 : mentions de facturation (SIRET/SIREN du client)
-  vatNumber String? // Lot C1 : TVA intracommunautaire du client
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String   @id @default(cuid())
+  name            String
+  email           String?
+  phone           String?
+  address         String?
+  notes           String?
+  companyId       String
+  active          Boolean  @default(true)
+  siret           String? // Lot C1 : mentions de facturation (SIRET/SIREN du client)
+  deliveryAddress String? // 21/11/2026 : adresse de livraison par défaut (reprise sur factures et bons de livraison)
+  vatNumber       String? // Lot C1 : TVA intracommunautaire du client
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   // Relations
   company             Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -1103,6 +1127,9 @@ model Client {
   shopOrders         ShopOrder[] // Lot I V2 : commandes boutique (simulation interne)
 
   // Cible FK composite AcquisitionPartner.(clientId, companyId)
+  clientOrders  ClientOrder[] // 21/11/2026
+  deliveryNotes DeliveryNote[] // 21/11/2026
+
   @@unique([id, companyId])
   @@index([companyId])
   @@map("clients")
@@ -1175,6 +1202,9 @@ model Worksite {
 
   opportunities      Opportunity[] // Lot E V2
   generatedDocuments GeneratedDocument[] @relation("GeneratedDocumentWorksite") // Lot G V2 : documents générés liés
+
+  clientOrders  ClientOrder[] // 21/11/2026
+  deliveryNotes DeliveryNote[] // 21/11/2026
 
   @@unique([id, companyId])
   @@index([companyId])
@@ -4978,4 +5008,136 @@ model MarketingConversion {
   @@unique([companyId, orderId])
   @@index([companyId, campaignId])
   @@map("marketing_conversions")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 21/11/2026 — Documents commerciaux : bon de commande client (depuis un devis accepté) et bon de livraison
+// (depuis un devis accepté, une facture émise ou un bon de commande client). Bornés à la société (FK composites).
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum ClientOrderStatus {
+  ISSUED // Émis (confirmation de commande)
+  CANCELLED // Annulé (jamais supprimé)
+}
+
+model ClientOrder {
+  id                   String            @id @default(cuid())
+  companyId            String
+  quoteId              String
+  clientId             String
+  worksiteId           String
+  number               String // "BC-2026-0001" (séquentiel, unique par société)
+  status               ClientOrderStatus @default(ISSUED)
+  issueDate            DateTime          @db.Date
+  expectedDeliveryDate DateTime?         @db.Date
+  clientReference      String? // n° de bon de commande du client (repris du devis)
+  deliveryAddress      String?
+  subject              String?
+  notes                String?
+  globalDiscountBp     Int               @default(0)
+  vatReverseCharge     Boolean           @default(false)
+  totalHT              Decimal           @db.Decimal(10, 2)
+  totalVAT             Decimal           @db.Decimal(10, 2)
+  totalTTC             Decimal           @db.Decimal(10, 2)
+  createdById          String
+  cancelledAt          DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  company       Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  quote         Quote             @relation(fields: [quoteId, companyId], references: [id, companyId], onDelete: Restrict)
+  client        Client            @relation(fields: [clientId, companyId], references: [id, companyId], onDelete: Restrict)
+  worksite      Worksite          @relation(fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict)
+  lines         ClientOrderLine[]
+  deliveryNotes DeliveryNote[]
+
+  @@unique([companyId, number])
+  @@unique([id, companyId])
+  @@index([companyId, quoteId])
+  @@map("client_orders")
+}
+
+model ClientOrderLine {
+  id          String  @id @default(cuid())
+  orderId     String
+  position    Int
+  articleId   String?
+  designation String
+  description String?
+  unit        String  @default("u")
+  quantity    Decimal @db.Decimal(10, 2)
+  unitPrice   Decimal @db.Decimal(10, 2)
+  vatRate     Decimal @db.Decimal(5, 2)
+  lineHT      Decimal @db.Decimal(10, 2)
+  discountBp  Int     @default(0)
+
+  order ClientOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, position])
+  @@map("client_order_lines")
+}
+
+enum DeliveryNoteStatus {
+  ISSUED // Émis, livraison à confirmer
+  DELIVERED // Réception enregistrée (nom et date)
+  CANCELLED // Annulé (jamais supprimé)
+}
+
+enum DeliveryNoteSource {
+  QUOTE
+  INVOICE
+  CLIENT_ORDER
+}
+
+model DeliveryNote {
+  id              String             @id @default(cuid())
+  companyId       String
+  number          String // "BL-2026-0001"
+  status          DeliveryNoteStatus @default(ISSUED)
+  sourceType      DeliveryNoteSource
+  quoteId         String?
+  invoiceId       String?
+  clientOrderId   String?
+  clientId        String
+  worksiteId      String
+  deliveryDate    DateTime           @db.Date
+  deliveryAddress String?
+  notes           String?
+  receivedByName  String?
+  receivedAt      DateTime?          @db.Date
+  createdById     String
+  cancelledAt     DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  company     Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  quote       Quote?             @relation(fields: [quoteId, companyId], references: [id, companyId], onDelete: Restrict)
+  invoice     Invoice?           @relation(fields: [invoiceId, companyId], references: [id, companyId], onDelete: Restrict)
+  clientOrder ClientOrder?       @relation(fields: [clientOrderId, companyId], references: [id, companyId], onDelete: Restrict)
+  client      Client             @relation(fields: [clientId, companyId], references: [id, companyId], onDelete: Restrict)
+  worksite    Worksite           @relation(fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict)
+  lines       DeliveryNoteLine[]
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+  @@index([quoteId])
+  @@index([invoiceId])
+  @@index([clientOrderId])
+  @@map("delivery_notes")
+}
+
+model DeliveryNoteLine {
+  id                String  @id @default(cuid())
+  noteId            String
+  position          Int
+  designation       String
+  description       String?
+  unit              String  @default("u")
+  quantityOrdered   Decimal @db.Decimal(10, 2)
+  quantityDelivered Decimal @db.Decimal(10, 2)
+
+  note DeliveryNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  @@unique([noteId, position])
+  @@map("delivery_note_lines")
 }

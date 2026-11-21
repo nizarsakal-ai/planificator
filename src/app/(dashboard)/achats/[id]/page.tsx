@@ -43,6 +43,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${ORDER_STATUS_CLASS[order.status] ?? ""}`}>{ORDER_STATUS_LABEL[order.status] ?? order.status}</span>
           {order.status === "DRAFT" && <form action={markOrderedAction}><input type="hidden" name="orderId" value={order.id} /><Button type="submit">Passer la commande</Button></form>}
           {(order.status === "DRAFT" || order.status === "ORDERED") && <form action={cancelOrderAction}><input type="hidden" name="orderId" value={order.id} /><Button type="submit" variant="outline">Annuler</Button></form>}
+          <Button variant="outline" asChild><a href={`/api/pdf/bon-commande-fournisseur/${order.id}`} target="_blank" rel="noopener noreferrer">PDF du bon de commande</a></Button>
           <Button variant="outline" asChild><Link href="/achats">Toutes les commandes</Link></Button>
         </div>
       </div>

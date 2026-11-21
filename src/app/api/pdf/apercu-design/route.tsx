@@ -22,6 +22,7 @@ export async function GET(req: Request) {
   const v = validateDesign({
     template: q.get("template") ?? "", primary: q.get("primary") ?? "", secondary: q.get("secondary") ?? "",
     layout: q.get("layout") ?? "COMPLETE", showClientIds: q.get("clientIds") !== "0", showBankDetails: q.get("bank") === "1",
+    showDeliveryAddress: q.get("delivery") !== "0", language: q.get("lang") ?? "FR",
   })
   if (!v.ok) return text(400, v.errors.join("\n"))
   const [company, settings] = await Promise.all([

@@ -15,6 +15,7 @@ import { PaymentDialog } from "@/components/factures/PaymentDialog"
 import { CreditNoteDialog } from "@/components/factures/CreditNoteDialog"
 import { DocumentDesignCard } from "@/components/factures/DocumentDesignCard"
 import { designFromStored } from "@/lib/billing/pdf/design"
+import { CommercialLinksCard } from "@/components/commercial/CommercialLinksCard"
 import { getBillingSettings } from "@/lib/billing/settings"
 
 export const metadata: Metadata = { title: "Facture" }
@@ -31,7 +32,7 @@ export default async function FactureDetailPage({ params }: { params: Promise<{ 
   const blockers = inv.status === "DRAFT" && inv.kind !== "CREDIT_NOTE" ? issueBlockers({ company: inv.company, client: inv.client, lineCount: inv.lines.length }) : []
   // 20/11/2026 — apparence du PDF : modifiable sur le brouillon seulement (figée au snapshot d'émission).
   const [invDesign, settings] = inv.status === "DRAFT"
-    ? await Promise.all([prisma.invoice.findFirst({ where: { id: inv.id, companyId: ctx.companyId }, select: { pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true } }), getBillingSettings(prisma, ctx.companyId)])
+    ? await Promise.all([prisma.invoice.findFirst({ where: { id: inv.id, companyId: ctx.companyId }, select: { pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true, pdfShowDeliveryAddress: true, pdfLanguage: true } }), getBillingSettings(prisma, ctx.companyId)])
     : [null, null]
   const progress = inv.status === "PAID" ? 100 : inv.totalTTCCents > BigInt(0) ? Number((inv.paidCents * BigInt(100)) / inv.totalTTCCents) : 0
 
@@ -49,6 +50,8 @@ export default async function FactureDetailPage({ params }: { params: Promise<{ 
         </div>
       </div>
       {invDesign && settings && <DocumentDesignCard key={JSON.stringify([invDesign, settings.pdfDesign])} kind="invoice" id={inv.id} documentDesign={designFromStored(invDesign)} companyDesign={settings.pdfDesign} bankAvailable={!!settings.iban} pdfHref={`/api/pdf/facture/${inv.id}`} />}
+      {/* 21/11/2026 — bons de livraison : sur une facture émise (hors avoir et acompte). */}
+      <CommercialLinksCard companyId={ctx.companyId} source="INVOICE" id={inv.id} canDeliver={inv.kind === "INVOICE" && inv.status !== "DRAFT" && inv.status !== "CANCELLED"} canOrder={false} defaultAddress="" />
       {blockers.length > 0 && <Card className="border-amber-300"><CardContent className="p-4 text-sm text-amber-800"><p className="font-medium">Avant émission, corrigez :</p><ul className="list-disc pl-5">{blockers.map((b) => <li key={b.code}>{b.message}</li>)}</ul></CardContent></Card>}
 
       <div className="grid gap-3 md:grid-cols-3">

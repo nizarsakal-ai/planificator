@@ -1,6 +1,6 @@
 // 20/11/2026 — schéma zod d'un design saisi (forme seulement ; lisibilité et couleurs contrôlées par validateDesign).
 import { z } from "zod"
-import { PDF_LAYOUTS, PDF_TEMPLATES } from "./design"
+import { PDF_LANGUAGES, PDF_LAYOUTS, PDF_TEMPLATES } from "./design"
 
 export const designInputSchema = z.object({
   template: z.enum(PDF_TEMPLATES),
@@ -9,4 +9,6 @@ export const designInputSchema = z.object({
   layout: z.enum(PDF_LAYOUTS),
   showClientIds: z.boolean(),
   showBankDetails: z.boolean(),
+  showDeliveryAddress: z.boolean().optional(),
+  language: z.enum(PDF_LANGUAGES).optional(),
 }).strict()

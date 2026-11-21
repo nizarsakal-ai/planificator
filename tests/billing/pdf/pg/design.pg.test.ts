@@ -18,8 +18,8 @@ if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL requis (base Postgr
 const db = new PrismaClient()
 const A = { companyId: "dsA", userId: "dsAdm" }
 const now = new Date("2026-11-20T10:00:00Z")
-const MODERN: PdfDesign = { template: "MODERN", primary: "#4f46e5", secondary: "#4338ca", layout: "QUICK", showClientIds: false, showBankDetails: true }
-const BAND: PdfDesign = { template: "BAND", primary: "#047857", secondary: "#065f46", layout: "COMPLETE", showClientIds: true, showBankDetails: false }
+const MODERN: PdfDesign = { template: "MODERN", primary: "#4f46e5", secondary: "#4338ca", layout: "QUICK", showClientIds: false, showBankDetails: true, showDeliveryAddress: true, language: "FR" }
+const BAND: PdfDesign = { template: "BAND", primary: "#047857", secondary: "#065f46", layout: "COMPLETE", showClientIds: true, showBankDetails: false, showDeliveryAddress: true, language: "FR" }
 const invoiceForm = () => { const r = parseInvoiceForm({ worksiteId: "dsW", lines: [{ designation: "Prestation", quantity: "1", unitPrice: "100", vatRate: "20" }] }); if (!r.ok) throw new Error(r.error); return r.value }
 async function setCompanyDesign(d: PdfDesign) { await db.billingSettings.update({ where: { companyId: A.companyId }, data: designToStored(d) }) }
 async function sqlError(sql: string): Promise<string> { try { await db.$executeRawUnsafe(sql); return "NO_ERROR" } catch (e) { return String((e as Error).message) } }
