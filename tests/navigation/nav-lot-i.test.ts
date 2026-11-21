@@ -107,9 +107,10 @@ describe("lot I : catégories et câblage", () => {
       assert.doesNotMatch(code(src), /MARKETING_SHOP_ENABLED|process\.env|isMarketingShopEnabled|marketing-shop-feature-flag/, f)
     }
   })
-  it("layout : drapeau, rôle ADMIN/SUPER_ADMIN et société ; transmis une fois dans l'objet user", () => {
+  it("layout : société pilote d'un module activé (même cible que la garde), rôle ADMIN/SUPER_ADMIN ; transmis une fois dans l'objet user", () => {
     const layout = read("src/app/(dashboard)/layout.tsx")
-    assert.ok(layout.includes(`const marketingShopNavVisible = isMarketingShopEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`))
+    assert.ok(layout.includes(`const marketingShopNavVisible = isMarketingShopEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`))
+    assert.doesNotMatch(code(layout), /isMarketingShopEnabled\(|MARKETING_SHOP_COMPANY_ID|readMarketingShopPilotCompanyId/, "aucune lecture parallèle de la cible I")
     const user = layout.slice(layout.indexOf("const user = {"), layout.indexOf("\n", layout.indexOf("const user = {")))
     assert.equal((user.match(/\bmarketingShopNavVisible\b/g) ?? []).length, 1)
   })

@@ -1,11 +1,10 @@
 /**
- * Garde d'accès du module pré-paie (Lot H V2). Même règle que les lots A et B (ADMIN ou SUPER_ADMIN avec la
- * société active de la session) : la logique pure `resolveStockAccessCore` est réutilisée telle quelle, seul le
- * drapeau diffère. Le `companyId` vient TOUJOURS de la session. Ne jamais importer depuis un composant client.
+ * Garde serveur de Pré-paie (Lot H V2). Seuls les ADMIN et SUPER_ADMIN dont la société de session
+ * correspond à la société pilote configurée côté serveur peuvent accéder au module.
  */
 import { notFound, redirect } from "next/navigation"
 import { auth } from "@/auth"
-import { isPayrollPrepEnabled } from "@/lib/payroll-prep/prepay-feature-flag"
+import { readPayrollPrepPilotCompanyId } from "@/lib/payroll-prep/prepay-feature-flag"
 import { pageDecision, resolveStockAccessCore, stockAccessMessage, type StockAccessResult, type StockContext, type StockDenial, type StockSessionLike } from "@/lib/stock/access"
 
 export type PrepayAccessContext = StockContext
@@ -18,16 +17,21 @@ export class PrepayAccessError extends Error {
   }
 }
 
-/** Logique pure (testable) : drapeau → session → rôle → société. */
-export function resolvePrepayAccessCore(enabled: boolean, session: StockSessionLike | null): StockAccessResult {
-  return resolveStockAccessCore(enabled, session)
+/** Le contrôle commun des rôles s'applique dans la société pilote. */
+export function resolvePrepayAccessCore(pilotCompanyId: string | null, session: StockSessionLike | null): StockAccessResult {
+  if (pilotCompanyId === null) return { ok: false, reason: "MODULE_DISABLED" }
+  const base = resolveStockAccessCore(true, session)
+  if (!base.ok && base.reason === "UNAUTHENTICATED") return base
+  if (session?.user?.companyId !== pilotCompanyId) return { ok: false, reason: "MODULE_DISABLED" }
+  return base
 }
 
 export async function resolvePrepayAccess(): Promise<StockAccessResult> {
-  if (!isPayrollPrepEnabled()) return { ok: false, reason: "MODULE_DISABLED" }
+  const pilotCompanyId = readPayrollPrepPilotCompanyId()
+  if (pilotCompanyId === null) return { ok: false, reason: "MODULE_DISABLED" }
   let session: StockSessionLike | null
   try { session = await auth() } catch { return { ok: false, reason: "UNAUTHENTICATED" } }
-  return resolvePrepayAccessCore(true, session)
+  return resolvePrepayAccessCore(pilotCompanyId, session)
 }
 
 export async function requirePrepayAdmin(): Promise<PrepayAccessContext> {

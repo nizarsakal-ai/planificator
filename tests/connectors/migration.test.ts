@@ -23,7 +23,8 @@ describe("migration du lot F", () => {
     const dirs = readdirSync("prisma/migrations").filter((d) => /^\d{14}_/.test(d)).sort()
     // Intégration FGHI : F reste après toutes les migrations de la base ; seules les migrations G, H et I la suivent.
     assert.ok(MIGRATION_DIR > "20261117120000_vehicle_tour_auto_km", "après la dernière migration de main 90ae644")
-    assert.deepEqual(dirs.filter((d) => d > MIGRATION_DIR), ["20261119130000_v2_lot_g_document_studio", "20261119140000_v2_lot_h_payroll_prep", "20261119150000_v2_lot_i_marketing_shop"], "seules G, H, I après F")
+    // Seuls les lots G, H, I suivent F ; les migrations ultérieures hors lots (photos, espace PDF du Studio…) ne comptent pas.
+    assert.deepEqual(dirs.filter((d) => d > MIGRATION_DIR && /_v2_lot_/.test(d)), ["20261119130000_v2_lot_g_document_studio", "20261119140000_v2_lot_h_payroll_prep", "20261119150000_v2_lot_i_marketing_shop"], "seules G, H, I après F")
     assert.equal(dirs.filter((d) => /lot_f/.test(d)).length, 1, "une seule migration du lot F")
     assert.ok(dirs.every((d) => !/lot_d|reserve/.test(d)), "aucune migration du lot D")
     assert.doesNotMatch(sql, /worksite_reserves|reception_report/, "aucun objet du lot D")
@@ -105,8 +106,8 @@ describe("gardes et menus", () => {
   it("layout : menus conditionnés par drapeau, rôle ADMIN/SUPER_ADMIN et société", () => {
     const layout = read("src/app/(dashboard)/layout.tsx")
     for (const v of [
-      `const assistantNavVisible = isAssistantEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`,
-      `const connectorsNavVisible = isConnectorCenterEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`,
+      `const assistantNavVisible = isAssistantEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`,
+      `const connectorsNavVisible = isConnectorCenterEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`,
       "crmNavVisible, automationNavVisible, assistantNavVisible, connectorsNavVisible }",
     ]) assert.ok(layout.includes(v), v)
   })

@@ -6,7 +6,7 @@ import assert from "node:assert/strict"
 import { readFileSync, readdirSync } from "node:fs"
 import { describe, it } from "node:test"
 import {
-  PREPAY_ERRORS, blockingCount, businessDaysInMonth, computePrepay, csvCell, eurosPlain, hoursDecimal, parseAmount, readSnapshot, toCsv, validateLabel, validatePeriod,
+  PREPAY_ERRORS, blockingCount, businessDaysInMonth, computePrepay, csvCell, eurosPlain, hoursDecimal, parseAmount, readSnapshot, toCsv, validateLabel, validatePeriod, openableMonths,
 } from "@/lib/payroll-prep/prepay.core"
 import { DSN_DISCLAIMER, RUBRICS, luhnValid, nirValid, renderDsn, validateDsn, type DsnLine } from "@/lib/payroll-prep/dsn-model"
 import { isPayrollPrepEnabled } from "@/lib/payroll-prep/prepay-feature-flag"
@@ -154,5 +154,24 @@ describe("modèle DSN : format seulement, jeu synthétique", () => {
     const c = code(readFileSync("src/lib/payroll-prep/dsn-model.ts", "utf8"))
     assert.doesNotMatch(c, /\bfetch\(|from "node:(?:http|https|net)"|https?:\/\/|prisma|process\.env/)
     for (const f of readdirSync("src/lib/payroll-prep")) assert.doesNotMatch(code(readFileSync(`src/lib/payroll-prep/${f}`, "utf8")), /\bfetch\(|net-entreprises\.fr\/|https?:\/\//, f)
+  })
+})
+
+describe("mois proposés à l'ouverture (liste déroulante, compatible Safari)", () => {
+  it("mois en cours puis précédents, sans les mois ouverts, valeur AAAA-MM acceptée par l'action", () => {
+    const m = openableMonths(D("2026-11-21"), [{ year: 2026, month: 11 }, { year: 2026, month: 9 }], 4)
+    assert.deepEqual(m.map((x) => x.value), ["2026-10", "2026-08"])
+    assert.equal(m[0].label, "octobre 2026")
+    for (const x of m) assert.match(x.value, /^\d{4}-\d{2}$/)
+  })
+  it("passage d'année et aucun mois futur", () => {
+    const m = openableMonths(D("2027-01-05"), [], 3)
+    assert.deepEqual(m.map((x) => x.value), ["2027-01", "2026-12", "2026-11"])
+    for (const x of m) { const [y, mo] = x.value.split("-").map(Number); assert.equal(validatePeriod(y, mo, D("2027-01-05")).ok, true) }
+  })
+  it("la page n'utilise plus <input type=\"month\">", () => {
+    const page = readFileSync("src/app/(dashboard)/pre-paie/page.tsx", "utf8")
+    assert.doesNotMatch(page, /<Input[^>]*type="month"/)
+    assert.match(page, /openableMonths\(parisToday\(serverNow\(\)\), periods\)/)
   })
 })

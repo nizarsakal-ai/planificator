@@ -24,7 +24,8 @@ describe("migration du lot H", () => {
     const dirs = readdirSync("prisma/migrations").filter((d) => /^\d{14}_/.test(d)).sort()
     assert.deepEqual(dirs.filter((d) => d.includes("lot_h")), [MIGRATION_DIR])
     // Intégration FGHI : H reste après F, G et toutes les migrations de la base ; seule I la suit.
-    assert.deepEqual(dirs.filter((d) => d > MIGRATION_DIR), ["20261119150000_v2_lot_i_marketing_shop"], "seule I après H")
+    // Seul le lot I suit H ; les migrations ultérieures hors lots (photos, espace PDF du Studio…) ne comptent pas.
+    assert.deepEqual(dirs.filter((d) => d > MIGRATION_DIR && /_v2_lot_/.test(d)), ["20261119150000_v2_lot_i_marketing_shop"], "seule I après H")
     assert.ok(dirs.includes("20261117120000_vehicle_tour_auto_km"), "dernière migration de main 90ae644 présente")
   })
   it("additive : aucun objet existant modifié, aucune donnée lue ni écrite", () => {
@@ -87,6 +88,6 @@ describe("gardes et périmètre", () => {
       assert.doesNotMatch(c, /api\/pdf\/paie/, f)
     }
     assert.match(read("src/lib/payroll-prep/prepay-feature-flag.ts"), /ne calcule ni salaire,\n\/\/ ni cotisation/)
-    assert.ok(read("src/app/(dashboard)/layout.tsx").includes(`const payrollPrepNavVisible = isPayrollPrepEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`))
+    assert.ok(read("src/app/(dashboard)/layout.tsx").includes(`const payrollPrepNavVisible = isPayrollPrepEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`))
   })
 })

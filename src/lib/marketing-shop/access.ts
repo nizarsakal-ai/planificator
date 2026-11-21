@@ -1,12 +1,10 @@
 /**
- * Garde d'accès du lot I (marketing et boutique). Même règle que les lots A et B (ADMIN ou SUPER_ADMIN avec la société
- * active de la session) : la logique pure `resolveStockAccessCore` et la décision de page `pageDecision` du stock sont
- * réutilisées telles quelles, seul le drapeau diffère. Le `companyId` vient TOUJOURS de la session. Ne jamais importer
- * depuis un composant client.
+ * Garde serveur du lot I (Marketing et Boutique). Le contrôle commun des rôles s'applique dans la
+ * société pilote. L'identifiant de société vient de la session.
  */
 import { notFound, redirect } from "next/navigation"
 import { auth } from "@/auth"
-import { isMarketingShopEnabled } from "@/lib/marketing-shop/marketing-shop-feature-flag"
+import { readMarketingShopPilotCompanyId } from "@/lib/marketing-shop/marketing-shop-feature-flag"
 import { pageDecision, resolveStockAccessCore, stockAccessMessage, type StockAccessResult, type StockContext, type StockDenial, type StockSessionLike } from "@/lib/stock/access"
 
 export type MarketingShopContext = StockContext
@@ -19,16 +17,20 @@ export class MarketingShopAccessError extends Error {
   }
 }
 
-/** Logique pure (testable) : drapeau → session → rôle → société. */
-export function resolveMarketingShopAccessCore(enabled: boolean, session: StockSessionLike | null): StockAccessResult {
-  return resolveStockAccessCore(enabled, session)
+export function resolveMarketingShopAccessCore(pilotCompanyId: string | null, session: StockSessionLike | null): StockAccessResult {
+  if (!pilotCompanyId) return { ok: false, reason: "MODULE_DISABLED" }
+  const base = resolveStockAccessCore(true, session)
+  if (!base.ok && base.reason === "UNAUTHENTICATED") return base
+  if (session?.user?.companyId !== pilotCompanyId) return { ok: false, reason: "MODULE_DISABLED" }
+  return base
 }
 
 export async function resolveMarketingShopAccess(): Promise<StockAccessResult> {
-  if (!isMarketingShopEnabled()) return { ok: false, reason: "MODULE_DISABLED" }
+  const pilotCompanyId = readMarketingShopPilotCompanyId()
+  if (pilotCompanyId === null) return { ok: false, reason: "MODULE_DISABLED" }
   let session: StockSessionLike | null
   try { session = await auth() } catch { return { ok: false, reason: "UNAUTHENTICATED" } }
-  return resolveMarketingShopAccessCore(true, session)
+  return resolveMarketingShopAccessCore(pilotCompanyId, session)
 }
 
 /** Actions : contexte ou erreur typée (aucune écriture sans drapeau, session, rôle et société). */

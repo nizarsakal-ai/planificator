@@ -56,10 +56,17 @@ describe("cinq drapeaux serveur indépendants", () => {
       FLAGS.forEach(([name, fn], i) => assert.equal(fn(env), !!(n & (1 << i)), `${name} ${n}`))
     }
   })
-  it("layout : cinq visibilités calculées côté serveur, rôle ADMIN/SUPER_ADMIN et société, chacune de son seul drapeau", () => {
+  it("layout : cinq visibilités calculées côté serveur, rôle ADMIN/SUPER_ADMIN et société, chacune de son seul drapeau (H : société pilote en plus)", () => {
     const layout = read("src/app/(dashboard)/layout.tsx")
-    for (const [v, fn] of [["connectorsNavVisible", "isConnectorCenterEnabled"], ["assistantNavVisible", "isAssistantEnabled"], ["documentStudioNavVisible", "isDocumentStudioEnabled"], ["payrollPrepNavVisible", "isPayrollPrepEnabled"], ["marketingShopNavVisible", "isMarketingShopEnabled"]]) {
-      assert.ok(layout.includes(`const ${v} = ${fn}() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`), v)
+    // Pilote H (20/11/2026) : la visibilité H exige aussi la société pilote (configuration serveur partagée avec la garde H).
+    for (const [v, expr] of [
+      ["connectorsNavVisible", `isConnectorCenterEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`],
+      ["assistantNavVisible", `isAssistantEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`],
+      ["documentStudioNavVisible", `isDocumentStudioEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`],
+      ["payrollPrepNavVisible", `isPayrollPrepEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`],
+      ["marketingShopNavVisible", `isMarketingShopEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`],
+    ]) {
+      assert.ok(layout.includes(`const ${v} = ${expr}`), v)
       const user = layout.slice(layout.indexOf("const user = {"), layout.indexOf("\n", layout.indexOf("const user = {")))
       assert.equal((user.match(new RegExp(`\\b${v}\\b`, "g")) ?? []).length, 1, `${v} transmis une fois`)
     }
@@ -186,8 +193,9 @@ describe("retours natifs : familles E, F, G, H, I", () => {
       "const FICHE = /^\\/crm\\/opportunites\\/[A-Za-z0-9_-]{1,64}$/",
       "const PAGES_LOT_E = /^\\/(?:crm\\/opportunites(?:\\/[A-Za-z0-9_-]{1,64})?|automatisations)$/",
       "const PAGES_LOT_F = /^\\/connecteurs$/",
-      "const FICHES_LOT_G = /^\\/studio-documents\\/(?:documents\\/[A-Za-z0-9_-]{1,64}|(?!documents$)[A-Za-z0-9_-]{1,64})$/",
-      "const PAGES_LOT_G = /^\\/studio-documents(?:\\/(?:documents\\/[A-Za-z0-9_-]{1,64}|(?!documents$)[A-Za-z0-9_-]{1,64}))?$/",
+      // Espace PDF du Studio (20/11/2026) : fiches « /studio-documents/fichiers/<id> » ajoutées aux listes G, même règle.
+      "const FICHES_LOT_G = /^\\/studio-documents\\/(?:(?:documents|fichiers)\\/[A-Za-z0-9_-]{1,64}|(?!(?:documents|fichiers)$)[A-Za-z0-9_-]{1,64})$/",
+      "const PAGES_LOT_G = /^\\/studio-documents(?:\\/(?:(?:documents|fichiers)\\/[A-Za-z0-9_-]{1,64}|(?!(?:documents|fichiers)$)[A-Za-z0-9_-]{1,64}))?$/",
       "const PAGES_LOT_H = /^\\/pre-paie(?:\\/[A-Za-z0-9_-]{1,64})?$/",
       "const FICHES_LOT_I = /^\\/boutique\\/commandes\\/[A-Za-z0-9_-]{1,64}$/",
       "const PAGES_LOT_I = /^\\/(?:marketing|boutique(?:\\/commandes\\/[A-Za-z0-9_-]{1,64})?)$/",
@@ -207,8 +215,12 @@ describe("migrations F, G, H, I", () => {
       ["20261119140000_v2_lot_h_payroll_prep", "6bf15b8f9a0b10657da801fdfa57e4baab45475f581afb2fde3a087bd0115ece"],
       ["20261119150000_v2_lot_i_marketing_shop", "afc78dda37a480096c080a79e6793d97cdd35d45732a08d688a57a3257854aad"],
     ]
-    assert.deepEqual(dirs.slice(-4), lots.map(([d]) => d))
-    assert.equal(dirs[dirs.length - 5], "20261117120000_vehicle_tour_auto_km")
+    // Les quatre lots se suivent dans l'ordre, directement après la dernière migration de main 90ae644 ; les migrations
+    // ultérieures hors lots (photos, espace PDF du Studio…) viennent après et ne sont pas des lots.
+    const i = dirs.indexOf(lots[0][0])
+    assert.deepEqual(dirs.slice(i, i + 4), lots.map(([d]) => d))
+    assert.equal(dirs[i - 1], "20261117120000_vehicle_tour_auto_km")
+    assert.deepEqual(dirs.filter((d) => /_v2_lot_[fghi]_/.test(d)), lots.map(([d]) => d))
     for (const [d, sha] of lots) assert.equal(createHash("sha256").update(readFileSync(`prisma/migrations/${d}/migration.sql`)).digest("hex"), sha, d)
     assert.ok(dirs.every((d) => !/lot_d|reserve/.test(d)))
   })

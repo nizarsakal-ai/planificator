@@ -174,7 +174,7 @@ export default async function StudioPage({ searchParams }: { searchParams: Promi
               <tr key={f.id} className="border-t">
                 <td className="px-3 py-2"><a href={`/studio-documents/fichiers/${f.id}`} className="font-medium text-[#0f3460] underline">{f.title}</a> <span className="text-xs text-slate-500">{f.originalName}</span></td>
                 <td className="px-3 py-2 tabular-nums">{f.latest?.pageCount ?? "—"}</td>
-                <td className="px-3 py-2 text-xs">{f.latest ? `v${f.latest.revision} · ${f.latest.kind === "ORIGINAL" ? (f.origin === "COMBINED" ? "combiné" : f.origin === "EXTRACTED" ? "extrait" : "original") : f.latest.kind === "ORGANIZED" ? "pages organisées" : f.latest.signerName ? `signée par ${f.latest.signerName}` : "remplie"}` : "—"}</td>
+                <td className="px-3 py-2 text-xs">{f.latest ? `v${f.latest.revision} · ${f.latest.kind === "ORIGINAL" ? (f.origin === "COMBINED" ? "combiné" : f.origin === "EXTRACTED" ? "extrait" : "original") : f.latest.kind === "ORGANIZED" ? "pages organisées" : f.latest.kind === "REDACTED" ? "pages biffées" : f.latest.signerName ? `signée par ${f.latest.signerName}` : "remplie"}` : "—"}</td>
                 <td className="px-3 py-2 tabular-nums">{fmtInstant(f.updatedAt)}</td>
               </tr>
             ))}

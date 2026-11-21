@@ -26,7 +26,9 @@ describe("migration du lot I", () => {
   it("unique, nommée comme demandé, dernière migration du dépôt", () => {
     const dirs = readdirSync("prisma/migrations").filter((d) => /^\d{14}_/.test(d)).sort()
     assert.deepEqual(dirs.filter((d) => d.includes("lot_i")), [MIGRATION_DIR])
-    assert.equal(dirs[dirs.length - 1], MIGRATION_DIR)
+    // Dernière migration de LOT du dépôt ; les migrations ultérieures hors lots (photos, espace PDF du Studio…) ne comptent pas.
+    const lots = dirs.filter((d) => /_v2_lot_/.test(d))
+    assert.equal(lots[lots.length - 1], MIGRATION_DIR)
     assert.ok(dirs.includes("20261117120000_vehicle_tour_auto_km"), "dernière migration de main 90ae644 présente")
   })
   it("additive : aucun objet existant modifié, aucune donnée lue ni écrite hors déclencheurs des tables I", () => {
@@ -133,7 +135,9 @@ describe("gardes et écrans", () => {
     assert.equal((code(read(PAGES[1])).match(/<FormulaireRetour /g) ?? []).length, 3)
     assert.ok(code(read(PAGES[1])).includes(`<input type="hidden" name="idempotencyKey" value={idempotencyKey} />`))
     const acces = read("src/lib/marketing-shop/access.ts")
-    assert.ok(acces.includes("const decision = pageDecision(r.reason)") && acces.includes("resolveStockAccessCore(enabled, session)"))
+    // Pilote limité à une société (972936f) : contrôle commun des rôles, puis société de session = société pilote.
+    assert.ok(acces.includes("const decision = pageDecision(r.reason)") && acces.includes("resolveStockAccessCore(true, session)"))
+    assert.ok(acces.includes("if (session?.user?.companyId !== pilotCompanyId) return { ok: false, reason: \"MODULE_DISABLED\" }"))
   })
   it("actions : gardées, retour par état, seule redirection /login, cible fiche de commande ; entrées sans troncature", () => {
     const a = read(ACTIONS), c = code(a)

@@ -10,6 +10,8 @@
  *   L'original et les révisions précédentes ne sont jamais modifiés (garanti en base).
  * - Organiser (lot 3) : même discipline que « Remplir et signer » (dernière révision, calcul hors transaction, verrou),
  *   révision ORGANIZED portant son plan de pages empreint.
+ * - Biffer (lot 4) : même discipline ; images des pages biffées vérifiées (JPEG, proportion, définition, poids), page
+ *   remplacée par sa seule image, puis CONTRÔLE avant enregistrement : aucun texte extractible sur une page biffée.
  * - Extraire et combiner (lot 3) : NOUVEAU PDF (révision 1) dont les sources (PDF, révision, pages) sont figées à la
  *   création ; sources lues dans l'entreprise de la session uniquement. Résultat identique à un PDF existant : sa fiche
  *   est rouverte (même règle d'unicité que l'import).
@@ -20,9 +22,9 @@ import { parseStudioSignature } from "@/lib/document-studio/signature"
 import { validateSignerName } from "@/lib/document-studio/studio.core"
 import {
   PDF_ERRORS, PDF_LIMITS, cleanOriginalName, downloadName, hasSignature, isIdentityPlan, pageRanges, parseCombineIds, parseOperations, parsePagePlan,
-  summarizeOperations, summarizePlan, validatePdfTitle, type PdfSource, type PlannedPage,
+  parseRedactions, summarizeOperations, summarizePlan, summarizeRedactions, validatePdfTitle, type PdfSource, type PlannedPage,
 } from "@/lib/document-studio/pdf-workspace.core"
-import { applyOperations, assemblePdf, inspectPdf, type PdfInspection } from "@/lib/document-studio/pdf-workspace.pdf"
+import { applyOperations, assemblePdf, inspectPdf, parseJpegDataUrl, redactPdf, type PdfInspection } from "@/lib/document-studio/pdf-workspace.pdf"
 
 type Db = PrismaClient
 type Tx = Prisma.TransactionClient
@@ -275,4 +277,68 @@ export async function combinePdfs(db: Db, ctx: PdfContext, input: { ids: string;
     sources: parts.map((r) => ({ pdfId: r.pdfId, revisionId: r.id, revision: r.revision, title: r.pdf.title, pages: all(r.pageCount).map((p) => p.page) })),
     detail: `PDF « ${title.value} » combiné depuis ${parts.map((r) => `« ${r.pdf.title} » v${r.revision}`).join(", ")}`.slice(0, 1000),
   })
+}
+
+// ── Lot 4 : biffer ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Biffer : nouvelle révision où chaque page biffée est remplacée par son image (zones noires peintes dedans). */
+export async function redactPdfRevision(
+  db: Db, ctx: PdfContext, pdfId: string, input: { baseRevisionId: string; redactions: string; images: Record<string, string> },
+): Promise<PdfResult<{ revision: number; revisionId: string }>> {
+  const latest = await db.studioPdfRevision.findFirst({
+    where: { companyId: ctx.companyId, pdfId }, orderBy: { revision: "desc" },
+    select: { id: true, revision: true, data: true, pageCount: true, encrypted: true, pdf: { select: { title: true } } },
+  })
+  if (!latest) return { ok: false, error: PDF_ERRORS.notFound }
+  if (latest.id !== input.baseRevisionId) return { ok: false, error: PDF_ERRORS.notLatest }
+  if (latest.revision >= PDF_LIMITS.maxRevisions) return { ok: false, error: PDF_ERRORS.tooManyRevisions }
+  if (latest.encrypted) return { ok: false, error: PDF_ERRORS.encrypted }
+  const red = parseRedactions(input.redactions, latest.pageCount)
+  if (!red.ok) return red
+
+  const images = new Map<number, Uint8Array>()
+  let total = 0
+  for (const r of red.value) {
+    const img = parseJpegDataUrl(input.images[String(r.page)])
+    if (!img) return { ok: false, error: PDF_ERRORS.redactImages }
+    total += img.length
+    images.set(r.page, img)
+  }
+  if (total > PDF_LIMITS.maxRedactImagesBytes) return { ok: false, error: PDF_ERRORS.redactImagesTooLarge }
+  if (Object.keys(input.images).length !== images.size) return { ok: false, error: PDF_ERRORS.redactImages }
+
+  const written = await redactPdf(new Uint8Array(latest.data), red.value, images, { title: latest.pdf.title })
+  if (!written.ok) return written
+  const info = await inspectPdf(written.value)
+  if (!info.ok || info.value.pageCount !== latest.pageCount) return { ok: false, error: PDF_ERRORS.writeFailed }
+  // Contrôle de non-fuite : une page biffée n'est qu'une image, aucun texte ne doit pouvoir en être extrait.
+  if (red.value.some((r) => (info.value.pageTexts[r.page - 1] ?? "").trim() !== "")) return { ok: false, error: PDF_ERRORS.redactLeak }
+  const operations = red.value.map((r) => ({ page: r.page, rects: r.rects.map((x) => ({ ...x })), imageSha256: sha256Hex(images.get(r.page)!) }))
+  const summary = summarizeRedactions(red.value)
+
+  try {
+    const created = await db.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<{ id: string; title: string }[]>`SELECT "id", "title" FROM "studio_pdfs" WHERE "id" = ${pdfId} AND "companyId" = ${ctx.companyId} FOR UPDATE`
+      const pdf = locked[0] ?? fail(PDF_ERRORS.notFound)
+      const head = await tx.studioPdfRevision.findFirst({ where: { companyId: ctx.companyId, pdfId }, orderBy: { revision: "desc" }, select: { id: true } })
+      if (!head || head.id !== latest.id) fail(PDF_ERRORS.notLatest)
+      const revision = latest.revision + 1
+      const r = await tx.studioPdfRevision.create({
+        data: {
+          companyId: ctx.companyId, pdfId, revision, kind: "REDACTED", sha256: sha256Hex(written.value), size: written.value.length, data: Buffer.from(written.value),
+          pageCount: info.value.pageCount, pages: info.value.pages.map((p) => ({ ...p })), pageTexts: info.value.pageTexts, encrypted: false,
+          operations, operationsSha256: sha256Hex(canonicalJson(operations)), createdById: ctx.userId,
+        },
+        select: { id: true },
+      })
+      await tx.studioPdf.update({ where: { id: pdfId }, data: { updatedAt: new Date() } })
+      await audit(tx, ctx, { action: "UPDATED", entityId: pdfId, detail: `PDF « ${pdf.title} » : version ${revision} enregistrée (${summary})` })
+      return { revision, revisionId: r.id }
+    })
+    return { ok: true, value: created }
+  } catch (e) {
+    if (e instanceof PdfFailure) return { ok: false, error: e.userMessage }
+    if (isUniqueViolation(e)) return { ok: false, error: PDF_ERRORS.notLatest }
+    throw e
+  }
 }

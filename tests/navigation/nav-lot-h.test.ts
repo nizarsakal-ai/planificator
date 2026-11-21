@@ -104,9 +104,11 @@ describe("lot H : catégories et câblage", () => {
       assert.doesNotMatch(code(src), /PAYROLL_PREP_ENABLED|process\.env|isPayrollPrepEnabled|prepay-feature-flag/, `${f} : aucun drapeau lu côté client`)
     }
   })
-  it("layout : drapeau, rôle ADMIN/SUPER_ADMIN et société ; transmis une fois dans l'objet user", () => {
+  it("layout : drapeau et société pilote (configuration partagée avec la garde), rôle ADMIN/SUPER_ADMIN ; transmis une fois dans l'objet user", () => {
     const layout = read("src/app/(dashboard)/layout.tsx")
-    assert.ok(layout.includes(`const payrollPrepNavVisible = isPayrollPrepEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`))
+    assert.ok(layout.includes(`const payrollPrepNavVisible = isPayrollPrepEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`))
+    assert.ok(layout.includes(`import { isPayrollPrepEnabledForCompany } from "@/lib/payroll-prep/prepay-feature-flag"`))
+    assert.doesNotMatch(code(layout), /isPayrollPrepEnabled\(|PAYROLL_PREP_COMPANY_ID|readPayrollPrepPilotCompanyId/, "aucune lecture parallèle de la configuration H")
     const user = layout.slice(layout.indexOf("const user = {"), layout.indexOf("\n", layout.indexOf("const user = {")))
     assert.equal((user.match(/\bpayrollPrepNavVisible\b/g) ?? []).length, 1)
   })

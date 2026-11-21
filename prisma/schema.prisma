@@ -4668,6 +4668,8 @@ model GeneratedDocument {
 // des éléments posés (empreinte) et, si une signature est posée, le nom du signataire et l'empreinte du tracé.
 // Lot 3 : « Organiser » ajoute une révision ORGANIZED (pages réordonnées, pivotées ou retirées, plan empreint) ;
 // « Combiner » et « Extraire » créent un NOUVEAU PDF (origine COMBINED ou EXTRACTED, sources figées).
+// Lot 4 : « Biffer » ajoute une révision REDACTED (pages biffées remplacées par leur image, zones et empreintes des
+// images en liste empreinte) ; les annotations (surligner, encadrer, note) sont des révisions FILLED.
 // Révisions immuables et jamais supprimées (garanti en base). Même drapeau que le Studio (DOCUMENT_STUDIO_ENABLED).
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -4675,6 +4677,7 @@ enum StudioPdfRevisionKind {
   ORIGINAL
   FILLED
   ORGANIZED
+  REDACTED
 }
 
 enum StudioPdfOrigin {
