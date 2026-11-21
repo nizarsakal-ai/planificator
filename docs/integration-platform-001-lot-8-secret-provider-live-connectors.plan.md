@@ -2,7 +2,7 @@
 
 | Champ | Valeur |
 |---|---|
-| **Statut** | **PROPOSÉ — en attente de validation** |
+| **Statut** | **VALIDÉ le 21/11/2026 — PR 8A autorisée** |
 | **Date** | 21/11/2026 |
 | **Demande** | Brancher pour de vrai Google Agenda, puis Shopify, Mailchimp et Slack (aujourd'hui en simulation dans le centre de connecteurs, lot F) |
 | **Décision préalable** | Coffre conforme à `docs/integration-platform-001-security.spec.md` (SECURITY SPEC CLOSED) **avant** toute connexion réelle, sans chiffrement simple à clé unique (choix validé le 21/11/2026) |
