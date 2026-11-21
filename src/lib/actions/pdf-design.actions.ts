@@ -21,7 +21,7 @@ export async function saveDocumentDesignAction(raw: unknown): Promise<Result> {
   const p = schema.safeParse(raw)
   if (!p.success) return { ok: false, error: "Saisie invalide." }
   // Toutes les colonnes à null = suivre le réglage de la société (choix tout ou rien, voir designFromStored).
-  let stored: DesignColumns | { [K in keyof DesignColumns]: null } = { pdfTemplate: null, pdfPrimaryColor: null, pdfSecondaryColor: null, pdfLayout: null, pdfShowClientIds: null, pdfShowBankDetails: null }
+  let stored: DesignColumns | { [K in keyof DesignColumns]: null } = { pdfTemplate: null, pdfPrimaryColor: null, pdfSecondaryColor: null, pdfLayout: null, pdfShowClientIds: null, pdfShowBankDetails: null, pdfShowDeliveryAddress: null, pdfLanguage: null }
   if (p.data.design) {
     const v = validateDesign(p.data.design)
     if (!v.ok) return { ok: false, error: v.errors[0] }

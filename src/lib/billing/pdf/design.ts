@@ -37,6 +37,11 @@ export const PDF_LAYOUT_DESCRIPTION: Record<PdfLayout, string> = {
   QUICK: "L'essentiel : désignation, TVA, montant. Uniquement si toutes les lignes ont une quantité de 1 sans remise.",
 }
 
+/** 21/11/2026 — langue du document (libellés et mentions standard ; textes saisis par l'utilisateur inchangés). */
+export const PDF_LANGUAGES = ["FR", "EN"] as const
+export type PdfLanguage = (typeof PDF_LANGUAGES)[number]
+export const PDF_LANGUAGE_LABEL: Record<PdfLanguage, string> = { FR: "Français", EN: "Anglais" }
+
 export interface PdfDesign {
   template: PdfTemplate
   primary: string
@@ -46,10 +51,14 @@ export interface PdfDesign {
   showClientIds: boolean
   /** Encadré « Coordonnées bancaires » (IBAN/BIC des paramètres de facturation). */
   showBankDetails: boolean
+  /** 21/11/2026 — adresse de livraison sous le client (si elle est renseignée). */
+  showDeliveryAddress: boolean
+  /** 21/11/2026 — langue du document. */
+  language: PdfLanguage
 }
 
 /** Rendu historique (avant les modèles) : aucune pièce existante ne change d'apparence. */
-export const DEFAULT_PDF_DESIGN: PdfDesign = { template: "CLASSIC", primary: "#0f3460", secondary: "#0f3460", layout: "COMPLETE", showClientIds: true, showBankDetails: false }
+export const DEFAULT_PDF_DESIGN: PdfDesign = { template: "CLASSIC", primary: "#0f3460", secondary: "#0f3460", layout: "COMPLETE", showClientIds: true, showBankDetails: false, showDeliveryAddress: true, language: "FR" }
 
 export interface PdfPalette { id: string; label: string; primary: string; secondary: string }
 
@@ -106,14 +115,21 @@ export function tint(hex: string, amount: number): string {
 
 export type DesignValidation = { ok: true; design: PdfDesign } | { ok: false; errors: string[] }
 
-export interface DesignInput { template: string; primary: string; secondary: string; layout: string; showClientIds: boolean; showBankDetails: boolean }
+export interface DesignInput {
+  template: string; primary: string; secondary: string; layout: string; showClientIds: boolean; showBankDetails: boolean
+  /** Facultatifs (saisies antérieures) : valeurs par défaut appliquées. */
+  showDeliveryAddress?: boolean; language?: string
+}
 
 /** Contrôle d'un design saisi : modèle et format connus, couleurs hexadécimales, lisibilité garantie. */
 export function validateDesign(input: DesignInput): DesignValidation {
   const errors: string[] = []
   const layout = (PDF_LAYOUTS as readonly string[]).includes(input.layout) ? (input.layout as PdfLayout) : null
   if (!layout) errors.push("Format de document inconnu.")
-  if (typeof input.showClientIds !== "boolean" || typeof input.showBankDetails !== "boolean") errors.push("Options d'affichage invalides.")
+  if (typeof input.showClientIds !== "boolean" || typeof input.showBankDetails !== "boolean" || (input.showDeliveryAddress !== undefined && typeof input.showDeliveryAddress !== "boolean")) errors.push("Options d'affichage invalides.")
+  const languageRaw = input.language ?? DEFAULT_PDF_DESIGN.language
+  const language = (PDF_LANGUAGES as readonly string[]).includes(languageRaw) ? (languageRaw as PdfLanguage) : null
+  if (!language) errors.push("Langue de document inconnue.")
   const template = (PDF_TEMPLATES as readonly string[]).includes(input.template) ? (input.template as PdfTemplate) : null
   if (!template) errors.push("Modèle de document inconnu.")
   const primary = normalizeHex(input.primary)
@@ -122,14 +138,16 @@ export function validateDesign(input: DesignInput): DesignValidation {
   if (!secondary) errors.push("Couleur secondaire invalide (format attendu : #1a2b3c).")
   if (primary && contrastRatio(primary, "#ffffff") < MIN_CONTRAST) errors.push("Couleur principale trop claire : le texte blanc posé dessus serait illisible. Choisissez une teinte plus foncée.")
   if (secondary && contrastRatio(secondary, "#ffffff") < MIN_CONTRAST) errors.push("Couleur secondaire trop claire : les totaux seraient illisibles sur fond blanc. Choisissez une teinte plus foncée.")
-  if (errors.length > 0 || !template || !primary || !secondary || !layout) return { ok: false, errors }
-  return { ok: true, design: { template, primary, secondary, layout, showClientIds: input.showClientIds, showBankDetails: input.showBankDetails } }
+  if (errors.length > 0 || !template || !primary || !secondary || !layout || !language) return { ok: false, errors }
+  return { ok: true, design: { template, primary, secondary, layout, showClientIds: input.showClientIds, showBankDetails: input.showBankDetails, showDeliveryAddress: input.showDeliveryAddress ?? DEFAULT_PDF_DESIGN.showDeliveryAddress, language } }
 }
 
 /** Valeurs brutes lues en base (colonnes nullables d'un document, ou réglage de la société). */
 export interface StoredDesign {
   pdfTemplate: string | null; pdfPrimaryColor: string | null; pdfSecondaryColor: string | null
   pdfLayout: string | null; pdfShowClientIds: boolean | null; pdfShowBankDetails: boolean | null
+  /** 21/11/2026 — absents des lectures antérieures : valeur par défaut. */
+  pdfShowDeliveryAddress?: boolean | null; pdfLanguage?: string | null
 }
 
 /**
@@ -141,6 +159,7 @@ export function designFromStored(s: StoredDesign | null | undefined): PdfDesign 
   const v = validateDesign({
     template: s.pdfTemplate, primary: s.pdfPrimaryColor, secondary: s.pdfSecondaryColor,
     layout: s.pdfLayout ?? DEFAULT_PDF_DESIGN.layout, showClientIds: s.pdfShowClientIds ?? DEFAULT_PDF_DESIGN.showClientIds, showBankDetails: s.pdfShowBankDetails ?? DEFAULT_PDF_DESIGN.showBankDetails,
+    showDeliveryAddress: s.pdfShowDeliveryAddress ?? DEFAULT_PDF_DESIGN.showDeliveryAddress, language: s.pdfLanguage ?? DEFAULT_PDF_DESIGN.language,
   })
   return v.ok ? v.design : null
 }
@@ -160,6 +179,8 @@ export function designFromSnapshot(raw: unknown): PdfDesign {
     layout: typeof r.layout === "string" ? r.layout : DEFAULT_PDF_DESIGN.layout,
     showClientIds: typeof r.showClientIds === "boolean" ? r.showClientIds : DEFAULT_PDF_DESIGN.showClientIds,
     showBankDetails: typeof r.showBankDetails === "boolean" ? r.showBankDetails : DEFAULT_PDF_DESIGN.showBankDetails,
+    showDeliveryAddress: typeof r.showDeliveryAddress === "boolean" ? r.showDeliveryAddress : DEFAULT_PDF_DESIGN.showDeliveryAddress,
+    language: typeof r.language === "string" ? r.language : DEFAULT_PDF_DESIGN.language,
   })
   return v.ok ? v.design : DEFAULT_PDF_DESIGN
 }
@@ -168,10 +189,11 @@ export function designFromSnapshot(raw: unknown): PdfDesign {
 export interface DesignColumns {
   pdfTemplate: PdfTemplate; pdfPrimaryColor: string; pdfSecondaryColor: string
   pdfLayout: PdfLayout; pdfShowClientIds: boolean; pdfShowBankDetails: boolean
+  pdfShowDeliveryAddress: boolean; pdfLanguage: PdfLanguage
 }
 
 export function designToStored(d: PdfDesign): DesignColumns {
-  return { pdfTemplate: d.template, pdfPrimaryColor: d.primary, pdfSecondaryColor: d.secondary, pdfLayout: d.layout, pdfShowClientIds: d.showClientIds, pdfShowBankDetails: d.showBankDetails }
+  return { pdfTemplate: d.template, pdfPrimaryColor: d.primary, pdfSecondaryColor: d.secondary, pdfLayout: d.layout, pdfShowClientIds: d.showClientIds, pdfShowBankDetails: d.showBankDetails, pdfShowDeliveryAddress: d.showDeliveryAddress, pdfLanguage: d.language }
 }
 
 

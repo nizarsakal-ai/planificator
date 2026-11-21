@@ -46,7 +46,7 @@ export default async function DevisDetailPage({ params }: { params: Promise<{ id
   const recipientSuggestions = recipientCtx ? buildRecipientSuggestions(recipientCtx) : null
   const issuedDeposits = deposits.filter((d) => d.status !== "CANCELLED" && d.status !== "DRAFT").length
   // 20/11/2026 — apparence du PDF : modifiable sur le brouillon seulement (figée à l'envoi).
-  const quoteDesign = q.status === "DRAFT" ? await prisma.quote.findFirst({ where: { id: q.id, companyId: ctx.companyId }, select: { pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true } }) : null
+  const quoteDesign = q.status === "DRAFT" ? await prisma.quote.findFirst({ where: { id: q.id, companyId: ctx.companyId }, select: { pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true, pdfShowDeliveryAddress: true, pdfLanguage: true } }) : null
 
   return (
     <div className="space-y-4">

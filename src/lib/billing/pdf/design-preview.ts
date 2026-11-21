@@ -35,6 +35,7 @@ export function buildDesignPreviewData(design: PdfDesign, identity: PreviewIdent
     notes: null, footer: null,
     logoDataUrl: identity.logoDataUrl, legalFooter: identity.legalFooter,
     design, bank: identity.bank,
+    deliveryAddress: "Entrepôt — 3 allée des Livraisons, 93100 Montreuil",
     stamp: { label: "Payée", tone: "success" },
   }
 }

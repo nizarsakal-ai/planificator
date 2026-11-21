@@ -6,16 +6,17 @@ import { Check, Eye } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
-  PDF_LAYOUTS, PDF_LAYOUT_DESCRIPTION, PDF_LAYOUT_LABEL, PDF_PALETTES, PDF_TEMPLATES, PDF_TEMPLATE_DESCRIPTION, PDF_TEMPLATE_LABEL,
-  normalizeHex, tint, validateDesign, type PdfLayout, type PdfTemplate,
+  PDF_LANGUAGES, PDF_LANGUAGE_LABEL, PDF_LAYOUTS, PDF_LAYOUT_DESCRIPTION, PDF_LAYOUT_LABEL, PDF_PALETTES, PDF_TEMPLATES, PDF_TEMPLATE_DESCRIPTION, PDF_TEMPLATE_LABEL,
+  normalizeHex, tint, validateDesign, type PdfLanguage, type PdfLayout, type PdfTemplate,
 } from "@/lib/billing/pdf/design"
 
 export interface PdfDesignValue {
   template: PdfTemplate; primary: string; secondary: string; layout: PdfLayout; showClientIds: boolean; showBankDetails: boolean
+  showDeliveryAddress: boolean; language: PdfLanguage
 }
 
 export function previewUrl(v: PdfDesignValue): string {
-  const q = new URLSearchParams({ template: v.template, primary: v.primary, secondary: v.secondary, layout: v.layout, clientIds: v.showClientIds ? "1" : "0", bank: v.showBankDetails ? "1" : "0" })
+  const q = new URLSearchParams({ template: v.template, primary: v.primary, secondary: v.secondary, layout: v.layout, clientIds: v.showClientIds ? "1" : "0", bank: v.showBankDetails ? "1" : "0", delivery: v.showDeliveryAddress ? "1" : "0", lang: v.language })
   return `/api/pdf/apercu-design?${q.toString()}`
 }
 
@@ -115,7 +116,17 @@ export function PdfDesignPicker({ value, onChange, bankAvailable }: { value: Pdf
             <span>SIREN / SIRET et n° de TVA du client<span className="block text-xs text-slate-500">Recommandé entre professionnels (mentions obligatoires sur les factures B2B).</span></span></label>
           <label className="flex items-start gap-2"><input type="checkbox" className="mt-1" checked={value.showBankDetails} onChange={(e) => set("showBankDetails", e.target.checked)} />
             <span>Encadré « Coordonnées bancaires »<span className="block text-xs text-slate-500">{bankAvailable ? "IBAN et BIC des paramètres de facturation." : "Aucun IBAN renseigné dans les paramètres de facturation : l'encadré n'apparaîtra pas tant qu'il manque."}</span></span></label>
+          <label className="flex items-start gap-2"><input type="checkbox" className="mt-1" checked={value.showDeliveryAddress} onChange={(e) => set("showDeliveryAddress", e.target.checked)} />
+            <span>Adresse de livraison<span className="block text-xs text-slate-500">Sous le client, si elle est renseignée sur la facture ou la fiche client.</span></span></label>
         </div>
+      </fieldset>
+
+      <fieldset>
+        <legend className="mb-2 text-sm font-medium text-slate-700">Langue du document</legend>
+        <select aria-label="Langue du document" value={value.language} onChange={(e) => set("language", e.target.value as PdfLanguage)} className="h-10 rounded-md border border-input bg-background px-3 text-sm">
+          {PDF_LANGUAGES.map((l) => <option key={l} value={l}>{PDF_LANGUAGE_LABEL[l]}</option>)}
+        </select>
+        {value.language === "EN" && <p className="mt-1 text-xs text-slate-500">Libellés et mentions standard traduits ; vos textes (désignations, notes) restent tels que saisis. Le document indique que la version française fait foi.</p>}
       </fieldset>
 
       <div>

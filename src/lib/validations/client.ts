@@ -5,6 +5,8 @@ export const createClientSchema = z.object({
   email: z.string().email("Email invalide").optional().or(z.literal("")),
   phone: z.string().optional(),
   address: z.string().optional(),
+  // 21/11/2026 : adresse de livraison par défaut (factures, bons de livraison).
+  deliveryAddress: z.string().max(500, "Adresse de livraison : 500 caractères maximum.").optional(),
   notes: z.string().optional(),
 })
 

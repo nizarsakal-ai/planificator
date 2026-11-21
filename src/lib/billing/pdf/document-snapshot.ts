@@ -31,14 +31,17 @@ export interface DocumentSnapshotContent {
   design?: PdfDesign
   /** 20/11/2026 : coordonnées bancaires à l'émission (encadré optionnel ; absentes des snapshots antérieurs). */
   bank?: { iban: string; bic: string | null } | null
+  /** 21/11/2026 : adresse de livraison et intitulé à l'émission (absents des snapshots antérieurs ⇒ non affichés). */
+  deliveryAddress?: string | null
+  documentTitle?: string | null
 }
 
 export interface DocumentSnapshot { schemaVersion: number; seller: PdfParty; buyer: PdfParty; document: DocumentSnapshotContent; createdAt: Date }
 
 const invoiceSelect = {
-  id: true, number: true, kind: true, status: true, sentAt: true, pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true, subject: true, clientPurchaseOrderRef: true, notes: true, paymentTerms: true, vatReverseCharge: true, totalVAT: true,
+  id: true, number: true, kind: true, status: true, sentAt: true, pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true, pdfShowDeliveryAddress: true, pdfLanguage: true, subject: true, clientPurchaseOrderRef: true, deliveryAddress: true, documentTitle: true, notes: true, paymentTerms: true, vatReverseCharge: true, totalVAT: true,
   company: { select: { name: true, address: true, siret: true, email: true, phone: true } },
-  client: { select: { name: true, address: true, siret: true, vatNumber: true, email: true } },
+  client: { select: { name: true, address: true, siret: true, vatNumber: true, email: true, deliveryAddress: true } },
   worksite: { select: { name: true } }, quote: { select: { number: true } }, creditedInvoice: { select: { number: true, issueDate: true } },
 } satisfies Prisma.InvoiceSelect
 
@@ -62,6 +65,8 @@ export async function captureDocumentSnapshot(tx: Prisma.TransactionClient, comp
     footer: settings.invoiceFooter, vatReverseCharge: inv.vatReverseCharge,
     design: designFromStored(inv) ?? settings.pdfDesign,
     bank: settings.iban ? { iban: settings.iban, bic: settings.bic } : null,
+    deliveryAddress: inv.deliveryAddress ?? inv.client.deliveryAddress ?? null,
+    documentTitle: inv.documentTitle,
   }
   await tx.invoiceDocumentSnapshot.create({
     data: {

@@ -134,7 +134,7 @@ export default async function ClientsPage() {
                 {/* Actions : menu « ⋯ » Modifier / Désactiver-Réactiver / Supprimer */}
                 <div className="border-t border-slate-100 pt-3 flex justify-end">
                   <ClientActions
-                    client={{ id: client.id, name: client.name, email: client.email, phone: client.phone, address: client.address, notes: client.notes, active: client.active }}
+                    client={{ id: client.id, name: client.name, email: client.email, phone: client.phone, address: client.address, deliveryAddress: client.deliveryAddress, notes: client.notes, active: client.active }}
                     canDelete={canDelete}
                   />
                 </div>

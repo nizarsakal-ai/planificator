@@ -17,6 +17,9 @@ export const invoiceFormSchema = z.object({
   // V2 06/11/2026 : bon de commande client (normalisé ci-dessous). Correctif R1 (revue Codex) : ABSENT ≠ VIDE.
   // Absent (formulaire antérieur) ⇒ undefined ⇒ colonne non écrite (valeur existante préservée) ; "" explicite ⇒ effacement volontaire.
   clientPurchaseOrderRef: z.string().max(200).optional(),
+  // 21/11/2026 : adresse de livraison (vide = celle du client) et intitulé libre. Même règle : absent ≠ vide.
+  deliveryAddress: z.string().max(500, "Adresse de livraison : 500 caractères maximum.").optional(),
+  documentTitle: z.string().max(120, "Intitulé : 120 caractères maximum.").optional(),
   notes: text(2000).optional(),
   paymentTerms: text(500).optional(),
   globalDiscount: z.string().trim().max(10).optional(),
@@ -32,12 +35,22 @@ export interface ParsedInvoice {
   subject: string | null
   /** undefined = champ absent de la saisie (ne pas écrire) ; null = effacement explicite ; chaîne = référence normalisée. */
   clientPurchaseOrderRef?: string | null
+  /** undefined = absent de la saisie ; null = effacé ; chaîne = valeur (espaces de bord retirés). */
+  deliveryAddress?: string | null
+  documentTitle?: string | null
   notes: string | null
   paymentTerms: string | null
   globalDiscountBp: number
   vatReverseCharge: boolean
   lines: ParsedQuoteLine[]
   totals: DocumentTotals
+}
+
+/** Absent ⇒ undefined (non écrit) ; vide ⇒ null (effacement) ; sinon texte sans espaces de bord. */
+function optionalText(v: string | undefined): string | null | undefined {
+  if (v === undefined) return undefined
+  const t = v.trim()
+  return t ? t : null
 }
 
 export function parseInvoiceForm(raw: unknown): { ok: true; value: ParsedInvoice } | { ok: false; error: string } {
@@ -64,7 +77,8 @@ export function parseInvoiceForm(raw: unknown): { ok: true; value: ParsedInvoice
   if (totals.totalTTCCents < BigInt(0)) return { ok: false, error: "Le total TTC d'une facture ne peut pas être négatif." }
   return { ok: true, value: {
     worksiteId: v.worksiteId, quoteId: v.quoteId ? v.quoteId : null, dueDate: v.dueDate ? new Date(`${v.dueDate}T00:00:00.000Z`) : null,
-    subject: v.subject ? v.subject : null, clientPurchaseOrderRef: po.value, notes: v.notes ? v.notes : null, paymentTerms: v.paymentTerms ? v.paymentTerms : null,
+    subject: v.subject ? v.subject : null, clientPurchaseOrderRef: po.value,
+    deliveryAddress: optionalText(v.deliveryAddress), documentTitle: optionalText(v.documentTitle), notes: v.notes ? v.notes : null, paymentTerms: v.paymentTerms ? v.paymentTerms : null,
     globalDiscountBp, vatReverseCharge: v.vatReverseCharge === true, lines, totals,
   } }
 }

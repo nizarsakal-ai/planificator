@@ -31,7 +31,7 @@ export default async function FactureDetailPage({ params }: { params: Promise<{ 
   const blockers = inv.status === "DRAFT" && inv.kind !== "CREDIT_NOTE" ? issueBlockers({ company: inv.company, client: inv.client, lineCount: inv.lines.length }) : []
   // 20/11/2026 — apparence du PDF : modifiable sur le brouillon seulement (figée au snapshot d'émission).
   const [invDesign, settings] = inv.status === "DRAFT"
-    ? await Promise.all([prisma.invoice.findFirst({ where: { id: inv.id, companyId: ctx.companyId }, select: { pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true } }), getBillingSettings(prisma, ctx.companyId)])
+    ? await Promise.all([prisma.invoice.findFirst({ where: { id: inv.id, companyId: ctx.companyId }, select: { pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true, pdfShowDeliveryAddress: true, pdfLanguage: true } }), getBillingSettings(prisma, ctx.companyId)])
     : [null, null]
   const progress = inv.status === "PAID" ? 100 : inv.totalTTCCents > BigInt(0) ? Number((inv.paidCents * BigInt(100)) / inv.totalTTCCents) : 0
 

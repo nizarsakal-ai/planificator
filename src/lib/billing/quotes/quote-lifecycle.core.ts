@@ -55,7 +55,7 @@ export interface QuoteTransitionInput {
 export async function transitionQuoteCore(tx: Prisma.TransactionClient, input: QuoteTransitionInput): Promise<LifecycleResult<{ from: QuoteStatusValue }>> {
   const quote = await tx.quote.findFirst({
     where: { id: input.quoteId, companyId: input.companyId },
-    select: { id: true, status: true, number: true, worksiteId: true, pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true },
+    select: { id: true, status: true, number: true, worksiteId: true, pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true, pdfShowDeliveryAddress: true, pdfLanguage: true },
   })
   if (!quote) return { ok: false, error: QUOTE_ERRORS.notFound }
   const from = quote.status as QuoteStatusValue
@@ -177,7 +177,7 @@ export async function convertQuoteCore(tx: Prisma.TransactionClient, input: Conv
     select: {
       id: true, status: true, number: true, worksiteId: true, clientId: true, notes: true, paymentTerms: true,
       totalHT: true, totalVAT: true, totalTTC: true, globalDiscountBp: true, vatReverseCharge: true, subject: true, clientPurchaseOrderRef: true,
-      pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true,
+      pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true, pdfShowDeliveryAddress: true, pdfLanguage: true,
       worksite: { select: { startDate: true, endDate: true } },
       lines: { orderBy: { position: "asc" }, select: { articleId: true, designation: true, description: true, unit: true, quantity: true, unitPrice: true, vatRate: true, lineHT: true, discountBp: true, position: true } },
     },

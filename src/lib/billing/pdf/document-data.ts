@@ -45,6 +45,18 @@ export interface DocumentPdfData {
   stamp?: PdfStamp | null
   /** 20/11/2026 — coordonnées bancaires de l'émetteur (encadré affiché si l'option est activée et l'IBAN connu). */
   bank?: { iban: string; bic: string | null } | null
+  /** 21/11/2026 — adresse de livraison (multiligne) ; affichée si l'option du design est active. */
+  deliveryAddress?: string | null
+  /** 21/11/2026 — intitulé libre, sous le titre légal du document. */
+  subtitle?: string | null
+  /** 21/11/2026 — libellés des parties (défaut : Émetteur / Client) — ex. Fournisseur pour un bon de commande d'achat. */
+  partyLabels?: { seller: string; buyer: string }
+  /** 21/11/2026 — tableau propre au document (remplace les lignes de facturation) : la 1re colonne porte la description. */
+  table?: { columns: { key: string; label: string; width: number; numeric?: boolean }[]; rows: { cells: Record<string, string>; description?: string | null }[] }
+  /** 21/11/2026 — encadré de signature : accord sur devis (défaut) ou réception d'une livraison. */
+  signatureKind?: "quote" | "delivery"
+  /** 21/11/2026 — document sans montants (bon de livraison) : bloc des totaux masqué. */
+  hideTotals?: boolean
 }
 
 export function sellerParty(company: { name: string; address: string | null; siret: string | null; email: string | null; phone: string | null }, s: BillingSettingsView): PdfParty {

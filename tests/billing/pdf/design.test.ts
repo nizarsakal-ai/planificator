@@ -52,7 +52,7 @@ describe("validation d'un design", () => {
   it("accepte un design complet et normalise les couleurs", () => {
     const v = validateDesign(input({ template: "MODERN", primary: "#4F46E5", secondary: "4338ca", layout: "QUICK", showBankDetails: true }))
     assert.ok(v.ok)
-    assert.deepEqual(v.design, { template: "MODERN", primary: "#4f46e5", secondary: "#4338ca", layout: "QUICK", showClientIds: true, showBankDetails: true })
+    assert.deepEqual(v.design, { template: "MODERN", primary: "#4f46e5", secondary: "#4338ca", layout: "QUICK", showClientIds: true, showBankDetails: true, showDeliveryAddress: true, language: "FR" })
   })
   it("refuse modèle / format inconnus et couleurs invalides", () => {
     const v = validateDesign(input({ template: "FANCY", layout: "TINY", primary: "bleu", secondary: "#12" }))
