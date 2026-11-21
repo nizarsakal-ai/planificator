@@ -11,6 +11,7 @@ import type { Prisma } from "@prisma/client"
 import { decimalToCents } from "@/lib/billing/money"
 import { getBillingSettings } from "@/lib/billing/settings"
 import { buyerParty, legalMentions, sellerParty, type PdfParty } from "./document-data"
+import { designFromStored, type PdfDesign } from "./design"
 
 export const DOCUMENT_SNAPSHOT_SCHEMA_VERSION = 1
 
@@ -26,12 +27,16 @@ export interface DocumentSnapshotContent {
   mentions: string[]
   footer: string | null
   vatReverseCharge: boolean
+  /** 20/11/2026 : design figé à l'émission (absent des snapshots antérieurs ⇒ rendu « Classique » historique). */
+  design?: PdfDesign
+  /** 20/11/2026 : coordonnées bancaires à l'émission (encadré optionnel ; absentes des snapshots antérieurs). */
+  bank?: { iban: string; bic: string | null } | null
 }
 
 export interface DocumentSnapshot { schemaVersion: number; seller: PdfParty; buyer: PdfParty; document: DocumentSnapshotContent; createdAt: Date }
 
 const invoiceSelect = {
-  id: true, number: true, kind: true, status: true, sentAt: true, subject: true, clientPurchaseOrderRef: true, notes: true, paymentTerms: true, vatReverseCharge: true, totalVAT: true,
+  id: true, number: true, kind: true, status: true, sentAt: true, pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true, subject: true, clientPurchaseOrderRef: true, notes: true, paymentTerms: true, vatReverseCharge: true, totalVAT: true,
   company: { select: { name: true, address: true, siret: true, email: true, phone: true } },
   client: { select: { name: true, address: true, siret: true, vatNumber: true, email: true } },
   worksite: { select: { name: true } }, quote: { select: { number: true } }, creditedInvoice: { select: { number: true, issueDate: true } },
@@ -55,6 +60,8 @@ export async function captureDocumentSnapshot(tx: Prisma.TransactionClient, comp
     subject: inv.subject, notes: inv.notes, paymentTerms: inv.paymentTerms,
     mentions: legalMentions(settings, { vatReverseCharge: inv.vatReverseCharge, paymentTerms: inv.paymentTerms, kind: isCredit ? "credit" : "invoice", vatExempt: !settings.vatNumber && decimalToCents(inv.totalVAT) === BigInt(0) && !inv.vatReverseCharge }),
     footer: settings.invoiceFooter, vatReverseCharge: inv.vatReverseCharge,
+    design: designFromStored(inv) ?? settings.pdfDesign,
+    bank: settings.iban ? { iban: settings.iban, bic: settings.bic } : null,
   }
   await tx.invoiceDocumentSnapshot.create({
     data: {

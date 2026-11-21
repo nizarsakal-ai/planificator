@@ -5,6 +5,8 @@ import { z } from "zod"
 import { prisma } from "@/lib/prisma"
 import { BillingAccessError, billingAccessMessage, requireBillingAdmin } from "@/lib/billing/access"
 import { isPlausibleVatNumber, vatMatchesSiren } from "@/lib/billing/company-identity"
+import { designToStored, validateDesign } from "@/lib/billing/pdf/design"
+import { designInputSchema } from "@/lib/billing/pdf/design-schema"
 
 const text = (max: number) => z.string().trim().max(max)
 const schema = z.object({
@@ -12,6 +14,8 @@ const schema = z.object({
   quoteValidityDays: z.coerce.number().int().min(1).max(365), paymentTermsDays: z.coerce.number().int().min(0).max(120),
   latePenaltyText: text(1000), quoteFooter: text(1000), invoiceFooter: text(1000),
   vatRegime: z.enum(["DEBITS", "ENCAISSEMENTS"]), defaultDepositPercent: z.coerce.number().int().min(1).max(100),
+  // 20/11/2026 — design par défaut des PDF de la société.
+  pdfDesign: designInputSchema,
 }).strict()
 
 export async function saveBillingSettingsAction(raw: unknown): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -20,6 +24,8 @@ export async function saveBillingSettingsAction(raw: unknown): Promise<{ ok: tru
   const v = p.data
   if (v.iban && !/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(v.iban.replace(/\s/g, "").toUpperCase())) return { ok: false, error: "IBAN invalide." }
   if (v.vatNumber && !/^[A-Z]{2}[A-Z0-9]{2,13}$/.test(v.vatNumber.replace(/\s/g, "").toUpperCase())) return { ok: false, error: "Numéro de TVA intracommunautaire invalide." }
+  const design = validateDesign(v.pdfDesign)
+  if (!design.ok) return { ok: false, error: design.errors[0] }
   try {
     const ctx = await requireBillingAdmin()
     const data = {
@@ -27,6 +33,7 @@ export async function saveBillingSettingsAction(raw: unknown): Promise<{ ok: tru
       iban: v.iban ? v.iban.replace(/\s/g, "").toUpperCase() : null, bic: v.bic ? v.bic.replace(/\s/g, "").toUpperCase() : null,
       quoteValidityDays: v.quoteValidityDays, paymentTermsDays: v.paymentTermsDays, latePenaltyText: v.latePenaltyText || null,
       quoteFooter: v.quoteFooter || null, invoiceFooter: v.invoiceFooter || null, vatRegime: v.vatRegime, defaultDepositBp: v.defaultDepositPercent * 100,
+      ...designToStored(design.design),
     }
     await prisma.$transaction(async (tx) => {
       await tx.billingSettings.upsert({ where: { companyId: ctx.companyId }, create: { companyId: ctx.companyId, ...data }, update: data })

@@ -17,6 +17,8 @@ import { listQuoteDeposits } from "@/lib/billing/invoices/deposit.service"
 import { getBillingSettings } from "@/lib/billing/settings"
 import { decimalToCents, formatEuro } from "@/lib/billing/money"
 import { assessIssuerIdentity, isPlausibleVatNumber } from "@/lib/billing/company-identity"
+import { DocumentDesignCard } from "@/components/factures/DocumentDesignCard"
+import { designFromStored } from "@/lib/billing/pdf/design"
 
 export const metadata: Metadata = { title: "Devis" }
 const MAIL_KIND: Record<string, string> = { QUOTE_SENT: "Envoi du devis", QUOTE_REMINDER_J3: "Relance J+3", QUOTE_REMINDER_J7: "Relance J+7", QUOTE_REMINDER_J15: "Relance J+15" }
@@ -43,6 +45,8 @@ export default async function DevisDetailPage({ params }: { params: Promise<{ id
   const recipientCtx = q.status === "DRAFT" || q.status === "SENT" ? await getQuoteRecipientContext(prisma, ctx.companyId, q.id) : null
   const recipientSuggestions = recipientCtx ? buildRecipientSuggestions(recipientCtx) : null
   const issuedDeposits = deposits.filter((d) => d.status !== "CANCELLED" && d.status !== "DRAFT").length
+  // 20/11/2026 — apparence du PDF : modifiable sur le brouillon seulement (figée à l'envoi).
+  const quoteDesign = q.status === "DRAFT" ? await prisma.quote.findFirst({ where: { id: q.id, companyId: ctx.companyId }, select: { pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true } }) : null
 
   return (
     <div className="space-y-4">
@@ -51,6 +55,7 @@ export default async function DevisDetailPage({ params }: { params: Promise<{ id
           Identité juridique de l&apos;émetteur incomplète : {identityBlocking.join(", ")}. Complétez-la dans <Link href="/parametres" className="underline">Paramètres</Link> et <Link href="/factures/parametres" className="underline">Paramètres de facturation</Link> avant d&apos;envoyer ce devis ; le pied de page du PDF ne contient que les données présentes.
         </p>
       )}
+      {quoteDesign && <DocumentDesignCard key={JSON.stringify([quoteDesign, settings.pdfDesign])} kind="quote" id={q.id} documentDesign={designFromStored(quoteDesign)} companyDesign={settings.pdfDesign} bankAvailable={!!settings.iban} pdfHref={`/api/pdf/devis/${q.id}`} />}
       {clientVatInvalid && (
         <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
           Le numéro de TVA enregistré pour ce client ({q.client.vatNumber}) n&apos;a pas la forme d&apos;un numéro intracommunautaire : il n&apos;est pas imprimé sur le devis. Corrigez-le ci-dessous (un SIRET se saisit dans le champ SIRET / SIREN).

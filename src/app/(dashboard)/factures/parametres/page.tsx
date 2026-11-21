@@ -17,6 +17,7 @@ export default async function ParametresFacturationPage() {
     vatNumber: s.vatNumber ?? "", legalForm: s.legalForm ?? "", shareCapital: s.shareCapital ?? "", rcs: s.rcs ?? "", iban: s.iban ?? "", bic: s.bic ?? "",
     quoteValidityDays: s.quoteValidityDays, paymentTermsDays: s.paymentTermsDays, latePenaltyText: s.latePenaltyText ?? "", quoteFooter: s.quoteFooter ?? "", invoiceFooter: s.invoiceFooter ?? "",
     vatRegime: s.vatRegime, defaultDepositPercent: Math.round(s.defaultDepositBp / 100),
+    pdfDesign: s.pdfDesign,
   }
   const siren = sirenFromSiret(company?.siret)
   return (
