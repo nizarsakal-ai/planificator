@@ -482,6 +482,11 @@ model Company {
   clientOrders  ClientOrder[] // 21/11/2026
   deliveryNotes DeliveryNote[] // 21/11/2026
 
+  worksiteBudgets WorksiteBudget[]
+  worksiteBudgetRevisions WorksiteBudgetRevision[]
+  worksiteBudgetLines WorksiteBudgetLine[]
+  supplierInvoiceAllocations SupplierInvoiceAllocation[]
+
   @@map("companies")
 }
 
@@ -1205,6 +1210,9 @@ model Worksite {
 
   clientOrders  ClientOrder[] // 21/11/2026
   deliveryNotes DeliveryNote[] // 21/11/2026
+
+  budget WorksiteBudget?
+  supplierInvoiceAllocations SupplierInvoiceAllocation[]
 
   @@unique([id, companyId])
   @@index([companyId])
@@ -3294,6 +3302,8 @@ model SupplierInvoice {
   goodsReceipts    GoodsReceipt[]
   equipmentRentals EquipmentRentalContract[]
 
+  worksiteAllocations SupplierInvoiceAllocation[]
+
   @@unique([companyId, id])
   @@index([companyId, status])
   @@index([companyId, date])
@@ -5214,4 +5224,105 @@ model DeliveryNoteLine {
 
   @@unique([noteId, position])
   @@map("delivery_note_lines")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Lot C Planificator V2 (04/11/2026) : budgets et marges chantier.
+// Un budget par chantier ; chaque version (révision) est une ligne IMMUABLE avec ses montants par nature : une
+// révision ajoute une version, elle ne réécrit jamais les précédentes (déclencheurs en base, voir la migration).
+// Les factures fournisseurs sans réception ni location liées peuvent être imputées explicitement à un chantier
+// (SupplierInvoiceAllocation). Montants en centimes (BigInt). Clés composites (companyId, id) comme aux lots A et B.
+// Module désactivé par défaut (WORKSITE_BUDGET_ENABLED).
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum WorksiteCostNature {
+  MATERIALS
+  SUBCONTRACTING
+  EQUIPMENT
+  VEHICLES
+  LABOR
+  OTHER
+}
+
+enum WorksiteBudgetRevisionKind {
+  INITIAL
+  REVISED
+}
+
+model WorksiteBudget {
+  id              String   @id @default(cuid())
+  companyId       String
+  worksiteId      String
+  currentRevision Int      @default(0)
+  createdById     String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  company   Company                  @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  worksite  Worksite                 @relation(fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  revisions WorksiteBudgetRevision[]
+
+  @@unique([companyId, id])
+  @@unique([worksiteId, companyId])
+  @@map("worksite_budgets")
+}
+
+model WorksiteBudgetRevision {
+  id                  String                     @id @default(cuid())
+  companyId           String
+  budgetId            String
+  number              Int
+  kind                WorksiteBudgetRevisionKind
+  reason              String?
+  plannedRevenueCents BigInt
+  totalCostCents      BigInt
+  createdById         String
+  createdAt           DateTime                   @default(now())
+
+  company Company              @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  budget  WorksiteBudget       @relation(fields: [companyId, budgetId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  lines   WorksiteBudgetLine[]
+
+  @@unique([companyId, id])
+  @@unique([budgetId, number])
+  @@map("worksite_budget_revisions")
+}
+
+model WorksiteBudgetLine {
+  id          String             @id @default(cuid())
+  companyId   String
+  revisionId  String
+  nature      WorksiteCostNature
+  amountCents BigInt
+  label       String?
+
+  company  Company                @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  revision WorksiteBudgetRevision @relation(fields: [companyId, revisionId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([companyId, id])
+  @@unique([revisionId, nature])
+  @@map("worksite_budget_lines")
+}
+
+model SupplierInvoiceAllocation {
+  id                String             @id @default(cuid())
+  companyId         String
+  supplierInvoiceId String
+  worksiteId        String
+  nature            WorksiteCostNature
+  amountHTCents     BigInt
+  label             String?
+  createdById       String
+  createdAt         DateTime           @default(now())
+  cancelledAt       DateTime?
+  cancelledById     String?
+
+  company         Company         @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  supplierInvoice SupplierInvoice @relation(fields: [companyId, supplierInvoiceId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  worksite        Worksite        @relation(fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([companyId, id])
+  @@index([companyId, worksiteId])
+  @@index([companyId, supplierInvoiceId])
+  @@map("supplier_invoice_allocations")
 }

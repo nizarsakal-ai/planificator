@@ -37,6 +37,7 @@ import {
   Boxes,
   ShoppingCart,
   Wrench,
+  PiggyBank,
   Fuel,
   Target,
   Workflow,
@@ -385,5 +386,18 @@ export function withMarketingShopNavItems(items: readonly NavItem[], visible: bo
   const add = [MARKETING_NAV_ITEM, SHOP_NAV_ITEM].filter((entry) => !result.some((i) => i.href === entry.href))
   const profile = result.findIndex((i) => i.href === "/profil")
   result.splice(profile < 0 ? result.length : profile, 0, ...add)
+  return result
+}
+
+/**
+ * Lot C Planificator V2 : entrée « Budgets » (drapeau serveur WORKSITE_BUDGET_ENABLED, ADMIN et SUPER_ADMIN avec
+ * société), placée avant « Profil » ; rangée dans « Finance » par le regroupement par catégories (href « /budgets »).
+ * Affichage seulement : chaque page, l'export et chaque action du module refusent côté serveur.
+ */
+export function withBudgetNavItem(items: readonly NavItem[], visible: boolean): NavItem[] {
+  const result = [...items]
+  if (visible !== true || result.some(i => i.href === "/budgets")) return result
+  const profile = result.findIndex(i => i.href === "/profil")
+  result.splice(profile < 0 ? result.length : profile, 0, { label: "Budgets", href: "/budgets", icon: PiggyBank })
   return result
 }
