@@ -32,7 +32,6 @@
 - Adresse de livraison : nouveau champ client et mention à concevoir.
 
 ## 5. Déploiement (21/11/2026)
-- Le build Vercel de **production** applique désormais les migrations en attente avant la compilation (`scripts/migrate-on-production-build.mjs`, appelé par `npm run build`).
-- Connexion directe Neon (`DIRECT_URL`, sinon `DATABASE_URL` sans « -pooler ») ; URL jamais journalisée.
-- Échec de migration ⇒ échec du build ⇒ le déploiement précédent reste en ligne. Previews et builds locaux : aucune migration. Secours : `SKIP_BUILD_MIGRATIONS=1`.
-
+- Vercel n'applique aucune migration : l'application utilise un rôle sans DDL (`planificator_app`) et les migrations sont appliquées avec `neondb_owner`, dont l'URL n'est jamais dans Vercel (`docs/runbooks/DB-APP-ROLE.md`).
+- Garde du build de **production** (`scripts/migrate-on-production-build.mjs`, en tête de `npm run build`) : `prisma migrate status` en **lecture seule** ; migration en attente ou en échec ⇒ build interrompu ⇒ le déploiement précédent reste en ligne. Aucune écriture en base. Secours : `SKIP_BUILD_MIGRATIONS=1`.
+- Incident du 21/11/2026 : une première version de l'étape tentait `migrate deploy` avec le rôle applicatif ⇒ `permission denied for schema public`, build refusé, production intacte ; une ligne « en échec » a pu être ajoutée dans `_prisma_migrations`. Le script SQL d'application (exécuté en `neondb_owner`) la marque `rolled_back_at` avant d'appliquer la migration.
