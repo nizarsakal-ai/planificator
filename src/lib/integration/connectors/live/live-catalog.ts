@@ -4,6 +4,8 @@
  * Pour chaque service : les champs saisis par l'administrateur, leur validation stricte, la séparation entre le SECRET
  * (stocké chiffré dans le coffre PLATFORM_ENCRYPTED, jamais relu) et la configuration NON secrète (domaine de la boutique,
  * centre de données, audience), et les hôtes FIXES autorisés pour les appels (SECURITY-SPEC §24 : aucun endpoint libre).
+ * LOT-8C : Google Agenda n'a AUCUN champ saisi (autorisation OAuth, voir `oauth/google-calendar-oauth.ts`) ; seul
+ * l'agenda principal de l'utilisateur est lu (`calendarId = primary`).
  */
 import type { LiveConnectorKey } from "@/lib/connectors/connectors.core"
 
@@ -23,6 +25,7 @@ export const LIVE_FIELDS: Record<LiveConnectorKey, readonly LiveField[]> = {
   slack: [
     { name: "botToken", label: "Jeton de robot", secret: true, placeholder: "xoxb-…", help: "Application Slack, droit en lecture : channels:read. Aucun envoi." },
   ],
+  google_calendar: [],
 }
 
 const SHOP_DOMAIN = /^[a-z0-9][a-z0-9-]{0,60}\.myshopify\.com$/
@@ -56,6 +59,8 @@ export function parseLiveCredentials(key: LiveConnectorKey, form: Record<string,
       if (!SLACK_BOT.test(token)) return { ok: false, error: "Jeton de robot Slack invalide (format xoxb-…)." }
       return { ok: true, secret: token, config: {} }
     }
+    case "google_calendar":
+      return { ok: false, error: "Google Agenda se connecte avec le bouton « Se connecter avec Google », sans saisie d'identifiant." }
   }
 }
 
@@ -68,6 +73,7 @@ export function readLiveConfig(key: LiveConnectorKey, raw: unknown): LiveConfig 
     case "shopify": return SHOP_DOMAIN.test(str("shopDomain")) ? { shopDomain: str("shopDomain") } : null
     case "mailchimp": return /^us[0-9]{1,3}$/.test(str("dataCenter")) && MAILCHIMP_AUDIENCE.test(str("audienceId")) ? { dataCenter: str("dataCenter"), audienceId: str("audienceId") } : null
     case "slack": return {}
+    case "google_calendar": return str("calendarId") === "primary" ? { calendarId: "primary" } : null
   }
 }
 
@@ -77,5 +83,6 @@ export function liveHost(key: LiveConnectorKey, config: LiveConfig): string {
     case "shopify": return config.shopDomain
     case "mailchimp": return `${config.dataCenter}.api.mailchimp.com`
     case "slack": return "slack.com"
+    case "google_calendar": return "www.googleapis.com"
   }
 }

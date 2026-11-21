@@ -165,6 +165,25 @@ L'OAuth Gmail existant reste **inchangé** (§4).
 
 Client OAuth : distinct de Gmail et distinct entre production et préproduction (§16.3).
 
+### 5.1 Réalisation (23/11/2026)
+
+- **Base** : migration `20261123090000_v2_google_calendar_live`.
+  - Table `integration_oauth_states` : empreintes SHA-256 du `state` et du cookie du navigateur, vérificateur PKCE effacé à la consommation, 10 minutes (15 au plus en base), usage unique garanti par déclencheur.
+  - `google_calendar` ajouté à la liste fermée du mode `LIVE`.
+- **Routes** : `/api/connecteurs/google-agenda/connect` et `/api/connecteurs/google-agenda/callback`. Garde du centre de connecteurs (ADMIN de la société de session), drapeau `CONNECTOR_LIVE_ENABLED`, client OAuth dédié configuré.
+- **Coffre** : refresh token en `OAUTH_REFRESH_TOKEN` (PENDING → lecture de l'agenda principal → ACTIVE) ; jeton d'accès en mémoire, obtenu à chaque synchronisation sous verrou consultatif par société et connexion ; un refresh token renouvelé par Google devient une nouvelle version, jamais une valeur vide.
+- **Données** : agenda principal seulement ; titre, début, fin, journée entière, lieu, annulation. Aucun participant, aucune description. Lecture complète depuis 30 jours, puis incrémentale par jeton de synchronisation ; jeton périmé (410) ⇒ relecture complète.
+- **Révocation** : autorisation retirée chez Google au mieux, puis révocation dans le coffre.
+
+**Mise en service (exploitation)** :
+
+1. Google Cloud Console : deux clients OAuth « Application Web » dédiés à Google Agenda, un pour la production et un pour la préproduction, distincts du client Gmail et Drive (`GOOGLE_CLIENT_ID`).
+2. Écran de consentement : portée `https://www.googleapis.com/auth/calendar.readonly` seulement ; API Google Calendar activée.
+3. Adresse de retour autorisée : `<NEXTAUTH_URL>/api/connecteurs/google-agenda/callback`, pour chaque environnement.
+4. Vercel : `GOOGLE_CALENDAR_CLIENT_ID` et `GOOGLE_CALENDAR_CLIENT_SECRET`, valeurs distinctes en Production et en Preview.
+5. Appliquer la migration sur la base Neon de production AVANT la fusion : script `docs/runbooks/neon-20261123090000_v2_google_calendar_live.sql` dans l'éditeur SQL de la console Neon (projet `planificator`, branche `production`, rôle `neondb_owner`). Sans elle, la garde de schéma arrête le build de production.
+6. Gates §7 inchangés avant d'allumer `CONNECTOR_LIVE_ENABLED` en production.
+
 ## 6. Hors périmètre
 
 - Écriture vers les services : aucun envoi Slack, aucune création d'événement Google.

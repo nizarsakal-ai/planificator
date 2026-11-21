@@ -62,8 +62,8 @@ describe("saisie des identifiants (catalogue LOT-8B)", () => {
     assert.equal(liveHost("mailchimp", readLiveConfig("mailchimp", { dataCenter: "us21", audienceId: "a1b2c3d4e5" })!), "us21.api.mailchimp.com")
     assert.equal(liveHost("slack", {}), "slack.com")
   })
-  it("chaque service déclare au moins un champ secret ; aucun champ secret n'a de valeur par défaut", () => {
-    for (const fields of Object.values(LIVE_FIELDS)) assert.ok(fields.some((f) => f.secret))
+  it("chaque service à identifiants saisis déclare au moins un champ secret ; Google Agenda (OAuth, LOT-8C) n'en a aucun", () => {
+    for (const [key, fields] of Object.entries(LIVE_FIELDS)) assert.ok(key === "google_calendar" ? fields.length === 0 : fields.some((f) => f.secret), key)
   })
 })
 

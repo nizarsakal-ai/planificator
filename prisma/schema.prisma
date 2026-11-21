@@ -479,8 +479,9 @@ model Company {
   // Veille prospection (V1) — opportunités publiques (relation inverse, sans effet SQL).
   prospectOpportunities ProspectOpportunity[]
 
-  clientOrders  ClientOrder[] // 21/11/2026
-  deliveryNotes DeliveryNote[] // 21/11/2026
+  clientOrders           ClientOrder[] // 21/11/2026
+  deliveryNotes          DeliveryNote[] // 21/11/2026
+  integrationOAuthStates IntegrationOAuthState[]
 
   @@map("companies")
 }
@@ -980,6 +981,7 @@ model User {
   vehicleDocumentsCreated         VehicleDocument[]        @relation("VehicleDocumentAuthor")
   vehicleDocumentVersionsUploaded VehicleDocumentVersion[] @relation("VehicleDocumentVersionAuthor")
   vehicleAuditLogs                VehicleAuditLog[]        @relation("VehicleAuditActor")
+  integrationOAuthStates          IntegrationOAuthState[]
 
   @@index([companyId])
   @@index([email])
@@ -2370,7 +2372,7 @@ model IntegrationConnection {
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  inboundEnvelopes InboundEnvelope[]
+  inboundEnvelopes   InboundEnvelope[]
   credentialVersions IntegrationCredentialVersion[]
   connectorSettings  ConnectorSetting[]
 
@@ -2451,6 +2453,27 @@ model IntegrationSecretAuditLog {
 
   @@index([companyId, connectionId, createdAt])
   @@map("integration_secret_audit_logs")
+}
+
+/// PLAN-INTEGRATION-PLATFORM-001 — LOT-8C (23/11/2026) : état OAuth à usage unique (SECURITY-SPEC §11.2). Empreintes
+/// SHA-256 seulement (state, cookie du navigateur) ; vérificateur PKCE effacé à la consommation ; 10 minutes au plus.
+model IntegrationOAuthState {
+  id           String    @id @default(cuid())
+  companyId    String
+  userId       String
+  connectorKey String
+  stateHash    String    @unique
+  browserHash  String
+  codeVerifier String?
+  createdAt    DateTime  @default(now())
+  expiresAt    DateTime
+  consumedAt   DateTime?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, userId, createdAt])
+  @@map("integration_oauth_states")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

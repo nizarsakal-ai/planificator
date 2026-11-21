@@ -7,6 +7,9 @@
  *   seau de débit lu (`X-Shopify-Shop-Api-Call-Limit`) : au-delà de 75 %, pause d'une seconde avant la requête suivante.
  * - Mailchimp (Marketing API 3.0) : membres d'une audience, relecture complète par pages (`off:<n>`, puis curseur effacé).
  * - Slack (Web API) : canaux publics non archivés, relecture complète (`nc:<curseur base64url>`, puis effacé). Aucun envoi.
+ * - Google Agenda (Calendar API v3, LOT-8C) : événements de l'agenda principal, lecture complète depuis 30 jours puis
+ *   incrémentale par jeton de synchronisation (`gs:` jeton de page, `gt:` jeton de synchronisation, encodés base64url) ;
+ *   un jeton périmé (410) relance une lecture complète. Aucun participant, aucune description, aucun envoi.
  * Chaque élément est réduit aux champs utiles, sans caractère de contrôle, chaînes tronquées : il passe `checkItem` du lot F.
  * `probe` vérifie les identifiants par une requête de lecture minimale, avant leur activation dans le coffre (§9.1).
  */
@@ -20,7 +23,7 @@ export const SHOPIFY_API_VERSION = "2026-10"
 export const SHOPIFY_THROTTLE_RATIO = 0.75
 export const SHOPIFY_THROTTLE_PAUSE_MS = 1000
 
-export interface LiveSourceOptions { sleep?: (ms: number) => Promise<void> }
+export interface LiveSourceOptions { sleep?: (ms: number) => Promise<void>; now?: () => Date }
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 /** « 32/40 » ⇒ 0,8 ; toute autre forme ⇒ 0. */
@@ -157,11 +160,74 @@ function slackSource(secret: string, fetchImpl: FetchLike): LiveSource {
   }
 }
 
+/** Fenêtre de la première lecture Google Agenda (et de toute relecture complète). */
+export const GOOGLE_CALENDAR_LOOKBACK_DAYS = 30
+
+function googleCalendarSource(accessToken: string, config: LiveConfig, fetchImpl: FetchLike, opts: LiveSourceOptions): LiveSource {
+  const host = liveHost("google_calendar", config)
+  const headers = { authorization: `Bearer ${accessToken}` }
+  const path = `/calendar/v3/calendars/${config.calendarId}/events`
+  const fields = "items(id,status,summary,location,start,end),nextPageToken,nextSyncToken"
+  const now = opts.now ?? (() => new Date())
+  // Curseur `gc:<base64url JSON>` : k = f (page d'une lecture complète, avec sa fenêtre m), i (page d'une lecture
+  // incrémentale), s (jeton de synchronisation). Les paramètres d'une suite de pages restent ceux de la première page.
+  type GState = { k: "f" | "i" | "s"; t: string; m?: string }
+  const enc = (st: GState) => {
+    const c = `gc:${Buffer.from(JSON.stringify(st), "utf8").toString("base64url")}`
+    if (!isValidCursor(c)) throw new ConnectorSourceError("SOURCE_UNAVAILABLE")
+    return c
+  }
+  const dec = (c: string): GState => {
+    let v: unknown
+    try { v = JSON.parse(Buffer.from(c.slice(3), "base64url").toString("utf8")) } catch { throw new ConnectorSourceError("WATERMARK_INVALID") }
+    const o = v as Record<string, unknown> | null
+    if (!o || !["f", "i", "s"].includes(o.k as string) || typeof o.t !== "string" || !o.t || (o.k === "f" && typeof o.m !== "string")) throw new ConnectorSourceError("WATERMARK_INVALID")
+    return o as GState
+  }
+  const when = (v: unknown): { at: SourceValue; allDay: boolean } => {
+    const o = (v ?? {}) as Record<string, unknown>
+    if (typeof o.dateTime === "string" && /^\d{4}-\d{2}-\d{2}T/.test(o.dateTime)) return { at: o.dateTime.slice(0, 25), allDay: false }
+    if (typeof o.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(o.date)) return { at: o.date, allDay: true }
+    return { at: null, allDay: false }
+  }
+  const read = async (query: Record<string, string | undefined>, pageKind: "f" | "i", timeMin?: string): Promise<LivePage> => {
+    const j = await liveGetJson(fetchImpl, { host, path, query: { ...query, timeMin, maxResults: PAGE_SIZE, singleEvents: "true", showDeleted: "true", fields }, headers })
+    const items = arrayOf(j.items).map((e): SourceItem => {
+      const start = when(e.start), end = when(e.end)
+      const cancelled = e.status === "cancelled"
+      return { externalId: externalId(e.id), data: { title: cancelled ? null : text(e.summary), startsAt: start.at, endsAt: end.at, allDay: start.allDay, location: cancelled ? null : text(e.location), cancelled } }
+    })
+    if (typeof j.nextPageToken === "string" && j.nextPageToken) return { items, cursor: enc({ k: pageKind, t: j.nextPageToken, m: timeMin }), hasMore: true }
+    if (typeof j.nextSyncToken === "string" && j.nextSyncToken) return { items, cursor: enc({ k: "s", t: j.nextSyncToken }), hasMore: false }
+    return { items, cursor: null, hasMore: false }
+  }
+  const full = () => read({}, "f", new Date(now().getTime() - GOOGLE_CALENDAR_LOOKBACK_DAYS * 86_400_000).toISOString())
+  return {
+    async probe() { await liveGetJson(fetchImpl, { host, path: `/calendar/v3/calendars/${config.calendarId}`, query: { fields: "id" }, headers }) },
+    async fetchPage(resource, cursor) {
+      if (resource !== "events") throw new ConnectorSourceError("SOURCE_ITEM_INVALID")
+      if (cursor === null) return full()
+      if (!isValidCursor(cursor) || !cursor.startsWith("gc:")) throw new ConnectorSourceError("WATERMARK_INVALID")
+      const st = dec(cursor)
+      try {
+        if (st.k === "f") return await read({ pageToken: st.t }, "f", st.m)
+        if (st.k === "i") return await read({ pageToken: st.t }, "i")
+        return await read({ syncToken: st.t }, "i")
+      } catch (e) {
+        // 410 : jeton périmé ⇒ relecture complète (les éléments inchangés restent « inchangés », rien n'est doublé).
+        if (e instanceof ConnectorSourceError && e.code === "WATERMARK_INVALID") return full()
+        throw e
+      }
+    },
+  }
+}
+
 /** Source réelle d'un connecteur, à partir du secret résolu par le coffre et de la configuration validée. */
 export function createLiveSource(key: LiveConnectorKey, secret: string, config: LiveConfig, fetchImpl: FetchLike, opts: LiveSourceOptions = {}): LiveSource {
   switch (key) {
     case "shopify": return shopifySource(secret, config, fetchImpl, opts)
     case "mailchimp": return mailchimpSource(secret, config, fetchImpl)
     case "slack": return slackSource(secret, fetchImpl)
+    case "google_calendar": return googleCalendarSource(secret, config, fetchImpl, opts)
   }
 }

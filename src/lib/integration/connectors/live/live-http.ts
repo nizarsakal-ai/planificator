@@ -49,6 +49,8 @@ export async function liveGetJson(fetchImpl: FetchLike, req: LiveRequest): Promi
   }
   if (res.status === 401 || res.status === 403) throw new ConnectorSourceError("AUTH_FAILED")
   if (res.status === 429) throw new ConnectorSourceError("RATE_LIMITED")
+  // LOT-8C : 410 (jeton de synchronisation Google périmé) ⇒ curseur à reprendre de zéro, jamais une panne.
+  if (res.status === 410) throw new ConnectorSourceError("WATERMARK_INVALID")
   if (res.status < 200 || res.status > 299) throw new ConnectorSourceError("SOURCE_UNAVAILABLE")
   req.onHeaders?.((name) => res.header?.(name) ?? null)
   let body: string
