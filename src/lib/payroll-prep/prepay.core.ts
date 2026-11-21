@@ -48,6 +48,24 @@ export function validatePeriod(year: number, month: number, today: Date): Plan<{
   if (year * 12 + (month - 1) > cur) return ko(PREPAY_ERRORS.period)
   return { ok: true, value: { year, month } }
 }
+/**
+ * Mois proposés à l'ouverture : le mois en cours (`today`, jour civil Paris en minuit UTC) et les `count - 1` mois
+ * précédents, plus récents d'abord, sans ceux déjà ouverts. Valeur au format attendu par l'action (`AAAA-MM`).
+ * Remplace `<input type="month">`, que Safari sur macOS affiche comme un champ texte vide sans format.
+ */
+export function openableMonths(today: Date, opened: ReadonlyArray<{ year: number; month: number }>, count = 24): { value: string; label: string }[] {
+  const taken = new Set(opened.map((p) => p.year * 12 + (p.month - 1)))
+  const cur = today.getUTCFullYear() * 12 + today.getUTCMonth()
+  const out: { value: string; label: string }[] = []
+  for (let i = 0; i < count; i++) {
+    const idx = cur - i
+    if (taken.has(idx)) continue
+    const year = Math.floor(idx / 12), month = (idx % 12) + 1
+    if (!validatePeriod(year, month, today).ok) continue
+    out.push({ value: `${year}-${String(month).padStart(2, "0")}`, label: periodLabel(year, month) })
+  }
+  return out
+}
 /** [premier jour, premier jour du mois suivant[ en minuit UTC (jours civils). */
 export function monthBounds(year: number, month: number): { start: Date; end: Date } {
   return { start: new Date(Date.UTC(year, month - 1, 1)), end: new Date(Date.UTC(year, month, 1)) }
