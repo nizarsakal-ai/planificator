@@ -34,25 +34,26 @@ export default async function ConnectorCenterPage({ searchParams }: { searchPara
     <div className="space-y-4">
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900"><PlugZap className="h-6 w-6 text-[#0f3460]" /> Centre de connecteurs</h1>
-        <p className="mt-1 text-sm text-slate-500">Connecteurs externes (commerce, paiement, marketing, messagerie, ChatGPT, agenda, e-mail, documents) désactivés ou simulés · aucune connexion réelle ni identifiant dans cette version · données reçues en zone de transit seulement</p>
+        <p className="mt-1 text-sm text-slate-500">Services externes (commerce, paiement, marketing, messagerie, ChatGPT, agenda, e-mail, documents). Aucun n&apos;est encore branché : chacun peut être testé avec des données fictives, mises de côté sans toucher à vos données.</p>
       </div>
       <MessageRetour><StockFlash params={params} /></MessageRetour>
       <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-        Mode simulation : les données sont <strong>fictives</strong>, produites par un double de test sur le serveur, sans aucun appel réseau. Une connexion réelle exigera une autorisation de connexion, des identifiants et une version dédiée.
+        Simulation uniquement : les données affichées sont <strong>fictives</strong>, générées par Planificator lui-même, sans contacter le service. Brancher un service pour de vrai demandera votre accord, ses identifiants et une version dédiée.
       </p>
 
       <div className="grid gap-3 lg:grid-cols-2">
         {connectors.map((c) => (
           <Card key={c.def.key}><CardContent className="space-y-3 p-4">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
+            {/* Badge d'état toujours en haut à droite : le bloc de texte se réduit, le badge ne passe jamais à la ligne. */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
                 <h2 className="font-semibold text-slate-900">{c.def.label} <span className="text-xs font-normal text-slate-500">· {CATEGORY_LABEL[c.def.category]}</span></h2>
                 <p className="text-xs text-slate-500">{c.def.description}</p>
               </div>
-              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${c.mode === "SIMULATION" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-700"}`}>{c.mode === "SIMULATION" ? "Simulation" : "Désactivé"}</span>
+              <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${c.mode === "SIMULATION" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-700"}`}>{c.mode === "SIMULATION" ? "Simulation" : "Désactivé"}</span>
             </div>
-            <p className="text-xs text-slate-500">Connexion réelle : <strong>non autorisée</strong> (exigerait : {c.def.credentialsRequired.join(", ")}). Aucun identifiant enregistré.</p>
-            <p className="text-xs text-slate-600">Reçus en transit : {c.def.resources.map((r) => `${r.label} ${c.staged[r.key] ?? 0}`).join(" · ")}{c.hasWatermark ? " · curseur positionné" : ""}</p>
+            <p className="text-xs text-slate-500">Connexion réelle : <strong>pas encore disponible</strong> (nécessitera : {c.def.credentialsRequired.join(", ")}). Aucun identifiant enregistré.</p>
+            <p className="text-xs text-slate-600">Données fictives reçues : {c.def.resources.map((r) => `${r.label} ${c.staged[r.key] ?? 0}`).join(" · ")}{c.hasWatermark ? " · reprise à partir de la dernière synchronisation" : ""}</p>
             <div className="flex flex-wrap items-center gap-2">
               <FormulaireRetour action={setConnectorModeAction}><input type="hidden" name="connectorKey" value={c.def.key} /><input type="hidden" name="mode" value={c.mode === "SIMULATION" ? "DISABLED" : "SIMULATION"} />
                 <Button type="submit" size="sm" variant="outline">{c.mode === "SIMULATION" ? "Désactiver" : "Activer la simulation"}</Button>

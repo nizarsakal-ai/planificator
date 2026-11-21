@@ -135,7 +135,9 @@ describe("gardes et écrans", () => {
     assert.equal((code(read(PAGES[1])).match(/<FormulaireRetour /g) ?? []).length, 3)
     assert.ok(code(read(PAGES[1])).includes(`<input type="hidden" name="idempotencyKey" value={idempotencyKey} />`))
     const acces = read("src/lib/marketing-shop/access.ts")
-    assert.ok(acces.includes("const decision = pageDecision(r.reason)") && acces.includes("resolveStockAccessCore(enabled, session)"))
+    // Pilote limité à une société (972936f) : contrôle commun des rôles, puis société de session = société pilote.
+    assert.ok(acces.includes("const decision = pageDecision(r.reason)") && acces.includes("resolveStockAccessCore(true, session)"))
+    assert.ok(acces.includes("if (session?.user?.companyId !== pilotCompanyId) return { ok: false, reason: \"MODULE_DISABLED\" }"))
   })
   it("actions : gardées, retour par état, seule redirection /login, cible fiche de commande ; entrées sans troncature", () => {
     const a = read(ACTIONS), c = code(a)

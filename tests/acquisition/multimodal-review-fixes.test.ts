@@ -244,8 +244,9 @@ describe("P0 — une valeur lue en vision ne mène jamais à une décision AUTO"
           },
         },
       })
+      // Horloge figée : REPRO_BODY vise un chantier du 16 au 20/11/2026 ; à date réelle, il deviendrait OBSOLETE.
       const r = await runDraftExtraction(
-        { actor, draftId: "d1" },
+        { actor, draftId: "d1", now: () => new Date("2026-10-27T12:00:00Z") },
         { repository: repo as never, provider: adapter, loadAttachmentBytes: async () => buildMinimalJpeg() }
       )
       assert.equal(r.ok, true, JSON.stringify(r))

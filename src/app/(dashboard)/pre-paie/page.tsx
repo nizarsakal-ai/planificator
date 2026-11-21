@@ -7,13 +7,14 @@ import { CalendarCheck } from "lucide-react"
 import { prisma } from "@/lib/prisma"
 import { prepayPageAccess } from "@/lib/payroll-prep/access"
 import { AdminOnlyNotice } from "@/components/stock/AdminOnlyNotice"
-import { periodLabel } from "@/lib/payroll-prep/prepay.core"
+import { openableMonths, periodLabel } from "@/lib/payroll-prep/prepay.core"
+import { parisToday } from "@/lib/equipment/equipment.core"
+import { serverNow } from "@/lib/billing/clock"
 import { listPeriods } from "@/lib/payroll-prep/queries"
 import { openPeriodAction } from "@/lib/actions/payroll-prep.actions"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { StockFlash } from "@/components/stock/StockFlash"
+import { SELECT_CLASS, StockFlash } from "@/components/stock/StockFlash"
 import { FormulaireRetour, MessageRetour, ZoneRetour } from "@/components/crm/RetourFormulaire"
 import { fmtInstant } from "@/components/equipment/labels"
 
@@ -23,12 +24,14 @@ export default async function PrepayPage({ searchParams }: { searchParams: Promi
   if (!ctx) return <AdminOnlyNotice />
   const params = await searchParams
   const periods = await listPeriods(prisma, ctx.companyId)
+  // Liste déroulante plutôt que <input type="month"> (champ texte vide sans format sous Safari macOS).
+  const months = openableMonths(parisToday(serverNow()), periods)
   return (
     <ZoneRetour rendu={Date.now()}>
     <div className="space-y-4">
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900"><CalendarCheck className="h-6 w-6 text-[#0f3460]" /> Pré-paie</h1>
-        <p className="mt-1 text-sm text-slate-500">Variables mensuelles (heures, absences, primes, frais) · contrôles avant clôture · export · aucun calcul de paie</p>
+        <p className="mt-1 text-sm text-slate-500">Rassemblez chaque mois les heures, absences, primes et frais de vos salariés, vérifiez-les, puis exportez-les pour votre comptable ou votre logiciel de paie.</p>
       </div>
       <MessageRetour><StockFlash params={params} /></MessageRetour>
       <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -36,8 +39,18 @@ export default async function PrepayPage({ searchParams }: { searchParams: Promi
       </p>
       <Card><CardContent className="p-4">
         <FormulaireRetour action={openPeriodAction} className="flex flex-wrap items-end gap-2">
-          <label className="grid gap-1 text-sm">Mois <Input name="month" type="month" required aria-label="Mois de la période" /></label>
-          <Button type="submit">Ouvrir la période</Button>
+          {months.length === 0 ? (
+            <p className="text-sm text-slate-500">Tous les mois des deux dernières années sont déjà ouverts.</p>
+          ) : (
+            <>
+              <label className="grid gap-1 text-sm font-medium text-slate-700">Mois à préparer
+                <select name="month" required defaultValue={months[0].value} className={`${SELECT_CLASS} min-w-48 capitalize`}>
+                  {months.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select>
+              </label>
+              <Button type="submit">Ouvrir la période</Button>
+            </>
+          )}
         </FormulaireRetour>
       </CardContent></Card>
       <Card><CardContent className="overflow-x-auto p-0">
