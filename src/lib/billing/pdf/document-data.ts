@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client"
 import { bpToPercentString, computeDocumentTotals, decimalToCents, formatEuro, storedVatRateToBp, type DocumentTotals } from "@/lib/billing/money"
 import { DEFAULT_LATE_PENALTY_TEXT, sirenFromSiret, type BillingSettingsView } from "@/lib/billing/settings"
 import { isPlausibleVatNumber } from "@/lib/billing/company-identity"
+import type { PdfDesign, PdfStamp } from "./design"
 
 const dateFr = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" })
 export const fmtDate = (d: Date | null | undefined) => (d ? dateFr.format(d) : "—")
@@ -38,6 +39,12 @@ export interface DocumentPdfData {
   mentionsTitle?: string | null
   /** 29/10/2026 — brouillon uniquement : données juridiques indispensables manquantes, signalées sur le document. */
   draftWarnings?: string[]
+  /** 20/11/2026 — design effectif (modèle, couleurs, format, options) ; absent = rendu historique « Classique ». */
+  design?: PdfDesign
+  /** 20/11/2026 — tampon de statut (« Payée », « Annulée ») des modèles récents, calculé à chaque rendu. */
+  stamp?: PdfStamp | null
+  /** 20/11/2026 — coordonnées bancaires de l'émetteur (encadré affiché si l'option est activée et l'IBAN connu). */
+  bank?: { iban: string; bic: string | null } | null
 }
 
 export function sellerParty(company: { name: string; address: string | null; siret: string | null; email: string | null; phone: string | null }, s: BillingSettingsView): PdfParty {

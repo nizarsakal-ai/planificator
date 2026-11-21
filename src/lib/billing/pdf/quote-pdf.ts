@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client"
 import { getBillingSettings } from "@/lib/billing/settings"
 import { assessIssuerIdentity, issuerLegalFooter } from "@/lib/billing/company-identity"
 import { logoForPdf } from "@/lib/company-logo"
+import { DEFAULT_PDF_DESIGN, designFromStored } from "./design"
 import { buyerIsBusiness, buyerParty, fmtDate, legalMentions, linesAndTotals, sellerParty, type DocumentPdfData } from "./document-data"
 
 type Db = PrismaClient | Prisma.TransactionClient
@@ -16,7 +17,7 @@ export async function buildQuotePdfData(db: Db, companyId: string, quoteId: stri
   const q = await db.quote.findFirst({
     where: { id: quoteId, companyId },
     select: {
-      number: true, status: true, issueDate: true, validUntil: true, subject: true, notes: true, paymentTerms: true, globalDiscountBp: true, vatReverseCharge: true, signerName: true, signedAt: true,
+      number: true, status: true, issueDate: true, pdfTemplate: true, pdfPrimaryColor: true, pdfSecondaryColor: true, pdfLayout: true, pdfShowClientIds: true, pdfShowBankDetails: true, validUntil: true, subject: true, notes: true, paymentTerms: true, globalDiscountBp: true, vatReverseCharge: true, signerName: true, signedAt: true,
       company: { select: { name: true, address: true, siret: true, email: true, phone: true, logoUrl: true } },
       client: { select: { name: true, address: true, siret: true, vatNumber: true, email: true } },
       worksite: { select: { name: true, address: true } },
@@ -43,6 +44,9 @@ export async function buildQuotePdfData(db: Db, companyId: string, quoteId: stri
     signature: q.signerName && q.signedAt ? { name: q.signerName, date: fmtDate(q.signedAt) } : null,
     logoDataUrl: logoForPdf(q.company.logoUrl),
     legalFooter: issuerLegalFooter(identity),
+    // 20/11/2026 — brouillon : choix du devis ?? réglage société ; envoyé : design écrit à l'envoi (absent ⇒ Classique historique).
+    design: draft ? designFromStored(q) ?? settings.pdfDesign : designFromStored(q) ?? DEFAULT_PDF_DESIGN,
+    bank: settings.iban ? { iban: settings.iban, bic: settings.bic } : null,
     draftWarnings: draft ? assessIssuerIdentity(identity).blocking.map((label) => `Donnée d'identité manquante ou invalide : ${label} (Paramètres de l'entreprise / de facturation).`) : undefined,
   }
 }

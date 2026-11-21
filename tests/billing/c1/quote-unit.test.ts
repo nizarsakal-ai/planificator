@@ -107,6 +107,8 @@ function makeTx(quotes: Row[], invoices: Row[] = []) {
       create: async ({ data }: { data: Record<string, unknown> }) => { const id = `inv-${++seq}`; inv.push({ id, ...data }); return { id, number: data.number as string } },
     },
     historyLog: { create: async ({ data }: { data: Record<string, unknown> }) => { history.push({ id: `h${++seq}`, ...data }); return data } },
+    // 20/11/2026 : l'envoi d'un devis lit le design par défaut de la société (aucun réglage ⇒ design historique).
+    billingSettings: { findUnique: async () => null },
   } as unknown as Prisma.TransactionClient
   return { tx, q, inv, history, hooks }
 }
@@ -122,6 +124,8 @@ describe("automate des devis", () => {
     const { tx, q, history } = makeTx([quote("1", "DRAFT")])
     const r = await transitionQuoteCore(tx, { companyId: A, quoteId: "1", to: "SENT", actorId: "u", now })
     assert.deepEqual(r, { ok: true, value: { from: "DRAFT" } }); assert.equal(q[0].status, "SENT"); assert.equal(q[0].sentAt, now); assert.equal(history.length, 1)
+    // 20/11/2026 : design effectif écrit à l'envoi (aucun choix ni réglage ⇒ Classique historique), il ne change plus ensuite.
+    assert.deepEqual([q[0].pdfTemplate, q[0].pdfPrimaryColor, q[0].pdfLayout, q[0].pdfShowClientIds], ["CLASSIC", "#0f3460", "COMPLETE", true])
     assert.deepEqual(await transitionQuoteCore(tx, { companyId: B, quoteId: "1", to: "ACCEPTED", actorId: "u", now }), { ok: false, error: QUOTE_ERRORS.notFound })
     assert.deepEqual(await transitionQuoteCore(tx, { companyId: A, quoteId: "1", to: "CONVERTED", actorId: "u", now }), { ok: false, error: QUOTE_ERRORS.forbidden })
   })

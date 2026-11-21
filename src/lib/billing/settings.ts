@@ -1,5 +1,6 @@
 // Paramètres de facturation d'une société (BillingSettings) avec valeurs par défaut ; mentions légales des PDF.
 import type { Prisma, PrismaClient } from "@prisma/client"
+import { DEFAULT_PDF_DESIGN, designFromStored, type PdfDesign } from "@/lib/billing/pdf/design"
 
 type Db = PrismaClient | Prisma.TransactionClient
 
@@ -17,12 +18,14 @@ export interface BillingSettingsView {
   invoiceFooter: string | null
   vatRegime: "DEBITS" | "ENCAISSEMENTS"
   defaultDepositBp: number
+  /** 20/11/2026 — design par défaut des PDF de la société. */
+  pdfDesign: PdfDesign
 }
 
 export const DEFAULT_BILLING_SETTINGS: BillingSettingsView = {
   vatNumber: null, legalForm: null, shareCapital: null, rcs: null, iban: null, bic: null,
   quoteValidityDays: 30, paymentTermsDays: 30, latePenaltyText: null, quoteFooter: null, invoiceFooter: null,
-  vatRegime: "DEBITS", defaultDepositBp: 3000,
+  vatRegime: "DEBITS", defaultDepositBp: 3000, pdfDesign: DEFAULT_PDF_DESIGN,
 }
 
 /** Mention légale par défaut (art. L441-10 C. com.) : pénalités de retard, indemnité forfaitaire de 40 €, pas d'escompte. */
@@ -36,6 +39,7 @@ export async function getBillingSettings(db: Db, companyId: string): Promise<Bil
     vatNumber: s.vatNumber, legalForm: s.legalForm, shareCapital: s.shareCapital, rcs: s.rcs, iban: s.iban, bic: s.bic,
     quoteValidityDays: s.quoteValidityDays, paymentTermsDays: s.paymentTermsDays, latePenaltyText: s.latePenaltyText,
     quoteFooter: s.quoteFooter, invoiceFooter: s.invoiceFooter, vatRegime: s.vatRegime, defaultDepositBp: s.defaultDepositBp,
+    pdfDesign: designFromStored(s) ?? DEFAULT_PDF_DESIGN,
   }
 }
 
