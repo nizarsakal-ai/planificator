@@ -35,6 +35,13 @@ export const PLUS_SECTIONS: readonly PlusSection[] = [
     ],
   },
   {
+    // 21/11/2026 — documents commerciaux (bons de commande et de livraison) accessibles depuis la comptabilité.
+    title: "Documents commerciaux",
+    links: [
+      { href: "/achats", label: "Bons de commande fournisseurs", hint: "Commandes d'achat, réceptions et PDF du bon de commande" },
+    ],
+  },
+  {
     title: "États et déclarations",
     links: [
       { href: "/comptabilite/tableau-de-bord", label: "Tableau de bord", hint: "Résultat et trésorerie" },
