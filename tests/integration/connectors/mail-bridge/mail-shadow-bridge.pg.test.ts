@@ -197,14 +197,17 @@ describe("LOT-1C Mail Shadow — PostgreSQL", () => {
 
   it("normalisation échouée isolée → NORMALIZE_FAILED (taille message)", async () => {
     const stats = createMailShadowRunStats()
-    // DTO Zod OK ; mapper LOT-1B2 refuse > 256 KiB → create échoue → CAS FAILED
-    const oversizedSubject = "S".repeat(300_000)
+    // DTO Zod OK ; mapper LOT-1B2 refuse > 256 KiB → create échoue → CAS FAILED.
+    // LOT-2A tronque subject à 512 pts de code : surdimensionner via recipients.
+    const recipients = Array.from({ length: 8000 }, (_, i) => ({
+      email: `user${i}@example-very-long-domain-name-for-payload-size.com`,
+    }))
     await bridge.project(
       dto(companyA, connA, `fail-${runId}`, {
         message: {
           externalMessageId: `fail-${runId}`,
           contentCapabilities: [MESSAGE_CONTENT_CAPABILITIES.CONTENT_INLINE],
-          subject: oversizedSubject,
+          recipients,
         },
       }),
       { stats }

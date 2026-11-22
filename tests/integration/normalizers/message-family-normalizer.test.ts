@@ -49,4 +49,38 @@ describe("message-family-normalizer", () => {
     } as MailShadowInputDto)
     assert.equal(r.ok, false)
   })
+
+  it("LOT-2A : hash différent avec/sans subject", () => {
+    const withSubject = normalizeMessageFamily(baseDto)
+    const without = normalizeMessageFamily({
+      ...baseDto,
+      message: {
+        externalMessageId: "ext1",
+        contentCapabilities: [MESSAGE_CONTENT_CAPABILITIES.CONTENT_INLINE],
+      },
+    } as MailShadowInputDto)
+    assert.equal(withSubject.ok, true)
+    assert.equal(without.ok, true)
+    if (withSubject.ok && without.ok) {
+      assert.notEqual(withSubject.normalizedHash, without.normalizedHash)
+      assert.equal(withSubject.message.subject, "Hello")
+      assert.equal(without.message.subject, undefined)
+    }
+  })
+
+  it("LOT-2A : normalizer revalide subject via normalizeSubject (troncature)", () => {
+    const emoji = "😀"
+    const r = normalizeMessageFamily({
+      ...baseDto,
+      message: {
+        externalMessageId: "ext1",
+        contentCapabilities: [MESSAGE_CONTENT_CAPABILITIES.CONTENT_INLINE],
+        subject: emoji.repeat(600),
+      },
+    } as MailShadowInputDto)
+    assert.equal(r.ok, true)
+    if (r.ok) {
+      assert.equal(Array.from(r.message.subject!).length, 512)
+    }
+  })
 })
