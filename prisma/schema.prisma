@@ -426,6 +426,7 @@ model Company {
   inboundEnvelopes                InboundEnvelope[]
   normalizedInbounds              NormalizedInbound[]
   routingDecisions                RoutingDecision[]
+  routingParityObservations       RoutingParityObservation[]
   trucks                          Truck[]
   truckAssignments                TruckAssignment[]
   mileageEntries                  MileageEntry[]
@@ -2487,6 +2488,8 @@ model RoutingDecision {
   decidedAt                   DateTime @default(now())
   createdAt                   DateTime @default(now())
 
+  parityObservations RoutingParityObservation[]
+
   company           Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
   normalizedInbound NormalizedInbound @relation(fields: [normalizedInboundId, companyId], references: [id, companyId], onDelete: Cascade, map: "integration_routing_decisions_normalized_fkey")
 
@@ -2494,6 +2497,31 @@ model RoutingDecision {
   @@unique([companyId, normalizedInboundId, routingConfigurationVersion], map: "integration_routing_decisions_idempotency_key")
   @@index([companyId, decidedAt], map: "integration_routing_decisions_companyId_decidedAt_idx")
   @@map("integration_routing_decisions")
+}
+
+// LOT-2D (27/11/2026) — Observations de parité legacy L1 ↔ Router (SPEC LOT-2 §14 ; plan I5, I6). Ajout seul, sans PII :
+// identifiant externe haché seulement. Une observation par (message normalisé, configuration) ; immuable (UPDATE refusé).
+model RoutingParityObservation {
+  id                          String   @id @default(cuid())
+  companyId                   String
+  normalizedInboundId         String?
+  externalIdHash              String
+  parityBaselineCode          String   @default("L1_REGISTER_INCOMING_MESSAGE")
+  legacyOutcome               String
+  routerOutcome               String?
+  routingDecisionId           String?
+  routingConfigurationVersion String?
+  parityOutcome               String
+  explainedCodes              String[] @default([])
+  comparisonCode              String?
+  observedAt                  DateTime @default(now())
+
+  company           Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  normalizedInbound NormalizedInbound? @relation(fields: [normalizedInboundId, companyId], references: [id, companyId], onDelete: Cascade, map: "integration_routing_parity_observations_normalized_fkey")
+  routingDecision   RoutingDecision?   @relation(fields: [routingDecisionId, companyId], references: [id, companyId], onDelete: Cascade, map: "integration_routing_parity_observations_decision_fkey")
+
+  @@index([companyId, observedAt], map: "integration_routing_parity_observations_co_observedAt_idx")
+  @@map("integration_routing_parity_observations")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2642,7 +2670,8 @@ model NormalizedInbound {
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  routingDecisions RoutingDecision[]
+  routingParityObservations RoutingParityObservation[]
+  routingDecisions          RoutingDecision[]
 
   company  Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
   envelope InboundEnvelope @relation(fields: [envelopeId, companyId, connectionId], references: [id, companyId, connectionId], onDelete: Cascade, map: "integration_normalized_inbounds_envelope_tenant_connection_fkey")

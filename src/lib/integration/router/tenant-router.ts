@@ -50,6 +50,17 @@ export interface RouterResult {
   reasonCode: RoutingReasonCode
   /** Nombre de règles évaluées (observabilité §16). */
   rulesEvaluated: number
+  /** Diagnostics opaques pour les divergences expliquées de la parité (SPEC §14.6) — aucune valeur. */
+  diagnostics: RouterDiagnostics
+}
+
+export interface RouterDiagnostics {
+  /** Au moins une Source dont l'identité matche mais aucun qualificatif actif ne matche. */
+  qualifierGap: boolean
+  subjectKeywordRuleActive: boolean
+  bodyKeywordRuleActive: boolean
+  subjectPresent: boolean
+  bodyAvailable: boolean
 }
 
 function lower(v: string | undefined): string | undefined {
@@ -121,10 +132,17 @@ export function snapshotNeedsBody(snapshot: RoutingConfigSnapshot): boolean {
 
 export function routeMessage(input: RouterInput): RouterResult {
   const snap = buildRoutingConfigSnapshot(input.snapshot)
-  if (snap.sources.length === 0) {
-    return { outcome: ROUTING_OUTCOMES.NO_MATCH, matchedSourceIds: [], pipelineIds: [], reasonCode: ROUTING_REASON_CODES.NO_ENABLED_SOURCE, rulesEvaluated: 0 }
-  }
   const facts = factsOf(input.message, input.body)
+  const diagnostics: RouterDiagnostics = {
+    qualifierGap: false,
+    subjectKeywordRuleActive: snap.rules.some((r) => r.type === INBOUND_SOURCE_RULE_TYPES.SUBJECT_KEYWORD),
+    bodyKeywordRuleActive: snap.rules.some((r) => r.type === INBOUND_SOURCE_RULE_TYPES.BODY_KEYWORD),
+    subjectPresent: facts.subject !== undefined,
+    bodyAvailable: facts.body !== undefined,
+  }
+  if (snap.sources.length === 0) {
+    return { outcome: ROUTING_OUTCOMES.NO_MATCH, matchedSourceIds: [], pipelineIds: [], reasonCode: ROUTING_REASON_CODES.NO_ENABLED_SOURCE, rulesEvaluated: 0, diagnostics }
+  }
   let rulesEvaluated = 0
   const candidates: { sourceId: string; pipelineId: string | null }[] = []
 
@@ -147,14 +165,14 @@ export function routeMessage(input: RouterInput): RouterResult {
       rulesEvaluated++
       if (ruleMatches(r, facts)) { qualifierOk = true; break }
     }
-    if (!qualifierOk) continue
+    if (!qualifierOk) { diagnostics.qualifierGap = true; continue }
 
     if (binding?.connectionId && binding.connectionId !== input.connectionId) continue
     candidates.push({ sourceId: source.id, pipelineId: binding ? binding.pipelineId : null })
   }
 
   if (candidates.length === 0) {
-    return { outcome: ROUTING_OUTCOMES.NO_MATCH, matchedSourceIds: [], pipelineIds: [], reasonCode: ROUTING_REASON_CODES.NO_CANDIDATE, rulesEvaluated }
+    return { outcome: ROUTING_OUTCOMES.NO_MATCH, matchedSourceIds: [], pipelineIds: [], reasonCode: ROUTING_REASON_CODES.NO_CANDIDATE, rulesEvaluated, diagnostics }
   }
   if (candidates.length > 1) {
     return {
@@ -163,11 +181,12 @@ export function routeMessage(input: RouterInput): RouterResult {
       pipelineIds: [],
       reasonCode: ROUTING_REASON_CODES.MULTIPLE_CANDIDATES,
       rulesEvaluated,
+      diagnostics,
     }
   }
   const only = candidates[0]!
   if (only.pipelineId === null) {
-    return { outcome: ROUTING_OUTCOMES.NO_ACTIVE_BINDING, matchedSourceIds: [only.sourceId], pipelineIds: [], reasonCode: ROUTING_REASON_CODES.CANDIDATE_WITHOUT_BINDING, rulesEvaluated }
+    return { outcome: ROUTING_OUTCOMES.NO_ACTIVE_BINDING, matchedSourceIds: [only.sourceId], pipelineIds: [], reasonCode: ROUTING_REASON_CODES.CANDIDATE_WITHOUT_BINDING, rulesEvaluated, diagnostics }
   }
-  return { outcome: ROUTING_OUTCOMES.MATCH, matchedSourceIds: [only.sourceId], pipelineIds: [only.pipelineId], reasonCode: ROUTING_REASON_CODES.MATCHED, rulesEvaluated }
+  return { outcome: ROUTING_OUTCOMES.MATCH, matchedSourceIds: [only.sourceId], pipelineIds: [only.pipelineId], reasonCode: ROUTING_REASON_CODES.MATCHED, rulesEvaluated, diagnostics }
 }

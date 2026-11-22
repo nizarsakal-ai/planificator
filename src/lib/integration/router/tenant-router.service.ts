@@ -32,8 +32,17 @@ import {
   ROUTING_REASON_CODES,
   routeMessage,
   snapshotNeedsBody,
+  type RouterDiagnostics,
   type RouterResult,
 } from "@/lib/integration/router/tenant-router"
+
+const NO_DIAGNOSTICS: RouterDiagnostics = {
+  qualifierGap: false,
+  subjectKeywordRuleActive: false,
+  bodyKeywordRuleActive: false,
+  subjectPresent: false,
+  bodyAvailable: false,
+}
 
 export type RouteNormalizedInboundResult =
   | { status: "DISABLED" }
@@ -44,6 +53,8 @@ export type RouteNormalizedInboundResult =
       reused: boolean
       rulesEvaluated: number
       durationMs: number
+      /** Diagnostics opaques pour la parité (LOT-2D), aucune valeur. */
+      diagnostics: RouterDiagnostics
     }
 
 export interface TenantRouterDeps {
@@ -93,9 +104,9 @@ export class TenantRouterService {
       if (!(error instanceof IntegrationInboundValidationError)) throw error
     }
     if (!normalized) {
-      result = { outcome: "ERROR", matchedSourceIds: [], pipelineIds: [], reasonCode: ROUTING_REASON_CODES.INVALID_NORMALIZED_MESSAGE, rulesEvaluated: 0 }
+      result = { outcome: "ERROR", matchedSourceIds: [], pipelineIds: [], reasonCode: ROUTING_REASON_CODES.INVALID_NORMALIZED_MESSAGE, rulesEvaluated: 0, diagnostics: NO_DIAGNOSTICS }
     } else if (rows.limitExceeded) {
-      result = { outcome: "ERROR", matchedSourceIds: [], pipelineIds: [], reasonCode: ROUTING_REASON_CODES.CONFIG_LIMIT_EXCEEDED, rulesEvaluated: 0 }
+      result = { outcome: "ERROR", matchedSourceIds: [], pipelineIds: [], reasonCode: ROUTING_REASON_CODES.CONFIG_LIMIT_EXCEEDED, rulesEvaluated: 0, diagnostics: NO_DIAGNOSTICS }
     } else {
       const body = snapshotNeedsBody(rows)
         ? await this.deps.body.read({ companyId, normalizedInboundId })
@@ -126,6 +137,6 @@ export class TenantRouterService {
       idempotentReuse: recorded.reused,
       durationMs,
     })
-    return { status: "DECIDED", decision: recorded.decision, reused: recorded.reused, rulesEvaluated: result.rulesEvaluated, durationMs }
+    return { status: "DECIDED", decision: recorded.decision, reused: recorded.reused, rulesEvaluated: result.rulesEvaluated, durationMs, diagnostics: result.diagnostics }
   }
 }

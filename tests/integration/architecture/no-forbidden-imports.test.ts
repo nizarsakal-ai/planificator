@@ -9,6 +9,7 @@
  * - connectors / ops (LOT-1C) : Prisma + persistence OK ; Acquisition/Booking interdits
  * - router (LOT-2C) : persistence OK ; Prisma direct, connectors, normalizers, sources interdits ;
  *   noyau pur (tenant-router, snapshot, port corps) sans persistence ; aucune admission (barrière LOT-3)
+ * - shadow (LOT-2D) : mêmes règles que router ; calcul de parité pur
  */
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
@@ -66,6 +67,7 @@ export type IntegrationLayer =
   | "rules"
   | "util"
   | "router"
+  | "shadow"
   | "other"
 
 export function stripComments(source: string): string {
@@ -116,6 +118,7 @@ export function layerOf(filePath: string): IntegrationLayer {
   if (rel.startsWith("rules/")) return "rules"
   if (rel.startsWith("util/")) return "util"
   if (rel.startsWith("router/")) return "router"
+  if (rel.startsWith("shadow/")) return "shadow"
   return "other"
 }
 
@@ -161,6 +164,7 @@ const PERSISTENCE_FORBIDDEN_LAYER_PREFIXES = [
   "sources",
   "rules",
   "router",
+  "shadow",
 ] as const
 
 /**
@@ -281,7 +285,7 @@ export function violationForImport(
   }
 
   // LOT-2C router : persistence OK ; Prisma direct, connectors/normalizers, sources et admission interdits.
-  if (layer === "router") {
+  if (layer === "router" || layer === "shadow") {
     if (prisma) return `Prisma interdit depuis router (passer par persistence): ${spec}`
     if (isConnectorsOrNormalizersTarget(fromFile, spec)) {
       return `connectors/normalizers interdits depuis router: ${spec}`
@@ -666,5 +670,22 @@ describe("Integration architecture — frontières LOT-1A / LOT-1B / LOT-1C / LO
     assert.equal(violationForImport("router", path.join(ROOT, "router/x.ts"), "@/lib/integration/persistence/routing-decision.repository"), null)
     assert.ok(violationForImport("router", path.join(ROOT, "router/x.ts"), "@prisma/client"))
     assert.ok(violationForImport("router", path.join(ROOT, "router/x.ts"), "@/lib/integration/sources/routing-config-admin.service"))
+  })
+  it("LOT-2D : calcul de parité pur ; shadow/** sans admission, brouillon ni accès Acquisition", () => {
+    const shadowFiles = files.filter((f) => layerOf(f) === "shadow")
+    assert.ok(shadowFiles.length >= 2, "shadow LOT-2D attendu")
+    const offenders: string[] = []
+    for (const file of shadowFiles) {
+      const src = fs.readFileSync(file, "utf8")
+      const specs = extractImportSpecifiers(src)
+      if (path.basename(file) === "routing-parity.ts") {
+        for (const spec of specs) if (isPrismaImport(spec) || isPersistenceTarget(file, spec)) offenders.push(`routing-parity.ts -> ${spec}`)
+      }
+      if (/admission|createDraft|worksiteImportDraft|PipelineAdmission|transitionLifecycle/i.test(stripComments(src))) {
+        offenders.push(`${path.basename(file)} : admission, brouillon ou transition d'Envelope`)
+      }
+    }
+    assert.deepEqual(offenders, [])
+    assert.ok(violationForImport("persistence", path.join(ROOT, "persistence/x.ts"), "@/lib/integration/shadow/routing-parity"))
   })
 })
