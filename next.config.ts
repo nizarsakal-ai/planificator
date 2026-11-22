@@ -92,6 +92,9 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: "20mb",
     },
+    // Réduit le pic mémoire de webpack au build : le conteneur Vercel a déjà été tué par manque de mémoire
+    // (OOM, SIGKILL) sur main (#176, #181-#183) et sur la PR #198. Compilation un peu plus lente, sortie identique.
+    webpackMemoryOptimizations: true,
   },
   images: {
     remotePatterns: [],
