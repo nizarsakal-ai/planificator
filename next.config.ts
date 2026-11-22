@@ -70,6 +70,39 @@ const withPWA = withPWAInit({
   },
 })
 
+/**
+ * SECURITY-HEADERS-001 (lot A) : en-têtes de sécurité sur toutes les réponses.
+ * Appliqués (sans effet de bord attendu) : HSTS, anti-framing, anti-sniffing, politique de référent, permissions.
+ * HSTS sans includeSubDomains ni preload : un sous-domaine futur en HTTP simple ne doit pas être bloqué.
+ * Permissions : caméra (ticket carburant, notes de frais) et géolocalisation (pointage, photos) restent autorisées
+ * pour l'application elle-même ; micro et paiement sont refusés.
+ * La CSP est en mode REPORT-ONLY : elle journalise les violations dans la console du navigateur sans rien bloquer.
+ * Elle sera durcie (puis appliquée) après observation sur l'application déployée. 'unsafe-inline' reste nécessaire
+ * tant que le script d'amorçage de l'apparence (layout.tsx) et les scripts Next sont inline.
+ */
+export const CSP_REPORT_ONLY = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' data: https://fonts.gstatic.com",
+  "img-src 'self' data: blob: https://*.tile.openstreetmap.org https://unpkg.com",
+  "connect-src 'self' https://data.geopf.fr",
+  "worker-src 'self' blob:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ")
+
+export const SECURITY_HEADERS = [
+  { key: "Strict-Transport-Security", value: "max-age=31536000" },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "camera=(self), geolocation=(self), microphone=(), payment=(), usb=()" },
+  { key: "Content-Security-Policy-Report-Only", value: CSP_REPORT_ONLY },
+]
+
 const OCR_TRACE_INCLUDES = ["./node_modules/@tesseract.js-data/fra/4.0.0_best_int/**", "./node_modules/@tesseract.js-data/eng/4.0.0_best_int/**",
   "./node_modules/tesseract.js-core/tesseract-core*.wasm"]
 const OCR_TRACE_EXCLUDES = ["./node_modules/@tesseract.js-data/*/4.0.0/**"]
@@ -98,6 +131,9 @@ const nextConfig: NextConfig = {
   },
   images: {
     remotePatterns: [],
+  },
+  async headers() {
+    return [{ source: "/:path*", headers: SECURITY_HEADERS }]
   },
 }
 
