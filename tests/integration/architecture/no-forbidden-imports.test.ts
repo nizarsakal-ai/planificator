@@ -7,6 +7,8 @@
  * - persistence : Prisma + contracts/types/registry OK ;
  *   connectors / normalizers / observability / ops / sources / rules interdits
  * - connectors / ops (LOT-1C) : Prisma + persistence OK ; Acquisition/Booking interdits
+ * - router (LOT-2C) : persistence OK ; Prisma direct, connectors, normalizers, sources interdits ;
+ *   noyau pur (tenant-router, snapshot, port corps) sans persistence ; aucune admission (barrière LOT-3)
  */
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
@@ -63,6 +65,7 @@ export type IntegrationLayer =
   | "sources"
   | "rules"
   | "util"
+  | "router"
   | "other"
 
 export function stripComments(source: string): string {
@@ -112,6 +115,7 @@ export function layerOf(filePath: string): IntegrationLayer {
   if (rel.startsWith("sources/")) return "sources"
   if (rel.startsWith("rules/")) return "rules"
   if (rel.startsWith("util/")) return "util"
+  if (rel.startsWith("router/")) return "router"
   return "other"
 }
 
@@ -156,6 +160,7 @@ const PERSISTENCE_FORBIDDEN_LAYER_PREFIXES = [
   "ops",
   "sources",
   "rules",
+  "router",
 ] as const
 
 /**
@@ -271,6 +276,18 @@ export function violationForImport(
     if (prisma) return `Prisma interdit depuis sources (passer par persistence): ${spec}`
     if (isConnectorsOrNormalizersTarget(fromFile, spec)) {
       return `connectors/normalizers interdits depuis sources: ${spec}`
+    }
+    return null
+  }
+
+  // LOT-2C router : persistence OK ; Prisma direct, connectors/normalizers, sources et admission interdits.
+  if (layer === "router") {
+    if (prisma) return `Prisma interdit depuis router (passer par persistence): ${spec}`
+    if (isConnectorsOrNormalizersTarget(fromFile, spec)) {
+      return `connectors/normalizers interdits depuis router: ${spec}`
+    }
+    if (/\/sources\b|\/pipeline-admission\b/.test(spec)) {
+      return `sources / admission interdits depuis router: ${spec}`
     }
     return null
   }
@@ -617,5 +634,37 @@ describe("Integration architecture — frontières LOT-1A / LOT-1B / LOT-1C / LO
         )
       }
     }
+  })
+  it("LOT-2C : noyau pur du Router sans persistence ni Prisma ; aucune admission ni brouillon dans router/**", () => {
+    const routerFiles = files.filter((f) => layerOf(f) === "router")
+    assert.ok(routerFiles.length >= 4, "router LOT-2C attendu")
+    const pure = new Set(["tenant-router.ts", "routing-config-snapshot.ts", "local-message-body.port.ts"])
+    const offenders: string[] = []
+    for (const file of routerFiles) {
+      const src = fs.readFileSync(file, "utf8")
+      const specs = extractImportSpecifiers(src)
+      if (pure.has(path.basename(file))) {
+        for (const spec of specs) {
+          if (isPrismaImport(spec) || isPersistenceTarget(file, spec) || /flags|observability/.test(spec)) {
+            offenders.push(`${path.basename(file)} -> ${spec}`)
+          }
+        }
+      }
+      if (/admission|createDraft|worksiteImportDraft|PipelineAdmission/i.test(stripComments(src))) {
+        offenders.push(`${path.basename(file)} : référence à l'admission / au brouillon`)
+      }
+      if (/inboundEnvelope|lifecycle/i.test(stripComments(src))) {
+        offenders.push(`${path.basename(file)} : accès à l'Envelope`)
+      }
+    }
+    assert.deepEqual(offenders, [])
+  })
+
+  it("LOT-2C : persistence n'importe jamais router/**", () => {
+    const fromPersistence = path.join(ROOT, "persistence/x.ts")
+    assert.ok(violationForImport("persistence", fromPersistence, "@/lib/integration/router/tenant-router"))
+    assert.equal(violationForImport("router", path.join(ROOT, "router/x.ts"), "@/lib/integration/persistence/routing-decision.repository"), null)
+    assert.ok(violationForImport("router", path.join(ROOT, "router/x.ts"), "@prisma/client"))
+    assert.ok(violationForImport("router", path.join(ROOT, "router/x.ts"), "@/lib/integration/sources/routing-config-admin.service"))
   })
 })

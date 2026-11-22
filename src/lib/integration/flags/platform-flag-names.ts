@@ -15,6 +15,12 @@ export const PLATFORM_FLAG_NAMES = {
   AGENT_GATEWAY_COMPANY_ALLOWLIST: "INTEGRATION_AGENT_GATEWAY_COMPANY_ALLOWLIST",
   /** PLAN-AGENT-GATEWAY-001 — LOT-1A. Requêtes/min par principal (borné 1–1000, défaut 120). */
   AGENT_GATEWAY_RPM: "INTEGRATION_AGENT_GATEWAY_RPM",
+  /** PLAN-INTEGRATION-PLATFORM-001 — LOT-2 (plan I1). Router : nouvelles décisions (fail-closed). */
+  ROUTING_ENABLED: "INTEGRATION_ROUTING_ENABLED",
+  /** LOT-2 (I1). Allowlist CSV d'ids d'entreprise pour le Router (vide ⇒ aucune). */
+  ROUTING_COMPANY_ALLOWLIST: "INTEGRATION_ROUTING_COMPANY_ALLOWLIST",
+  /** LOT-2 (I1). Comparaison de parité shadow (LOT-2D). */
+  ROUTING_SHADOW_ENABLED: "INTEGRATION_ROUTING_SHADOW_ENABLED",
 } as const
 
 /** Défaut documenté — budget global du run shadow. */
