@@ -1,3 +1,7 @@
+import {
+  admitGmailConsultation,
+  isGmailConsultationsAdmissionEnabled,
+} from "@/lib/acquisition/admission/gmail-consultations-admission"
 import type { MailProviderPort } from "@/lib/acquisition/ports/mail-provider.port"
 import type { AcquisitionIngestionPort } from "@/lib/acquisition/ports/acquisition-ingestion.port"
 import type { AcquisitionScanCursorRepositoryPort } from "@/lib/acquisition/persistence/acquisition-scan-cursor.repository"
@@ -145,6 +149,7 @@ export interface SyncAcquisitionMailForCompanyInput {
    * `false` désactive explicitement le shadow pour ce run.
    */
   mailShadow?: MailShadowRunContext | false
+  consultationsAdmission?: Parameters<typeof admitGmailConsultation>[3]
   /**
    * Appelé après chaque échec d'accès Gmail (listing refusé), avec le compteur
    * d'échecs consécutifs à jour. Best-effort : une exception est absorbée.
@@ -223,8 +228,9 @@ export async function syncAcquisitionMailForCompany(
     cursorRecord.lastErrorCode === "MESSAGE_INGESTION_FAILED" &&
     cursorRecord.consecutiveFailures >= MESSAGE_INGESTION_CIRCUIT_BREAKER_THRESHOLD
 
+  const routerAdmits = isGmailConsultationsAdmissionEnabled(companyId, input.consultationsAdmission?.env)
   let mailShadowCtx: MailShadowRunContext | null = null
-  if (input.mailShadow === false) {
+  if (routerAdmits || input.mailShadow === false) {
     mailShadowCtx = null
   } else if (input.mailShadow) {
     mailShadowCtx = input.mailShadow
@@ -350,7 +356,14 @@ export async function syncAcquisitionMailForCompany(
           companyId,
           mailboxKey
         )
-        const result = await ingestion.registerIncomingMessage(registerInput)
+        const result = routerAdmits
+          ? await admitGmailConsultation(message, registerInput, record => ingestion.registerIncomingMessage(record), input.consultationsAdmission)
+          : await ingestion.registerIncomingMessage(registerInput)
+
+        if (result.outcome === "NOT_ADMITTED") {
+          base.stats.rejected++
+          continue
+        }
 
         if (result.outcome === "DRAFT_CREATED") {
           if (result.created) base.stats.ingested++

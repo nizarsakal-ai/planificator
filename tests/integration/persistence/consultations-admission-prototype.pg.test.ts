@@ -1,0 +1,271 @@
+import assert from "node:assert/strict"
+import { after, before, it } from "node:test"
+import { PrismaClient } from "@prisma/client"
+import { registerIncomingMessage } from "@/lib/acquisition/acquisition.service"
+import type { RegisterIncomingMessageInput } from "@/lib/validations/acquisition"
+import { admitConsultation } from "@/lib/acquisition/admission/consultations-admission"
+import { syncAcquisitionMailForCompany } from "@/lib/acquisition/connector/acquisition-gmail-sync.service"
+import { AcquisitionScanCursorRepository } from "@/lib/acquisition/persistence/acquisition-scan-cursor.repository"
+import { TenantRouterService } from "@/lib/integration/router/tenant-router.service"
+import { InboundEnvelopeRepository } from "@/lib/integration/persistence/inbound-envelope.repository"
+import { NormalizedInboundRepository } from "@/lib/integration/persistence/normalized-inbound.repository"
+import { RoutingConfigSnapshotRepository } from "@/lib/integration/persistence/routing-config-snapshot.repository"
+import { RoutingDecisionRepository } from "@/lib/integration/persistence/routing-decision.repository"
+import { InboundSourceRepository } from "@/lib/integration/persistence/inbound-source.repository"
+import { InboundSourceRuleRepository } from "@/lib/integration/persistence/inbound-source-rule.repository"
+import { InboundSourceIdentityTx } from "@/lib/integration/persistence/inbound-source-identity.tx"
+import { PipelineBindingRepository } from "@/lib/integration/persistence/pipeline-binding.repository"
+import { InboundSourceWriteService } from "@/lib/integration/sources/inbound-source-write.service"
+import { assertSafeDisposableTestDatabaseUrl } from "./helpers/safe-test-database-url"
+
+const url = process.env.TEST_LOT3_DATABASE_URL
+if (!url) throw new Error("TEST_LOT3_DATABASE_URL requis")
+assertSafeDisposableTestDatabaseUrl(url)
+const target = new URL(url)
+assert.equal(target.hostname, "127.0.0.1")
+assert.equal(target.pathname, "/pgtest_lot3_local")
+
+const db = new PrismaClient({ datasources: { db: { url } } })
+let companyId: string
+let partnerId: string
+let sourceId: string
+let connectionId: string
+const envelopes = new InboundEnvelopeRepository(db)
+const normalized = new NormalizedInboundRepository(db)
+const writerCalls = { legacy: 0, project: 0 }
+
+before(async () => {
+  const company = await db.company.create({
+    data: { name: "Société fictive LOT-3", slug: "lot3-fictif" },
+  })
+  companyId = company.id
+  const partner = await db.acquisitionPartner.create({
+    data: { companyId, name: "Partenaire fictif", code: "fictif" },
+  })
+  partnerId = partner.id
+  await db.acquisitionPartnerDomain.create({
+    data: { companyId, partnerId, domainNormalized: "partenaire.example" },
+  })
+  const connection = await db.integrationConnection.create({
+    data: { companyId, connectorType: "platform.mail.legacy", displayName: "Boîte fictive", status: "ACTIVE", secretBackend: "LEGACY_GMAIL", config: {} },
+  })
+  connectionId = connection.id
+  const writes = new InboundSourceWriteService(
+    new InboundSourceRepository(db), new InboundSourceRuleRepository(db), new InboundSourceIdentityTx(db),
+  )
+  sourceId = (await writes.createSource({ companyId, displayName: "Source fictive" })).id
+  await writes.createRule({ companyId, sourceId, type: "SENDER_DOMAIN", value: "partenaire.example" })
+  const bindings = new PipelineBindingRepository(db)
+  const binding = await bindings.create({ companyId, sourceId, connectionId })
+  await bindings.setEnabled(companyId, binding.id, true)
+  await writes.setSourceEnabled(companyId, sourceId, true)
+})
+
+after(() => db.$disconnect())
+
+function message(externalMessageId: string): RegisterIncomingMessageInput {
+  return {
+    companyId,
+    source: "GMAIL",
+    sourceMailboxKey: "boite-fictive",
+    externalMessageId,
+    senderEmail: "devis@partenaire.example",
+    subject: "Consultation fictive",
+    receivedAt: new Date("2026-01-01T12:00:00Z"),
+    attachments: [],
+  }
+}
+
+const dependencies = {
+  router: {
+    route: (input: { companyId: string; normalizedInboundId: string }) => new TenantRouterService({
+      normalized, config: new RoutingConfigSnapshotRepository(db), decisions: new RoutingDecisionRepository(db),
+      env: {
+        INTEGRATION_PLATFORM_FOUNDATION_ENABLED: "true",
+        INTEGRATION_ROUTING_ENABLED: "true",
+        INTEGRATION_ROUTING_COMPANY_ALLOWLIST: companyId,
+      },
+      log: () => undefined,
+    }).route(input),
+  },
+  normalized,
+  envelopes,
+  legacy: (input: RegisterIncomingMessageInput) => {
+    writerCalls.legacy++
+    return registerIncomingMessage(input, db)
+  },
+  project: async (input: RegisterIncomingMessageInput, selectedSource: string) => {
+    writerCalls.project++
+    assert.equal(selectedSource, sourceId)
+    const partner = await db.acquisitionPartner.findFirstOrThrow({
+      where: { id: partnerId, companyId: input.companyId, active: true, pipeline: "consultations" },
+    })
+    return registerIncomingMessage(input, db, {
+      eligibilityResolver: {
+        isDomainEligible: async () => true,
+        resolveEligibleSender: async () => ({ partner, matchKind: "DOMAIN" }),
+      },
+    })
+  },
+}
+
+async function seedRoute(input: RegisterIncomingMessageInput) {
+  const timestamp = "2026-01-01T12:00:00Z"
+  const envelope = await envelopes.createIdempotent({
+    companyId, connectionId, externalId: input.externalMessageId, idempotencyKey: input.externalMessageId,
+    receivedAt: timestamp, payloadRef: "fixture", contentType: "message/rfc822",
+  })
+  const inbound = await normalized.create({
+    companyId, connectionId, envelopeId: envelope.id, family: "MESSAGE",
+    occurredAt: timestamp, receivedAt: timestamp, normalizedHash: input.externalMessageId, artifactRefs: [],
+    message: { externalMessageId: input.externalMessageId, sender: { email: input.senderEmail }, contentCapabilities: [] },
+  })
+  return { kind: "router" as const, normalizedInboundId: inbound.id, connectionId, mailboxKey: "boite-fictive" }
+}
+
+function admit(input: RegisterIncomingMessageInput, authority: Awaited<ReturnType<typeof seedRoute>>) {
+  return admitConsultation(input, authority, dependencies)
+}
+
+async function verifySingleDraft(
+  input: RegisterIncomingMessageInput,
+  results: Awaited<ReturnType<typeof admit>>[],
+) {
+  const messages = await db.acquisitionMessage.findMany({
+    where: { companyId: input.companyId, source: input.source, externalMessageId: input.externalMessageId },
+    include: { draft: true },
+  })
+  assert.equal(messages.length, 1)
+  const [saved] = messages
+  assert.equal(saved.resolvedPartnerId, partnerId)
+  assert.ok(saved.draft)
+  assert.equal(results.filter(result => result.outcome === "DRAFT_CREATED" && result.created).length, 1)
+  for (const result of results) {
+    assert.equal(result.outcome, "DRAFT_CREATED")
+    assert.equal(result.messageId, saved.id)
+    assert.equal(result.draftId, saved.draft.id)
+  }
+}
+
+it("rejeu de la décision : même message et même brouillon", async () => {
+  const input = message("rejeu")
+  const authority = await seedRoute(input)
+  const calls = { ...writerCalls }
+  const first = await admit(input, authority)
+  await verifySingleDraft(input, [first, await admit(input, authority)])
+  assert.deepEqual(writerCalls, { legacy: calls.legacy, project: calls.project + 2 })
+  assert.equal(await db.routingDecision.count({ where: { normalizedInboundId: authority.normalizedInboundId } }), 1)
+})
+
+it("deux admissions simultanées : une seule création", async () => {
+  const input = message("concurrence")
+  const authority = await seedRoute(input)
+  await verifySingleDraft(input, await Promise.all([admit(input, authority), admit(input, authority)]))
+})
+
+it("retour au flux historique : réutilise le brouillon créé par le routeur", async () => {
+  const input = message("retour-historique")
+  const first = await admit(input, await seedRoute(input))
+  const calls = { ...writerCalls }
+  const legacy = await admitConsultation({ ...input, sourceMailboxKey: "" }, { kind: "legacy" }, dependencies)
+  await verifySingleDraft(input, [first, legacy])
+  assert.deepEqual(writerCalls, { legacy: calls.legacy + 1, project: calls.project })
+})
+
+it("deux versions du flux se chevauchent : un seul brouillon", async () => {
+  const input = message("chevauchement")
+  const authority = await seedRoute(input)
+  await verifySingleDraft(input, await Promise.all([
+    admit(input, authority),
+    admitConsultation({ ...input, sourceMailboxKey: "" }, { kind: "legacy" }, dependencies),
+  ]))
+})
+
+it("sans correspondance ou en cas de panne du nouveau flux, aucun repli historique", async () => {
+  const input = { ...message("refus"), senderEmail: "contact@autre.example" }
+  const authority = await seedRoute(input)
+  const calls = { ...writerCalls }
+  assert.deepEqual(await admit(input, authority), { outcome: "NOT_ADMITTED" })
+  await assert.rejects(admitConsultation(input, authority, {
+    ...dependencies, router: { route: async () => { throw new Error("Panne fictive") } },
+  }), /Panne fictive/)
+  assert.deepEqual(writerCalls, calls)
+  assert.equal(await db.acquisitionMessage.count({ where: { companyId, externalMessageId: input.externalMessageId } }), 0)
+})
+
+it("Gmail : admission, rejeu et retour historique avec la clé de boîte persistée", async () => {
+  const mailbox = await db.acquisitionGmailConnection.create({
+    data: {
+      companyId,
+      gmailAddress: "boite@partenaire.example",
+      accessToken: "fixture",
+      refreshToken: "fixture",
+      tokenExpiry: new Date("2027-01-01T00:00:00Z"),
+      connectedById: "utilisateur-fictif",
+    },
+  })
+  await db.integrationConnection.update({
+    where: { id: connectionId },
+    data: { config: { gmailMailboxId: mailbox.id, sourcePartners: [{ sourceId, partnerId }] } },
+  })
+  const env = {
+    ...process.env,
+    INTEGRATION_PLATFORM_FOUNDATION_ENABLED: "true",
+    INTEGRATION_ROUTING_ENABLED: "true",
+    INTEGRATION_ROUTING_COMPANY_ALLOWLIST: companyId,
+    INTEGRATION_CONSULTATIONS_ADMISSION_ENABLED: "true",
+  }
+  const externalMessageId = "gmail-admission"
+  const run = (enabled: boolean) => syncAcquisitionMailForCompany({
+    companyId,
+    connectionId: mailbox.id,
+    mailShadow: false,
+    consultationsAdmission: { db, env: { ...env, INTEGRATION_CONSULTATIONS_ADMISSION_ENABLED: String(enabled) } },
+    ingestion: {
+      isEnabled: () => true,
+      registerIncomingMessage: dependencies.legacy,
+    },
+    provider: {
+      source: "GMAIL",
+      listMessagesPage: async () => ({
+        messages: [{
+          externalMessageId, fromHeader: "Devis <devis@partenaire.example>",
+          subject: "Consultation fictive Gmail", receivedAt: new Date("2026-01-01T12:00:00Z"),
+          threadId: null, labels: [], snippet: null, attachments: [], providerMetadata: {},
+        }],
+        nextPageToken: null, nextHistoryId: "h1", hasMore: false, paginationMode: "lookback",
+      }),
+    },
+    cursorRepository: new AcquisitionScanCursorRepository(db),
+  })
+
+  const before = writerCalls.legacy
+  const first = await run(true)
+  assert.equal(first.status, "SUCCESS")
+  assert.equal(first.stats.ingested, 1)
+  const saved = await db.acquisitionMessage.findFirstOrThrow({
+    where: { companyId, externalMessageId }, include: { draft: true },
+  })
+  assert.equal(saved.sourceMailboxKey, mailbox.id)
+  assert.equal(saved.resolvedPartnerId, partnerId)
+  assert.ok(saved.draft)
+
+  const replay = await run(true)
+  assert.equal(replay.status, "SUCCESS")
+  assert.equal(replay.stats.skippedDuplicate, 1)
+  assert.equal(writerCalls.legacy, before)
+
+  const rollback = await run(false)
+  assert.equal(rollback.status, "SUCCESS")
+  assert.equal(rollback.stats.skippedDuplicate, 1)
+  assert.equal(writerCalls.legacy, before + 1)
+  const drafts = await db.worksiteImportDraft.findMany({
+    where: { companyId, acquisitionMessage: { externalMessageId } },
+    select: { id: true },
+  })
+  assert.deepEqual(drafts, [{ id: saved.draft.id }])
+  assert.equal(await db.acquisitionMessage.count({ where: { companyId, externalMessageId } }), 1)
+  assert.equal(await db.routingDecision.count({
+    where: { companyId, normalizedInbound: { envelope: { externalId: externalMessageId } }, outcome: "MATCH" },
+  }), 1)
+})
