@@ -16,7 +16,8 @@ Ce plan fige tout ce que la SPEC renvoie au « plan d'implémentation ». Il ne 
 2. **Point d'accroche L1 disponible.** Dans `acquisition-gmail-sync.service.ts`, chaque message passe par `registerIncomingMessage` (résultat `DRAFT_CREATED` ou `REJECTED`), puis par `projectMailShadowAfterLegacy` (LOT-1C). Le résultat L1 et le `NormalizedInbound` sont donc tous deux connus au même endroit, sans second poll.
 3. **`subject` volontairement omis** du DTO shadow (`mail-shadow-dto.mapper.ts`, « limiter PII en shadow V1 »). Le contrat LOT-1A l'accepte déjà en optionnel : c'est l'objet de LOT-2A.
 4. **Contrat `RoutingDecision`** (LOT-1A) : outcomes `MATCH`, `NO_MATCH`, `NO_ACTIVE_BINDING`, `AMBIGUOUS_SOURCE`, `ERROR`, `DUPLICATE`. `DUPLICATE` ne sera jamais écrit (SPEC §9.2).
-5. **Aucun corps de message matérialisé** par LOT-1C. Le contenu n'est lu que plus tard, par les workers d'acquisition, hors chemin du Router.
+5. **Une implémentation partielle existe déjà** : PR nizarsakal-ai/planificator#42 (1er août 2026, jamais fusionnée), soit 32 fichiers. Elle contient la normalisation du `subject` (LOT-2A), les contrats, le dépôt et le service d'écriture des Sources et Rules, sa migration (`20260801220000_add_integration_inbound_sources_rules`) et ses tests. Elle n'a ni Bindings, ni Router, ni `RoutingDecision`, ni shadow. Sa migration est datée avant des migrations déjà appliquées en production : il faudra la redater.
+6. **Aucun corps de message matérialisé** par LOT-1C. Le contenu n'est lu que plus tard, par les workers d'acquisition, hors chemin du Router.
 
 ## 2. Décisions d'implémentation (à valider avec le GO)
 
@@ -37,11 +38,13 @@ Ce plan fige tout ce que la SPEC renvoie au « plan d'implémentation ». Il ne 
 
 | PR | Contenu | Migration | Tests de fermeture |
 |---|---|---|---|
-| **2A** — `subject` | Mapper `mail-shadow-dto.mapper.ts` : `subject` renseigné s'il est déjà dans le message acquis (trim, NFC, aucune balise HTML, 512 caractères au plus, troncature documentée), jamais journalisé. Aucun fetch. | Non | Unitaires : présent, absent, vide, trop long, Unicode ; contrôle statique sans réseau ; logs sans `subject`. |
-| **2B** — Configuration | Tables `inbound_sources`, `inbound_source_rules`, `pipeline_bindings` ; contrats Zod ; normalisation §6.3 ; services CRUD avec AuthZ, bornes et audit ; règle « Source active ⇒ au moins une rule IDENTITÉ active » vérifiée par le service et par un déclencheur. | Oui, additive | PG : unicités (un Binding actif par Source), isolation tenant, bornes, déclencheur d'intégrité, audit sans valeur brute. |
+| **2A** — `subject` (reprise de la #42) | Mapper `mail-shadow-dto.mapper.ts` : `subject` renseigné s'il est déjà dans le message acquis (trim, NFC, aucune balise HTML, 512 caractères au plus, troncature documentée), jamais journalisé. Aucun fetch. | Non | Unitaires : présent, absent, vide, trop long, Unicode ; contrôle statique sans réseau ; logs sans `subject`. |
+| **2B** — Configuration (reprise de la #42, complétée des Bindings) | Tables `inbound_sources`, `inbound_source_rules`, `pipeline_bindings` ; contrats Zod ; normalisation §6.3 ; services CRUD avec AuthZ, bornes et audit ; règle « Source active ⇒ au moins une rule IDENTITÉ active » vérifiée par le service et par un déclencheur. | Oui, additive | PG : unicités (un Binding actif par Source), isolation tenant, bornes, déclencheur d'intégrité, audit sans valeur brute. |
 | **2C** — Router | Router pur (§10), hash I2, port I3, dépôt `routing_decisions` idempotent (`ON CONFLICT DO NOTHING` puis relecture ; `reused` hors contrat). Aucune transition d'Envelope. | Oui, additive | Unitaires §20.1 complets ; PG : idempotence, `Promise.all` concurrent, Envelope toujours `NORMALIZED`, aucun appel d'admission (contrôle statique). |
 | **2D** — Shadow | Appel du Router après `projectMailShadowAfterLegacy`, sous les flags I1, dans le budget du run shadow, best-effort (une erreur n'altère jamais le chemin legacy ni ses statistiques) ; calcul de parité I6 ; table I5 ; journaux redacted. | Oui, additive (I5) | Non-régression §20.3 : aucun brouillon supplémentaire, aucun second poll, statistiques legacy identiques, Booking intact, LOT-1C intact ; kill-switch testé. |
 | **2E** — Simulateur et amorçage | `simulateRouting` (I7) ; script d'amorçage du pilote (I8) ; rapport de fermeture §22. | Non | Simulateur sans persistance ; script en dry-run vérifié. |
+
+**Reprise de la PR #42** : 2A et 2B repartent de son code, rebasé sur `main` et revu contre ce plan (flags I1, bornes, audit, déclencheur d'intégrité). Sa migration est redatée après la dernière migration de `main`. La #42 est ensuite fermée, avec un renvoi vers les nouvelles PR. Rien n'est réécrit sans raison.
 
 Chaque migration a son script Neon (`docs/runbooks/neon-<migration>.sql`), testé sur base jetable et appliqué **avant** la fusion, à cause de la garde de schéma du build de production.
 
