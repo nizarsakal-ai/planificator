@@ -9,6 +9,7 @@ import {
 } from "@/lib/integration/contracts/normalized-message"
 import type { MailShadowInputDto } from "@/lib/integration/connectors/mail-bridge/mail-shadow-input.dto"
 import { computeNormalizedMessageHash } from "@/lib/integration/normalizers/message/normalized-hash"
+import { normalizeSubject } from "@/lib/integration/normalizers/message/normalize-subject"
 
 export type MessageNormalizeSuccess = {
   ok: true
@@ -31,7 +32,15 @@ export function normalizeMessageFamily(
   dto: MailShadowInputDto
 ): MessageNormalizeResult {
   try {
-    const message = normalizedMessageSchema.parse(dto.message)
+    // LOT-2A invariant : revalider subject via normalizeSubject (jamais contourner).
+    const subject = normalizeSubject(dto.message.subject)
+    const messageInput: Record<string, unknown> = { ...dto.message }
+    if (subject) {
+      messageInput.subject = subject
+    } else {
+      delete messageInput.subject
+    }
+    const message = normalizedMessageSchema.parse(messageInput)
     const normalizedHash = computeNormalizedMessageHash(message)
     return { ok: true, message, normalizedHash }
   } catch (error) {
