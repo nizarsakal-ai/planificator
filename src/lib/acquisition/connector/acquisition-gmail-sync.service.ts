@@ -363,7 +363,7 @@ export async function syncAcquisitionMailForCompany(
 
         // LOT-1C — shadow après legacy ; best-effort ; n’altère pas stats métier
         if (mailShadowCtx) {
-          await projectMailShadowAfterLegacy(message, companyId, mailShadowCtx)
+          await projectMailShadowAfterLegacy(message, companyId, mailShadowCtx, Date.now, result.outcome)
         }
       } catch (e) {
         base.stats.failed++

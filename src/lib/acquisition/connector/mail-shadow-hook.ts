@@ -1,6 +1,8 @@
 /**
  * PLAN-INTEGRATION-PLATFORM-001 — LOT-1C
  * Hook shadow post-legacy — admission budget + await project (pas d’annulation).
+ * LOT-2D : si le shadow matching est actif (flags I1), route ensuite le message normalisé et compare au résultat L1,
+ * dans le même budget, best-effort (aucune exception vers le legacy, aucune statistique legacy modifiée).
  */
 
 import type { CanonicalMailMessage } from "@/lib/acquisition/connector/connector.types"
@@ -8,7 +10,9 @@ import { mapCanonicalMailToShadowDto } from "@/lib/acquisition/connector/mail-sh
 import {
   getMailShadowRunBudgetMs,
   isMailShadowActiveForCompany,
+  isRoutingShadowActiveForCompany,
 } from "@/lib/integration/flags/platform-flags"
+import { RoutingShadowService } from "@/lib/integration/shadow/routing-shadow.service"
 import { MailShadowBridgeService } from "@/lib/integration/connectors/mail-bridge/mail-shadow-bridge.service"
 import type { MailShadowBridgePort } from "@/lib/integration/connectors/mail-bridge/mail-shadow-bridge.port"
 import {
@@ -26,6 +30,8 @@ export type MailShadowRunContext = {
   deadlineAtMs: number
   stats: MailShadowRunStats
   bridge: MailShadowBridgePort
+  /** LOT-2D — présent seulement si le shadow matching est actif pour la société. */
+  routingShadow?: Pick<RoutingShadowService, "observe">
 }
 
 /**
@@ -38,6 +44,7 @@ export async function prepareMailShadowRun(
     env?: NodeJS.ProcessEnv
     nowMs?: number
     bridge?: MailShadowBridgePort
+    routingShadow?: Pick<RoutingShadowService, "observe">
   }
 ): Promise<MailShadowRunContext | null> {
   const env = options?.env ?? process.env
@@ -59,6 +66,9 @@ export async function prepareMailShadowRun(
     deadlineAtMs: nowMs + budgetMs,
     stats,
     bridge: options?.bridge ?? new MailShadowBridgeService(),
+    ...(isRoutingShadowActiveForCompany(companyId, env)
+      ? { routingShadow: options?.routingShadow ?? new RoutingShadowService({ env }) }
+      : {}),
   }
 }
 
@@ -70,7 +80,9 @@ export async function projectMailShadowAfterLegacy(
   message: CanonicalMailMessage,
   companyId: string,
   ctx: MailShadowRunContext,
-  nowMs: () => number = Date.now
+  nowMs: () => number = Date.now,
+  /** LOT-2D — résultat de `registerIncomingMessage` pour ce message (baseline L1). */
+  legacyOutcome: string | null = null
 ): Promise<void> {
   try {
     if (nowMs() >= ctx.deadlineAtMs) {
@@ -94,6 +106,18 @@ export async function projectMailShadowAfterLegacy(
     }
 
     await ctx.bridge.project(mapped.dto, { stats: ctx.stats })
+
+    if (ctx.routingShadow) {
+      // Ne lève jamais ; aucun compteur legacy ni LOT-1C touché.
+      await ctx.routingShadow.observe({
+        companyId,
+        connectionId: ctx.connectionId,
+        idempotencyKey: mapped.dto.idempotencyKey,
+        externalId: mapped.dto.externalId,
+        legacyOutcome,
+        deadlineAtMs: ctx.deadlineAtMs,
+      })
+    }
   } catch (error) {
     ctx.stats.shadowErrors++
     logMailShadowError(
