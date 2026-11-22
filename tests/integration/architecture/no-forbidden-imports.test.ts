@@ -10,6 +10,7 @@
  * - router (LOT-2C) : persistence OK ; Prisma direct, connectors, normalizers, sources interdits ;
  *   noyau pur (tenant-router, snapshot, port corps) sans persistence ; aucune admission (barrière LOT-3)
  * - shadow (LOT-2D) : mêmes règles que router ; calcul de parité pur
+ * - simulator (LOT-2E) : mêmes règles que router ; aucune écriture
  */
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
@@ -68,6 +69,7 @@ export type IntegrationLayer =
   | "util"
   | "router"
   | "shadow"
+  | "simulator"
   | "other"
 
 export function stripComments(source: string): string {
@@ -119,6 +121,7 @@ export function layerOf(filePath: string): IntegrationLayer {
   if (rel.startsWith("util/")) return "util"
   if (rel.startsWith("router/")) return "router"
   if (rel.startsWith("shadow/")) return "shadow"
+  if (rel.startsWith("simulator/")) return "simulator"
   return "other"
 }
 
@@ -165,6 +168,7 @@ const PERSISTENCE_FORBIDDEN_LAYER_PREFIXES = [
   "rules",
   "router",
   "shadow",
+  "simulator",
 ] as const
 
 /**
@@ -285,7 +289,7 @@ export function violationForImport(
   }
 
   // LOT-2C router : persistence OK ; Prisma direct, connectors/normalizers, sources et admission interdits.
-  if (layer === "router" || layer === "shadow") {
+  if (layer === "router" || layer === "shadow" || layer === "simulator") {
     if (prisma) return `Prisma interdit depuis router (passer par persistence): ${spec}`
     if (isConnectorsOrNormalizersTarget(fromFile, spec)) {
       return `connectors/normalizers interdits depuis router: ${spec}`
@@ -687,5 +691,18 @@ describe("Integration architecture — frontières LOT-1A / LOT-1B / LOT-1C / LO
     }
     assert.deepEqual(offenders, [])
     assert.ok(violationForImport("persistence", path.join(ROOT, "persistence/x.ts"), "@/lib/integration/shadow/routing-parity"))
+  })
+  it("LOT-2E : le simulateur n'importe aucun dépôt d'écriture (décisions, parité, audit, Envelope, Normalized)", () => {
+    const simFiles = files.filter((f) => layerOf(f) === "simulator")
+    assert.ok(simFiles.length >= 1, "simulator LOT-2E attendu")
+    const offenders: string[] = []
+    for (const file of simFiles) {
+      for (const spec of extractImportSpecifiers(fs.readFileSync(file, "utf8"))) {
+        if (/routing-decision|routing-parity|routing-config-audit|inbound-envelope|normalized-inbound\.repository|tenant-router\.service|@prisma\/client/.test(spec)) {
+          offenders.push(`${path.basename(file)} -> ${spec}`)
+        }
+      }
+    }
+    assert.deepEqual(offenders, [])
   })
 })
