@@ -483,9 +483,9 @@ model Company {
   deliveryNotes          DeliveryNote[] // 21/11/2026
   integrationOAuthStates IntegrationOAuthState[]
 
-  worksiteBudgets WorksiteBudget[]
-  worksiteBudgetRevisions WorksiteBudgetRevision[]
-  worksiteBudgetLines WorksiteBudgetLine[]
+  worksiteBudgets            WorksiteBudget[]
+  worksiteBudgetRevisions    WorksiteBudgetRevision[]
+  worksiteBudgetLines        WorksiteBudgetLine[]
   supplierInvoiceAllocations SupplierInvoiceAllocation[]
 
   @@map("companies")
@@ -1213,7 +1213,7 @@ model Worksite {
   clientOrders  ClientOrder[] // 21/11/2026
   deliveryNotes DeliveryNote[] // 21/11/2026
 
-  budget WorksiteBudget?
+  budget                     WorksiteBudget?
   supplierInvoiceAllocations SupplierInvoiceAllocation[]
 
   @@unique([id, companyId])
@@ -2437,6 +2437,8 @@ model IntegrationCredentialVersion {
   revokedAt      DateTime?
   revokedReason  String?
   failedAt       DateTime?
+  /// LOT-8D : destruction cryptographique (90 jours après la fin de vie), matériel remplacé par des zéros.
+  destroyedAt    DateTime?
 
   connection IntegrationConnection @relation(fields: [connectionId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
 
