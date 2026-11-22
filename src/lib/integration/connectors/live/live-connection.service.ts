@@ -14,6 +14,7 @@ import { CONNECTOR_ERRORS, LIVE_CONNECTOR_KEYS, SYNC_ERROR_LABEL, isLiveConnecto
 import { revokeGoogleCalendarRemotely, type TokenPost } from "@/lib/integration/connectors/oauth/google-calendar-oauth"
 import { linkConnectorConnection, readConnectorSetting, setConnectorMode, type ConnectorContext, type ConnectorResult } from "@/lib/connectors/connectors.service"
 import { parseLiveCredentials } from "@/lib/integration/connectors/live/live-catalog"
+import { checkCredentialAttemptLimit } from "@/lib/integration/connectors/live/live-rate-limits"
 import { nativeFetch, type FetchLike } from "@/lib/integration/connectors/live/live-http"
 import { createLiveSource } from "@/lib/integration/connectors/live/live-sources"
 import { activateCredential, assignCredentialsRef, failCredential, revokeCredential, storeCredential, type SecretProviderDeps } from "@/lib/integration/persistence/secret-provider.service"
@@ -61,6 +62,9 @@ export async function configureLiveConnector(db: Db, ctx: ConnectorContext, rawK
   const conn = await ensureConnection(db, ctx, key, parsed.config, now)
   if (!conn.ok) return conn
   const connectionId = conn.value
+  // LOT-8D (§25) : verrou après refus répétés du service, et volume d'enregistrements borné par connexion.
+  const limited = await checkCredentialAttemptLimit(db, ctx, connectionId, now)
+  if (limited) return { ok: false, error: limited }
   let stored: { versionId: string; hint: string | null }
   try {
     await assignCredentialsRef(db, { companyId: ctx.companyId, connectionId })

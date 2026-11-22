@@ -9,6 +9,7 @@ import type { PrismaClient } from "@prisma/client"
 import { stockAccessMessage, type StockAccessResult } from "@/lib/stock/access"
 import { isConnectorLiveEnabled } from "@/lib/connectors/connector-feature-flag"
 import { ensureLiveConnection } from "@/lib/integration/connectors/live/live-connection.service"
+import { checkOAuthStartLimit } from "@/lib/integration/connectors/live/live-rate-limits"
 import type { FetchLike } from "@/lib/integration/connectors/live/live-http"
 import type { SecretProviderDeps } from "@/lib/integration/persistence/secret-provider.service"
 import {
@@ -46,6 +47,9 @@ export async function handleGoogleCalendarConnect(request: Request, d: GoogleRou
   if (!g.ok) return g.response
   const cfg = readGoogleCalendarOAuthConfig(d.env)
   if (!cfg) return backToConnectors(request, false, GOOGLE_OAUTH_MESSAGES.notConfigured)
+  // LOT-8D (§25) : démarrages OAuth bornés par utilisateur et par société.
+  const limited = await checkOAuthStartLimit(d.db, g.ctx, d.now?.() ?? new Date())
+  if (limited) return backToConnectors(request, false, limited)
   const { authUrl, browserNonce } = await startGoogleCalendarOAuth(d.db, g.ctx, cfg, { now: d.now?.(), rng: d.rng })
   return redirectToGoogle(authUrl, browserNonce, new URL(cfg.redirectUri).protocol === "https:")
 }

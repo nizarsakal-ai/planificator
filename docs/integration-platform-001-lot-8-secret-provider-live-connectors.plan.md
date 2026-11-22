@@ -184,6 +184,10 @@ Client OAuth : distinct de Gmail et distinct entre production et préproduction 
 5. Appliquer la migration sur la base Neon de production AVANT la fusion : script `docs/runbooks/neon-20261123090000_v2_google_calendar_live.sql` dans l'éditeur SQL de la console Neon (projet `planificator`, branche `production`, rôle `neondb_owner`). Sans elle, la garde de schéma arrête le build de production.
 6. Gates §7 inchangés avant d'allumer `CONNECTOR_LIVE_ENABLED` en production.
 
+### 5.2 Suite : conditions d'exploitation (LOT-8D)
+
+Voir `docs/integration-platform-001-lot-8d-gates.plan.md` : limites de débit livrées, preuve des KEK distinctes confiée à Codex, restauration de test et fiche RGPD à décider.
+
 ## 6. Hors périmètre
 
 - Écriture vers les services : aucun envoi Slack, aucune création d'événement Google.

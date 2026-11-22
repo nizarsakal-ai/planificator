@@ -180,7 +180,7 @@ describe("routes OAuth (triple contrôle)", () => {
   const req = (path: string, cookie?: string) => new Request(`https://planificator.test${path}`, { headers: cookie ? { cookie } : {} })
   const deps = (o: Partial<GoogleRouteDeps> = {}): GoogleRouteDeps => ({
     access: async () => ({ ok: true, context: { companyId: "co", userId: "u", role: "ADMIN" } }),
-    db: { integrationOAuthState: { create: async () => undefined } } as never, env: ENV, ...o,
+    db: { integrationOAuthState: { create: async () => undefined, count: async () => 0 } } as never, env: ENV, ...o,
   })
   it("module absent ⇒ 404 ; non connecté ⇒ /login ; rôle refusé, drapeau éteint, client absent ⇒ retour avec message", async () => {
     assert.equal((await handleGoogleCalendarConnect(req("/api/connecteurs/google-agenda/connect"), deps({ access: async () => ({ ok: false, reason: "MODULE_DISABLED" }) }))).status, 404)
