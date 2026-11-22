@@ -2,7 +2,7 @@
 
 | Champ | Valeur |
 |---|---|
-| **Statut** | **PROPOSÉ — en attente du GO de Nizar** (aucune ligne de code LOT-2 avant ce GO) |
+| **Statut** | **VALIDÉ — GO de Nizar le 22/11/2026** (décisions I1 à I10, pilote GALYA EVENTS ; activation du shadow LOT-1C à décider après 2D) |
 | **Date** | 22/11/2026 |
 | **SPEC** | `docs/integration-platform-001-lot-2-routing.spec.md` (R1, READY FOR IMPLEMENTATION PLAN) |
 | **Jalon** | M2 — Parité Matching |
