@@ -137,3 +137,37 @@ export function isAgentGatewayActiveForCompany(
 ): boolean {
   return isAgentGatewayEnabled(env) && isCompanyAllowedForAgentGateway(companyId, env)
 }
+
+// ─── PLAN-INTEGRATION-PLATFORM-001 — LOT-2 (plan I1) ────────────────────────
+// Indépendants des flags LOT-1C ; tous exigent la foundation. Strictement "true", défaut OFF.
+
+export function isCompanyAllowedForRouting(
+  companyId: string,
+  env: PlatformFlagEnv = process.env
+): boolean {
+  if (!companyId) return false
+  return parseCompanyAllowlist(readRaw(env, PLATFORM_FLAG_NAMES.ROUTING_COMPANY_ALLOWLIST)).has(companyId)
+}
+
+/** Fail-closed : foundation ∧ routing ∧ allowlist. Coupure de l'un ⇒ aucune nouvelle décision. */
+export function isRoutingActiveForCompany(
+  companyId: string,
+  env: PlatformFlagEnv = process.env
+): boolean {
+  return (
+    isPlatformFoundationEnabled(env) &&
+    isExactTrue(readRaw(env, PLATFORM_FLAG_NAMES.ROUTING_ENABLED)) &&
+    isCompanyAllowedForRouting(companyId, env)
+  )
+}
+
+/** Parité shadow (LOT-2D) : exige en plus le Router actif pour la société. */
+export function isRoutingShadowActiveForCompany(
+  companyId: string,
+  env: PlatformFlagEnv = process.env
+): boolean {
+  return (
+    isRoutingActiveForCompany(companyId, env) &&
+    isExactTrue(readRaw(env, PLATFORM_FLAG_NAMES.ROUTING_SHADOW_ENABLED))
+  )
+}

@@ -425,6 +425,7 @@ model Company {
   integrationConnections          IntegrationConnection[]
   inboundEnvelopes                InboundEnvelope[]
   normalizedInbounds              NormalizedInbound[]
+  routingDecisions                RoutingDecision[]
   trucks                          Truck[]
   truckAssignments                TruckAssignment[]
   mileageEntries                  MileageEntry[]
@@ -2470,6 +2471,31 @@ model PipelineBinding {
   @@map("integration_pipeline_bindings")
 }
 
+// LOT-2C (26/11/2026) — Décisions du Tenant Router (SPEC LOT-2 §9, §15). Shadow en LOT-2 : aucune admission,
+// aucune transition d'Envelope. Idempotence (companyId, normalizedInboundId, routingConfigurationVersion) ;
+// immuable (UPDATE refusé en base) ; `DUPLICATE` jamais persisté. Cohérence outcome ↔ listes vérifiée en base.
+model RoutingDecision {
+  id                          String   @id @default(cuid())
+  companyId                   String
+  normalizedInboundId         String
+  outcome                     String
+  matchedSourceIds            String[] @default([])
+  pipelineIds                 String[] @default([])
+  reasonCode                  String?
+  routingConfigurationVersion String
+  schemaVersion               String   @default("1.0.0")
+  decidedAt                   DateTime @default(now())
+  createdAt                   DateTime @default(now())
+
+  company           Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  normalizedInbound NormalizedInbound @relation(fields: [normalizedInboundId, companyId], references: [id, companyId], onDelete: Cascade, map: "integration_routing_decisions_normalized_fkey")
+
+  @@unique([id, companyId], map: "integration_routing_decisions_id_companyId_key")
+  @@unique([companyId, normalizedInboundId, routingConfigurationVersion], map: "integration_routing_decisions_idempotency_key")
+  @@index([companyId, decidedAt], map: "integration_routing_decisions_companyId_decidedAt_idx")
+  @@map("integration_routing_decisions")
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // INTEGRATION PLATFORM — LOT-8A (21/11/2026) — Coffre à secrets PLATFORM_ENCRYPTED (SECURITY-SPEC §5 à §12, §18).
 // Chiffrement d'enveloppe : une DEK aléatoire par version (AES-256-GCM), enveloppée par une KEK hors base (env serveur).
@@ -2615,6 +2641,8 @@ model NormalizedInbound {
   message        Json
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
+
+  routingDecisions RoutingDecision[]
 
   company  Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
   envelope InboundEnvelope @relation(fields: [envelopeId, companyId, connectionId], references: [id, companyId, connectionId], onDelete: Cascade, map: "integration_normalized_inbounds_envelope_tenant_connection_fkey")
