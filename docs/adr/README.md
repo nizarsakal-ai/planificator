@@ -84,3 +84,4 @@ Un ADR **DOIT** contenir au minimum (ES-001-§21.2) :
 |----|-------|--------|
 | [ADR-PLAN-003](ADR-PLAN-003-comptabilite-partie-double.md) | Comptabilité en partie double native, multi-société | Proposé |
 | [ADR-PLAN-005](ADR-PLAN-005-photos-engins-drive-oauth-agent.md) | Photos d'engins : stockage Drive par OAuth utilisateur, upload par proxy borné, agent externe à jeton dédié | Accepté |
+| [ADR-PLAN-006](ADR-PLAN-006-limitation-tentatives-connexion.md) | Limitation des tentatives de connexion (table Postgres) et durée de session | Proposé |
