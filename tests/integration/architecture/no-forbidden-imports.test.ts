@@ -36,6 +36,14 @@ const UNIVERSAL_FORBIDDEN: readonly RegExp[] = [
   /src\/lib\/actions\b/,
 ]
 
+/**
+ * PLAN-INTEGRATION-PLATFORM-001 — LOT-8C : seule exception à `oauth`. Le module OAuth **Platform** de Google Agenda
+ * (SECURITY-SPEC §11, coffre PLATFORM_ENCRYPTED) vit dans `connectors/oauth/`. L'interdit universel vise l'OAuth
+ * historique de Gmail (LEGACY_GMAIL), qui reste interdit : l'exception ne couvre que ce dossier Platform, et
+ * les autres interdits (gmail, acquisition, booking…) s'appliquent toujours.
+ */
+const PLATFORM_OAUTH_MODULE = /^@\/lib\/integration\/connectors\/oauth\/[a-z0-9-]+$/
+
 const PRISMA_FORBIDDEN: readonly RegExp[] = [
   /@prisma\/client/,
   /@\/lib\/prisma\b/,
@@ -226,6 +234,7 @@ export function violationForImport(
   spec: string
 ): string | null {
   for (const pattern of UNIVERSAL_FORBIDDEN) {
+    if (pattern.source === "\\boauth\\b" && PLATFORM_OAUTH_MODULE.test(spec)) continue
     if (pattern.test(spec)) {
       return `interdit universel: ${spec}`
     }
@@ -393,6 +402,14 @@ describe("Integration architecture — frontières LOT-1A / LOT-1B / LOT-1C", ()
         "interdit universel"
       )
     )
+  })
+
+  it("LOT-8C : le module OAuth Platform est autorisé ; tout autre import « oauth » reste interdit", () => {
+    const fake = path.join(ROOT, "connectors", "live", "fixture.ts")
+    assert.equal(violationForImport("connectors", fake, "@/lib/integration/connectors/oauth/google-calendar-oauth"), null)
+    for (const spec of ["@/lib/auth/gmail-oauth-state", "@/lib/worksite-photos/drive/drive-oauth", "@/lib/integration/connectors/oauth/../../../auth/oauth", "@/lib/integration/connectors/oauth/sub/dir"]) {
+      assert.ok(violationForImport("connectors", fake, spec)?.includes("interdit universel"), spec)
+    }
   })
 
   it("rejette connectors depuis contracts (politique)", () => {
