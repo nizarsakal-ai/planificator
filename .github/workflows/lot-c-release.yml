@@ -102,6 +102,7 @@ jobs:
           npm run -s test:google-calendar | tee ci-evidence/google-calendar.log
           sh tests/billing/pg/with-disposable-db.sh ci_google_calendar npm run -s test:google-calendar:pg | tee ci-evidence/google-calendar-pg.log
           sh tests/billing/pg/with-disposable-db.sh ci_live_rate_limits npm run -s test:live-rate-limits:pg | tee ci-evidence/live-rate-limits-pg.log
+          sh tests/billing/pg/with-disposable-db.sh ci_connector_retention npm run -s test:connector-retention:pg | tee ci-evidence/connector-retention-pg.log
       - name: PostgreSQL non-regression
         env:
           NODE_ENV: test

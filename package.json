@@ -41,6 +41,7 @@
     "test:google-calendar": "node --import tsx --test tests/integration/connectors/live/google-calendar.test.ts",
     "test:google-calendar:pg": "node --import tsx --test --test-concurrency=1 tests/integration/connectors/live/pg/google-calendar.pg.test.ts",
     "test:live-rate-limits:pg": "node --import tsx --test --test-concurrency=1 tests/integration/connectors/live/pg/rate-limits.pg.test.ts",
+    "test:connector-retention:pg": "node --import tsx --test --test-concurrency=1 tests/integration/connectors/live/pg/retention.pg.test.ts",
     "test:billing:pdf": "node --import tsx --test tests/billing/pdf/document-pdf.test.ts tests/billing/pdf/design.test.ts tests/billing/pdf/options.test.ts",
     "test:billing:pdf:pg": "node --import tsx --test --test-concurrency=1 tests/billing/pdf/pg/design.pg.test.ts",
     "test:billing:commercial": "node --import tsx --test tests/billing/commercial/delivery-unit.test.ts",

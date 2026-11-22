@@ -13,7 +13,7 @@
 | 1 | KEK production et préproduction posées et distinctes ; déchiffrement refusé dans un autre environnement | **Partiellement prouvé.** Les deux KEK sont posées (Vercel). L'environnement fait partie de l'AAD : un chiffré de préproduction ne s'ouvre pas en production (`tests/integration/secrets/envelope.test.ts`, cas « AAD figé »). | Prouver que les deux valeurs diffèrent, sans les lire. Le geste touche aux secrets : il est confié à Codex (comparaison d'empreintes, rapport « égales » ou « différentes » seulement). |
 | 2 | Limites de débit fixées ; procédure de rotation de KEK écrite | **Fait** (PR de ce lot). Limites dans `src/lib/integration/connectors/live/live-rate-limits.ts`, valeurs dans `docs/runbooks/INTEGRATION-RATE-LIMITS.md`. La rotation de KEK est écrite dans `docs/runbooks/INTEGRATION-KEK.md` §3. | — |
 | 3 | Restauration de base testée (§19) | **Fait le 22/11/2026**, voir « Résultat de la restauration de test » ci-dessous. | Limite constatée : l'historique Neon ne remonte qu'à **6 heures** (voir ci-dessous). |
-| 4 | RGPD des données personnelles en zone de transit | **À décider par Nizar.** | Valider la fiche de traitement ci-dessous. La purge à l'échéance demande ensuite une PR dédiée : la zone de transit interdit aujourd'hui toute suppression. |
+| 4 | RGPD des données personnelles en zone de transit | **Fiche validée par Nizar le 22/11/2026** (« je suis tes recommandations »). Purge livrée : migration `20261124090000_v2_connector_retention`, `retention.service.ts`, tâche planifiée quotidienne `/api/cron/connector-retention` (3 h 15 UTC). | Effacement ciblé disponible côté service ; un bouton dans l'écran reste à ajouter si besoin. |
 
 ## Condition 3 — contrôles après une restauration de test
 
@@ -57,7 +57,13 @@ Attendu : aucune ligne pour le deuxième contrôle ; les versions `REVOKED` rest
 
 **Constat d'exploitation** : la fenêtre de restauration Neon du projet `planificator` n'est que de **6 heures** (point le plus ancien disponible : 22/11/2026 à 2 h 23 pour une demande à 8 h 24). Au-delà, seules les copies faites à la main protègent la base. À décider : allonger cette fenêtre (offre Neon supérieure) ou programmer une copie quotidienne.
 
-## Condition 4 — fiche de traitement proposée (à valider)
+## Condition 4 — purge livrée
+
+- **Zone de transit** : chaque nuit, suppression des éléments non synchronisés depuis plus de 365 jours. La base revérifie l'âge avec sa propre horloge et refuse toute autre suppression, sauf l'effacement ciblé d'un élément (droit des personnes), journalisé.
+- **Coffre** : chaque nuit, destruction cryptographique des versions `REVOKED`, `RETIRED` ou `FAILED` depuis plus de 90 jours. La DEK enveloppée et le chiffré sont remplacés par des zéros, l'indice est effacé, et la version passe `DESTROYED`, état définitif. La ligne et le journal d'audit (`CREDENTIAL_DESTROYED`) sont conservés. La base refuse une destruction trop tôt ou un matériel non nul.
+- **Application en production** : script `docs/runbooks/neon-20261124090000_v2_connector_retention.sql`, avant la fusion (garde de schéma du build).
+
+## Condition 4 — fiche de traitement (validée le 22/11/2026)
 
 | Rubrique | Proposition |
 |---|---|

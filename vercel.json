@@ -39,6 +39,10 @@
     {
       "path": "/api/cron/prospection-veille",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/connector-retention",
+      "schedule": "15 3 * * *"
     }
   ]
 }
