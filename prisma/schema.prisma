@@ -323,6 +323,15 @@ enum InboundFamily {
   MESSAGE
 }
 
+/// PLAN-INTEGRATION-PLATFORM-001 — LOT-2B (repris de la PR #42) — Types de rules InboundSource.
+enum InboundSourceRuleType {
+  SENDER_EMAIL
+  SENDER_DOMAIN
+  SUBJECT_KEYWORD
+  BODY_KEYWORD
+  RECIPIENT_EMAIL
+}
+
 // ─── Module Tâches (V1) ───────────────────────────────────────────────────────
 
 enum TaskStatus {
@@ -487,6 +496,9 @@ model Company {
   worksiteBudgetRevisions    WorksiteBudgetRevision[]
   worksiteBudgetLines        WorksiteBudgetLine[]
   supplierInvoiceAllocations SupplierInvoiceAllocation[]
+  inboundSources             InboundSource[]
+  inboundSourceRules         InboundSourceRule[]
+  pipelineBindings           PipelineBinding[]
 
   @@map("companies")
 }
@@ -2383,11 +2395,79 @@ model IntegrationConnection {
   inboundEnvelopes   InboundEnvelope[]
   credentialVersions IntegrationCredentialVersion[]
   connectorSettings  ConnectorSetting[]
+  pipelineBindings   PipelineBinding[]
 
   @@unique([id, companyId])
   @@index([companyId, status])
   @@index([companyId, connectorType])
   @@map("integration_connections")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INTEGRATION PLATFORM — LOT-2B (25/11/2026) — Configuration du routage : InboundSource, InboundSourceRule (repris de
+// la PR #42) et PipelineBinding. Additive. Invariant « Source active ⇒ ≥ 1 rule IDENTITÉ active » et « au plus un
+// Binding actif par Source » portés par la base (migration 20261125090000_v2_integration_routing_config).
+// ═══════════════════════════════════════════════════════════════════════════
+
+model InboundSource {
+  id            String   @id @default(cuid())
+  companyId     String
+  displayName   String
+  enabled       Boolean  @default(false)
+  schemaVersion String   @default("1.0.0")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  company  Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  rules    InboundSourceRule[]
+  bindings PipelineBinding[]
+
+  @@unique([id, companyId], map: "integration_inbound_sources_id_companyId_key")
+  @@index([companyId, enabled], map: "integration_inbound_sources_companyId_enabled_idx")
+  @@map("integration_inbound_sources")
+}
+
+model InboundSourceRule {
+  id              String                @id @default(cuid())
+  companyId       String
+  sourceId        String
+  type            InboundSourceRuleType
+  value           String
+  normalizedValue String
+  enabled         Boolean               @default(true)
+  schemaVersion   String                @default("1.0.0")
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  company Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  source  InboundSource @relation(fields: [sourceId, companyId], references: [id, companyId], onDelete: Cascade, map: "integration_inbound_source_rules_source_fkey")
+
+  @@unique([id, companyId], map: "integration_inbound_source_rules_id_companyId_key")
+  @@unique([companyId, sourceId, type, normalizedValue], map: "integration_inbound_source_rules_match_key")
+  @@index([companyId, type, normalizedValue], map: "integration_inbound_source_rules_co_type_norm_idx")
+  @@index([companyId, sourceId, enabled], map: "integration_inbound_source_rules_co_src_en_idx")
+  @@map("integration_inbound_source_rules")
+}
+
+model PipelineBinding {
+  id            String   @id @default(cuid())
+  companyId     String
+  sourceId      String
+  pipelineId    String   @default("consultations")
+  /// Seul lieu du scope Connection (SPEC LOT-2 D13) ; Connection de la même société.
+  connectionId  String?
+  enabled       Boolean  @default(false)
+  schemaVersion String   @default("1.0.0")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  company    Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  source     InboundSource          @relation(fields: [sourceId, companyId], references: [id, companyId], onDelete: Cascade, map: "integration_pipeline_bindings_source_fkey")
+  connection IntegrationConnection? @relation(fields: [connectionId, companyId], references: [id, companyId], onDelete: Restrict, map: "integration_pipeline_bindings_connection_fkey")
+
+  @@unique([id, companyId], map: "integration_pipeline_bindings_id_companyId_key")
+  @@index([companyId, sourceId], map: "integration_pipeline_bindings_companyId_sourceId_idx")
+  @@map("integration_pipeline_bindings")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
