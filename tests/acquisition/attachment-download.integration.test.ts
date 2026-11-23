@@ -13,6 +13,10 @@ import { AcquisitionAttachmentRepository } from "@/lib/acquisition/attachments/a
 import type { AttachmentSourcePort } from "@/lib/acquisition/attachments/attachment-source.port"
 import type { AttachmentStoragePort } from "@/lib/acquisition/attachments/attachment-storage.port"
 
+import { gmailAdmissionKey } from "@/lib/acquisition/artifacts/gmail-admission-key"
+import { resolveMailArtifactProvider } from "@/lib/acquisition/artifacts/resolve-mail-artifact-provider"
+import { fetchAndStoreMessageContentCore } from "@/lib/acquisition/content/message-content.service"
+
 const TEST_URL = process.env.TEST_ACQUISITION_DATABASE_URL
 const enabled = Boolean(TEST_URL)
 
@@ -33,6 +37,7 @@ describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
   before(async () => {
     process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "true"
+    process.env.ACQUISITION_CONTENT_FETCH_ENABLED = "true"
 
     const a = await db.company.create({
       data: { name: "Attach A", slug: `attach-a-${Date.now()}` },
@@ -89,6 +94,99 @@ describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
   after(async () => {
     await db.company.deleteMany({ where: { id: { in: [companyA, companyB] } } })
     await db.$disconnect()
+  })
+
+  it("résout le corps et la pièce d’une admission via la connexion, la boîte et les capacités", async () => {
+    const connection = await db.integrationConnection.create({
+      data: {
+        companyId: companyA, connectorType: "platform.mail.legacy", displayName: "Boîte fictive",
+        status: "ACTIVE", secretBackend: "LEGACY_GMAIL", config: { gmailMailboxId: mailboxA },
+      },
+    })
+    async function seedAdmission(externalMessageId: string, contentCapabilities: string[]) {
+      const reg = await registerIncomingMessage({
+        companyId: companyA, source: "GMAIL", sourceMailboxKey: mailboxA,
+        externalMessageId, senderEmail: "user@lauralu.fr", subject: "Consultation fictive",
+        receivedAt: new Date(), attachments: [
+          { externalAttachmentId: "piece-fictive", filename: "plan.pdf", mimeType: "application/pdf", sizeBytes: PDF_BUFFER.length },
+        ],
+      }, db)
+      assert.equal(reg.outcome, "DRAFT_CREATED")
+      const envelope = await db.inboundEnvelope.create({
+        data: {
+          companyId: companyA, connectionId: connection.id, connectorType: connection.connectorType,
+          externalId: externalMessageId, idempotencyKey: gmailAdmissionKey(externalMessageId),
+          receivedAt: new Date(), payloadRef: "fixture", contentType: "message/rfc822", lifecycleStatus: "NORMALIZED",
+        },
+      })
+      await db.normalizedInbound.create({
+        data: {
+          companyId: companyA, connectionId: connection.id, envelopeId: envelope.id,
+          family: "MESSAGE", occurredAt: new Date(), receivedAt: new Date(), normalizedHash: "fixture",
+          message: { externalMessageId, contentCapabilities },
+        },
+      })
+      const attachment = await db.acquisitionAttachment.findFirstOrThrow({
+        where: { companyId: companyA, acquisitionMessageId: reg.messageId },
+      })
+      return { messageId: reg.messageId, attachmentId: attachment.id, envelopeId: envelope.id }
+    }
+
+    const externalMessageId = "admission-artefacts"
+    const fixture = await seedAdmission(externalMessageId, ["CONTENT_FETCHABLE", "ATTACHMENTS_FETCHABLE"])
+    const body = await fetchAndStoreMessageContentCore(
+      { companyId: companyA, acquisitionMessageId: fixture.messageId },
+      { db, source: { fetchMessageBody: async (input) => {
+        assert.equal(input.companyId, companyA)
+        assert.equal(input.connectionId, mailboxA)
+        assert.equal(input.externalMessageId, externalMessageId)
+        return {
+          textPlain: "Demande fictive", textHtml: null, mimeType: "text/plain", charset: "utf-8",
+          providerMessageId: externalMessageId, byteLengthOriginal: 15,
+        }
+      } } }
+    )
+    assert.ok(body.ok)
+    assert.equal(body.content.normalizedText, "Demande fictive")
+    const result = await downloadAcquisitionAttachment(
+      { companyId: companyA, attachmentId: fixture.attachmentId },
+      {
+        db, repository: new AcquisitionAttachmentRepository(db), storage: mockStorage(), log: () => {},
+        source: { fetchAttachment: async (input) => {
+          assert.equal(input.companyId, companyA)
+          assert.equal(input.connectionId, mailboxA)
+          assert.equal(input.externalMessageId, externalMessageId)
+          assert.equal(input.externalAttachmentId, "piece-fictive")
+          return { data: PDF_BUFFER, sizeBytes: PDF_BUFFER.length }
+        } },
+      }
+    )
+    assert.equal(result.outcome, "STORED")
+    const resolved = await resolveMailArtifactProvider(
+      db, { companyId: companyA, sourceMailboxKey: mailboxA, externalMessageId }, "ARTIFACT_FETCH",
+      { id: fixture.attachmentId, externalArtifactId: "piece-fictive" },
+    )
+    assert.ok(resolved.ok)
+    assert.equal(resolved.artifact?.connectionId, connection.id)
+    assert.equal(resolved.artifact?.envelopeId, fixture.envelopeId)
+    assert.equal(resolved.artifact?.id, fixture.attachmentId)
+
+    const blocked = await seedAdmission("admission-sans-capacites", [])
+    const blockedBody = await fetchAndStoreMessageContentCore(
+      { companyId: companyA, acquisitionMessageId: blocked.messageId },
+      { db, source: { fetchMessageBody: async () => assert.fail("Aucun appel sans capacité de contenu") } },
+    )
+    assert.ok(!blockedBody.ok)
+    assert.equal(blockedBody.code, "ARTIFACT_CAPABILITY_UNAVAILABLE")
+    const blockedAttachment = await downloadAcquisitionAttachment(
+      { companyId: companyA, attachmentId: blocked.attachmentId },
+      {
+        db, repository: new AcquisitionAttachmentRepository(db), storage: mockStorage(), log: () => {},
+        source: { fetchAttachment: async () => assert.fail("Aucun appel sans capacité de pièce") },
+      },
+    )
+    assert.equal(blockedAttachment.outcome, "FAILED")
+    assert.equal(blockedAttachment.errorCode, "ARTIFACT_CAPABILITY_UNAVAILABLE")
   })
 
   it("transition DISCOVERED → PENDING_DOWNLOAD → STORED", async () => {

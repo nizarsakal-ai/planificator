@@ -25,3 +25,11 @@ Références dans le dépôt — plan général §16, contrat `inbound-artifact.
 Les workers consomment des ports indépendants du fournisseur. Les adaptateurs Gmail historiques sont assemblés dans un module dédié. L’injection historique du fournisseur de pièces reste compatible. La résolution par capacité de connexion et le raccordement à la façade `InboundArtifact` restent à réaliser.
 
 La recette sur PostgreSQL 17 jetable a appliqué 117 migrations existantes. Les 45 tests ciblés ont réussi, sans test ignoré. Les fournisseurs de contenu et de pièces ainsi que le stockage étaient simulés. Les tests ont vérifié la normalisation et la persistance du corps, la boîte transmise aux deux ports, le stockage et le hachage de la pièce, l’isolation par société, la concurrence et l’absence de nouvelle lecture si la pièce est déjà stockée.
+
+## Raccordement à InboundArtifact
+
+Pour un message admis via la plateforme, le résolveur retrouve son enveloppe à partir de la clé stable d’admission Gmail, de la société et du lien entre boîte Acquisition et connexion d’intégration. Il valide la connexion active, le type enregistré, la capacité du connecteur et la capacité déclarée par le message normalisé. Le contrat InboundArtifact transporte les références et les métadonnées de lecture. Le binaire reste géré par le stockage Acquisition existant.
+
+Les messages sans enveloppe d’admission associée restent sur le chemin Gmail historique. Le lien LOT‑3 est déduit de la configuration de boîte et de la clé d’admission actuelles. Cette livraison ne persiste pas de nouvelle relation et n’ajoute aucune migration.
+
+Recette PostgreSQL 17 jetable avec 117 migrations existantes et fournisseurs simulés. 46 tests réussis sans échec ni test ignoré. Le scénario de bout en bout vérifie la boîte et la connexion d’un message admis, la lecture du corps et de la pièce, et le refus des deux lectures lorsque les capacités manquent.
