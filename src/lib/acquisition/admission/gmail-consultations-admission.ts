@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { z } from "zod"
 import type { PrismaClient } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
@@ -72,10 +73,15 @@ export async function admitGmailConsultation(
   })
   if (!mapped.ok) throw new Error("Message Gmail incompatible avec l’admission")
 
+  // L’admission reconstruit son instantané depuis le message du poll.
+  // Les projections shadow antérieures restent immuables, même si leur
+  // expéditeur est différent. L’identité métier Acquisition reste la même.
+  const digest = createHash("sha256").update(mapped.dto.externalId).digest("hex")
+  const dto = { ...mapped.dto, idempotencyKey: `consultations-gmail-v1:${digest}` }
   const envelopes = new InboundEnvelopeRepository(db)
   const normalized = new NormalizedInboundRepository(db)
-  await new MailShadowBridgeService(db).project(mapped.dto, { stats: createMailShadowRunStats() })
-  const envelope = await envelopes.findByIdempotencyKey(companyId, binding.id, mapped.dto.idempotencyKey)
+  await new MailShadowBridgeService(db).project(dto, { stats: createMailShadowRunStats() })
+  const envelope = await envelopes.findByIdempotencyKey(companyId, binding.id, dto.idempotencyKey)
   if (envelope.lifecycleStatus !== "NORMALIZED") throw new Error("Enveloppe Gmail non normalisée")
   const inbound = await normalized.findByEnvelopeVersion(companyId, envelope.id, INBOUND_FAMILY.MESSAGE, PLATFORM_SCHEMA_VERSION_V1)
   if (inbound.message.sender?.email !== sender.email) throw new Error("Expéditeur incohérent avec le message normalisé")

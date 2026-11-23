@@ -193,7 +193,7 @@ it("sans correspondance ou en cas de panne du nouveau flux, aucun repli historiq
   assert.equal(await db.acquisitionMessage.count({ where: { companyId, externalMessageId: input.externalMessageId } }), 0)
 })
 
-it("Gmail : admission, rejeu et retour historique avec la clé de boîte persistée", async () => {
+it("Gmail : ancienne projection, admission, rejeu et retour historique", async () => {
   const mailbox = await db.acquisitionGmailConnection.create({
     data: {
       companyId,
@@ -216,6 +216,23 @@ it("Gmail : admission, rejeu et retour historique avec la clé de boîte persist
     INTEGRATION_CONSULTATIONS_ADMISSION_ENABLED: "true",
   }
   const externalMessageId = "gmail-admission"
+  const timestamp = "2026-01-01T12:00:00Z"
+  const oldEnvelope = await envelopes.createIdempotent({
+    companyId, connectionId, externalId: externalMessageId, idempotencyKey: externalMessageId,
+    receivedAt: timestamp, payloadRef: `mail:${externalMessageId}`, contentType: "message/rfc822",
+  })
+  const oldProjection = await normalized.create({
+    companyId, connectionId, envelopeId: oldEnvelope.id, family: "MESSAGE",
+    receivedAt: timestamp, occurredAt: timestamp, normalizedHash: "ancien-hash", artifactRefs: [],
+    message: {
+      externalMessageId, contentCapabilities: [],
+      sender: { email: "Devis <devis@partenaire.example>", domain: "partenaire.example>" },
+    },
+  })
+  await envelopes.transitionLifecycle({
+    companyId, envelopeId: oldEnvelope.id, expectedStatuses: ["RECEIVED"], targetStatus: "NORMALIZED",
+  })
+
   const run = (enabled: boolean) => syncAcquisitionMailForCompany({
     companyId,
     connectionId: mailbox.id,
@@ -265,6 +282,8 @@ it("Gmail : admission, rejeu et retour historique avec la clé de boîte persist
   })
   assert.deepEqual(drafts, [{ id: saved.draft.id }])
   assert.equal(await db.acquisitionMessage.count({ where: { companyId, externalMessageId } }), 1)
+  assert.deepEqual(await normalized.findById(companyId, oldProjection.id), oldProjection)
+  assert.equal(await db.inboundEnvelope.count({ where: { companyId, connectionId, externalId: externalMessageId } }), 2)
   assert.equal(await db.routingDecision.count({
     where: { companyId, normalizedInbound: { envelope: { externalId: externalMessageId } }, outcome: "MATCH" },
   }), 1)
