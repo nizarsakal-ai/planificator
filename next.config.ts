@@ -95,6 +95,11 @@ const nextConfig: NextConfig = {
     // Réduit le pic mémoire de webpack au build : le conteneur Vercel a déjà été tué par manque de mémoire
     // (OOM, SIGKILL) sur main (#176, #181-#183) et sur la PR #198. Compilation un peu plus lente, sortie identique.
     webpackMemoryOptimizations: true,
+    // 23/11/2026 : nouveaux arrêts par manque de mémoire (PR #215). Chaque tâche de génération des pages charge toute
+    // l'application en mémoire : au plus 2 tâches en parallèle, et leur nombre est réduit si la mémoire libre manque.
+    // Compilation un peu plus lente, sortie identique.
+    cpus: 2,
+    memoryBasedWorkersCount: true,
   },
   images: {
     remotePatterns: [],
