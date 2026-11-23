@@ -39,6 +39,7 @@ interface MobileNavUser {
   marketingShopNavVisible?: boolean // Lot I V2
   reservesNavVisible?: boolean // Lot D V2
   salesDashboardNavVisible?: boolean // Lot D V2
+  copilotVisible?: boolean // IA-1 : entrée « Assistant IA » sous « Dashboard »
 }
 
 /**
@@ -150,7 +151,7 @@ export function MobileNav({ user }: { user: MobileNavUser }) {
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 pb-3" aria-label="Menu principal">
           {/* Un clic sur un lien ferme le menu (comportement existant conservé) ; replier une catégorie ne le ferme pas. */}
-          <NavCategories categories={grouped.categories} activeHref={activeHref} activeCategoryId={activeCategoryId} navigationKey={pathname} onNavigate={close} touch />
+          <NavCategories categories={grouped.categories} activeHref={activeHref} activeCategoryId={activeCategoryId} navigationKey={pathname} onNavigate={close} touch assistantEntry={user.copilotVisible === true} />
         </nav>
 
         {/* Pied : « Mon profil » (même lien), identité + Déconnexion, Apparence. */}

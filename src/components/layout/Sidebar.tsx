@@ -49,6 +49,7 @@ interface SidebarUser {
   marketingShopNavVisible?: boolean // Lot I V2
   reservesNavVisible?: boolean // Lot D V2
   salesDashboardNavVisible?: boolean // Lot D V2
+  copilotVisible?: boolean // IA-1 : entrée « Assistant IA » sous « Dashboard »
 }
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
@@ -74,7 +75,7 @@ export function Sidebar({ user }: { user: SidebarUser }) {
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 pb-3" aria-label="Menu principal">
-          <NavCategories categories={grouped.categories} activeHref={activeHref} activeCategoryId={activeCategoryId} navigationKey={pathname} />
+          <NavCategories categories={grouped.categories} activeHref={activeHref} activeCategoryId={activeCategoryId} navigationKey={pathname} assistantEntry={user.copilotVisible === true} />
         </nav>
 
         {/* Pied : « Mon profil » (même lien, même libellé), identité + Déconnexion, Apparence. */}

@@ -176,3 +176,19 @@ describe("rendu de la réponse", () => {
     assert.match(html, /&lt;img src=x&gt;/)
   })
 })
+
+describe("entrée du menu", () => {
+  it("« Assistant IA » juste sous « Dashboard », seulement si visible", async () => {
+    const { NavCategories } = await import("@/components/layout/NavCategories")
+    const { LayoutDashboard, FileText } = await import("lucide-react")
+    const categories = [{ id: "pilotage" as const, label: "Pilotage", icon: LayoutDashboard, items: [
+      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      { label: "Rapports", href: "/rapports", icon: FileText },
+    ] }]
+    const props = { categories, activeHref: "/dashboard", activeCategoryId: "pilotage" as const, navigationKey: "/dashboard" }
+    const on = renderToStaticMarkup(<NavCategories {...props} assistantEntry />)
+    const iDash = on.indexOf(">Dashboard<"), iAssist = on.indexOf(">Assistant IA<"), iRapports = on.indexOf(">Rapports<")
+    assert.ok(iDash > 0 && iAssist > iDash && iRapports > iAssist, "ordre Dashboard → Assistant IA → Rapports")
+    assert.doesNotMatch(renderToStaticMarkup(<NavCategories {...props} />), /Assistant IA/)
+  })
+})
