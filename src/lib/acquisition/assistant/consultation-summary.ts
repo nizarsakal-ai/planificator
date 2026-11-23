@@ -38,13 +38,20 @@ export async function reserveConsultationSummary(
   }, { isolationLevel: "ReadCommitted" })
 }
 
+export class ConsultationSummaryEmptyError extends Error {
+  constructor(readonly causeCode: "OUTPUT_LIMIT" | "EMPTY_OUTPUT") {
+    super(causeCode)
+  }
+}
+
 export async function summarizeConsultation(
   input: { subject: string; text: string },
   client: ReturnType<typeof createAnthropicExtractionClient>
 ): Promise<string> {
-  const result = await client.messagesCreate({
+  const request = {
     model: MODEL,
     max_tokens: 640,
+    output_config: { effort: "low" },
     system: [
       "Résume en français la demande commerciale dans le courriel fourni.",
       "Présente la demande, le lieu, les dates, les quantités et les points à confirmer.",
@@ -53,15 +60,18 @@ export async function summarizeConsultation(
       "Évite de répéter les coordonnées personnelles. Réponds en texte simple et synthétique.",
     ].join(" "),
     messages: [{
-      role: "user",
+      role: "user" as const,
       content: JSON.stringify({
         sujet: input.subject.slice(0, 512),
         courriel: input.text.slice(0, MAX_CONTENT_CHARS),
         tronque: input.text.length > MAX_CONTENT_CHARS,
       }),
     }],
-  }, { timeout: 15_000, maxRetries: 0 })
+  }
+  const result = await client.messagesCreate(request, { timeout: 15_000, maxRetries: 0 })
   const summary = result.content.flatMap(block => block.type === "text" ? [block.text] : []).join("\n").trim()
-  if (!summary) throw new Error("Résumé indisponible")
+  if (!summary) {
+    throw new ConsultationSummaryEmptyError(result.stop_reason === "max_tokens" ? "OUTPUT_LIMIT" : "EMPTY_OUTPUT")
+  }
   return summary
 }
