@@ -47,6 +47,16 @@ describe("catalogue et configuration", () => {
     assert.equal(readGoogleCalendarOAuthConfig({ ...ENV, NEXTAUTH_URL: "http://localhost:3000" })?.redirectUri, "http://localhost:3000/api/connecteurs/google-agenda/callback")
     assert.equal(readGoogleCalendarOAuthConfig({ ...ENV, NEXTAUTH_URL: "http://localhost:3000", VERCEL_ENV: "production" }), null)
   })
+  it("Preview exige une origine HTTPS dédiée sans repli sur la production", () => {
+    const preview = { ...ENV, VERCEL_ENV: "preview", VERCEL_PROJECT_PRODUCTION_URL: "project.vercel.app" }
+    assert.equal(readGoogleCalendarOAuthConfig(preview), null)
+    for (const origin of ["https://planificator.test", "https://planificator.test:8443", "https://project.vercel.app", "http://localhost:3000", "https://user@preview.test", "https://preview.test/#fragment"]) {
+      assert.equal(readGoogleCalendarOAuthConfig({ ...preview, GOOGLE_CALENDAR_PREVIEW_ORIGIN: origin }), null)
+    }
+    const configured = { ...preview, GOOGLE_CALENDAR_PREVIEW_ORIGIN: "https://preview.test" }
+    assert.equal(readGoogleCalendarOAuthConfig(configured)?.redirectUri, "https://preview.test/api/connecteurs/google-agenda/callback")
+    assert.equal(readGoogleCalendarOAuthConfig({ ...configured, VERCEL_ENV: "production" })?.redirectUri, CFG.redirectUri)
+  })
 })
 
 describe("initiation : état, PKCE, portée minimale", () => {
@@ -193,6 +203,19 @@ describe("routes OAuth (triple contrôle)", () => {
     }
     const cb = await handleGoogleCalendarCallback(req("/x?code=c&state=s"), deps({ env: { ...ENV, CONNECTOR_LIVE_ENABLED: "" } }))
     assert.ok(new URL(cb.headers.get("location")!).searchParams.get("erreur"))
+  })
+  it("Preview accepte le domaine fixe et refuse les autres origines avant accès à la base", async () => {
+    const env = { ...ENV, VERCEL_ENV: "preview", GOOGLE_CALENDAR_PREVIEW_ORIGIN: "https://preview.test" }
+    const wrong = new Request("https://preview-branch.test/api/connecteurs/google-agenda/connect")
+    for (const handler of [handleGoogleCalendarConnect, handleGoogleCalendarCallback]) {
+      const response = await handler(wrong, deps({ env, db: {} as never }))
+      assert.ok(new URL(response.headers.get("location")!).searchParams.get("erreur"))
+    }
+    const correct = new Request("https://preview.test/api/connecteurs/google-agenda/connect")
+    const response = await handleGoogleCalendarConnect(correct, deps({ env }))
+    const google = new URL(response.headers.get("location")!)
+    assert.equal(google.hostname, "accounts.google.com")
+    assert.equal(google.searchParams.get("redirect_uri"), "https://preview.test/api/connecteurs/google-agenda/callback")
   })
   it("démarrage : redirection vers Google, cookie HttpOnly Secure SameSite=Lax limité au chemin du flux, sans cache", async () => {
     const r = await handleGoogleCalendarConnect(req("/api/connecteurs/google-agenda/connect"), deps())
