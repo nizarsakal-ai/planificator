@@ -19,6 +19,9 @@ import { InboundSourceIdentityTx } from "@/lib/integration/persistence/inbound-s
 import { PipelineBindingRepository } from "@/lib/integration/persistence/pipeline-binding.repository"
 import { TenantRouterService } from "@/lib/integration/router/tenant-router.service"
 import { RoutingShadowService, hashExternalId } from "@/lib/integration/shadow/routing-shadow.service"
+import { mapCanonicalMailToShadowDto } from "@/lib/acquisition/connector/mail-shadow-dto.mapper"
+import { MailShadowBridgeService } from "@/lib/integration/connectors/mail-bridge/mail-shadow-bridge.service"
+import { createMailShadowRunStats } from "@/lib/integration/connectors/mail-bridge/mail-shadow-run-stats"
 import { assertSafeDisposableTestDatabaseUrl, resolveIntegrationTestDatabaseUrl } from "./helpers/safe-test-database-url"
 
 const resolved = resolveIntegrationTestDatabaseUrl()
@@ -81,6 +84,20 @@ after(async () => {
 })
 
 describe("shadow matching de bout en bout", () => {
+  it("un en-tête Gmail avec nom affiché donne une parité positive sur le domaine réel", async () => {
+    const key = "from-display-name"
+    const mapped = mapCanonicalMailToShadowDto({
+      externalMessageId: key, fromHeader: '"Maison Martin" <Devis@MAISON-MARTIN.FR>',
+      receivedAt: new Date("2026-11-22T10:00:00.000Z"), subject: "Consultation fictive",
+      threadId: null, labels: [], snippet: null, attachments: [], providerMetadata: {},
+    }, { companyId: A, connectionId: conn })
+    assert.ok(mapped.ok)
+    await new MailShadowBridgeService(db).project(mapped.dto, { stats: createMailShadowRunStats() })
+    assert.deepEqual(await shadow().observe(input(key, "DRAFT_CREATED")), {
+      status: "OBSERVED", parityOutcome: "PARITY_MATCH", recorded: true,
+    })
+  })
+
   it("admit legacy × MATCH → PARITY_MATCH ; décision et observation liées ; Envelope inchangée ; aucun brouillon", async () => {
     const key = `k1${run}`
     const envelopeId = await seed(key, "contact@maison-martin.fr")
