@@ -13,6 +13,7 @@ import {
 import type { AttachmentStoragePort } from "@/lib/acquisition/attachments/attachment-storage.port"
 import { cloudinaryAttachmentStorage } from "@/lib/acquisition/attachments/attachment-storage.port"
 import type { AttachmentSourcePort } from "@/lib/acquisition/attachments/attachment-source.port"
+import { resolveMailArtifactProvider } from "@/lib/acquisition/artifacts/resolve-mail-artifact-provider"
 import { legacyMailArtifactSources } from "@/lib/acquisition/artifacts/legacy-mail-artifact-sources"
 import { getAttachmentRecoveryCronConfig } from "@/lib/acquisition/attachments/attachment-recovery-cron-feature-flag"
 import { isRetryableAttachmentErrorCode } from "@/lib/acquisition/attachments/attachment-retry.policy"
@@ -204,7 +205,6 @@ export async function downloadAcquisitionAttachment(
 ): Promise<AttachmentDownloadResult> {
   const db = deps.db ?? prisma
   const repository = deps.repository ?? acquisitionAttachmentRepository
-  const source = deps.source ?? deps.gmailSource ?? legacyMailArtifactSources.attachment
   const storage = deps.storage ?? cloudinaryAttachmentStorage
   const log = deps.log ?? defaultLog
   const now = input.now ?? (() => new Date())
@@ -284,26 +284,36 @@ export async function downloadAcquisitionAttachment(
     return failureResult(input.attachmentId, "GMAIL_ATTACHMENT_NOT_FOUND")
   }
 
-  const mailbox = await resolveAcquisitionMailboxForMessage(
-    {
-      companyId: input.companyId,
-      sourceMailboxKey: scoped.message.sourceMailboxKey,
-    },
-    db
-  )
-  if (!mailbox.ok) {
-    await markFail("FAILED", mailbox.code)
-    log("DOWNLOAD_FAILED", { attachmentId: input.attachmentId, errorCode: mailbox.code })
-    return failureResult(input.attachmentId, mailbox.code)
+  let resolved
+  try {
+    resolved = deps.gmailSource && !deps.source
+      ? await resolveAcquisitionMailboxForMessage(scoped.message, db)
+      : await resolveMailArtifactProvider(db, scoped.message, "ARTIFACT_FETCH", {
+        id: claimed.id, externalArtifactId: claimed.externalAttachmentId,
+        filename: claimed.filename || undefined, mimeType: claimed.mimeType || undefined,
+        sizeBytes: claimed.sizeBytes,
+      })
+  } catch {
+    await markFail("FAILED", "ATTACHMENT_PERSISTENCE_FAILED")
+    return failureResult(input.attachmentId, "ATTACHMENT_PERSISTENCE_FAILED")
+  }
+  if (!resolved.ok) {
+    await markFail("FAILED", resolved.code)
+    log("DOWNLOAD_FAILED", { attachmentId: input.attachmentId, errorCode: resolved.code })
+    return failureResult(input.attachmentId, resolved.code)
   }
 
   let binary: Buffer
   try {
+    const source = deps.source ?? deps.gmailSource ?? (
+      "provider" in resolved ? resolved.provider.attachment : legacyMailArtifactSources.attachment
+    )
+    const artifact = "artifact" in resolved ? resolved.artifact : undefined
     const fetched = await source.fetchAttachment({
       companyId: input.companyId,
       externalMessageId: scoped.message.externalMessageId,
-      externalAttachmentId: claimed.externalAttachmentId,
-      connectionId: mailbox.connectionId,
+      externalAttachmentId: artifact?.externalArtifactId ?? claimed.externalAttachmentId,
+      connectionId: resolved.connectionId,
     })
     binary = fetched.data
   } catch (error) {

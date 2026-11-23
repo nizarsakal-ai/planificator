@@ -20,6 +20,7 @@ export function classifyContentFetchError(code: MessageContentErrorCode): Conten
     case "GMAIL_MESSAGE_PARSE_ERROR":
     case "CONTENT_NOT_FOUND":
       return "PERMANENT"
+    case "ARTIFACT_CAPABILITY_UNAVAILABLE":
     case "GMAIL_NOT_CONNECTED":
     case "GMAIL_TOKEN_REFRESH_FAILED":
     case "GMAIL_UNAUTHORIZED":
