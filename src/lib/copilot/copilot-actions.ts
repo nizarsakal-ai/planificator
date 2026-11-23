@@ -6,12 +6,14 @@
 import type { PrismaClient, Prisma } from "@prisma/client"
 import type Anthropic from "@anthropic-ai/sdk"
 import { parseQuoteForm } from "@/lib/billing/quotes/quote-schemas"
+import { ACTION_LABEL, ACTIONS, ACTIVATION_SCOPE, TEMPLATE_FIELDS, TRIGGER_LABEL, TRIGGERS, isTriggerAvailable, validateRule } from "@/lib/automation/automation.core"
+import { STAGE_LABEL, STAGES } from "@/lib/crm/crm.core"
 import { CopilotToolInputError, parseDay } from "@/lib/copilot/copilot-tools"
 import { signProposal, type ProposalCard, type ProposalPayload, type QuoteLinePayload } from "@/lib/copilot/copilot-proposal"
 
 type Db = Pick<PrismaClient, "worksite" | "team" | "employee" | "assignment" | "article">
 
-export interface ActionContext { companyId: string; userId: string; secret: string; billingEnabled: boolean; today: Date }
+export interface ActionContext { companyId: string; userId: string; secret: string; billingEnabled: boolean; today: Date; automationsEnabled?: boolean; crmEnabled?: boolean }
 
 const DAY_MS = 86_400_000
 const MAX_ASSIGN_DAYS = 62
@@ -76,7 +78,32 @@ export const COPILOT_ACTION_TOOLS: Anthropic.Tool[] = [
   },
 ]
 
-export const COPILOT_ACTION_TOOL_NAMES = new Set(COPILOT_ACTION_TOOLS.map(t => t.name))
+/** IA-5 : automatisation décrite en français, traduite en règle du module Automatisations (liste fermée). */
+export const AUTOMATION_TOOL: Anthropic.Tool = {
+  name: "proposer_automatisation",
+  description: `Prépare une règle d'automatisation, créée en BROUILLON (elle n'agira qu'après approbation dans la page Automatisations). Liste fermée : déclencheurs ${TRIGGERS.map(t => `${t} (${TRIGGER_LABEL[t]})`).join(", ")} ; actions ${ACTIONS.map(a => `${a} (${ACTION_LABEL[a]})`).join(", ")}. Champs de modèle utilisables dans le titre de tâche ou le message : ${TEMPLATE_FIELDS.map(f => `{${f}}`).join(" ")}.`,
+  input_schema: {
+    type: "object",
+    properties: {
+      nom: { type: "string", description: "3 à 120 caractères" },
+      declencheur: { type: "string", enum: [...TRIGGERS] },
+      etape: { type: "string", enum: [...STAGES], description: "Seulement pour OPPORTUNITY_STAGE_CHANGED : étape d'arrivée" },
+      action: { type: "string", enum: [...ACTIONS] },
+      titre_tache: { type: "string", description: "CREATE_TASK : 3 à 200 caractères" },
+      responsable_id: { type: "string", description: "CREATE_TASK : identifiant d'employé (facultatif)" },
+      echeance_jours: { type: "integer", description: "CREATE_TASK : échéance en jours après le déclenchement (0 à 365)" },
+      message: { type: "string", description: "NOTIFY_ADMINS : 3 à 500 caractères" },
+    },
+    required: ["nom", "declencheur", "action"],
+  },
+}
+
+export const COPILOT_ACTION_TOOL_NAMES = new Set([...COPILOT_ACTION_TOOLS, AUTOMATION_TOOL].map(t => t.name))
+
+/** Outils de proposition offerts selon les modules actifs. */
+export function actionToolsFor(ctx: Pick<ActionContext, "automationsEnabled">): Anthropic.Tool[] {
+  return ctx.automationsEnabled ? [...COPILOT_ACTION_TOOLS, AUTOMATION_TOOL] : COPILOT_ACTION_TOOLS
+}
 
 const str = (v: unknown, max: number): string | null => {
   if (typeof v !== "string") return null
@@ -194,6 +221,37 @@ const preparers: Record<string, Preparer> = {
     return {
       card: { kind: "QUOTE", title: "Créer un brouillon de devis", details, warning: "Brouillon seulement : rien n'est envoyé au client." },
       payload: { kind: "QUOTE", data: { worksiteId: w.id, issueDate, subject, lines } },
+    }
+  },
+
+  async proposer_automatisation(db, input, ctx) {
+    if (!ctx.automationsEnabled) throw new CopilotToolInputError("Le module Automatisations n'est pas activé.")
+    const days = input.echeance_jours === undefined || input.echeance_jours === null ? null : Number(input.echeance_jours)
+    const v = validateRule({
+      name: str(input.nom, 1000) ?? "", trigger: str(input.declencheur, 40) ?? "", action: str(input.action, 20) ?? "",
+      stageFilter: str(input.etape, 20), taskTitle: str(input.titre_tache, 1000), taskAssigneeId: str(input.responsable_id, 64),
+      taskDueInDays: days, message: str(input.message, 2000),
+    }, STAGES)
+    if (!v.ok) throw new CopilotToolInputError(v.error)
+    const r = v.value
+    if (!isTriggerAvailable(r.trigger, ctx.crmEnabled === true)) throw new CopilotToolInputError("Ce déclencheur exige le pipeline commercial, actuellement désactivé.")
+    let assignee: string | null = null
+    if (r.taskAssigneeId) {
+      const e = await db.employee.findFirst({ where: { id: r.taskAssigneeId, companyId: ctx.companyId, active: true }, select: { firstName: true, lastName: true } })
+      if (!e) throw new CopilotToolInputError("Employé introuvable ou inactif dans cette société.")
+      assignee = `${e.firstName} ${e.lastName}`
+    }
+    const when = TRIGGER_LABEL[r.trigger] + (r.stageFilter ? ` (étape « ${STAGE_LABEL[r.stageFilter as keyof typeof STAGE_LABEL]} »)` : "")
+    const details = [`Nom : ${r.name}`, `Quand : ${when}`, `Alors : ${ACTION_LABEL[r.action]}`]
+    if (r.action === "CREATE_TASK") {
+      details.push(`Tâche : ${r.taskTitle}`)
+      if (r.taskDueInDays !== null) details.push(`Échéance : ${r.taskDueInDays === 0 ? "le jour même" : `${r.taskDueInDays} jour(s) après`}`)
+      if (assignee) details.push(`Responsable : ${assignee}`)
+    } else details.push(`Message : ${r.message}`)
+    details.push(`Portée : ${ACTIVATION_SCOPE[r.trigger]}`)
+    return {
+      card: { kind: "AUTOMATION", title: "Créer une règle d'automatisation", details, warning: "Créée en brouillon : elle n'agira qu'après votre approbation dans la page Automatisations." },
+      payload: { kind: "AUTOMATION", data: { name: r.name, trigger: r.trigger, stageFilter: r.stageFilter, action: r.action, taskTitle: r.taskTitle, taskAssigneeId: r.taskAssigneeId, taskDueInDays: r.taskDueInDays, message: r.message } },
     }
   },
 }

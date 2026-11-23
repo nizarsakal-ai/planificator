@@ -8,7 +8,7 @@ import type Anthropic from "@anthropic-ai/sdk"
 import type { AnthropicExtractionClient } from "@/lib/acquisition/extraction/anthropic-extraction.client"
 import { COPILOT_MODEL } from "@/lib/copilot/copilot-config"
 import { COPILOT_TOOLS, runCopilotTool } from "@/lib/copilot/copilot-tools"
-import { COPILOT_ACTION_TOOLS, COPILOT_ACTION_TOOL_NAMES, prepareCopilotAction, type ActionContext } from "@/lib/copilot/copilot-actions"
+import { COPILOT_ACTION_TOOL_NAMES, actionToolsFor, prepareCopilotAction, type ActionContext } from "@/lib/copilot/copilot-actions"
 import type { ProposalCard } from "@/lib/copilot/copilot-proposal"
 
 export const MAX_HISTORY_TURNS = 12
@@ -64,9 +64,10 @@ export function parsePage(raw: unknown): string {
 export function buildSystemPrompt(ctx: { userName: string; companyName: string; today: string; page: string; actions?: boolean }): string {
   const actionRules = ctx.actions
     ? [
-      "Tu peux PRÉPARER trois actions avec les outils proposer_tache, proposer_affectation et proposer_devis. Ces outils ne font rien : ils affichent une carte que l'utilisateur doit valider en cliquant « Je confirme ».",
+      "Tu peux PRÉPARER des actions avec les outils proposer_* (tâche, affectation, brouillon de devis et, si disponible, règle d'automatisation). Ces outils ne font rien : ils affichent une carte que l'utilisateur doit valider en cliquant « Je confirme ».",
       "Ne dis jamais qu'une action est faite : dis qu'elle est prête et qu'il reste à cliquer « Je confirme » sur la carte.",
       "Trouve d'abord les identifiants avec les outils de recherche (chantiers, équipes, employés, articles). Si un nom est ambigu ou introuvable, demande une précision au lieu de deviner.",
+      "Automatisations (outil proposer_automatisation, s'il est disponible) : traduis la demande en français en règle de la liste fermée (déclencheur + action). Si elle n'entre pas dans cette liste (par exemple « chaque lundi », un envoi de courriel, un autre événement), dis-le simplement, propose la règle la plus proche si elle a du sens, et rappelle que la règle reste en brouillon jusqu'à son approbation.",
       "Pour un courriel, rédige le texte dans ta réponse pour que l'utilisateur le copie : tu n'envoies jamais rien.",
       "Toute autre modification (supprimer, envoyer, payer, modifier une facture…) n'est pas possible : explique où le faire dans Planificator.",
     ]
@@ -114,7 +115,7 @@ export async function runCopilot(client: AnthropicExtractionClient, db: Db, inpu
   })
   const used: string[] = []
   const proposals: ProposalCard[] = []
-  const tools = input.actions ? [...COPILOT_TOOLS, ...COPILOT_ACTION_TOOLS] : COPILOT_TOOLS
+  const tools = input.actions ? [...COPILOT_TOOLS, ...actionToolsFor(input.actions)] : COPILOT_TOOLS
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     const response = await client.messagesCreate({
