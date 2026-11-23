@@ -77,3 +77,26 @@ Les courriels sont rédigés dans la réponse, à copier : rien n'est envoyé.
 
 Drapeau distinct, désactivé par défaut : `COPILOT_ACTIONS_ENABLED=true` (en plus des variables d'IA-1).
 Sans lui, l'assistant reste en lecture seule et le point d'accès de confirmation répond 404.
+
+---
+
+# IA-3 : briefing du jour et veille
+
+À l'ouverture du panneau (conversation vide), un **briefing du jour** s'affiche, calculé sur le serveur **sans IA**
+(aucun coût, hors quota, aucune écriture) : chantiers et équipes du jour, équipes libres, absents, puis les alertes :
+
+| Urgence | Alerte |
+|---|---|
+| Urgent | Factures en retard (nombre, total TTC) |
+| Urgent | Affectations refusées dans les 7 jours (à replanifier) |
+| Urgent | Chantiers qui démarrent sous 7 jours sans aucune équipe |
+| À surveiller | Affectations non confirmées pour aujourd'hui ou demain |
+| À surveiller | Chantiers en cours dont la date de fin est dépassée |
+| À surveiller | Demandes d'absence à valider |
+| Info | Factures à échéance sous 7 jours, articles sous le seuil de stock, consultations à traiter |
+
+- Bouton **Analyser et proposer des actions** : l'assistant commente le briefing et peut préparer des actions (IA-2),
+  toujours à confirmer.
+- **Pastille rouge** sur l'entrée « Assistant IA » du menu : nombre d'alertes urgentes et à surveiller.
+- Outil `briefing_du_jour` pour l'assistant ; point d'accès `GET /api/assistant/copilote/briefing` (même garde qu'IA-1).
+- Jour de référence : jour civil à Paris.
