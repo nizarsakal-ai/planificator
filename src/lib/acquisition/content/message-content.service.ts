@@ -9,7 +9,7 @@ import {
   isAcquisitionContentFetchEnabled,
 } from "@/lib/acquisition/content/content-fetch-feature-flag"
 import type { AcquisitionMessageContentSourcePort } from "@/lib/acquisition/content/message-content-source.port"
-import { gmailMessageContentSource } from "@/lib/acquisition/content/gmail-message-content-source.adapter"
+import { legacyMailArtifactSources } from "@/lib/acquisition/artifacts/legacy-mail-artifact-sources"
 import { AcquisitionMessageContentRepository } from "@/lib/acquisition/content/message-content.repository"
 import { sanitizeMessageBodyParts } from "@/lib/acquisition/content/message-content-sanitizer"
 import type {
@@ -17,7 +17,6 @@ import type {
   MessageContentErrorCode,
   MessageContentRecord,
 } from "@/lib/acquisition/content/message-content.types"
-import { isGmailProviderError } from "@/lib/acquisition/connector/gmail-api.client"
 import { resolveAcquisitionMailboxForMessage } from "@/lib/acquisition/connector/resolve-acquisition-mailbox"
 
 const ALLOWED_ROLES = new Set<Role>(["ADMIN", "SUPER_ADMIN"])
@@ -42,7 +41,7 @@ function fail(
   return { ok: false, outcome, code, message }
 }
 
-function mapGmailCode(code: string): MessageContentErrorCode {
+function mapContentSourceCode(code: string): MessageContentErrorCode {
   switch (code) {
     case "GMAIL_NOT_CONNECTED":
     case "LEGACY_MAILBOX_AMBIGUOUS":
@@ -130,7 +129,7 @@ export async function fetchAndStoreMessageContentCore(
   const companyId = input.companyId
   const db = deps.db ?? prisma
   const repository = deps.repository ?? new AcquisitionMessageContentRepository(db)
-  const source = deps.source ?? gmailMessageContentSource
+  const source = deps.source ?? legacyMailArtifactSources.content
 
   const message = await db.acquisitionMessage.findFirst({
     where: { id: input.acquisitionMessageId, companyId },
@@ -157,11 +156,9 @@ export async function fetchAndStoreMessageContentCore(
       connectionId: mailbox.connectionId,
     })
   } catch (error) {
-    if (isGmailProviderError(error)) {
-      const code = mapGmailCode(error.code)
-      return fail("FAILED", code, publicMessage(code))
-    }
-    return fail("FAILED", "CONTENT_FETCH_FAILED", publicMessage("CONTENT_FETCH_FAILED"))
+    const providerCode = legacyMailArtifactSources.contentFailureCode(error)
+    const code = providerCode ? mapContentSourceCode(providerCode) : "CONTENT_FETCH_FAILED"
+    return fail("FAILED", code, publicMessage(code))
   }
 
   if (parts.byteLengthOriginal > getContentFetchMaxRawBytes()) {

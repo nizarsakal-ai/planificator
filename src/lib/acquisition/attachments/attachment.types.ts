@@ -61,17 +61,20 @@ export interface AttachmentMessageContext {
   sourceMailboxKey: string
 }
 
-export interface GmailAttachmentFetchInput {
+export interface AttachmentFetchInput {
   companyId: string
   externalMessageId: string
   externalAttachmentId: string
   connectionId?: string
 }
 
-export interface GmailAttachmentFetchResult {
+export interface AttachmentFetchResult {
   data: Buffer
   sizeBytes: number
 }
+
+export type GmailAttachmentFetchInput = AttachmentFetchInput
+export type GmailAttachmentFetchResult = AttachmentFetchResult
 
 export interface AttachmentStorageInput {
   companyId: string

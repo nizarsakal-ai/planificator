@@ -25,6 +25,7 @@ describe("acquisition message content — intégration PostgreSQL", RUN, () => {
   let companyA = ""
   let companyB = ""
   let messageA = ""
+  let mailboxA = ""
 
   before(async () => {
     process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
@@ -42,7 +43,7 @@ describe("acquisition message content — intégration PostgreSQL", RUN, () => {
     await seedLauraluPartnerForCompany(db, companyB)
 
     // Legacy "" + 1 connexion active → legacy_single (fetch Gmail legacy).
-    await db.acquisitionGmailConnection.create({
+    const mailbox = await db.acquisitionGmailConnection.create({
       data: {
         companyId: companyA,
         gmailAddress: `content-a-${Date.now()}@example.com`,
@@ -53,6 +54,8 @@ describe("acquisition message content — intégration PostgreSQL", RUN, () => {
         active: true,
       },
     })
+
+    mailboxA = mailbox.id
 
     const reg = await registerIncomingMessage(
       {
@@ -161,7 +164,9 @@ describe("acquisition message content — intégration PostgreSQL", RUN, () => {
 
   it("service fetch avec source mock persistée", async () => {
     const source: AcquisitionMessageContentSourcePort = {
-      async fetchMessageBody() {
+      async fetchMessageBody(input) {
+        assert.equal(input.companyId, companyA)
+        assert.equal(input.connectionId, mailboxA)
         return {
           textPlain: "Contenu service intégration",
           textHtml: "<b>ignore</b>",
