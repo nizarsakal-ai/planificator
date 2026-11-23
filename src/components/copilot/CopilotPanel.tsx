@@ -5,12 +5,14 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Check, CheckCircle2, Loader2, RefreshCw, Send, Sparkles, Sun, Trash2, X, XCircle } from "lucide-react"
+import { Camera, Check, CheckCircle2, Loader2, Mic, MicOff, RefreshCw, Send, Sparkles, Sun, Trash2, Volume2, VolumeX, X, XCircle } from "lucide-react"
+import { preparePhoto, useDictation, useSpeech, type PreparedPhoto } from "@/components/copilot/copilot-field"
 import { COPILOT_OPEN_EVENT, publishCopilotBadge } from "@/components/copilot/copilot-events"
 
 interface Proposal { token: string; kind: "TASK" | "ASSIGNMENT" | "QUOTE"; title: string; details: string[]; warning?: string }
 type CardState = { status: "pending" } | { status: "busy" } | { status: "cancelled" } | { status: "done"; message: string; href?: string } | { status: "error"; message: string }
-interface Turn { role: "user" | "assistant"; text: string; error?: boolean; proposals?: Proposal[] }
+interface Turn { role: "user" | "assistant"; text: string; error?: boolean; proposals?: Proposal[]; photo?: string }
+export const PHOTO_DEFAULT_QUESTION = "Que vois-tu sur cette photo ? Dis-moi ce qui est utile."
 interface BriefingData {
   date: string
   today: { worksites: Array<{ name: string; teams: string[]; href: string }>; freeTeams: string[]; absent: string[] }
@@ -168,20 +170,42 @@ export function CopilotPanel() {
   useEffect(() => { if (open) inputRef.current?.focus() }, [open])
   useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" }) }, [turns, busy])
 
+  // IA-4 : mode terrain — dictée, photo, lecture à voix haute.
+  const [photo, setPhoto] = useState<PreparedPhoto | null>(null)
+  const [photoError, setPhotoError] = useState<string | null>(null)
+  const [photoBusy, setPhotoBusy] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const dictation = useDictation(text => setDraft(d => `${d}${d && !d.endsWith(" ") ? " " : ""}${text}`.slice(0, 2000)))
+  const speech = useSpeech()
+  useEffect(() => { if (!open) { speech.cancel(); dictation.stop() } }, [open, speech, dictation])
+
+  const pickPhoto = useCallback(async (file: File | undefined) => {
+    if (!file) return
+    setPhotoError(null)
+    setPhotoBusy(true)
+    try { setPhoto(await preparePhoto(file)) } catch (e) { setPhotoError(e instanceof Error ? e.message : "Photo impossible à préparer.") } finally { setPhotoBusy(false) }
+  }, [])
+
   const send = useCallback(async (question: string) => {
-    const text = question.trim()
+    const text = question.trim() || (photo ? PHOTO_DEFAULT_QUESTION : "")
     if (!text || busy) return
+    const sentPhoto = photo
     const history = [...turns.filter(t => !t.error), { role: "user" as const, text }]
-    setTurns(prev => [...prev, { role: "user", text }])
+    setTurns(prev => [...prev, { role: "user", text, photo: sentPhoto?.preview }])
     setDraft("")
+    setPhoto(null)
     setBusy(true)
     try {
       const res = await fetch("/api/assistant/copilote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history.map(({ role, text }) => ({ role, text })), page: pathname }),
+        body: JSON.stringify({
+          messages: history.map(({ role, text }) => ({ role, text })), page: pathname,
+          ...(sentPhoto ? { image: { mediaType: sentPhoto.mediaType, data: sentPhoto.data } } : {}),
+        }),
       })
       const data = (await res.json().catch(() => ({}))) as { reply?: string; error?: string; proposals?: Proposal[] }
+      if (data.reply) speech.speak(data.reply)
       setTurns(prev => [...prev, data.reply
         ? { role: "assistant", text: data.reply, proposals: Array.isArray(data.proposals) ? data.proposals.slice(0, 5) : undefined }
         : { role: "assistant", text: data.error ?? "L'assistant est indisponible pour le moment.", error: true }])
@@ -190,7 +214,7 @@ export function CopilotPanel() {
     } finally {
       setBusy(false)
     }
-  }, [busy, turns, pathname])
+  }, [busy, turns, pathname, photo, speech])
 
   const setCard = (token: string, state: CardState) => setCards(prev => ({ ...prev, [token]: state }))
   const confirm = useCallback(async (token: string) => {
@@ -218,6 +242,11 @@ export function CopilotPanel() {
               <p className="text-sm font-semibold">Assistant IA</p>
               <p className="text-xs text-sky-100/80">Rien n&apos;est fait sans votre confirmation</p>
             </div>
+            {speech.supported && (
+              <button type="button" onClick={speech.toggle} aria-pressed={speech.enabled} aria-label={speech.enabled ? "Couper la lecture à voix haute" : "Lire les réponses à voix haute"} title={speech.enabled ? "Lecture à voix haute activée" : "Lire les réponses à voix haute"} className="rounded p-1.5 hover:bg-white/10">
+                {speech.enabled ? <Volume2 className="h-4 w-4" aria-hidden /> : <VolumeX className="h-4 w-4 opacity-70" aria-hidden />}
+              </button>
+            )}
             {turns.length > 0 && (
               <button type="button" onClick={() => { setTurns([]); setCards({}) }} disabled={busy} aria-label="Effacer la conversation" title="Effacer la conversation" className="rounded p-1.5 hover:bg-white/10 disabled:opacity-50">
                 <Trash2 className="h-4 w-4" aria-hidden />
@@ -258,6 +287,7 @@ export function CopilotPanel() {
                     : t.error ? "rounded-bl-sm bg-rose-50 text-rose-800 dark:bg-rose-950 dark:text-rose-200"
                     : "rounded-bl-sm bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-100",
                 ].join(" ")}>
+                  {t.photo && <img src={t.photo} alt="Photo envoyée" className="mb-1.5 max-h-40 rounded-lg" />}
                   {t.role === "assistant" && !t.error ? renderCopilotText(t.text, () => { if (window.innerWidth < 640) setOpen(false) }) : t.text}
                   {t.proposals?.map(p => (
                     <ProposalCardView
@@ -279,21 +309,62 @@ export function CopilotPanel() {
             )}
           </div>
 
+          {(photo || photoBusy || photoError || dictation.error || dictation.listening) && (
+            <div className="space-y-1 border-t border-slate-200 px-3 pt-2 text-xs dark:border-slate-700">
+              {photo && (
+                <div className="flex items-center gap-2">
+                  <img src={photo.preview} alt="Photo à envoyer" className="h-14 w-14 rounded-md object-cover" />
+                  <span className="flex-1 text-slate-600 dark:text-slate-300">Photo jointe à votre prochain message.</span>
+                  <button type="button" onClick={() => setPhoto(null)} aria-label="Retirer la photo" className="rounded p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"><X className="h-4 w-4" aria-hidden /></button>
+                </div>
+              )}
+              {photoBusy && <p className="flex items-center gap-1.5 text-slate-500"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> Préparation de la photo…</p>}
+              {photoError && <p className="text-rose-700 dark:text-rose-300">{photoError}</p>}
+              {dictation.listening && <p className="flex items-center gap-1.5 font-medium text-rose-600"><span className="h-2 w-2 animate-pulse rounded-full bg-rose-600" aria-hidden /> Je vous écoute… parlez puis faites une pause.</p>}
+              {dictation.error && <p className="text-rose-700 dark:text-rose-300">{dictation.error}</p>}
+            </div>
+          )}
           <form
             onSubmit={e => { e.preventDefault(); void send(draft) }}
             className="flex items-end gap-2 border-t border-slate-200 p-3 dark:border-slate-700"
           >
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={e => { void pickPhoto(e.target.files?.[0]); e.target.value = "" }}
+            />
+            <div className="flex flex-col gap-1">
+              <button type="button" onClick={() => fileRef.current?.click()} disabled={busy || photoBusy} aria-label="Joindre une photo" title="Prendre ou joindre une photo" className="flex h-[21px] w-9 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-[#0f3460] disabled:opacity-40 dark:hover:bg-slate-800">
+                <Camera className="h-4 w-4" aria-hidden />
+              </button>
+              {dictation.supported && (
+                <button
+                  type="button"
+                  onClick={dictation.listening ? dictation.stop : dictation.start}
+                  disabled={busy}
+                  aria-label={dictation.listening ? "Arrêter la dictée" : "Dicter"}
+                  aria-pressed={dictation.listening}
+                  title={dictation.listening ? "Arrêter la dictée" : "Dicter à la voix"}
+                  className={`flex h-[21px] w-9 items-center justify-center rounded-md disabled:opacity-40 ${dictation.listening ? "bg-rose-600 text-white" : "text-slate-500 hover:bg-slate-100 hover:text-[#0f3460] dark:hover:bg-slate-800"}`}
+                >
+                  {dictation.listening ? <MicOff className="h-4 w-4" aria-hidden /> : <Mic className="h-4 w-4" aria-hidden />}
+                </button>
+              )}
+            </div>
             <textarea
               ref={inputRef}
               value={draft}
               onChange={e => setDraft(e.target.value.slice(0, 2000))}
               onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(draft) } }}
               rows={2}
-              placeholder="Votre question…"
+              placeholder={dictation.supported ? "Votre question… (ou dictez au micro)" : "Votre question…"}
               aria-label="Votre question"
               className="min-h-[44px] flex-1 resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-[#0f3460] focus:outline-none focus:ring-1 focus:ring-[#0f3460] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
             />
-            <button type="submit" disabled={busy || !draft.trim()} aria-label="Envoyer" className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#0f3460] text-white transition hover:bg-[#143e72] disabled:opacity-40">
+            <button type="submit" disabled={busy || photoBusy || (!draft.trim() && !photo)} aria-label="Envoyer" className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#0f3460] text-white transition hover:bg-[#143e72] disabled:opacity-40">
               <Send className="h-4 w-4" aria-hidden />
             </button>
           </form>
