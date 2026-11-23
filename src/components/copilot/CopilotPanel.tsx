@@ -1,10 +1,11 @@
 "use client"
-// IA-1 : copilote Planificator. Bouton flottant (ou Ctrl+J / ⌘J) qui ouvre un panneau à droite. La conversation reste
+// IA-1 : copilote Planificator. Entrée « Assistant IA » du menu (sous « Dashboard ») ou Ctrl+J / ⌘J : ouvre un panneau à droite. La conversation reste
 // dans le navigateur (rien n'est conservé côté serveur) ; la page courante est envoyée comme contexte. Lecture seule.
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Loader2, Send, Sparkles, Trash2, X } from "lucide-react"
+import { COPILOT_OPEN_EVENT } from "@/components/copilot/copilot-events"
 
 interface Turn { role: "user" | "assistant"; text: string; error?: boolean }
 
@@ -51,8 +52,10 @@ export function CopilotPanel() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "j") { e.preventDefault(); setOpen(o => !o) }
       else if (e.key === "Escape") setOpen(false)
     }
+    const onOpen = () => setOpen(true)
     window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    window.addEventListener(COPILOT_OPEN_EVENT, onOpen)
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener(COPILOT_OPEN_EVENT, onOpen) }
   }, [])
 
   useEffect(() => { if (open) inputRef.current?.focus() }, [open])
@@ -84,19 +87,6 @@ export function CopilotPanel() {
 
   return (
     <>
-      {!open && (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          aria-label="Ouvrir l'assistant IA"
-          title="Assistant IA (Ctrl+J)"
-          className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-[#0f3460] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-900/30 transition hover:scale-[1.03] hover:bg-[#143e72] focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
-        >
-          <Sparkles className="h-4 w-4" aria-hidden />
-          Assistant
-        </button>
-      )}
-
       {open && (
         <aside
           role="dialog"

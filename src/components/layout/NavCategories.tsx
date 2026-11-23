@@ -3,7 +3,8 @@
 import type React from "react"
 import { useEffect, useId, useLayoutEffect, useReducer, useRef, useState } from "react"
 import Link from "next/link"
-import { ChevronRight } from "lucide-react"
+import { ChevronRight, Sparkles } from "lucide-react"
+import { openCopilot } from "@/components/copilot/copilot-events"
 import { cn } from "@/lib/utils"
 import { SHADOW_RAISED, SHADOW_SLIDER } from "@/components/ui/shadows"
 import type { NavItem } from "@/lib/navigation/nav-config"
@@ -108,6 +109,27 @@ function SliderNavLink({ item, active, onSlider, sliderReady, onNavigate, onHove
   )
 }
 
+/** IA-1 : bouton du menu qui ouvre le panneau du copilote (pas une page : aucun lien, aucun curseur). */
+function AssistantEntry({ onNavigate, touch }: { onNavigate?: () => void; touch: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={() => { onNavigate?.(); openCopilot() }}
+      title="Assistant IA (Ctrl+J)"
+      className={cn(
+        "group relative z-[1] mt-0.5 flex w-full items-center gap-2.5 rounded-xl px-1.5 text-left text-[13.5px] font-medium tracking-[-0.005em] text-slate-600 outline-none",
+        "transition-colors duration-200 hover:bg-[#0f3460]/[0.06] motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-blue-500/60",
+        touch ? "h-11" : "h-10",
+      )}
+    >
+      <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] bg-[#0f3460]/10 text-[#0f3460] dark:bg-blue-400/15 dark:text-blue-200" aria-hidden="true">
+        <Sparkles className="h-4 w-4" />
+      </span>
+      <span className="flex-1 truncate">Assistant IA</span>
+    </button>
+  )
+}
+
 /** Curseur : dégradé bleu Planificator et ombre bleue portée. */
 const SLIDER_SURFACE = cn("bg-gradient-to-br from-[#1b4a85] to-[#0f3460]", SHADOW_SLIDER)
 
@@ -139,7 +161,7 @@ export function reduceNavOpenState(state: NavOpenState, event: NavOpenEvent): Na
 }
 
 export function NavCategories({
-  categories, activeHref, activeCategoryId, navigationKey, onNavigate, touch = false,
+  categories, activeHref, activeCategoryId, navigationKey, onNavigate, touch = false, assistantEntry = false,
 }: {
   categories: readonly NavCategory[]
   activeHref: string | null
@@ -148,6 +170,8 @@ export function NavCategories({
   navigationKey: string
   onNavigate?: () => void
   touch?: boolean
+  /** IA-1 : entrée « Assistant IA » (ouvre le panneau du copilote) juste sous « Dashboard ». Affichage seulement. */
+  assistantEntry?: boolean
 }) {
   const baseId = useId()
   const [state, dispatch] = useReducer(reduceNavOpenState, undefined, () => initialNavOpenState(navigationKey, activeCategoryId))
@@ -256,6 +280,7 @@ export function NavCategories({
                     onHover={setHoveredHref}
                     touch={touch}
                   />
+                  {assistantEntry && item.href === "/dashboard" && <AssistantEntry onNavigate={onNavigate} touch={touch} />}
                 </li>
               ))}
             </ul>
