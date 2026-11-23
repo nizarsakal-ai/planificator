@@ -8,9 +8,6 @@ import { prisma } from "@/lib/prisma"
 import { copilotConfig, isCopilotActionsEnabled, isCopilotRole } from "@/lib/copilot/copilot-config"
 import { proposalSecret, verifyProposal } from "@/lib/copilot/copilot-proposal"
 import { executeProposal, releaseProposal, reserveProposal } from "@/lib/copilot/copilot-execute"
-import { createTask } from "@/lib/actions/task.actions"
-import { affecterEquipe } from "@/lib/actions/chantier.actions"
-import { createQuoteAction } from "@/lib/actions/quote.actions"
 
 export const dynamic = "force-dynamic"
 
@@ -43,6 +40,10 @@ export async function POST(request: Request): Promise<Response> {
   try {
     reserved = await reserveProposal(prisma, { companyId: ctx.companyId, actorId: ctx.userId, nonce: verified.nonce, kind: verified.payload.kind })
     if (!reserved) return json({ error: "Cette proposition a déjà été confirmée." }, 409)
+    // Chargement à la demande : ces modules ouvrent des clients (courriel…) qui ne doivent pas s'initialiser à la compilation.
+    const [{ createTask }, { affecterEquipe }, { createQuoteAction }] = await Promise.all([
+      import("@/lib/actions/task.actions"), import("@/lib/actions/chantier.actions"), import("@/lib/actions/quote.actions"),
+    ])
     const result = await executeProposal(verified.payload, { createTask, assignTeam: affecterEquipe, createQuote: createQuoteAction })
     if (!result.ok) {
       await releaseProposal(prisma, { companyId: ctx.companyId, nonce: verified.nonce })
