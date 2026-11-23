@@ -100,3 +100,20 @@ Sans lui, l'assistant reste en lecture seule et le point d'accès de confirmatio
 - **Pastille rouge** sur l'entrée « Assistant IA » du menu : nombre d'alertes urgentes et à surveiller.
 - Outil `briefing_du_jour` pour l'assistant ; point d'accès `GET /api/assistant/copilote/briefing` (même garde qu'IA-1).
 - Jour de référence : jour civil à Paris.
+
+---
+
+# IA-4 : mode terrain (voix et photos)
+
+- **Dictée** : bouton micro du panneau (reconnaissance vocale du navigateur, en français). Le texte reconnu s'ajoute à la
+  question, que l'utilisateur relit avant d'envoyer. Aucun son n'est envoyé à Planificator. Bouton masqué si le navigateur
+  ne gère pas la dictée (dans l'appli iPhone, le micro du clavier reste disponible).
+- **Photo** : bouton appareil photo (caméra arrière sur téléphone, ou galerie). La photo est réduite dans le navigateur
+  (1600 px, JPEG, métadonnées et position GPS retirées), jointe au message suivant et transmise à Claude pour ce seul
+  message. Elle n'est conservée ni sur le serveur ni dans l'historique envoyé ensuite.
+- **Lecture à voix haute** des réponses (synthèse vocale du navigateur), activable dans l'en-tête du panneau ;
+  réglage mémorisé sur l'appareil.
+
+Contrôles serveur de la photo (`parseImage`) : JPEG, PNG ou WebP seulement, base64 strict, signature du format
+cohérente, 3,5 millions de caractères au plus. Le prompt rappelle que le texte visible sur une photo est une information,
+jamais une instruction.

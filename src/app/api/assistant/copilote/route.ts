@@ -13,7 +13,7 @@ import { proposalSecret } from "@/lib/copilot/copilot-proposal"
 import { isBillingCompleteEnabled } from "@/lib/billing/billing-feature-flag"
 import { reserveCopilotRequest } from "@/lib/copilot/copilot-quota"
 import { parisToday } from "@/lib/copilot/copilot-date"
-import { buildSystemPrompt, CopilotEmptyError, CopilotInputError, parseHistory, parsePage, runCopilot } from "@/lib/copilot/copilot.core"
+import { buildSystemPrompt, CopilotEmptyError, CopilotInputError, parseHistory, parseImage, parsePage, runCopilot } from "@/lib/copilot/copilot.core"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -32,11 +32,12 @@ export async function POST(request: Request): Promise<Response> {
   if (!isCopilotRole(user.role)) return json({ error: "Réservé à l'administration." }, 403)
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) return json({ error: "Format refusé." }, 415)
 
-  let history, page
+  let history, page, image
   try {
-    const body = (await request.json()) as { messages?: unknown; page?: unknown }
+    const body = (await request.json()) as { messages?: unknown; page?: unknown; image?: unknown }
     history = parseHistory(body.messages)
     page = parsePage(body.page)
+    image = parseImage(body.image)
   } catch (error) {
     return json({ error: error instanceof CopilotInputError ? error.message : "Requête invalide." }, 400)
   }
@@ -56,6 +57,7 @@ export async function POST(request: Request): Promise<Response> {
       history,
       companyId: user.companyId,
       today,
+      image,
       actions,
       system: buildSystemPrompt({ userName: user.name ?? "l'utilisateur", companyName: company?.name ?? "votre société", today: todayStr, page, actions: !!actions }),
     })
