@@ -174,7 +174,8 @@ describe("L1a : migration du lot A renumérotée après la production", () => {
   // 13/11/2026 (modification signalée) : la migration additive SPEC-INVOICE-IMPORT-001 est postérieure aux lots V2 ; elle rejoint
   // la liste FERMÉE des migrations admises après le lot A. Tout autre écart reste refusé.
   // 15/11/2026 (modification signalée, lot E) : migration additive du lot E ajoutée à la liste FERMÉE.
-  const LATER_V2_LOTS = new Set(["20261110130000_v2_lot_b_equipment_rental", "20261110140000_v2_lot_b_booking_overlap_guard", "20261111120000_v2_lot_c_worksite_budgets", "20261113120000_invoice_import_bank_verification", "20261115120000_v2_lot_e_crm_automations"])
+  // 23/11/2026 (modification signalée, intégration du lot D) : migration additive du lot D (nom exact) ajoutée à la liste FERMÉE, à son rang.
+  const LATER_V2_LOTS = new Set(["20261110130000_v2_lot_b_equipment_rental", "20261110140000_v2_lot_b_booking_overlap_guard", "20261111120000_v2_lot_c_worksite_budgets", "20261112120000_v2_lot_d_reserves_reception", "20261113120000_invoice_import_bank_verification", "20261115120000_v2_lot_e_crm_automations"])
   it("présente une seule fois, ancien nom absent, horodatage unique et postérieur aux migrations du périmètre historique", () => {
     assert.ok(dirs.includes(LOT_A))
     assert.equal(dirs.some((d) => d.startsWith("20261104120000_v2_lot_a")), false, "ancien horodatage (collision avec prospect_opportunities) absent")
@@ -186,5 +187,8 @@ describe("L1a : migration du lot A renumérotée après la production", () => {
     for (const prod of ["20261104120000_prospect_opportunities", "20261106120000_v2_quote_recipient_purchase_order", "20261108130000_hr_private_space"]) {
       assert.ok(dirs.includes(prod), `migration de production ${prod} conservée`)
     }
+    const order = [LOT_A, ...LATER_V2_LOTS]
+    for (const d of order) assert.equal(dirs.filter((x) => x === d).length, 1, `${d} présente une fois`)
+    assert.ok(order.every((d, i) => i === 0 || order[i - 1].slice(0, 14) < d.slice(0, 14)), "ordre A < B < garde < C < D")
   })
 })

@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { getNotifications, markAllAsRead, markAsRead } from "@/lib/actions/notification.actions"
+import { chargerSiEnLigne, ecouterRetourReseau, rechargementPwaSurDashboard } from "@/components/notifications/notifications-reseau"
 
 interface Notification {
   id: string
@@ -31,12 +32,18 @@ export function NotificationBell() {
 
   const unread = notifications.filter((n) => !n.read).length
 
-  const load = async () => {
+  const charger = async () => {
     const data = await getNotifications()
     setNotifications(data as unknown as Notification[])
   }
+  // Hors réseau, l'action serveur n'est pas tentée ; une erreur en ligne reste visible (promesse non interceptée).
+  const load = () => chargerSiEnLigne(charger, typeof navigator === "undefined" ? null : navigator)
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    // DG02 : sur /dashboard avec next-pwa actif, la page est déjà rechargée au retour du réseau ; le nouveau document relit au montage.
+    return ecouterRetourReseau(window, () => { if (rechargementPwaSurDashboard(window)) return; load() })
+  }, [])
 
   const handleOpen = (v: boolean) => {
     setOpen(v)

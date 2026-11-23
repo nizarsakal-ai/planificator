@@ -1,6 +1,7 @@
 import type { NextAuthConfig } from "next-auth"
 import type { JWT } from "next-auth/jwt"
 import type { Session } from "next-auth"
+import { refusLecturePageLotDParCacheDeNavigation } from "@/lib/reserves/garde-cache-sw"
 
 /**
  * Callbacks Edge-safe (pas de Prisma).
@@ -40,11 +41,16 @@ export async function edgeSessionCallback({
 
 export function authorizedCallback({
   auth,
-  request: { nextUrl },
+  request,
 }: {
   auth: { user?: { role?: string } | null } | null
-  request: { nextUrl: URL }
+  request: { nextUrl: URL; method?: string; headers?: Headers }
 }): boolean | Response {
+  // Lot D : lecture d'une page privée D par le cache de navigation front-end de next-pwa (fetch du worker « swe-worker »)
+  // refusée à la source, avant toute autre règle ; aucun autre effet (voir src/lib/reserves/garde-cache-sw.ts).
+  const refusLotD = refusLecturePageLotDParCacheDeNavigation(request)
+  if (refusLotD) return refusLotD
+  const { nextUrl } = request
   const isLoggedIn = !!auth?.user
   const role = auth?.user?.role as string | undefined
   const pathname = nextUrl.pathname

@@ -164,7 +164,8 @@ describe("L1b : migrations du lot B renumérotées après le lot A", () => {
     for (const stamp of [B, GUARD].map((d) => d.slice(0, 14))) assert.equal(dirs.filter((d) => d.startsWith(`${stamp}_`)).length, 1, `horodatage ${stamp} unique`)
     // 13/11/2026 (modification signalée) : liste FERMÉE des migrations postérieures au lot B (SPEC-INVOICE-IMPORT-001, additive).
     // 15/11/2026 (modification signalée, lot E) : migration additive du lot E ajoutée à la liste FERMÉE.
-    const LATER = new Set(["20261111120000_v2_lot_c_worksite_budgets", "20261113120000_invoice_import_bank_verification", "20261115120000_v2_lot_e_crm_automations"])
+    // 23/11/2026 (modification signalée, intégration du lot D) : migration additive du lot D (nom exact) ajoutée à la liste FERMÉE.
+    const LATER = new Set(["20261111120000_v2_lot_c_worksite_budgets", "20261112120000_v2_lot_d_reserves_reception", "20261113120000_invoice_import_bank_verification", "20261115120000_v2_lot_e_crm_automations"])
     for (const d of dirs.filter((x) => x !== B && x !== GUARD && x < "20261116000000" && !LATER.has(x))) assert.ok(d.slice(0, 14) < B.slice(0, 14), `${d} doit précéder le lot B`)
     for (const d of LATER) assert.ok(dirs.includes(d) && d.slice(0, 14) > GUARD.slice(0, 14), `${d} doit suivre la garde du lot B`)
   })

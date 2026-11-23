@@ -24,6 +24,9 @@ import { isConnectorCenterEnabledForCompany } from "@/lib/connectors/connector-f
 import { isDocumentStudioEnabled } from "@/lib/document-studio/studio-feature-flag"
 import { isPayrollPrepEnabledForCompany } from "@/lib/payroll-prep/prepay-feature-flag"
 import { isMarketingShopEnabledForCompany } from "@/lib/marketing-shop/marketing-shop-feature-flag"
+import { isWorksiteReservesEnabled } from "@/lib/reserves/reserves-feature-flag"
+import { isSalesDashboardEnabled } from "@/lib/sales-dashboard/sales-feature-flag"
+import { isGlobalSearchEnabled } from "@/lib/search/search-feature-flag"
 import type { Role } from "@prisma/client"
 
 export default async function DashboardLayout({
@@ -77,13 +80,17 @@ export default async function DashboardLayout({
   // Lot I V2 : marketing et boutique ; société active exactement égale à la société pilote d'un module activé (même cible
   // que la garde I, lue côté serveur seulement) ; rôle ADMIN/SUPER_ADMIN. Affichage seulement : pages et actions refusent.
   const marketingShopNavVisible = isMarketingShopEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")
+  // Lot D V2 : réserves, indicateurs commerciaux et recherche globale ; même règle d'affichage, drapeaux distincts (désactivés par défaut).
+  const reservesNavVisible = isWorksiteReservesEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
+  const salesDashboardNavVisible = isSalesDashboardEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
+  const searchVisible = isGlobalSearchEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
   const company = companyId ? await prisma.company.findUnique({
     where: { id: companyId }, select: { name: true, logoUrl: true },
   }) : null
   // Correctif #418 : adresse courte d'affichage, jamais la data URL dans la charge RSC de la coquille (voir companyLogoDisplaySrc).
   const companyLogo = companyLogoDisplaySrc(company?.logoUrl)
   const hrNavigation = await resolveHrDocumentNavigation()
-  const user = { ...hrNavigation, ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, worksitePhotosNavVisible, prospectionNavVisible, stockPurchasingNavVisible, equipmentNavVisible, budgetNavVisible, fuelTicketNavVisible, companyLogo, companyName: company?.name, documentStudioNavVisible, payrollPrepNavVisible, marketingShopNavVisible, crmNavVisible, automationNavVisible, assistantNavVisible, connectorsNavVisible }
+  const user = { ...hrNavigation, ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, worksitePhotosNavVisible, prospectionNavVisible, stockPurchasingNavVisible, equipmentNavVisible, budgetNavVisible, fuelTicketNavVisible, companyLogo, companyName: company?.name, documentStudioNavVisible, payrollPrepNavVisible, marketingShopNavVisible, crmNavVisible, automationNavVisible, assistantNavVisible, connectorsNavVisible, reservesNavVisible, salesDashboardNavVisible, searchVisible }
 
   return (
     <div data-app-backdrop="" className="flex h-screen overflow-hidden bg-[#f6f1e7] bg-[radial-gradient(45%_55%_at_4%_0%,rgba(120,160,255,0.65)_0,transparent_70%),radial-gradient(40%_45%_at_100%_100%,rgba(70,120,250,0.45)_0,transparent_70%),radial-gradient(28%_34%_at_100%_8%,rgba(140,175,255,0.4)_0,transparent_70%),radial-gradient(30%_36%_at_55%_45%,rgba(255,250,240,0.85)_0,transparent_70%)]">

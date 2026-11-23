@@ -3,6 +3,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { getInitials } from "@/lib/utils"
 import { NotificationBell } from "@/components/notifications/NotificationBell"
 import { MobileNav } from "@/components/layout/MobileNav"
+import { SearchPalette } from "@/components/search/SearchPalette"
 import type { Role } from "@prisma/client"
 
 interface NavbarUser {
@@ -18,6 +19,8 @@ interface NavbarUser {
   hrDocumentsNavVisible?: boolean
   hrDocumentsManageNavVisible?: boolean
   supplierIntakeNavVisible?: boolean
+  /** Lot D V2 : recherche globale (drapeau serveur + ADMIN/SUPER_ADMIN + société), calculée par le layout. */
+  searchVisible?: boolean
 }
 
 export function Navbar({ user }: { user: NavbarUser }) {
@@ -31,6 +34,7 @@ export function Navbar({ user }: { user: NavbarUser }) {
 
       {/* Actions */}
       <div className="flex items-center gap-3">
+        {user.searchVisible === true && <SearchPalette />}
         <CompanySwitcher userId={user.id} companyId={user.companyId} />
         <NotificationBell />
 

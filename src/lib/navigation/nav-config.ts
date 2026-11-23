@@ -47,6 +47,8 @@ import {
   CalendarCheck,
   Megaphone,
   Store,
+  ClipboardCheck,
+  TrendingUp,
 } from "lucide-react"
 
 export interface NavItem {
@@ -399,5 +401,31 @@ export function withBudgetNavItem(items: readonly NavItem[], visible: boolean): 
   if (visible !== true || result.some(i => i.href === "/budgets")) return result
   const profile = result.findIndex(i => i.href === "/profil")
   result.splice(profile < 0 ? result.length : profile, 0, { label: "Budgets", href: "/budgets", icon: PiggyBank })
+  return result
+}
+
+/**
+ * Lot D Planificator V2 : entrée « Réserves » (drapeau serveur WORKSITE_RESERVES_ENABLED, ADMIN et SUPER_ADMIN avec
+ * société), placée avant « Profil » ; rangée dans « Chantiers & terrain » par le regroupement par catégories (href
+ * « /reserves »). Affichage seulement : chaque page, route de fichier ou de PDF et chaque action refusent côté serveur.
+ */
+export function withReservesNavItem(items: readonly NavItem[], visible: boolean): NavItem[] {
+  const result = [...items]
+  if (visible !== true || result.some(i => i.href === "/reserves")) return result
+  const profile = result.findIndex(i => i.href === "/profil")
+  result.splice(profile < 0 ? result.length : profile, 0, { label: "Réserves", href: "/reserves", icon: ClipboardCheck })
+  return result
+}
+
+/**
+ * Lot D Planificator V2 : entrée « Indicateurs commerciaux » (drapeau serveur SALES_DASHBOARD_ENABLED, ADMIN et
+ * SUPER_ADMIN avec société), placée avant « Profil » ; rangée dans « Commercial » (href « /tableaux-de-bord »). Espace
+ * DÉDIÉ : le tableau de bord existant (« /dashboard ») n'est pas modifié. Affichage seulement : la page refuse côté serveur.
+ */
+export function withSalesDashboardNavItem(items: readonly NavItem[], visible: boolean): NavItem[] {
+  const result = [...items]
+  if (visible !== true || result.some(i => i.href === "/tableaux-de-bord")) return result
+  const profile = result.findIndex(i => i.href === "/profil")
+  result.splice(profile < 0 ? result.length : profile, 0, { label: "Indicateurs commerciaux", href: "/tableaux-de-bord", icon: TrendingUp })
   return result
 }

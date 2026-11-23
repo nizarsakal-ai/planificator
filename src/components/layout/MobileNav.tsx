@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation"
 import { Menu, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PlanificatorLogo } from "@/components/brand/PlanificatorLogo"
-import { getActiveNavHref, getNavItems, withHrDocumentNavItems, withAccountingNavItem, withBillingNavItems, withSupplierIntakeNavItem, withWorksitePhotosNavItem, withProspectionNavItem, withStockPurchasingNavItems, withEquipmentNavItem, withBudgetNavItem, withFuelTicketNavItem, withCrmAutomationNavItems, withAssistantConnectorNavItems, withDocumentStudioNavItem, withPayrollPrepNavItem, withMarketingShopNavItems } from "@/lib/navigation/nav-config"
+import { getActiveNavHref, getNavItems, withHrDocumentNavItems, withAccountingNavItem, withBillingNavItems, withSupplierIntakeNavItem, withWorksitePhotosNavItem, withProspectionNavItem, withStockPurchasingNavItems, withEquipmentNavItem, withBudgetNavItem, withFuelTicketNavItem, withCrmAutomationNavItems, withAssistantConnectorNavItems, withDocumentStudioNavItem, withPayrollPrepNavItem, withMarketingShopNavItems, withReservesNavItem, withSalesDashboardNavItem } from "@/lib/navigation/nav-config"
 import { getActiveNavCategoryId, groupNavItems } from "@/lib/navigation/nav-categories"
 import { NavCategories } from "@/components/layout/NavCategories"
 import { NavFooter } from "@/components/layout/NavFooter"
@@ -37,6 +37,8 @@ interface MobileNavUser {
   documentStudioNavVisible?: boolean // Lot G V2
   payrollPrepNavVisible?: boolean // Lot H V2
   marketingShopNavVisible?: boolean // Lot I V2
+  reservesNavVisible?: boolean // Lot D V2
+  salesDashboardNavVisible?: boolean // Lot D V2
 }
 
 /**
@@ -59,13 +61,16 @@ export function focusableIn(root: HTMLElement): HTMLElement[] {
   return visible.filter((el) => !(el instanceof HTMLInputElement && el.type === "radio" && el.name) || radioStop.get(el.name) === el)
 }
 
+
 export function MobileNav({ user }: { user: MobileNavUser }) {
   const [open, setOpen] = useState(false)
   const pathname = usePathname()
   const navItems = withBudgetNavItem(withMarketingShopNavItems(withPayrollPrepNavItem(withDocumentStudioNavItem(withAssistantConnectorNavItems(withFuelTicketNavItem(withStockPurchasingNavItems(withProspectionNavItem(withHrDocumentNavItems(withEquipmentNavItem(withWorksitePhotosNavItem(withSupplierIntakeNavItem(withCrmAutomationNavItems(withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true), user.crmNavVisible === true, user.automationNavVisible === true), user.supplierIntakeNavVisible === true), user.worksitePhotosNavVisible === true), user.equipmentNavVisible === true), user.hrDocumentsNavVisible === true, user.hrDocumentsManageNavVisible === true), user.prospectionNavVisible === true), user.stockPurchasingNavVisible === true), user.fuelTicketNavVisible === true), user.assistantNavVisible === true, user.connectorsNavVisible === true), user.documentStudioNavVisible === true), user.payrollPrepNavVisible === true), user.marketingShopNavVisible === true), user.budgetNavVisible === true)
-  const activeHref = getActiveNavHref(navItems, pathname)
+  // Lot D V2 : composition de main (navItems, inchangée), puis entrées « Réserves » et « Indicateurs commerciaux » (visibilités serveur).
+  const menuItems = withSalesDashboardNavItem(withReservesNavItem(navItems, user.reservesNavVisible === true), user.salesDashboardNavVisible === true)
+  const activeHref = getActiveNavHref(menuItems, pathname)
   // Mêmes catégories que la Sidebar, regroupées APRÈS la composition des drapeaux.
-  const grouped = groupNavItems(navItems)
+  const grouped = groupNavItems(menuItems)
   const activeCategoryId = getActiveNavCategoryId(grouped, activeHref)
   const close = () => setOpen(false)
   const openButtonRef = useRef<HTMLButtonElement>(null)

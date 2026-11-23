@@ -446,6 +446,11 @@ model Company {
   equipmentRentals                EquipmentRentalContract[]
   equipmentMaintenances           EquipmentMaintenance[]
   goodsReceipts                   GoodsReceipt[]
+  // Lot D V2 (réserves et réception) : relations inverses, sans effet SQL sur companies.
+  worksiteReserves                WorksiteReserve[]
+  worksiteReserveFiles            WorksiteReserveFile[]
+  receptionReports                ReceptionReport[]
+  receptionReportReserves         ReceptionReportReserve[]
 
   opportunities            Opportunity[] // Lot E V2
   opportunityEvents        OpportunityEvent[]
@@ -1229,6 +1234,8 @@ model Worksite {
 
   budget                     WorksiteBudget?
   supplierInvoiceAllocations SupplierInvoiceAllocation[]
+  reserves          WorksiteReserve[]
+  receptionReports  ReceptionReport[]
 
   @@unique([id, companyId])
   @@index([companyId])
@@ -5494,4 +5501,136 @@ model SupplierInvoiceAllocation {
   @@index([companyId, worksiteId])
   @@index([companyId, supplierInvoiceId])
   @@map("supplier_invoice_allocations")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Lot D Planificator V2 (04/11/2026, réconcilié le 12/11/2026 après le lot C) : réserves de réception et procès-verbal (évolution 11).
+// Une réserve est un défaut localisé sur un chantier, avec preuve (photo ou PDF) à la constatation et à la levée.
+// Un procès-verbal de réception fige, à sa signature, la liste des réserves ouvertes et la décision (avec ou sans
+// réserves, ou refus) dans un instantané immuable dont l'empreinte SHA-256 est stockée : le PDF est régénéré à
+// l'identique depuis cet instantané. Modèles dédiés (et non une extension de Task) : Task a des clés simples et des
+// suppressions en cascade, incompatibles avec une pièce de réception conservée. Clés composites (companyId, id).
+// Responsable = libellé libre, sans relation vers les salariés (module RH non touché). Au plus 500 réserves par PV.
+// Module désactivé par défaut (WORKSITE_RESERVES_ENABLED).
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum ReserveSeverity {
+  MINOR
+  MAJOR
+  BLOCKING
+}
+
+enum ReserveStatus {
+  OPEN
+  LIFTED
+  CANCELLED
+}
+
+enum ReserveFileKind {
+  FINDING
+  LIFT
+}
+
+enum ReceptionDecision {
+  WITHOUT_RESERVES
+  WITH_RESERVES
+  REFUSED
+}
+
+model WorksiteReserve {
+  id                 String          @id @default(cuid())
+  companyId          String
+  worksiteId         String
+  number             String
+  title              String
+  description        String?
+  location           String
+  severity           ReserveSeverity @default(MINOR)
+  status             ReserveStatus   @default(OPEN)
+  assigneeLabel      String?
+  dueDate            DateTime?       @db.Date
+  createdById        String
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  liftedAt           DateTime?
+  liftedById         String?
+  liftNote           String?
+  cancelledAt        DateTime?
+  cancelledById      String?
+  cancelReason       String?
+
+  company  Company               @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  worksite Worksite              @relation(fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  files    WorksiteReserveFile[]
+  reports  ReceptionReportReserve[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, number])
+  @@index([companyId, worksiteId, status])
+  @@map("worksite_reserves")
+}
+
+model WorksiteReserveFile {
+  id           String          @id @default(cuid())
+  companyId    String
+  reserveId    String
+  kind         ReserveFileKind
+  sha256       String
+  mime         String
+  size         Int
+  data         Bytes
+  originalName String
+  createdById  String
+  createdAt    DateTime        @default(now())
+
+  company Company         @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  reserve WorksiteReserve @relation(fields: [companyId, reserveId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([companyId, id])
+  @@index([companyId, reserveId])
+  @@map("worksite_reserve_files")
+}
+
+model ReceptionReport {
+  id                   String            @id @default(cuid())
+  companyId            String
+  worksiteId           String
+  number               String
+  decision             ReceptionDecision
+  receptionDate        DateTime          @db.Date
+  clientSignerName     String
+  companySignerName    String
+  attendees            String?
+  remarks              String?
+  signatureSha256      String
+  signaturePng         Bytes
+  snapshot             Json
+  snapshotSha256       String
+  createdById          String
+  createdAt            DateTime          @default(now())
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  worksite Worksite @relation(fields: [worksiteId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Cascade)
+  reserves ReceptionReportReserve[]
+
+  @@unique([companyId, id])
+  @@unique([companyId, number])
+  @@index([companyId, worksiteId])
+  @@map("reception_reports")
+}
+
+model ReceptionReportReserve {
+  id        String @id @default(cuid())
+  companyId String
+  reportId  String
+  reserveId String
+
+  company Company         @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  report  ReceptionReport @relation(fields: [companyId, reportId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+  reserve WorksiteReserve @relation(fields: [companyId, reserveId], references: [companyId, id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([companyId, id])
+  @@unique([reportId, reserveId])
+  @@index([companyId, reserveId])
+  @@map("reception_report_reserves")
 }

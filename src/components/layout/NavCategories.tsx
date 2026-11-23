@@ -12,8 +12,16 @@ import type { NavCategory, NavCategoryId } from "@/lib/navigation/nav-categories
 /** Lien d'une entrée : `next/link` (transition du routeur client) par défaut ; <a> ordinaire, mêmes attributs et classes, pour une
  * entrée `documentNavigation` (correctif E4 : navigation native du document, aucune transition client ni préchargement). */
 function EntreeLien({ item, ...props }: { item: NavItem } & Omit<React.ComponentProps<"a">, "href">) {
-  return item.documentNavigation ? <a href={item.href} {...props} /> : <Link href={item.href} {...props} />
+  return item.documentNavigation ? <a href={item.href} {...props} /> : <Link href={item.href} prefetch={prechargement(item.href)} {...props} />
 }
+
+/**
+ * Préchargement automatique DÉSACTIVÉ pour ces trois liens seulement (décision Nizar, preuves R18c) : hors ligne, le
+ * préchargement RSC de ces routes privées, servies sans cache par le service worker, échouait et produisait des erreurs
+ * console. Égalité EXACTE du href ; pages, accès, rendu et autres liens inchangés ; la navigation au clic reste identique.
+ */
+export const LIENS_SANS_PRECHARGEMENT: ReadonlySet<string> = new Set(["/vehicules", "/reserves", "/tableaux-de-bord"])
+const prechargement = (href: string) => (LIENS_SANS_PRECHARGEMENT.has(href) ? false : undefined)
 
 /**
  * Catégories repliables partagées par la Sidebar et le MobileNav (rendu seulement : les entrées viennent de la
