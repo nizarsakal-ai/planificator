@@ -6,7 +6,7 @@
 import type { PrismaClient, Prisma } from "@prisma/client"
 import type Anthropic from "@anthropic-ai/sdk"
 
-type Db = Pick<PrismaClient, "assignment" | "worksite" | "invoice" | "absence" | "stockLevel" | "client" | "worksiteImportDraft" | "team" | "employee">
+type Db = Pick<PrismaClient, "assignment" | "worksite" | "invoice" | "absence" | "stockLevel" | "client" | "worksiteImportDraft" | "team" | "employee" | "article">
 
 export const MAX_ROWS = 40
 const MAX_RANGE_DAYS = 62
@@ -100,8 +100,18 @@ export const COPILOT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "equipes",
-    description: "Équipes actives avec leur chef d'équipe, et nombre d'employés actifs.",
+    description: "Équipes actives (identifiant, nom, chef d'équipe) et nombre d'employés actifs.",
     input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "chercher_employes",
+    description: "Employés actifs par nom ou prénom (identifiant, nom, poste). Sans texte : les 40 premiers.",
+    input_schema: { type: "object", properties: { texte: { type: "string" } } },
+  },
+  {
+    name: "chercher_articles",
+    description: "Articles actifs du catalogue (identifiant, désignation, unité, prix HT, TVA) par texte.",
+    input_schema: { type: "object", properties: { texte: { type: "string" } }, required: ["texte"] },
   },
 ]
 
@@ -270,10 +280,31 @@ const handlers: Record<string, Handler> = {
 
   async equipes(db, companyId) {
     const [teams, employees] = await Promise.all([
-      db.team.findMany({ where: { companyId, active: true }, take: 100, orderBy: { name: "asc" }, select: { name: true, leader: { select: { firstName: true, lastName: true } } } }),
+      db.team.findMany({ where: { companyId, active: true }, take: 100, orderBy: { name: "asc" }, select: { id: true, name: true, leader: { select: { firstName: true, lastName: true } } } }),
       db.employee.count({ where: { companyId, active: true } }),
     ])
-    return { equipes: teams.map(t => ({ nom: t.name, chef: name(t.leader) })), employes_actifs: employees, lien: "/equipes" }
+    return { equipes: teams.map(t => ({ id: t.id, nom: t.name, chef: name(t.leader) })), employes_actifs: employees, lien: "/equipes" }
+  },
+
+  async chercher_employes(db, companyId, input) {
+    const q = text(input.texte)
+    const rows = await db.employee.findMany({
+      where: { companyId, active: true, ...(q ? { OR: [{ firstName: { contains: q, mode: "insensitive" } }, { lastName: { contains: q, mode: "insensitive" } }] } : {}) },
+      take: MAX_ROWS, orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+      select: { id: true, firstName: true, lastName: true, jobTitle: true, role: true },
+    })
+    return rows.map(e => ({ id: e.id, nom: name(e), poste: e.jobTitle, role: e.role }))
+  },
+
+  async chercher_articles(db, companyId, input) {
+    const q = text(input.texte)
+    if (!q) throw new CopilotToolInputError("texte obligatoire.")
+    const rows = await db.article.findMany({
+      where: { companyId, active: true, OR: [{ designation: { contains: q, mode: "insensitive" } }, { reference: { contains: q, mode: "insensitive" } }] },
+      take: 20, orderBy: { designation: "asc" },
+      select: { id: true, reference: true, designation: true, unit: true, unitPrice: true, vatRate: true },
+    })
+    return rows.map(a => ({ id: a.id, reference: a.reference, designation: a.designation, unite: a.unit, prix_ht: euros(a.unitPrice), tva: Number(a.vatRate), lien: "/articles" }))
   },
 }
 

@@ -8,7 +8,9 @@ import type { Session } from "next-auth"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { createAnthropicExtractionClient, mapAnthropicSdkError } from "@/lib/acquisition/extraction/anthropic-extraction.client"
-import { copilotConfig, isCopilotRole } from "@/lib/copilot/copilot-config"
+import { copilotConfig, isCopilotActionsEnabled, isCopilotRole } from "@/lib/copilot/copilot-config"
+import { proposalSecret } from "@/lib/copilot/copilot-proposal"
+import { isBillingCompleteEnabled } from "@/lib/billing/billing-feature-flag"
 import { reserveCopilotRequest } from "@/lib/copilot/copilot-quota"
 import { buildSystemPrompt, CopilotEmptyError, CopilotInputError, parseHistory, parsePage, runCopilot } from "@/lib/copilot/copilot.core"
 
@@ -49,14 +51,18 @@ export async function POST(request: Request): Promise<Response> {
 
     const company = await prisma.company.findUnique({ where: { id: user.companyId }, select: { name: true } })
     const todayStr = parisToday()
+    const today = new Date(`${todayStr}T00:00:00.000Z`)
+    const secret = isCopilotActionsEnabled() ? proposalSecret() : null
+    const actions = secret ? { companyId: user.companyId, userId: user.id, secret, billingEnabled: isBillingCompleteEnabled(), today } : undefined
     phase = "model"
     const result = await runCopilot(createAnthropicExtractionClient(config.apiKey), prisma, {
       history,
       companyId: user.companyId,
-      today: new Date(`${todayStr}T00:00:00.000Z`),
-      system: buildSystemPrompt({ userName: user.name ?? "l'utilisateur", companyName: company?.name ?? "votre société", today: todayStr, page }),
+      today,
+      actions,
+      system: buildSystemPrompt({ userName: user.name ?? "l'utilisateur", companyName: company?.name ?? "votre société", today: todayStr, page, actions: !!actions }),
     })
-    return json({ reply: result.text })
+    return json({ reply: result.text, proposals: result.proposals })
   } catch (error) {
     const code = phase !== "model" ? "PERSISTENCE"
       : error instanceof CopilotEmptyError ? error.causeCode

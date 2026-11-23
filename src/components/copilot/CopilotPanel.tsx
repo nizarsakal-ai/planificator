@@ -1,13 +1,52 @@
 "use client"
-// IA-1 : copilote Planificator. Entrée « Assistant IA » du menu (sous « Dashboard ») ou Ctrl+J / ⌘J : ouvre un panneau à droite. La conversation reste
-// dans le navigateur (rien n'est conservé côté serveur) ; la page courante est envoyée comme contexte. Lecture seule.
+// IA-1 / IA-2 : copilote Planificator. Entrée « Assistant IA » du menu (sous « Dashboard ») ou Ctrl+J / ⌘J : ouvre un
+// panneau à droite. La conversation reste dans le navigateur (rien n'est conservé côté serveur) ; la page courante est
+// envoyée comme contexte. IA-2 : les actions proposées s'affichent en cartes ; seul « Je confirme » les exécute.
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Loader2, Send, Sparkles, Trash2, X } from "lucide-react"
+import { Check, CheckCircle2, Loader2, Send, Sparkles, Trash2, X, XCircle } from "lucide-react"
 import { COPILOT_OPEN_EVENT } from "@/components/copilot/copilot-events"
 
-interface Turn { role: "user" | "assistant"; text: string; error?: boolean }
+interface Proposal { token: string; kind: "TASK" | "ASSIGNMENT" | "QUOTE"; title: string; details: string[]; warning?: string }
+type CardState = { status: "pending" } | { status: "busy" } | { status: "cancelled" } | { status: "done"; message: string; href?: string } | { status: "error"; message: string }
+interface Turn { role: "user" | "assistant"; text: string; error?: boolean; proposals?: Proposal[] }
+
+/** Carte d'action proposée : rien n'est fait avant « Je confirme ». */
+export function ProposalCardView({ proposal, state, onConfirm, onCancel, onNavigate }: {
+  proposal: Proposal; state: CardState; onConfirm: () => void; onCancel: () => void; onNavigate?: () => void
+}) {
+  return (
+    <div className="mt-2 rounded-xl border border-[#0f3460]/20 bg-white p-3 text-sm shadow-sm dark:border-slate-600 dark:bg-slate-900">
+      <p className="font-semibold text-[#0f3460] dark:text-sky-300">{proposal.title}</p>
+      <ul className="mt-1.5 space-y-0.5 text-slate-700 dark:text-slate-200">
+        {proposal.details.map((d, i) => <li key={i}>{d}</li>)}
+      </ul>
+      {proposal.warning && <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{proposal.warning}</p>}
+      <div className="mt-3">
+        {state.status === "pending" && (
+          <div className="flex gap-2">
+            <button type="button" onClick={onConfirm} className="flex items-center gap-1.5 rounded-lg bg-[#0f3460] px-3 py-1.5 font-semibold text-white hover:bg-[#143e72]">
+              <Check className="h-4 w-4" aria-hidden /> Je confirme
+            </button>
+            <button type="button" onClick={onCancel} className="rounded-lg border border-slate-300 px-3 py-1.5 text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">
+              Annuler
+            </button>
+          </div>
+        )}
+        {state.status === "busy" && <p className="flex items-center gap-2 text-slate-500"><Loader2 className="h-4 w-4 animate-spin" aria-hidden /> En cours…</p>}
+        {state.status === "cancelled" && <p className="text-slate-500">Annulé : rien n&apos;a été fait.</p>}
+        {state.status === "done" && (
+          <p className="flex items-center gap-1.5 font-medium text-emerald-700 dark:text-emerald-300">
+            <CheckCircle2 className="h-4 w-4" aria-hidden /> {state.message}
+            {state.href && <Link href={state.href} onClick={onNavigate} className="ml-1 underline underline-offset-2">Voir</Link>}
+          </p>
+        )}
+        {state.status === "error" && <p className="flex items-center gap-1.5 text-rose-700 dark:text-rose-300"><XCircle className="h-4 w-4 shrink-0" aria-hidden /> {state.message}</p>}
+      </div>
+    </div>
+  )
+}
 
 const SUGGESTIONS = [
   "Qui travaille demain et sur quel chantier ?",
@@ -44,6 +83,7 @@ export function CopilotPanel() {
   const [turns, setTurns] = useState<Turn[]>([])
   const [draft, setDraft] = useState("")
   const [busy, setBusy] = useState(false)
+  const [cards, setCards] = useState<Record<string, CardState>>({})
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -74,9 +114,9 @@ export function CopilotPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: history.map(({ role, text }) => ({ role, text })), page: pathname }),
       })
-      const data = (await res.json().catch(() => ({}))) as { reply?: string; error?: string }
+      const data = (await res.json().catch(() => ({}))) as { reply?: string; error?: string; proposals?: Proposal[] }
       setTurns(prev => [...prev, data.reply
-        ? { role: "assistant", text: data.reply }
+        ? { role: "assistant", text: data.reply, proposals: Array.isArray(data.proposals) ? data.proposals.slice(0, 5) : undefined }
         : { role: "assistant", text: data.error ?? "L'assistant est indisponible pour le moment.", error: true }])
     } catch {
       setTurns(prev => [...prev, { role: "assistant", text: "Connexion impossible. Vérifiez le réseau et réessayez.", error: true }])
@@ -84,6 +124,18 @@ export function CopilotPanel() {
       setBusy(false)
     }
   }, [busy, turns, pathname])
+
+  const setCard = (token: string, state: CardState) => setCards(prev => ({ ...prev, [token]: state }))
+  const confirm = useCallback(async (token: string) => {
+    setCard(token, { status: "busy" })
+    try {
+      const res = await fetch("/api/assistant/copilote/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }) })
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string; href?: string; error?: string }
+      setCard(token, data.ok && data.message ? { status: "done", message: data.message, href: data.href } : { status: "error", message: data.error ?? "L'action n'a pas pu être faite." })
+    } catch {
+      setCard(token, { status: "error", message: "Connexion impossible. Vérifiez le réseau et réessayez." })
+    }
+  }, [])
 
   return (
     <>
@@ -97,10 +149,10 @@ export function CopilotPanel() {
             <Sparkles className="h-5 w-5" aria-hidden />
             <div className="flex-1">
               <p className="text-sm font-semibold">Assistant IA</p>
-              <p className="text-xs text-sky-100/80">Consultation seule · ne modifie rien</p>
+              <p className="text-xs text-sky-100/80">Rien n&apos;est fait sans votre confirmation</p>
             </div>
             {turns.length > 0 && (
-              <button type="button" onClick={() => setTurns([])} disabled={busy} aria-label="Effacer la conversation" title="Effacer la conversation" className="rounded p-1.5 hover:bg-white/10 disabled:opacity-50">
+              <button type="button" onClick={() => { setTurns([]); setCards({}) }} disabled={busy} aria-label="Effacer la conversation" title="Effacer la conversation" className="rounded p-1.5 hover:bg-white/10 disabled:opacity-50">
                 <Trash2 className="h-4 w-4" aria-hidden />
               </button>
             )}
@@ -133,6 +185,16 @@ export function CopilotPanel() {
                     : "rounded-bl-sm bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-100",
                 ].join(" ")}>
                   {t.role === "assistant" && !t.error ? renderCopilotText(t.text, () => { if (window.innerWidth < 640) setOpen(false) }) : t.text}
+                  {t.proposals?.map(p => (
+                    <ProposalCardView
+                      key={p.token}
+                      proposal={p}
+                      state={cards[p.token] ?? { status: "pending" }}
+                      onConfirm={() => void confirm(p.token)}
+                      onCancel={() => setCard(p.token, { status: "cancelled" })}
+                      onNavigate={() => { if (window.innerWidth < 640) setOpen(false) }}
+                    />
+                  ))}
                 </div>
               </div>
             ))}
