@@ -7,6 +7,7 @@ import {
   mapWarningDataToPublicView,
 } from "@/lib/acquisition/review/consultation-ui"
 import { AttachmentReadingBadge } from "@/components/consultations/AttachmentReadingBadge"
+import { ConsultationSummary } from "@/components/consultations/ConsultationSummary"
 import { ConsultationProposedForm } from "@/components/consultations/ConsultationProposedForm"
 import { ConsultationConversionPanel } from "@/components/consultations/ConsultationConversionPanel"
 import type { ConversionClientOption } from "@/components/consultations/ConsultationConversionPanel"
@@ -46,11 +47,13 @@ export function ConsultationDetail({
   extractionEnabled,
   conversionEnabled,
   clients,
+  summaryEnabled = false,
 }: {
   bundle: ImportDraftReviewBundle
   extractionEnabled: boolean
   conversionEnabled: boolean
   clients: ConversionClientOption[]
+  summaryEnabled?: boolean
 }) {
   const { draft, message, content, attachments } = bundle
   const warnings = mapWarningDataToPublicView(draft.warningData)
@@ -128,6 +131,7 @@ export function ConsultationDetail({
               </p>
             )}
           </div>
+          {summaryEnabled && content.normalizedText?.trim() && <ConsultationSummary draftId={draft.id} />}
         </CardContent>
       </Card>
 

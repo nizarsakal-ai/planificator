@@ -6,6 +6,7 @@ import { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag
 import { isAcquisitionExtractionEnabled } from "@/lib/acquisition/extraction/extraction-feature-flag"
 import { isAcquisitionConversionFullyEnabled } from "@/lib/acquisition/conversion/conversion-feature-flag"
 import { importDraftReadRepository } from "@/lib/acquisition/review/import-draft-read.repository"
+import { consultationSummaryConfig } from "@/lib/acquisition/assistant/consultation-summary"
 import { ConsultationDetail } from "@/components/consultations/ConsultationDetail"
 import { Card, CardContent } from "@/components/ui/card"
 
@@ -68,6 +69,7 @@ export default async function ConsultationDetailPage({
         extractionEnabled={isAcquisitionExtractionEnabled()}
         conversionEnabled={isAcquisitionConversionFullyEnabled()}
         clients={clients}
+        summaryEnabled={Boolean(consultationSummaryConfig(session.user.companyId))}
       />
     </div>
   )
