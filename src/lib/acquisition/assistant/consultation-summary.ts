@@ -18,7 +18,7 @@ export function consultationSummaryConfig(companyId: string, env = process.env) 
 
 export async function reserveConsultationSummary(
   db: PrismaClient,
-  input: { companyId: string; actorId: string; draftId: string; dailyLimit: number }
+  input: { companyId: string; actorId: string; draftId: string | null; dailyLimit: number }
 ) {
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`consultation-summary:${input.companyId}`}, 0))`

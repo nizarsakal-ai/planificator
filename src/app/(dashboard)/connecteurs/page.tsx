@@ -5,6 +5,7 @@
 // Drapeau CONNECTOR_CENTER_ENABLED + ADMIN/SUPER_ADMIN.
 import { PlugZap } from "lucide-react"
 import Link from "next/link"
+import { ConsultationSummary } from "@/components/consultations/ConsultationSummary"
 import { consultationSummaryConfig } from "@/lib/acquisition/assistant/consultation-summary"
 import { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
 import { prisma } from "@/lib/prisma"
@@ -64,7 +65,12 @@ export default async function ConnectorCenterPage({ searchParams }: { searchPara
                 <span className="text-xs text-muted-foreground">{assistantEnabled ? "Mode réel" : "Désactivé"}</span>
               </div>
               <p className="text-sm text-muted-foreground">Résumé à la demande des consultations avec Claude Haiku 5.5.</p>
-              {assistantEnabled && <Link href="/consultations" className="text-sm underline">Ouvrir Consultations</Link>}
+              {assistantEnabled && (
+                <>
+                  <Link href="/consultations" className="text-sm underline">Ouvrir Consultations</Link>
+                  <ConsultationSummary draftId={null} />
+                </>
+              )}
             </CardContent></Card>
           )
           const ls = live && isLiveConnectorKey(c.def.key) ? live[c.def.key] : null
