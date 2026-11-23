@@ -12,7 +12,7 @@ import {
 type SummaryState = { status: "idle" } | { status: "ok"; text: string } | { status: "error"; text: string }
 
 export async function summarizeConsultationAction(
-  draftId: string,
+  draftId: string | null,
   _previous: SummaryState,
   _formData: FormData
 ): Promise<SummaryState> {
@@ -26,13 +26,20 @@ export async function summarizeConsultationAction(
 
   let phase: "lecture" | "quota" | "model" = "lecture"
   try {
-    const draft = await prisma.worksiteImportDraft.findFirst({
-      where: { id: draftId, companyId: user.companyId },
-      select: { acquisitionMessage: { select: { subject: true, content: { select: { normalizedText: true } } } } },
-    })
-    const message = draft?.acquisitionMessage
-    const text = message?.content?.normalizedText?.trim()
-    if (!message || !text) return { status: "error", text: "Aucun texte disponible pour ce résumé." }
+    let input = {
+      subject: "Demande de devis fictive",
+      text: "Pour un événement fictif à Lyon le 15 juin 2027, prévoir deux tentes de 25 m² et 40 chaises. Les horaires de montage restent à confirmer.",
+    }
+    if (draftId !== null) {
+      const draft = await prisma.worksiteImportDraft.findFirst({
+        where: { id: draftId, companyId: user.companyId },
+        select: { acquisitionMessage: { select: { subject: true, content: { select: { normalizedText: true } } } } },
+      })
+      const message = draft?.acquisitionMessage
+      const text = message?.content?.normalizedText?.trim()
+      if (!message || !text) return { status: "error", text: "Aucun texte disponible pour ce résumé." }
+      input = { subject: message.subject, text }
+    }
 
     phase = "quota"
     const allowed = await reserveConsultationSummary(prisma, {
@@ -43,7 +50,7 @@ export async function summarizeConsultationAction(
     phase = "model"
     return {
       status: "ok",
-      text: await summarizeConsultation({ subject: message.subject, text }, createAnthropicExtractionClient(config.apiKey)),
+      text: await summarizeConsultation(input, createAnthropicExtractionClient(config.apiKey)),
     }
   } catch (error) {
     const code = phase !== "model" ? "PERSISTENCE"
