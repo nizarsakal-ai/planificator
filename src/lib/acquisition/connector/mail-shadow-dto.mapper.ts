@@ -3,6 +3,7 @@
  * Mapper Acquisition → MailShadowInputDto — PUR (aucun repository).
  */
 
+import { normalizeSenderAddress } from "@/lib/acquisition/normalize-sender-address"
 import type { CanonicalMailMessage } from "@/lib/acquisition/connector/connector.types"
 import type { MailShadowInputDtoInput } from "@/lib/integration/connectors/mail-bridge/mail-shadow-input.dto"
 import { MESSAGE_CONTENT_CAPABILITIES } from "@/lib/integration/types/message-content-capability"
@@ -37,10 +38,7 @@ export function mapCanonicalMailToShadowDto(
         ? message.receivedAt
         : ctx.nowIso ?? new Date().toISOString()
 
-  const senderEmail = message.fromHeader?.trim()
-  const domain = senderEmail?.includes("@")
-    ? senderEmail.split("@")[1]?.toLowerCase()
-    : undefined
+  const sender = normalizeSenderAddress(message.fromHeader)
 
   // LOT-2A — subject optionnel déjà présent dans le poll (aucun second fetch).
   // Invariant : normalizeSubject obligatoire (borne 512 Unicode-safe).
@@ -61,14 +59,7 @@ export function mapCanonicalMailToShadowDto(
         MESSAGE_CONTENT_CAPABILITIES.CONTENT_FETCHABLE,
         MESSAGE_CONTENT_CAPABILITIES.ATTACHMENTS_FETCHABLE,
       ],
-      ...(senderEmail || domain
-        ? {
-            sender: {
-              ...(senderEmail ? { email: senderEmail } : {}),
-              ...(domain ? { domain } : {}),
-            },
-          }
-        : {}),
+      ...(sender ? { sender } : {}),
       ...(subject ? { subject } : {}),
     },
   }
