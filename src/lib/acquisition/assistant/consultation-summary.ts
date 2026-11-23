@@ -4,13 +4,14 @@ import { createAnthropicExtractionClient } from "@/lib/acquisition/extraction/an
 const MODEL = "claude-haiku-5-5"
 const REQUEST_ENTITY = "ConsultationAIRequest"
 const MAX_CONTENT_CHARS = 12_000
+const MAX_DAILY_REQUESTS = 20
 
 export function consultationSummaryConfig(companyId: string, env = process.env) {
   const dailyLimit = Number(env.CONSULTATION_AI_DAILY_LIMIT)
   const apiKey = env.ANTHROPIC_API_KEY?.trim()
   if (
     !companyId || env.CONSULTATION_AI_COMPANY_ID !== companyId || !apiKey ||
-    !Number.isInteger(dailyLimit) || dailyLimit < 1 || dailyLimit > 50
+    !Number.isInteger(dailyLimit) || dailyLimit < 1 || dailyLimit > MAX_DAILY_REQUESTS
   ) return null
   return { dailyLimit, apiKey }
 }

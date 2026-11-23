@@ -20,7 +20,7 @@ it("isole l’assistant et refuse un plafond manquant ou hors limites", () => {
   assert.equal(consultationSummaryConfig("pilote", env)?.dailyLimit, 20)
   assert.equal(consultationSummaryConfig("autre", env), null)
   assert.equal(consultationSummaryConfig("pilote", { ...env, CONSULTATION_AI_DAILY_LIMIT: "" }), null)
-  assert.equal(consultationSummaryConfig("pilote", { ...env, CONSULTATION_AI_DAILY_LIMIT: "51" }), null)
+  assert.equal(consultationSummaryConfig("pilote", { ...env, CONSULTATION_AI_DAILY_LIMIT: "21" }), null)
 })
 
 it("réserve le quota quotidien sous concurrence sans conserver le contenu", async () => {
