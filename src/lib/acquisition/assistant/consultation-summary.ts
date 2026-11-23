@@ -51,7 +51,7 @@ export async function summarizeConsultation(
   const request = {
     model: MODEL,
     max_tokens: 640,
-    output_config: { effort: "low" },
+    output_config: { effort: "low" as const },
     system: [
       "Résume en français la demande commerciale dans le courriel fourni.",
       "Présente la demande, le lieu, les dates, les quantités et les points à confirmer.",
