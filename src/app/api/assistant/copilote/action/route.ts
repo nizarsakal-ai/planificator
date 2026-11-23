@@ -41,10 +41,10 @@ export async function POST(request: Request): Promise<Response> {
     reserved = await reserveProposal(prisma, { companyId: ctx.companyId, actorId: ctx.userId, nonce: verified.nonce, kind: verified.payload.kind })
     if (!reserved) return json({ error: "Cette proposition a déjà été confirmée." }, 409)
     // Chargement à la demande : ces modules ouvrent des clients (courriel…) qui ne doivent pas s'initialiser à la compilation.
-    const [{ createTask }, { affecterEquipe }, { createQuoteAction }] = await Promise.all([
-      import("@/lib/actions/task.actions"), import("@/lib/actions/chantier.actions"), import("@/lib/actions/quote.actions"),
+    const [{ createTask }, { affecterEquipe }, { createQuoteAction }, { createRuleAction }] = await Promise.all([
+      import("@/lib/actions/task.actions"), import("@/lib/actions/chantier.actions"), import("@/lib/actions/quote.actions"), import("@/lib/actions/automation.actions"),
     ])
-    const result = await executeProposal(verified.payload, { createTask, assignTeam: affecterEquipe, createQuote: createQuoteAction })
+    const result = await executeProposal(verified.payload, { createTask, assignTeam: affecterEquipe, createQuote: createQuoteAction, createRule: (f) => createRuleAction(f) })
     if (!result.ok) {
       await releaseProposal(prisma, { companyId: ctx.companyId, nonce: verified.nonce })
       return json({ error: result.error }, 422)

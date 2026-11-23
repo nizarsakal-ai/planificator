@@ -11,6 +11,8 @@ import { createAnthropicExtractionClient, mapAnthropicSdkError } from "@/lib/acq
 import { copilotConfig, isCopilotActionsEnabled, isCopilotRole } from "@/lib/copilot/copilot-config"
 import { proposalSecret } from "@/lib/copilot/copilot-proposal"
 import { isBillingCompleteEnabled } from "@/lib/billing/billing-feature-flag"
+import { isAutomationsEnabled } from "@/lib/automation/automation-feature-flag"
+import { isCrmEnabled } from "@/lib/crm/crm-feature-flag"
 import { reserveCopilotRequest } from "@/lib/copilot/copilot-quota"
 import { parisToday } from "@/lib/copilot/copilot-date"
 import { buildSystemPrompt, CopilotEmptyError, CopilotInputError, parseHistory, parseImage, parsePage, runCopilot } from "@/lib/copilot/copilot.core"
@@ -51,7 +53,7 @@ export async function POST(request: Request): Promise<Response> {
     const todayStr = parisToday()
     const today = new Date(`${todayStr}T00:00:00.000Z`)
     const secret = isCopilotActionsEnabled() ? proposalSecret() : null
-    const actions = secret ? { companyId: user.companyId, userId: user.id, secret, billingEnabled: isBillingCompleteEnabled(), today } : undefined
+    const actions = secret ? { companyId: user.companyId, userId: user.id, secret, billingEnabled: isBillingCompleteEnabled(), automationsEnabled: isAutomationsEnabled(), crmEnabled: isCrmEnabled(), today } : undefined
     phase = "model"
     const result = await runCopilot(createAnthropicExtractionClient(config.apiKey), prisma, {
       history,

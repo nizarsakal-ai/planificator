@@ -8,17 +8,20 @@ import { createHmac, randomUUID, timingSafeEqual } from "crypto"
 
 type Env = Record<string, string | undefined>
 
-export type ProposalKind = "TASK" | "ASSIGNMENT" | "QUOTE"
+export type ProposalKind = "TASK" | "ASSIGNMENT" | "QUOTE" | "AUTOMATION"
 
 export interface TaskPayload { title: string; description: string | null; priority: "LOW" | "MEDIUM" | "HIGH"; dueDate: string | null; assigneeId: string | null; worksiteId: string | null }
 export interface AssignmentPayload { worksiteId: string; teamId: string; dateFrom: string; dateTo: string }
 export interface QuoteLinePayload { articleId: string | null; designation: string; unit: string; quantity: string; unitPrice: string; vatRate: string }
+/** IA-5 : règle d'automatisation, toujours créée en BROUILLON (approbation dans la page Automatisations). */
+export interface AutomationPayload { name: string; trigger: string; stageFilter: string | null; action: string; taskTitle: string | null; taskAssigneeId: string | null; taskDueInDays: number | null; message: string | null }
 export interface QuotePayload { worksiteId: string; issueDate: string; subject: string | null; lines: QuoteLinePayload[] }
 
 export type ProposalPayload =
   | { kind: "TASK"; data: TaskPayload }
   | { kind: "ASSIGNMENT"; data: AssignmentPayload }
   | { kind: "QUOTE"; data: QuotePayload }
+  | { kind: "AUTOMATION"; data: AutomationPayload }
 
 /** Ce que le navigateur affiche (aucune donnée hors de la société de l'utilisateur). */
 export interface ProposalCard { token: string; kind: ProposalKind; title: string; details: string[]; warning?: string }

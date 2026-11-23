@@ -14,6 +14,7 @@ export interface ExecutePorts {
   createTask: (formData: FormData) => Promise<{ success: true } | { error: string }>
   assignTeam: (formData: FormData) => Promise<{ success?: boolean; count?: number; error?: string }>
   createQuote: (raw: unknown) => Promise<{ ok: true; id: string; number: string } | { ok: false; error: string }>
+  createRule: (formData: FormData) => Promise<{ etat: "initial" | "ok" | "erreur"; message: string }>
 }
 
 /** Réserve le numéro de la proposition ; `false` si elle a déjà été confirmée. */
@@ -59,6 +60,14 @@ export async function executeProposal(payload: ProposalPayload, ports: ExecutePo
         lines: d.lines.map(l => ({ articleId: l.articleId, designation: l.designation, unit: l.unit, quantity: l.quantity, unitPrice: l.unitPrice, vatRate: l.vatRate })),
       })
       return r.ok ? { ok: true, message: `Brouillon de devis ${r.number} créé.`, href: `/devis/${r.id}` } : { ok: false, error: r.error }
+    }
+    case "AUTOMATION": {
+      const d = payload.data
+      const r = await ports.createRule(form({
+        name: d.name, trigger: d.trigger, action: d.action, stageFilter: d.stageFilter,
+        taskTitle: d.taskTitle, taskAssigneeId: d.taskAssigneeId, taskDueInDays: d.taskDueInDays === null ? null : String(d.taskDueInDays), message: d.message,
+      }))
+      return r.etat === "ok" ? { ok: true, message: "Règle créée en brouillon : approuvez-la dans Automatisations pour l'activer.", href: "/automatisations" } : { ok: false, error: r.message || "Règle impossible à créer." }
     }
     default:
       return { ok: false, error: "Action inconnue." }

@@ -117,3 +117,22 @@ Sans lui, l'assistant reste en lecture seule et le point d'accès de confirmatio
 Contrôles serveur de la photo (`parseImage`) : JPEG, PNG ou WebP seulement, base64 strict, signature du format
 cohérente, 3,5 millions de caractères au plus. Le prompt rappelle que le texte visible sur une photo est une information,
 jamais une instruction.
+
+---
+
+# IA-5 : automatisations écrites en français
+
+L'utilisateur décrit une automatisation en français (« quand un devis est accepté, crée une tâche pour planifier le
+chantier dans 2 jours »). L'assistant la traduit en règle du **module Automatisations existant** et affiche une carte
+« Je confirme ». La confirmation crée la règle **en brouillon** via `createRuleAction` : elle n'agit qu'après
+l'approbation habituelle dans la page Automatisations (deux étapes, comme à la main).
+
+- Liste fermée du module : déclencheurs « changement d'étape d'une opportunité » (filtre d'étape facultatif), « relance
+  d'opportunité arrivée à échéance », « devis accepté » ; actions « créer une tâche interne », « notifier les
+  administrateurs ». Champs de modèle : `{numero} {titre} {client} {chantier} {etape} {date}`.
+- Validation identique au formulaire (`validateRule`), déclencheurs du pipeline commercial refusés si celui-ci est coupé,
+  responsable vérifié dans la société.
+- Une demande hors liste (« chaque lundi », envoi de courriel…) est expliquée, avec la règle la plus proche si elle a du
+  sens.
+- Outil de lecture `automatisations` : règles existantes, pour éviter les doublons.
+- Outil offert seulement si `AUTOMATIONS_ENABLED=true` (et IA-2 active).

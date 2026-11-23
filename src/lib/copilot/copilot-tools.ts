@@ -6,8 +6,10 @@
 import type { PrismaClient, Prisma } from "@prisma/client"
 import type Anthropic from "@anthropic-ai/sdk"
 import { buildBriefing } from "@/lib/copilot/copilot-briefing"
+import { isAutomationsEnabled } from "@/lib/automation/automation-feature-flag"
+import { ACTION_LABEL, TRIGGER_LABEL } from "@/lib/automation/automation.core"
 
-type Db = Pick<PrismaClient, "assignment" | "worksite" | "invoice" | "absence" | "stockLevel" | "client" | "worksiteImportDraft" | "team" | "employee" | "article">
+type Db = Pick<PrismaClient, "assignment" | "worksite" | "invoice" | "absence" | "stockLevel" | "client" | "worksiteImportDraft" | "team" | "employee" | "article" | "automationRule">
 
 export const MAX_ROWS = 40
 const MAX_RANGE_DAYS = 62
@@ -107,6 +109,11 @@ export const COPILOT_TOOLS: Anthropic.Tool[] = [
   {
     name: "briefing_du_jour",
     description: "Briefing du jour : chantiers et équipes d'aujourd'hui, équipes libres, absents, et alertes de veille classées par urgence (factures en retard, affectations refusées ou non confirmées, chantiers sans équipe, dépassements, absences à valider, stock bas, consultations).",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "automatisations",
+    description: "Règles d'automatisation existantes (nom, statut brouillon / active / désactivée, déclencheur, action), pour éviter les doublons.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -295,6 +302,16 @@ const handlers: Record<string, Handler> = {
   async briefing_du_jour(db, companyId, _input, today) {
     const b = await buildBriefing(db, companyId, today)
     return { ...b, alerts: b.alerts.map(a => ({ urgence: a.level, titre: a.title, detail: a.detail, lien: a.href })) }
+  },
+
+  async automatisations(db, companyId) {
+    if (!isAutomationsEnabled()) return { module_desactive: true }
+    const rows = await db.automationRule.findMany({
+      where: { companyId }, take: MAX_ROWS, orderBy: { createdAt: "desc" },
+      select: { name: true, status: true, trigger: true, action: true },
+    })
+    const STATUS = { DRAFT: "brouillon", ACTIVE: "active", DISABLED: "désactivée" } as const
+    return { regles: rows.map(r => ({ nom: r.name, statut: STATUS[r.status], quand: TRIGGER_LABEL[r.trigger], alors: ACTION_LABEL[r.action] })), lien: "/automatisations" }
   },
 
   async chercher_employes(db, companyId, input) {

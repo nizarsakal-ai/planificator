@@ -139,6 +139,7 @@ describe("exécution après confirmation", () => {
       createTask: async (f: FormData) => { seen.task = Object.fromEntries(f); return { success: true as const } },
       assignTeam: async (f: FormData) => { seen.assign = Object.fromEntries(f); return { success: true, count: 3 } },
       createQuote: async (raw: unknown) => { seen.quote = raw; return { ok: true as const, id: "q1", number: "DEV-2026-0007" } },
+      createRule: async () => ({ etat: "ok" as const, message: "" }),
     }
     assert.deepEqual(await executeProposal(TASK, ports), { ok: true, message: "Tâche créée.", href: "/dashboard" })
     assert.deepEqual(seen.task, { title: "Relancer", priority: "MEDIUM" })
@@ -153,6 +154,7 @@ describe("exécution après confirmation", () => {
       createTask: async () => ({ error: "Accès refusé." }),
       assignTeam: async () => ({ error: "L'équipe est déjà affectée." }),
       createQuote: async () => ({ ok: false as const, error: "Saisie invalide" }),
+      createRule: async () => ({ etat: "erreur" as const, message: "" }),
     }
     assert.deepEqual(await executeProposal(TASK, ports), { ok: false, error: "Accès refusé." })
   })
