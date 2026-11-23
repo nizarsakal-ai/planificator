@@ -47,3 +47,33 @@ Sans l'une d'elles : pas de bouton et le point d'accès `/api/assistant/copilote
 ## Tests
 
 `npm run test:copilot`
+
+---
+
+# IA-2 : actions avec confirmation
+
+L'assistant peut **préparer** trois actions ; il ne les fait jamais lui-même :
+
+| Outil | Action après « Je confirme » | Fonction de l'interface réutilisée |
+|---|---|---|
+| `proposer_tache` | Crée une tâche interne | `createTask` (module Tâches) |
+| `proposer_affectation` | Affecte une équipe à un chantier (1 à 62 jours) | `affecterEquipe` (notification et courriel au chef d'équipe, comme à la main) |
+| `proposer_devis` | Crée un **brouillon** de devis (jamais envoyé) | `createQuoteAction` (module Devis, drapeau `BILLING_COMPLETE_ENABLED`) |
+
+Nouveaux outils de lecture : `chercher_employes`, `chercher_articles` ; `equipes` renvoie désormais les identifiants.
+Les courriels sont rédigés dans la réponse, à copier : rien n'est envoyé.
+
+## Déroulé
+
+1. Claude appelle un outil `proposer_*`. Le serveur vérifie les références **dans la société de la session**, refuse les
+   affectations dans le passé ou en conflit, valide le devis comme le formulaire (montants, TVA, totaux).
+2. Le serveur signe la proposition (HMAC dérivé de `AUTH_SECRET`, 15 minutes, liée à l'utilisateur et à la société) et
+   le panneau affiche une carte avec **Je confirme** / **Annuler**.
+3. `POST /api/assistant/copilote/action` vérifie le jeton, réserve son numéro dans `history_logs` (entité `CopilotAction`,
+   une seule exécution) puis appelle la fonction de l'interface, qui refait tous ses contrôles. En cas d'échec, la
+   réservation est libérée.
+
+## Activation
+
+Drapeau distinct, désactivé par défaut : `COPILOT_ACTIONS_ENABLED=true` (en plus des variables d'IA-1).
+Sans lui, l'assistant reste en lecture seule et le point d'accès de confirmation répond 404.

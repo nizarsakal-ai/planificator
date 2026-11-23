@@ -35,3 +35,8 @@ export function copilotConfig(companyId: unknown, env: Env = process.env): Copil
 export function isCopilotRole(role: unknown): boolean {
   return role === "ADMIN" || role === "SUPER_ADMIN"
 }
+
+/** IA-2 : propositions d'action (cartes « Je confirme »). Drapeau distinct, désactivé par défaut. */
+export function isCopilotActionsEnabled(env: Env = process.env): boolean {
+  return env.COPILOT_ACTIONS_ENABLED === "true"
+}
