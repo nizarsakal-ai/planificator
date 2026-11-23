@@ -10,7 +10,7 @@ import { registerIncomingMessage } from "@/lib/acquisition/acquisition.service"
 import { seedLauraluPartnerForCompany } from "./helpers/seed-lauralu-partner"
 import { downloadAcquisitionAttachment } from "@/lib/acquisition/attachments/attachment-download.service"
 import { AcquisitionAttachmentRepository } from "@/lib/acquisition/attachments/acquisition-attachment.repository"
-import type { GmailAttachmentSourcePort } from "@/lib/acquisition/attachments/gmail-attachment-source.adapter"
+import type { AttachmentSourcePort } from "@/lib/acquisition/attachments/attachment-source.port"
 import type { AttachmentStoragePort } from "@/lib/acquisition/attachments/attachment-storage.port"
 
 const TEST_URL = process.env.TEST_ACQUISITION_DATABASE_URL
@@ -28,6 +28,7 @@ describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
   let companyA = ""
   let companyB = ""
   let attachmentA = ""
+  let mailboxA = ""
 
   before(async () => {
     process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
@@ -45,7 +46,7 @@ describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
     await seedLauraluPartnerForCompany(db, companyB)
 
     // Legacy sourceMailboxKey="" → exactement 1 connexion active (contrat Multi-Gmail).
-    await db.acquisitionGmailConnection.create({
+    const mailbox = await db.acquisitionGmailConnection.create({
       data: {
         companyId: companyA,
         gmailAddress: `attach-a-${Date.now()}@example.com`,
@@ -56,6 +57,8 @@ describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
         active: true,
       },
     })
+
+    mailboxA = mailbox.id
 
     const reg = await registerIncomingMessage(
       {
@@ -92,7 +95,17 @@ describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
     const repository = new AcquisitionAttachmentRepository(db)
     const r = await downloadAcquisitionAttachment(
       { companyId: companyA, attachmentId: attachmentA },
-      { db, repository, gmailSource: mockGmailSource(), storage: mockStorage(), log: () => {} }
+      {
+        db, repository, storage: mockStorage(), log: () => {},
+        source: {
+          fetchAttachment: async (input) => {
+            assert.equal(input.companyId, companyA)
+            assert.equal(input.connectionId, mailboxA)
+            assert.equal(input.externalAttachmentId, "gmail-att-1")
+            return { data: PDF_BUFFER, sizeBytes: PDF_BUFFER.length }
+          },
+        },
+      }
     )
     assert.equal(r.outcome, "STORED")
     const row = await db.acquisitionAttachment.findFirstOrThrow({ where: { id: attachmentA } })
@@ -106,7 +119,7 @@ describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
       {
         db,
         repository: new AcquisitionAttachmentRepository(db),
-        gmailSource: mockGmailSource(),
+        source: { fetchAttachment: async () => assert.fail("La pièce stockée ne doit pas être relue") },
         storage: mockStorage(),
         log: () => {},
       }
@@ -216,7 +229,7 @@ describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
       {
         db,
         repository: new AcquisitionAttachmentRepository(db),
-        gmailSource: mockGmailSource(),
+        source: mockAttachmentSource(),
         storage: mockStorage(),
         log: () => {},
       }
@@ -225,7 +238,7 @@ describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
   })
 })
 
-function mockGmailSource(): GmailAttachmentSourcePort {
+function mockAttachmentSource(): AttachmentSourcePort {
   return {
     fetchAttachment: async () => ({ data: PDF_BUFFER, sizeBytes: PDF_BUFFER.length }),
   }

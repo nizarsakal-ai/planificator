@@ -12,8 +12,8 @@ import {
 } from "@/lib/acquisition/attachments/attachment-policy"
 import type { AttachmentStoragePort } from "@/lib/acquisition/attachments/attachment-storage.port"
 import { cloudinaryAttachmentStorage } from "@/lib/acquisition/attachments/attachment-storage.port"
-import type { GmailAttachmentSourcePort } from "@/lib/acquisition/attachments/gmail-attachment-source.adapter"
-import { gmailAttachmentSource } from "@/lib/acquisition/attachments/gmail-attachment-source.adapter"
+import type { AttachmentSourcePort } from "@/lib/acquisition/attachments/attachment-source.port"
+import { legacyMailArtifactSources } from "@/lib/acquisition/artifacts/legacy-mail-artifact-sources"
 import { getAttachmentRecoveryCronConfig } from "@/lib/acquisition/attachments/attachment-recovery-cron-feature-flag"
 import { isRetryableAttachmentErrorCode } from "@/lib/acquisition/attachments/attachment-retry.policy"
 import { computeRetrySchedule } from "@/lib/acquisition/attachments/attachment-retry-schedule"
@@ -40,7 +40,9 @@ export interface DownloadAcquisitionAttachmentInput {
 export interface AttachmentDownloadServiceDeps {
   db?: PrismaClient
   repository?: AcquisitionAttachmentRepositoryPort
-  gmailSource?: GmailAttachmentSourcePort
+  source?: AttachmentSourcePort
+  /** @deprecated Utiliser source. */
+  gmailSource?: AttachmentSourcePort
   storage?: AttachmentStoragePort
   log?: (event: string, payload?: Record<string, unknown>) => void
 }
@@ -202,7 +204,7 @@ export async function downloadAcquisitionAttachment(
 ): Promise<AttachmentDownloadResult> {
   const db = deps.db ?? prisma
   const repository = deps.repository ?? acquisitionAttachmentRepository
-  const gmailSource = deps.gmailSource ?? gmailAttachmentSource
+  const source = deps.source ?? deps.gmailSource ?? legacyMailArtifactSources.attachment
   const storage = deps.storage ?? cloudinaryAttachmentStorage
   const log = deps.log ?? defaultLog
   const now = input.now ?? (() => new Date())
@@ -297,7 +299,7 @@ export async function downloadAcquisitionAttachment(
 
   let binary: Buffer
   try {
-    const fetched = await gmailSource.fetchAttachment({
+    const fetched = await source.fetchAttachment({
       companyId: input.companyId,
       externalMessageId: scoped.message.externalMessageId,
       externalAttachmentId: claimed.externalAttachmentId,
