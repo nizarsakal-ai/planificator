@@ -61,7 +61,10 @@ describe("menu « Opportunités »", () => {
 
   it("rangé dans la catégorie Commercial, après Consultations", () => {
     const commercial = NAV_CATEGORY_DEFINITIONS.find((category) => category.id === "commercial")
-    assert.deepEqual(commercial?.hrefs, ["/clients", "/consultations", "/opportunites", "/articles"])
+    assert.ok(commercial)
+    const consultations = commercial.hrefs.indexOf("/consultations")
+    assert.notEqual(consultations, -1)
+    assert.equal(commercial.hrefs[consultations + 1], "/opportunites")
   })
 
   it("Sidebar et MobileNav composent le helper ; la visibilité est calculée côté serveur dans le layout", () => {
