@@ -4,6 +4,9 @@
 // de la plateforme d'intégration existante sont affichées en lecture seule (type, nom, états ; jamais d'identifiant).
 // Drapeau CONNECTOR_CENTER_ENABLED + ADMIN/SUPER_ADMIN.
 import { PlugZap } from "lucide-react"
+import Link from "next/link"
+import { consultationSummaryConfig } from "@/lib/acquisition/assistant/consultation-summary"
+import { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
 import { prisma } from "@/lib/prisma"
 import { connectorPageAccess } from "@/lib/connectors/access"
 import { AdminOnlyNotice } from "@/components/stock/AdminOnlyNotice"
@@ -30,13 +33,14 @@ export default async function ConnectorCenterPage({ searchParams }: { searchPara
   const ctx = await connectorPageAccess()
   // Rôle ou société non habilités : refus rendu sur place, avant toute lecture métier (modèle des lots A, B et E).
   if (!ctx) return <AdminOnlyNotice />
+  const assistantEnabled = isAcquisitionEnabled() && Boolean(consultationSummaryConfig(ctx.companyId))
   const params = await searchParams
   const { connectors, platform } = await loadConnectorCenter(prisma, ctx.companyId)
   // LOT-8B : état des identifiants (indice et configuration non secrète seulement), si le drapeau est actif.
   const liveEnabled = isConnectorLiveEnabled()
   const live = liveEnabled ? await loadLiveStatus(prisma, ctx.companyId) : null
   const googleOAuthReady = liveEnabled && isGoogleCalendarOAuthConfigured()
-  const preview = typeof params.apercu === "string" && isConnectorKey(params.apercu) ? params.apercu : null
+  const preview = typeof params.apercu === "string" && params.apercu !== "chatgpt" && isConnectorKey(params.apercu) ? params.apercu : null
   const records = preview ? await listStagedRecords(prisma, ctx.companyId, preview) : []
 
   return (
@@ -44,7 +48,7 @@ export default async function ConnectorCenterPage({ searchParams }: { searchPara
     <div className="space-y-4">
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900"><PlugZap className="h-6 w-6 text-[#0f3460]" /> Centre de connecteurs</h1>
-        <p className="mt-1 text-sm text-slate-500">Services externes (commerce, paiement, marketing, messagerie, ChatGPT, agenda, e-mail, documents). Chacun peut être testé avec des données fictives{liveEnabled ? " ; Shopify, Mailchimp, Slack et Google Agenda peuvent aussi être branchés pour de vrai, en lecture seule" : ""}. Les données reçues sont mises de côté sans toucher à vos données.</p>
+        <p className="mt-1 text-sm text-slate-500">Services externes (commerce, paiement, marketing, messagerie, assistant IA, agenda, e-mail, documents). Chacun peut être testé avec des données fictives{liveEnabled ? " ; Shopify, Mailchimp, Slack et Google Agenda peuvent aussi être branchés pour de vrai, en lecture seule" : ""}. Les données reçues sont mises de côté sans toucher à vos données.</p>
       </div>
       <MessageRetour><StockFlash params={params} /></MessageRetour>
       <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -53,6 +57,16 @@ export default async function ConnectorCenterPage({ searchParams }: { searchPara
 
       <div className="grid gap-3 lg:grid-cols-2">
         {connectors.map((c) => {
+          if (c.def.key === "chatgpt") return (
+            <Card key={c.def.key}><CardContent className="space-y-3 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="font-semibold">Assistant IA</h2>
+                <span className="text-xs text-muted-foreground">{assistantEnabled ? "Mode réel" : "Désactivé"}</span>
+              </div>
+              <p className="text-sm text-muted-foreground">Résumé à la demande des consultations avec Claude Haiku 5.5.</p>
+              {assistantEnabled && <Link href="/consultations" className="text-sm underline">Ouvrir Consultations</Link>}
+            </CardContent></Card>
+          )
           const ls = live && isLiveConnectorKey(c.def.key) ? live[c.def.key] : null
           const fields = ls && isLiveConnectorKey(c.def.key) ? LIVE_FIELDS[c.def.key] : []
           const badge = c.mode === "LIVE" ? ["Connexion réelle", "bg-emerald-50 text-emerald-700"] : c.mode === "SIMULATION" ? ["Simulation", "bg-amber-50 text-amber-700"] : ["Désactivé", "bg-slate-100 text-slate-700"]
