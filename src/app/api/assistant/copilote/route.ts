@@ -1,0 +1,73 @@
+// IA-1 : point d'accès du copilote (POST JSON). Lecture seule.
+// Drapeau + société cible (sinon 404) ; session obligatoire (401) ; ADMIN ou SUPER_ADMIN (403) ; corps JSON uniquement
+// (415, protège des formulaires d'un autre site) ; quota quotidien par société (429). Le companyId vient de la session.
+// Journal d'échec : phase, code et outils appelés, jamais la question ni la réponse.
+import { NextResponse } from "next/server"
+import { APIError } from "@anthropic-ai/sdk"
+import type { Session } from "next-auth"
+import { auth } from "@/auth"
+import { prisma } from "@/lib/prisma"
+import { createAnthropicExtractionClient, mapAnthropicSdkError } from "@/lib/acquisition/extraction/anthropic-extraction.client"
+import { copilotConfig, isCopilotRole } from "@/lib/copilot/copilot-config"
+import { reserveCopilotRequest } from "@/lib/copilot/copilot-quota"
+import { buildSystemPrompt, CopilotEmptyError, CopilotInputError, parseHistory, parsePage, runCopilot } from "@/lib/copilot/copilot.core"
+
+export const dynamic = "force-dynamic"
+export const maxDuration = 120
+
+const json = (body: unknown, status = 200) =>
+  NextResponse.json(body, { status, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } })
+
+/** Jour civil à Paris, au format AAAA-MM-JJ. */
+function parisToday(now = new Date()): string {
+  return new Intl.DateTimeFormat("fr-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(now)
+}
+
+export async function POST(request: Request): Promise<Response> {
+  let session: Session | null
+  try { session = await auth() } catch { session = null }
+  const user = session?.user
+  const config = copilotConfig(user?.companyId)
+  if (!config) return new NextResponse(null, { status: 404, headers: { "Cache-Control": "no-store" } })
+  if (!user?.id || !user.companyId) return json({ error: "Connexion requise." }, 401)
+  if (!isCopilotRole(user.role)) return json({ error: "Réservé à l'administration." }, 403)
+  if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) return json({ error: "Format refusé." }, 415)
+
+  let history, page
+  try {
+    const body = (await request.json()) as { messages?: unknown; page?: unknown }
+    history = parseHistory(body.messages)
+    page = parsePage(body.page)
+  } catch (error) {
+    return json({ error: error instanceof CopilotInputError ? error.message : "Requête invalide." }, 400)
+  }
+
+  let phase: "quota" | "model" = "quota"
+  try {
+    const allowed = await reserveCopilotRequest(prisma, { companyId: user.companyId, actorId: user.id, dailyLimit: config.dailyLimit })
+    if (!allowed) return json({ error: "La limite quotidienne de questions est atteinte. Elle se renouvelle demain." }, 429)
+
+    const company = await prisma.company.findUnique({ where: { id: user.companyId }, select: { name: true } })
+    const todayStr = parisToday()
+    phase = "model"
+    const result = await runCopilot(createAnthropicExtractionClient(config.apiKey), prisma, {
+      history,
+      companyId: user.companyId,
+      today: new Date(`${todayStr}T00:00:00.000Z`),
+      system: buildSystemPrompt({ userName: user.name ?? "l'utilisateur", companyName: company?.name ?? "votre société", today: todayStr, page }),
+    })
+    return json({ reply: result.text })
+  } catch (error) {
+    const code = phase !== "model" ? "PERSISTENCE"
+      : error instanceof CopilotEmptyError ? error.causeCode
+      : mapAnthropicSdkError(error).kind
+    console.warn("copilot_failed", {
+      phase, code,
+      ...(phase === "model" && error instanceof APIError && typeof error.status === "number" ? { status: error.status } : {}),
+    })
+    const text = code === "RATE_LIMIT" ? "L'assistant est très sollicité : réessayez dans une minute."
+      : code === "REFUSAL" ? "L'assistant ne peut pas répondre à cette demande."
+      : "L'assistant est indisponible pour le moment."
+    return json({ error: text }, code === "RATE_LIMIT" ? 429 : 503)
+  }
+}
