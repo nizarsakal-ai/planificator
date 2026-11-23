@@ -247,7 +247,7 @@ describe("nav-config — source unique Sidebar / MobileNav", () => {
       const src = read(file)
       assert.match(src, /from "@\/lib\/navigation\/nav-config"/)
       assert.match(src, /getNavItems\(user\.role\)/)
-      assert.match(src, /const activeHref = getActiveNavHref\(navItems, pathname\)/)
+      assert.match(src, /const activeHref = getActiveNavHref\(menuItems, pathname\)/)
       // Pied commun (identité, « Mon profil », Apparence) : même lien actif calculé par le shell.
       assert.match(src, /<NavFooter user=\{user\} items=\{grouped\.footer\} activeHref=\{activeHref\}/)
       assert.doesNotMatch(src, /function getNavItems/)
