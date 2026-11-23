@@ -218,7 +218,9 @@ describe("contrôles statiques", () => {
     assert.match(o, /if \(host !== TOKEN_HOST \|\| \(path !== "\/token" && path !== "\/revoke"\)\)/)
     assert.match(o, /runtimeCallerId: "connector-runtime"/)
     assert.match(o, /runtimeCallerId: "revocation-service"/)
-    assert.match(o, /pg_advisory_xact_lock/)
+    // Rafraîchissement sérialisé par le verrou de la connexion, dans UNE transaction du coffre (aucun interblocage de pool).
+    assert.match(o, /useCredentialUnderLock\(/)
+    assert.doesNotMatch(o, /\$transaction\(/, "aucune transaction ouverte ici autour d'appels au coffre")
   })
   it("migration : états OAuth par empreintes, usage unique, 15 min au plus en base ; LIVE élargi à google_calendar", () => {
     const sql = readFileSync("prisma/migrations/20261123090000_v2_google_calendar_live/migration.sql", "utf8")

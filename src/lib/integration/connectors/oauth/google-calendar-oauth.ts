@@ -10,8 +10,8 @@
  * Retour : `state` consommé atomiquement (une seule fois, non expiré, même société, même utilisateur, même navigateur)
  * AVANT l'échange du code ; échange hors transaction ; portée vérifiée ; refresh token chiffré dans le coffre
  * (`OAUTH_REFRESH_TOKEN`, PENDING → lecture de vérification → ACTIVE) ; jeton d'accès jamais stocké.
- * Rafraîchissement : par le runtime seulement, sérialisé par société + connexion (verrou consultatif PostgreSQL), sans
- * jamais remplacer un refresh token par une valeur vide.
+ * Rafraîchissement : par le runtime seulement, sérialisé par connexion (verrou `FOR UPDATE` dans une transaction unique
+ * du coffre), sans jamais remplacer un refresh token par une valeur vide.
  *
  * Client OAuth DÉDIÉ (`GOOGLE_CALENDAR_CLIENT_ID` / `GOOGLE_CALENDAR_CLIENT_SECRET`), distinct du client Gmail/Drive
  * (`GOOGLE_CLIENT_ID`) et distinct entre production et préproduction (§16.3). Aucun jeton, code, `state` ni vérificateur
@@ -24,7 +24,7 @@ import type { ConnectorContext } from "@/lib/connectors/connectors.service"
 import { liveGetJson, nativeFetch, type FetchLike } from "@/lib/integration/connectors/live/live-http"
 import { checkCredentialAttemptLimit } from "@/lib/integration/connectors/live/live-rate-limits"
 import {
-  activateCredential, assignCredentialsRef, failCredential, resolveCredential, storeCredential, type SecretProviderDeps,
+  activateCredential, assignCredentialsRef, failCredential, resolveCredential, storeCredential, useCredentialUnderLock, type SecretProviderDeps,
 } from "@/lib/integration/persistence/secret-provider.service"
 import { resolveSecretEnvironment } from "@/lib/integration/secrets/keyring"
 import { SecretProviderError } from "@/lib/integration/secrets/secret-errors"
@@ -243,9 +243,11 @@ export async function completeGoogleCalendarOAuth(
 // ─── Runtime : jeton d'accès éphémère, refresh sérialisé ─────────────────────
 
 /**
- * Jeton d'accès pour UNE synchronisation, jamais stocké. Sous verrou consultatif transactionnel (société + connexion) :
- * deux rafraîchissements de la même connexion sont sérialisés ; un refresh token renouvelé par Google est enregistré en
- * nouvelle version (PENDING → ACTIVE), jamais remplacé par une valeur vide.
+ * Jeton d'accès pour UNE synchronisation, jamais stocké. Sous verrou de la connexion (`useCredentialUnderLock` du
+ * coffre : une seule transaction, donc une seule connexion du pool, ce qui exclut l'interblocage d'un pool à une
+ * connexion) : deux rafraîchissements de la même connexion sont sérialisés et le second relit le refresh token le plus
+ * récent ; un refresh token renouvelé par Google devient une nouvelle version ACTIVE dans la même transaction, jamais
+ * remplacée par une valeur vide.
  */
 export async function googleAccessTokenForSync(
   db: Db, ctx: ConnectorContext, connectionId: string, d: { post?: TokenPost; secrets?: SecretProviderDeps; env?: Env } = {},
@@ -253,16 +255,15 @@ export async function googleAccessTokenForSync(
   const cfg = readGoogleCalendarOAuthConfig(d.env)
   if (!cfg) throw new ConnectorSourceError("REAL_CONNECTION_DISABLED")
   const post = d.post ?? nativeTokenPost
-  return db.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`gcal-refresh:${ctx.companyId}:${connectionId}`}, 0))`
-    const refreshToken = await resolveCredential(db, { companyId: ctx.companyId, connectionId, secretKind: "OAUTH_REFRESH_TOKEN", runtimeCallerId: "connector-runtime", environment: d.secrets?.environment ?? resolveSecretEnvironment() }, d.secrets)
-    const r = await refreshAccessToken(post, cfg, refreshToken)
-    if (r.newRefreshToken) {
-      const v = await storeCredential(db, { companyId: ctx.companyId, connectionId, secretKind: "OAUTH_REFRESH_TOKEN", plaintext: r.newRefreshToken, actorId: "connector-runtime" }, d.secrets)
-      await activateCredential(db, { companyId: ctx.companyId, connectionId, versionId: v.versionId, actorId: "connector-runtime" }, d.secrets)
-    }
-    return r.accessToken
-  }, { timeout: 25_000, maxWait: 10_000 })
+  return useCredentialUnderLock(
+    db,
+    { companyId: ctx.companyId, connectionId, secretKind: "OAUTH_REFRESH_TOKEN", runtimeCallerId: "connector-runtime", environment: d.secrets?.environment ?? resolveSecretEnvironment() },
+    async (refreshToken) => {
+      const r = await refreshAccessToken(post, cfg, refreshToken)
+      return { result: r.accessToken, replacement: r.newRefreshToken }
+    },
+    d.secrets,
+  )
 }
 
 /** Révocation Google au mieux, avant la révocation locale (appelant `revocation-service`, §12). */
