@@ -4,7 +4,7 @@ import type React from "react"
 import { useEffect, useId, useLayoutEffect, useReducer, useRef, useState } from "react"
 import Link from "next/link"
 import { ChevronRight, Sparkles } from "lucide-react"
-import { openCopilot } from "@/components/copilot/copilot-events"
+import { COPILOT_BADGE_EVENT, currentCopilotBadge, openCopilot } from "@/components/copilot/copilot-events"
 import { cn } from "@/lib/utils"
 import { SHADOW_RAISED, SHADOW_SLIDER } from "@/components/ui/shadows"
 import type { NavItem } from "@/lib/navigation/nav-config"
@@ -111,6 +111,14 @@ function SliderNavLink({ item, active, onSlider, sliderReady, onNavigate, onHove
 
 /** IA-1 : bouton du menu qui ouvre le panneau du copilote (pas une page : aucun lien, aucun curseur). */
 function AssistantEntry({ onNavigate, touch }: { onNavigate?: () => void; touch: boolean }) {
+  // IA-3 : pastille du nombre d'alertes du briefing (publiée par le panneau du copilote).
+  const [badge, setBadge] = useState(0)
+  useEffect(() => {
+    setBadge(currentCopilotBadge())
+    const onBadge = (e: Event) => setBadge(Number((e as CustomEvent<number>).detail) || 0)
+    window.addEventListener(COPILOT_BADGE_EVENT, onBadge)
+    return () => window.removeEventListener(COPILOT_BADGE_EVENT, onBadge)
+  }, [])
   return (
     <button
       type="button"
@@ -126,6 +134,11 @@ function AssistantEntry({ onNavigate, touch }: { onNavigate?: () => void; touch:
         <Sparkles className="h-4 w-4" />
       </span>
       <span className="flex-1 truncate">Assistant IA</span>
+      {badge > 0 && (
+        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1.5 text-[11px] font-semibold text-white" aria-label={`${badge} alerte${badge > 1 ? "s" : ""}`}>
+          {badge}
+        </span>
+      )}
     </button>
   )
 }

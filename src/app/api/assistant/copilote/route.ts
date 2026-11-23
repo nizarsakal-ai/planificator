@@ -12,6 +12,7 @@ import { copilotConfig, isCopilotActionsEnabled, isCopilotRole } from "@/lib/cop
 import { proposalSecret } from "@/lib/copilot/copilot-proposal"
 import { isBillingCompleteEnabled } from "@/lib/billing/billing-feature-flag"
 import { reserveCopilotRequest } from "@/lib/copilot/copilot-quota"
+import { parisToday } from "@/lib/copilot/copilot-date"
 import { buildSystemPrompt, CopilotEmptyError, CopilotInputError, parseHistory, parsePage, runCopilot } from "@/lib/copilot/copilot.core"
 
 export const dynamic = "force-dynamic"
@@ -20,10 +21,6 @@ export const maxDuration = 120
 const json = (body: unknown, status = 200) =>
   NextResponse.json(body, { status, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } })
 
-/** Jour civil à Paris, au format AAAA-MM-JJ. */
-function parisToday(now = new Date()): string {
-  return new Intl.DateTimeFormat("fr-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(now)
-}
 
 export async function POST(request: Request): Promise<Response> {
   let session: Session | null

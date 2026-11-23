@@ -5,12 +5,60 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Check, CheckCircle2, Loader2, Send, Sparkles, Trash2, X, XCircle } from "lucide-react"
-import { COPILOT_OPEN_EVENT } from "@/components/copilot/copilot-events"
+import { Check, CheckCircle2, Loader2, RefreshCw, Send, Sparkles, Sun, Trash2, X, XCircle } from "lucide-react"
+import { COPILOT_OPEN_EVENT, publishCopilotBadge } from "@/components/copilot/copilot-events"
 
 interface Proposal { token: string; kind: "TASK" | "ASSIGNMENT" | "QUOTE"; title: string; details: string[]; warning?: string }
 type CardState = { status: "pending" } | { status: "busy" } | { status: "cancelled" } | { status: "done"; message: string; href?: string } | { status: "error"; message: string }
 interface Turn { role: "user" | "assistant"; text: string; error?: boolean; proposals?: Proposal[] }
+interface BriefingData {
+  date: string
+  today: { worksites: Array<{ name: string; teams: string[]; href: string }>; freeTeams: string[]; absent: string[] }
+  alerts: Array<{ id: string; level: "urgent" | "attention" | "info"; title: string; detail: string; href: string }>
+  badge: number
+}
+
+const LEVEL_STYLE = { urgent: "bg-rose-500", attention: "bg-amber-500", info: "bg-sky-500" } as const
+const LEVEL_LABEL = { urgent: "Urgent", attention: "À surveiller", info: "Info" } as const
+export const BRIEFING_PROMPT = "Fais-moi le briefing du jour et propose les actions utiles."
+
+/** IA-3 : briefing du jour (calcul serveur, sans IA). Liens internes uniquement. */
+export function BriefingView({ data, onAnalyze, onNavigate }: { data: BriefingData; onAnalyze: () => void; onNavigate?: () => void }) {
+  const { worksites, freeTeams, absent } = data.today
+  return (
+    <section aria-label="Briefing du jour" className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-800/60">
+      <p className="flex items-center gap-2 font-semibold text-[#0f3460] dark:text-sky-300"><Sun className="h-4 w-4" aria-hidden /> Briefing du jour</p>
+      <div className="space-y-1 text-slate-700 dark:text-slate-200">
+        <p>{worksites.length === 0 ? "Aucun chantier planifié aujourd'hui." : `${worksites.length} chantier${worksites.length > 1 ? "s" : ""} aujourd'hui :`}</p>
+        {worksites.length > 0 && (
+          <ul className="ml-4 list-disc">
+            {worksites.slice(0, 6).map(w => <li key={w.href}><Link href={w.href} onClick={onNavigate} className="underline underline-offset-2">{w.name}</Link> · {w.teams.join(", ")}</li>)}
+          </ul>
+        )}
+        {freeTeams.length > 0 && <p>Équipes libres : {freeTeams.join(", ")}</p>}
+        {absent.length > 0 && <p>Absents : {absent.join(", ")}</p>}
+      </div>
+      {data.alerts.length === 0 ? (
+        <p className="text-emerald-700 dark:text-emerald-300">Aucune alerte : tout est en ordre.</p>
+      ) : (
+        <ul className="space-y-2">
+          {data.alerts.map(a => (
+            <li key={a.id} className="flex gap-2">
+              <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${LEVEL_STYLE[a.level]}`} title={LEVEL_LABEL[a.level]} aria-label={LEVEL_LABEL[a.level]} />
+              <div>
+                <Link href={a.href} onClick={onNavigate} className="font-medium text-slate-900 underline-offset-2 hover:underline dark:text-slate-100">{a.title}</Link>
+                <p className="text-slate-600 dark:text-slate-300">{a.detail}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button type="button" onClick={onAnalyze} className="flex items-center gap-1.5 rounded-lg bg-[#0f3460] px-3 py-1.5 font-semibold text-white hover:bg-[#143e72]">
+        <Sparkles className="h-4 w-4" aria-hidden /> Analyser et proposer des actions
+      </button>
+    </section>
+  )
+}
 
 /** Carte d'action proposée : rien n'est fait avant « Je confirme ». */
 export function ProposalCardView({ proposal, state, onConfirm, onCancel, onNavigate }: {
@@ -84,6 +132,25 @@ export function CopilotPanel() {
   const [draft, setDraft] = useState("")
   const [busy, setBusy] = useState(false)
   const [cards, setCards] = useState<Record<string, CardState>>({})
+  const [briefing, setBriefing] = useState<BriefingData | null>(null)
+  const [briefingState, setBriefingState] = useState<"idle" | "loading" | "error">("idle")
+
+  // IA-3 : briefing chargé au montage (pastille du menu) puis à chaque ouverture du panneau ; sans IA, hors quota.
+  const loadBriefing = useCallback(async () => {
+    setBriefingState("loading")
+    try {
+      const res = await fetch("/api/assistant/copilote/briefing", { cache: "no-store" })
+      if (!res.ok) throw new Error(String(res.status))
+      const data = (await res.json()) as BriefingData
+      setBriefing(data)
+      publishCopilotBadge(data.badge)
+      setBriefingState("idle")
+    } catch {
+      setBriefingState("error")
+    }
+  }, [])
+  useEffect(() => { void loadBriefing() }, [loadBriefing])
+  useEffect(() => { if (open) void loadBriefing() }, [open, loadBriefing])
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -164,6 +231,13 @@ export function CopilotPanel() {
           <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4" aria-live="polite">
             {turns.length === 0 && (
               <div className="space-y-3">
+                {briefing && <BriefingView data={briefing} onAnalyze={() => void send(BRIEFING_PROMPT)} onNavigate={() => { if (window.innerWidth < 640) setOpen(false) }} />}
+                {!briefing && briefingState === "loading" && <p className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Préparation du briefing…</p>}
+                {briefingState === "error" && (
+                  <button type="button" onClick={() => void loadBriefing()} className="flex items-center gap-1.5 text-sm text-slate-500 underline underline-offset-2">
+                    <RefreshCw className="h-3.5 w-3.5" aria-hidden /> Briefing indisponible, réessayer
+                  </button>
+                )}
                 <p className="text-sm text-slate-600 dark:text-slate-300">
                   Posez une question sur votre planning, vos chantiers, vos factures, vos absences ou votre stock.
                 </p>

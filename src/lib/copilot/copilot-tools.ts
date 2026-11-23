@@ -5,6 +5,7 @@
  */
 import type { PrismaClient, Prisma } from "@prisma/client"
 import type Anthropic from "@anthropic-ai/sdk"
+import { buildBriefing } from "@/lib/copilot/copilot-briefing"
 
 type Db = Pick<PrismaClient, "assignment" | "worksite" | "invoice" | "absence" | "stockLevel" | "client" | "worksiteImportDraft" | "team" | "employee" | "article">
 
@@ -101,6 +102,11 @@ export const COPILOT_TOOLS: Anthropic.Tool[] = [
   {
     name: "equipes",
     description: "Équipes actives (identifiant, nom, chef d'équipe) et nombre d'employés actifs.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "briefing_du_jour",
+    description: "Briefing du jour : chantiers et équipes d'aujourd'hui, équipes libres, absents, et alertes de veille classées par urgence (factures en retard, affectations refusées ou non confirmées, chantiers sans équipe, dépassements, absences à valider, stock bas, consultations).",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -284,6 +290,11 @@ const handlers: Record<string, Handler> = {
       db.employee.count({ where: { companyId, active: true } }),
     ])
     return { equipes: teams.map(t => ({ id: t.id, nom: t.name, chef: name(t.leader) })), employes_actifs: employees, lien: "/equipes" }
+  },
+
+  async briefing_du_jour(db, companyId, _input, today) {
+    const b = await buildBriefing(db, companyId, today)
+    return { ...b, alerts: b.alerts.map(a => ({ urgence: a.level, titre: a.title, detail: a.detail, lien: a.href })) }
   },
 
   async chercher_employes(db, companyId, input) {
