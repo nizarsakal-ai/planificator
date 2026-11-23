@@ -78,6 +78,8 @@ describe("raccordement des Connecteurs aux retours explicites", () => {
     const c = code(read("src/app/(dashboard)/connecteurs/page.tsx"))
     assert.ok(c.includes('<a href={`/connecteurs?apercu=${c.def.key}`} className="text-xs text-[#0f3460] underline">Aperçu des données reçues</a>'))
     assert.doesNotMatch(c, /from "next\/link"|<Link[\s>]/, "aucune transition client next/link sur l'écran")
-    assert.ok(c.includes(`const preview = typeof params.apercu === "string" && isConnectorKey(params.apercu) ? params.apercu : null`), "filtrage isConnectorKey conservé")
+    // #205 : la carte « chatgpt » est devenue l'Assistant IA (aucune donnée reçue) et est exclue de l'aperçu ; le filtrage
+    // isConnectorKey reste la garde de la liste fermée, l'exclusion ne fait que la restreindre.
+    assert.ok(c.includes(`const preview = typeof params.apercu === "string" && params.apercu !== "chatgpt" && isConnectorKey(params.apercu) ? params.apercu : null`), "filtrage isConnectorKey conservé")
   })
 })

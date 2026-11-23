@@ -4,7 +4,6 @@
 // de la plateforme d'intégration existante sont affichées en lecture seule (type, nom, états ; jamais d'identifiant).
 // Drapeau CONNECTOR_CENTER_ENABLED + ADMIN/SUPER_ADMIN.
 import { PlugZap } from "lucide-react"
-import Link from "next/link"
 import { ConsultationSummary } from "@/components/consultations/ConsultationSummary"
 import { consultationSummaryConfig } from "@/lib/acquisition/assistant/consultation-summary"
 import { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag"
@@ -67,7 +66,8 @@ export default async function ConnectorCenterPage({ searchParams }: { searchPara
               <p className="text-sm text-muted-foreground">Résumé à la demande des consultations avec Claude Haiku 5.5.</p>
               {assistantEnabled && (
                 <>
-                  <Link href="/consultations" className="text-sm underline">Ouvrir Consultations</Link>
+                  {/* Lien HTML natif comme le reste de l'écran (v5, recette Chrome v4 : la transition client next/link ne se terminait pas). */}
+                  <a href="/consultations" className="text-sm underline">Ouvrir Consultations</a>
                   <ConsultationSummary draftId={null} />
                 </>
               )}
