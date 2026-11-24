@@ -94,7 +94,7 @@ describe("écran d'accueil", () => {
     const c = code(read(PAGE))
     assert.ok(c.includes(`<nav aria-labelledby="acces-rapides-titre"`))
     assert.ok(c.includes("lg:grid-cols-[minmax(0,1fr)_15rem]"), "rail à droite sur grand écran seulement, dans le flux sinon")
-    assert.ok(c.includes("<StudioToolHub />"))
+    assert.ok(c.includes("<StudioToolHub contexte={horsVue} />"))
     // Deux formulaires : nouveau modèle, et import d'un PDF (espace PDF, lot 1).
     assert.equal((c.match(/<FormulaireRetour /g) ?? []).length, 2)
     assert.ok(c.includes("<FormulaireRetour action={importPdfAction}"))

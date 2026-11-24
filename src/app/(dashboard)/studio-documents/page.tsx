@@ -8,7 +8,8 @@
 // Espace PDF (lots 1 et 2, 20/11/2026) : #importer (dépôt d'un PDF reçu) et #fichiers (PDF importés, vers leur fiche).
 // Lot 3 : #combiner (plusieurs PDF importés en un nouveau PDF ; les PDF chiffrés ne sont pas proposés).
 // Lot G2 : éditeur visuel avec aperçu pour la création, modèles de départ (?depart=, liste fermée, rien n'est créé avant
-// l'envoi), recherche dans les documents générés (?q=, ?etat=, relus et bornés ici, filtrés dans la requête).
+// l'envoi), recherche dans les documents générés (?q=, ?etat=, relus et bornés ici, filtrés dans la requête). Les liens
+// de vue et de modèle de départ reconduisent le reste du contexte validé (`adresseStudio`).
 import { FilePenLine } from "lucide-react"
 import { prisma } from "@/lib/prisma"
 import { studioPageAccess } from "@/lib/document-studio/access"
@@ -17,7 +18,7 @@ import { CATEGORIES, CATEGORY_LABEL, type Category } from "@/lib/document-studio
 import { STARTERS, lireDepart } from "@/lib/document-studio/starters"
 import { formatDay, parisToday } from "@/lib/equipment/equipment.core"
 import { listGeneratedDocuments, listPdfDocuments, listPendingDocuments, listPublishedTemplates, listTemplates } from "@/lib/document-studio/queries"
-import { lireRecherche, lireVue } from "@/lib/document-studio/tool-hub"
+import { adresseStudio, adresseVue, lireRecherche, lireVue } from "@/lib/document-studio/tool-hub"
 import { createTemplateAction, importPdfAction } from "@/lib/actions/document-studio.actions"
 import { listStudioPdfs } from "@/lib/document-studio/pdf-workspace.queries"
 import { PDF_UPLOAD_LABEL } from "@/lib/document-studio/pdf-workspace.core"
@@ -61,6 +62,9 @@ export default async function StudioPage({ searchParams }: { searchParams: Promi
     listStudioPdfs(prisma, ctx.companyId),
   ])
   const filtre = recherche.q !== "" || recherche.etat !== null
+  // Contexte reconduit par les liens de l'accueil : changer de vue ou de modèle de départ garde la recherche, et inversement.
+  const horsVue = { depart: depart?.id ?? null, q: recherche.q, etat: recherche.etat }
+  const horsDepart = { vue, q: recherche.q, etat: recherche.etat }
   const publies = vue === "generer" ? await listPublishedTemplates(prisma, ctx.companyId) : []
   const enAttente = vue === "validation" ? await listPendingDocuments(prisma, ctx.companyId) : []
   const pdfs = vue === "pdf" ? await listPdfDocuments(prisma, ctx.companyId) : []
@@ -76,12 +80,12 @@ export default async function StudioPage({ searchParams }: { searchParams: Promi
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_15rem]">
         <section id="outils" aria-label="Outils du Document Studio" className="min-w-0 scroll-mt-4">
-          <StudioToolHub />
+          <StudioToolHub contexte={horsVue} />
         </section>
         <nav aria-labelledby="acces-rapides-titre" className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-4">
           <h2 id="acces-rapides-titre" className="border-b border-slate-300 pb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-600">Accès rapides</h2>
           <ul className="mt-2 space-y-1.5 text-sm">
-            {ACCES_RAPIDES.map((l) => <li key={l.href}><a href={l.href} className={LIEN}>{l.label}</a></li>)}
+            {ACCES_RAPIDES.map((l) => <li key={l.href}><a href={adresseVue(l.href, horsVue)} className={LIEN}>{l.label}</a></li>)}
           </ul>
         </nav>
       </div>
@@ -91,7 +95,7 @@ export default async function StudioPage({ searchParams }: { searchParams: Promi
           <Card><CardContent className="space-y-3 p-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2 id="generer-titre" className="text-sm font-semibold text-slate-900">Générer un document : choisir un modèle publié</h2>
-              <a href="/studio-documents#modeles" className={`text-xs ${LIEN}`}>Retour aux listes complètes</a>
+              <a href={adresseStudio(horsVue, "modeles")} className={`text-xs ${LIEN}`}>Retour aux listes complètes</a>
             </div>
             {publies.length === 0 ? (
               <p className="text-sm text-slate-600">Aucun modèle publié. Publiez une version depuis la fiche d&apos;un modèle, ou <a href="/studio-documents#nouveau-modele" className={LIEN}>créez un modèle</a>.</p>
@@ -114,7 +118,7 @@ export default async function StudioPage({ searchParams }: { searchParams: Promi
           <Card><CardContent className="space-y-3 p-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2 id="validation-titre" className="text-sm font-semibold text-slate-900">En attente de validation</h2>
-              <a href="/studio-documents#documents" className={`text-xs ${LIEN}`}>Retour aux listes complètes</a>
+              <a href={adresseStudio(horsVue, "documents")} className={`text-xs ${LIEN}`}>Retour aux listes complètes</a>
             </div>
             <p className="text-xs text-slate-600">La validation signée ou le refus motivé revient à un autre administrateur que l&apos;auteur du document.</p>
             {enAttente.length === 0 ? (
@@ -140,7 +144,7 @@ export default async function StudioPage({ searchParams }: { searchParams: Promi
           <Card><CardContent className="space-y-3 p-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2 id="pdf-titre" className="text-sm font-semibold text-slate-900">Télécharger un PDF : choisir un document</h2>
-              <a href="/studio-documents#documents" className={`text-xs ${LIEN}`}>Retour aux listes complètes</a>
+              <a href={adresseStudio(horsVue, "documents")} className={`text-xs ${LIEN}`}>Retour aux listes complètes</a>
             </div>
             <p className="text-xs text-slate-600">Le PDF est reconstruit depuis le contenu figé du document ; un projet en attente ou un document refusé porte sa mention.</p>
             {pdfs.length === 0 ? (
@@ -228,9 +232,9 @@ export default async function StudioPage({ searchParams }: { searchParams: Promi
           <p className="text-xs text-slate-600">Partir d&apos;une trame (à relire et adapter avant de publier : ce ne sont pas des documents juridiques validés) :</p>
           <ul className="flex flex-wrap gap-2 text-sm">
             {STARTERS.map((st) => (
-              <li key={st.id}><a href={`/studio-documents?depart=${st.id}#nouveau-modele`} title={st.description} aria-current={depart?.id === st.id ? "true" : undefined} className={`inline-block rounded-full border px-3 py-1 ${depart?.id === st.id ? "border-[#0f3460] bg-[#0f3460] text-white" : "border-slate-300 text-[#0f3460] hover:bg-slate-50"}`}>{st.label}</a></li>
+              <li key={st.id}><a href={adresseStudio({ ...horsDepart, depart: st.id }, "nouveau-modele")} title={st.description} aria-current={depart?.id === st.id ? "true" : undefined} className={`inline-block rounded-full border px-3 py-1 ${depart?.id === st.id ? "border-[#0f3460] bg-[#0f3460] text-white" : "border-slate-300 text-[#0f3460] hover:bg-slate-50"}`}>{st.label}</a></li>
             ))}
-            {depart && <li><a href="/studio-documents#nouveau-modele" className={`inline-block px-1 py-1 text-xs ${LIEN}`}>Repartir d&apos;une page blanche</a></li>}
+            {depart && <li><a href={adresseStudio(horsDepart, "nouveau-modele")} className={`inline-block px-1 py-1 text-xs ${LIEN}`}>Repartir d&apos;une page blanche</a></li>}
           </ul>
         </div>
         <FormulaireRetour action={createTemplateAction} className="grid gap-3">

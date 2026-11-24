@@ -4,9 +4,10 @@
 // carte est UN seul lien HTML natif vers une section stable ou une vue bornée. Sans JavaScript, toutes les cartes sont
 // rendues par le serveur et restent utilisables. Aucune animation obligatoire (léger décalage de la flèche au survol,
 // seulement si le mouvement n'est pas réduit).
+// Lot G2 : `contexte` (modèle de départ et recherche déjà validés par la page) est reconduit par les cartes qui ouvrent une vue.
 import { useId, useRef, useState } from "react"
 import { ArrowRight, Combine, Download, FilePlus2, FileSearch, FileUp, Files, PenLine, Search, ShieldCheck, Sparkles, X, type LucideIcon } from "lucide-react"
-import { STUDIO_TOOLS, TOOL_FAMILIES, filtrerOutils, type StudioTool, type ToolFamilyId } from "@/lib/document-studio/tool-hub"
+import { STUDIO_TOOLS, TOOL_FAMILIES, adresseVue, filtrerOutils, type StudioContexte, type StudioTool, type ToolFamilyId } from "@/lib/document-studio/tool-hub"
 
 const ICONES: Record<StudioTool["id"], LucideIcon> = {
   "nouveau-modele": FilePlus2, generer: Sparkles, modeles: Files, documents: FileSearch, validation: ShieldCheck, pdf: Download, "importer-pdf": FileUp, "pdf-importes": PenLine, "combiner-pdf": Combine,
@@ -19,7 +20,9 @@ const FAMILLE: Record<ToolFamilyId, { tuile: string; point: string }> = {
   pdf: { tuile: "bg-rose-50 text-[#b4233c]", point: "bg-[#b4233c]" },
 }
 
-export function StudioToolHub() {
+const SANS_CONTEXTE: Partial<Omit<StudioContexte, "vue">> = {}
+
+export function StudioToolHub({ contexte = SANS_CONTEXTE }: { contexte?: Partial<Omit<StudioContexte, "vue">> }) {
   const [saisie, setSaisie] = useState("")
   const champ = useRef<HTMLInputElement>(null)
   const id = useId()
@@ -71,7 +74,7 @@ export function StudioToolHub() {
                   return (
                     <li key={o.id} className="min-w-0">
                       <a
-                        href={o.href}
+                        href={adresseVue(o.href, contexte)}
                         className="group flex h-full items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f3460] focus-visible:ring-offset-2"
                       >
                         <span aria-hidden="true" className={`shrink-0 rounded-xl p-2 ${FAMILLE[f.id].tuile}`}><Icone className="h-5 w-5" /></span>

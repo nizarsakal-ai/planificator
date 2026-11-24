@@ -20,7 +20,8 @@ import {
 } from "@/lib/document-studio/studio.core"
 import { canonicalJson, sha256Hex } from "@/lib/document-studio/canonical"
 import { STARTERS, lireDepart } from "@/lib/document-studio/starters"
-import { lireRecherche } from "@/lib/document-studio/tool-hub"
+import { STUDIO_TOOLS, adresseStudio, adresseVue, lireRecherche, lireVue } from "@/lib/document-studio/tool-hub"
+import { StudioToolHub } from "@/components/document-studio/StudioToolHub"
 import { GeneratedDocumentPdf, issuerLine } from "@/lib/document-studio/document-pdf"
 import { formatEuro, parseEuroInputToCents } from "@/lib/billing/money"
 import { StudioTemplateEditor } from "@/components/document-studio/StudioTemplateEditor"
@@ -316,6 +317,33 @@ describe("PDF et frontières des modules", () => {
     }
     assert.match(read("src/components/document-studio/StudioTemplateEditor.tsx"), /^"use client"/)
     assert.ok(code(read("src/components/document-studio/StudioTemplateEditor.tsx")).includes(`<input type="hidden" name="fieldsJson" value={JSON.stringify(defs)} />`))
+  })
+  it("contexte d'adresse : vue, modèle de départ et recherche se conservent dans les deux sens", () => {
+    // Sans contexte, les adresses historiques sont inchangées.
+    assert.equal(adresseStudio({}, "documents"), "/studio-documents#documents")
+    for (const o of STUDIO_TOOLS) assert.equal(adresseVue(o.href, {}), o.href, o.id)
+    // Ouvrir une vue garde la recherche et le modèle de départ ; un lien de section reste tel quel.
+    const ctx = { depart: STARTERS[0].id, q: "devis é&#", etat: "ISSUED" as const }
+    assert.equal(adresseVue("/studio-documents?vue=pdf#pdf", ctx), `/studio-documents?vue=pdf&depart=${STARTERS[0].id}&q=devis+%C3%A9%26%23&etat=ISSUED#pdf`)
+    assert.equal(adresseVue("/studio-documents#documents", ctx), "/studio-documents#documents")
+    assert.equal(adresseVue("/studio-documents?vue=tout#tout", ctx), "/studio-documents?vue=tout#tout")
+    // Aller-retour : l'adresse produite est relue à l'identique par les lecteurs bornés de la page.
+    const u = new URL(adresseStudio({ vue: "validation", ...ctx }, "validation"), "http://x")
+    assert.equal(lireVue(u.searchParams.get("vue")), "validation")
+    assert.equal(lireDepart(u.searchParams.get("depart"))?.id, STARTERS[0].id)
+    assert.deepEqual(lireRecherche(u.searchParams.get("q"), u.searchParams.get("etat")), { q: "devis é&#", etat: "ISSUED" })
+    // Cartes d'outils : les trois vues reconduisent le contexte, les six sections non.
+    const hub = renderToStaticMarkup(<StudioToolHub contexte={{ depart: null, q: "devis", etat: "REJECTED" }} />)
+    for (const v of ["generer", "validation", "pdf"]) assert.ok(hub.includes(`href="/studio-documents?vue=${v}&amp;q=devis&amp;etat=REJECTED#${v}"`), v)
+    assert.equal((hub.match(/q=devis/g) ?? []).length, 3)
+    assert.ok(renderToStaticMarkup(<StudioToolHub />).includes(`href="/studio-documents?vue=pdf#pdf"`))
+    // Page : chaque lien qui change la vue ou le modèle de départ passe par le contexte validé.
+    const accueil = code(read("src/app/(dashboard)/studio-documents/page.tsx"))
+    assert.ok(accueil.includes("const horsVue = { depart: depart?.id ?? null, q: recherche.q, etat: recherche.etat }") && accueil.includes("const horsDepart = { vue, q: recherche.q, etat: recherche.etat }"))
+    assert.ok(accueil.includes("<a href={adresseVue(l.href, horsVue)}"))
+    assert.equal((accueil.match(/href=\{adresseStudio\(horsVue, "(?:modeles|documents)"\)\}/g) ?? []).length, 3)
+    assert.ok(accueil.includes(`<a href={adresseStudio({ ...horsDepart, depart: st.id }, "nouveau-modele")}`) && accueil.includes(`<a href={adresseStudio(horsDepart, "nouveau-modele")}`))
+    assert.doesNotMatch(accueil, /href=\{?[`"]\/studio-documents\?/, "plus aucune adresse à paramètres écrite à la main")
   })
   it("écrans : éditeur dans les formulaires de création et de brouillon ; recherche en lecture seule ; préremplissage borné au modèle", () => {
     const accueil = code(read("src/app/(dashboard)/studio-documents/page.tsx"))

@@ -6,14 +6,11 @@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { SELECT_CLASS } from "@/components/stock/StockFlash"
-import { DOC_ETATS, type DocEtat, type StudioVue } from "@/lib/document-studio/tool-hub"
+import { DOC_ETATS, adresseStudio, type DocEtat, type StudioVue } from "@/lib/document-studio/tool-hub"
 import { DOC_STATUS_LABEL } from "@/components/document-studio/labels"
 
 export function StudioDocumentSearch({ q, etat, vue = null, depart = null }: { q: string; etat: DocEtat | null; vue?: StudioVue | null; depart?: string | null }) {
-  const contexte = new URLSearchParams()
-  if (vue) contexte.set("vue", vue)
-  if (depart) contexte.set("depart", depart)
-  const effacer = `/studio-documents${contexte.size > 0 ? `?${contexte.toString()}` : ""}#documents`
+  const effacer = adresseStudio({ vue, depart }, "documents")
   return (
     <form method="get" action="/studio-documents#documents" role="search" aria-label="Rechercher dans les documents générés" className="flex flex-wrap items-center gap-2 px-3 py-2">
       {vue && <input type="hidden" name="vue" value={vue} />}
