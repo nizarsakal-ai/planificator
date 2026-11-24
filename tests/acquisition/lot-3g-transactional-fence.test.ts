@@ -71,11 +71,12 @@ describe("LOT-3G — review SYSTEM / ADMIN fence", () => {
           return { count: 1 }
         },
       },
-      async $transaction<T>(fn: (tx: typeof api) => Promise<T>) {
+    }
+    return Object.assign(api, {
+      $transaction<T>(fn: (tx: typeof api) => Promise<T>) {
         return fn(api)
       },
-    }
-    return api
+    })
   }
 
   it("3 — SYSTEM approve sans fence → LEASE_NOT_OWNED, zéro DB read", async () => {
@@ -194,10 +195,7 @@ describe("LOT-3G — cancellation fence option", () => {
   it("8/9 — fence NOT_OWNED → throw CancellationLeaseNotOwnedError", async () => {
     const journals: unknown[] = []
     const draftsUpdated: unknown[] = []
-    const db = {
-      async $transaction<T>(fn: (tx: typeof db) => Promise<T>) {
-        return fn(db)
-      },
+    const tx = {
       async $executeRaw() {
         return undefined
       },
@@ -222,6 +220,12 @@ describe("LOT-3G — cancellation fence option", () => {
             createdAt: new Date(),
           }
         },
+      },
+    }
+    const db = {
+      ...tx,
+      $transaction<T>(fn: (transaction: typeof tx) => Promise<T>) {
+        return fn(tx)
       },
     }
     await assert.rejects(

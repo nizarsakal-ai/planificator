@@ -31,8 +31,8 @@ refresh_token=1//SECRET_REFRESH
 Authorization: Bearer ya29.SECRET
 `
 
-const ENV_ON = { BOOKING_INTENT_DIAGNOSTICS: "true" }
-const ENV_OFF = { BOOKING_INTENT_DIAGNOSTICS: "false" }
+const ENV_ON: NodeJS.ProcessEnv = { NODE_ENV: "test", BOOKING_INTENT_DIAGNOSTICS: "true" }
+const ENV_OFF: NodeJS.ProcessEnv = { NODE_ENV: "test", BOOKING_INTENT_DIAGNOSTICS: "false" }
 
 function assertNoSensitiveLeak(line: string): void {
   assert.equal(line.includes('"subject"'), false)
@@ -53,18 +53,18 @@ function assertNoSensitiveLeak(line: string): void {
 
 describe("isBookingIntentDiagnosticsEnabled", () => {
   it("true uniquement si BOOKING_INTENT_DIAGNOSTICS=true", () => {
-    assert.equal(isBookingIntentDiagnosticsEnabled({}), false)
-    assert.equal(isBookingIntentDiagnosticsEnabled({ BOOKING_INTENT_DIAGNOSTICS: "" }), false)
+    assert.equal(isBookingIntentDiagnosticsEnabled({ NODE_ENV: "test" }), false)
+    assert.equal(isBookingIntentDiagnosticsEnabled({ NODE_ENV: "test", BOOKING_INTENT_DIAGNOSTICS: "" }), false)
     assert.equal(
-      isBookingIntentDiagnosticsEnabled({ BOOKING_INTENT_DIAGNOSTICS: "false" }),
+      isBookingIntentDiagnosticsEnabled({ NODE_ENV: "test", BOOKING_INTENT_DIAGNOSTICS: "false" }),
       false
     )
     assert.equal(
-      isBookingIntentDiagnosticsEnabled({ BOOKING_INTENT_DIAGNOSTICS: "1" }),
+      isBookingIntentDiagnosticsEnabled({ NODE_ENV: "test", BOOKING_INTENT_DIAGNOSTICS: "1" }),
       false
     )
     assert.equal(
-      isBookingIntentDiagnosticsEnabled({ BOOKING_INTENT_DIAGNOSTICS: "true" }),
+      isBookingIntentDiagnosticsEnabled({ NODE_ENV: "test", BOOKING_INTENT_DIAGNOSTICS: "true" }),
       true
     )
   })
@@ -149,7 +149,7 @@ describe("diagnostics désactivés → aucun log, coût minimal", () => {
           return "x@y.com"
         },
       },
-      { env: {}, logFn: (l) => lines.push(l) }
+      { env: { NODE_ENV: "test" }, logFn: (l) => lines.push(l) }
     )
     assert.equal(lines.length, 0)
     assert.equal(fromCalls, 0)

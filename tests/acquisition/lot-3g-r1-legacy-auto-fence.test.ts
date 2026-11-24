@@ -22,6 +22,8 @@ import {
   runDraftExtractionSystem,
   executeLegacyAutoDecisionAfterExtractionPersist,
 } from "@/lib/acquisition/extraction/extraction.service"
+import type { ImportDraftConversionService } from "@/lib/acquisition/conversion/conversion.service"
+import { EXTRACTION_SCHEMA_VERSION } from "@/lib/acquisition/extraction/extraction-feature-flag"
 import type {
   DraftExtractionRow,
   MessageContentLite,
@@ -220,11 +222,12 @@ function makeTxDb(draft: DraftRow) {
       draft.contentHashAtExtraction
         ? [{ contentHash: draft.contentHashAtExtraction }]
         : [],
-    async $transaction<T>(fn: (tx: typeof api) => Promise<T>) {
+  }
+  return Object.assign(api, {
+    $transaction<T>(fn: (tx: typeof api) => Promise<T>) {
       return fn(api)
     },
-  }
-  return api
+  })
 }
 
 function enableExtractionFlags() {
@@ -272,7 +275,7 @@ function createFakeRepo() {
       return { ...content }
     },
     async findMessage() {
-      return { id: "msg1", subject: "Consultation Tour Alpha" }
+      return { id: "msg1", subject: "Consultation Tour Alpha", receivedAt: new Date("2026-10-01T00:00:00Z") }
     },
     async listAttachmentMetadata() {
       return []
@@ -295,8 +298,8 @@ function createFakeRepo() {
         ...draft,
         status: input.status,
         version: draft.version + 1,
-        contentHashAtExtraction: input.contentHashAtExtraction,
-        extractionSchemaVersion: input.extractionSchemaVersion,
+        contentHashAtExtraction: input.expectedContentHash,
+        extractionSchemaVersion: EXTRACTION_SCHEMA_VERSION,
       }
       return "OK"
     },
@@ -348,7 +351,7 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
         db: db as never,
         review,
         conversion: {
-          convertImportDraft: async (_a, _i, opts) => {
+          convertImportDraft: async (...[, , opts]: Parameters<ImportDraftConversionService["convertImportDraft"]>) => {
             convertCalled = true
             assert.ok(opts?.transactionalOwnershipFence)
             draft.status = "CONVERTED"
@@ -474,7 +477,7 @@ describe("LOT-3G-R1 — legacy AUTO fenced", () => {
         db: db as never,
         review,
         conversion: {
-          convertImportDraft: async (_a, _i, opts) => {
+          convertImportDraft: async (...[, , opts]: Parameters<ImportDraftConversionService["convertImportDraft"]>) => {
             seenFence = opts?.transactionalOwnershipFence
             return {
               ok: false,
