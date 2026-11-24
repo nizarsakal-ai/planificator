@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { auth } from "@/auth"
 import { redirect, notFound } from "next/navigation"
 import { prisma } from "@/lib/prisma"
+import { resolveClientLink } from "@/lib/client-portal/client-link"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { MapPin, Calendar, Clock, Users, FileText, ArrowLeft, CheckCircle2, XCircle, Clock3 } from "lucide-react"
@@ -43,13 +44,12 @@ export default async function ClientChantierDetailPage({ params }: { params: Pro
   if (!session?.user) redirect("/login")
   if (session.user.role !== "CLIENT") redirect("/dashboard")
 
-  const clientRecord = await prisma.client.findFirst({
-    where: { companyId: session.user.companyId!, email: session.user.email! },
-  })
-  if (!clientRecord) notFound()
+  // Règle commune portail / assistant : lien explicite prioritaire, courriel accepté seulement s'il est sans ambiguïté.
+  const link = await resolveClientLink(prisma, { id: session.user.id, companyId: session.user.companyId, email: session.user.email })
+  if (!link.ok) notFound()
 
   const chantier = await prisma.worksite.findFirst({
-    where: { id, clientId: clientRecord.id },
+    where: { id, clientId: link.clientId, companyId: session.user.companyId! },
     include: {
       assignments: {
         include: { team: { select: { name: true } } },

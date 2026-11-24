@@ -13,6 +13,7 @@ import { runCopilotTool } from "@/lib/copilot/copilot-tools"
 import { buildBriefing } from "@/lib/copilot/copilot-briefing"
 import { reserveProposal, releaseProposal } from "@/lib/copilot/copilot-execute"
 import { reserveCopilotRequest } from "@/lib/copilot/copilot-quota"
+import { resolveClientLink } from "@/lib/client-portal/client-link"
 
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL requis (base PostgreSQL jetable migrée)")
 const db = new PrismaClient()
@@ -154,6 +155,34 @@ describe("administrateur : toute SA société, jamais l'autre", () => {
     assert.ok(b.alerts.some(a => a.id === "absences"))
     const absAlert = b.alerts.find(a => a.id === "absences")!
     assert.match(absAlert.title, /^1 demande/)
+  })
+})
+
+describe("rattachement client sans ambiguïté (règle commune portail et assistant)", () => {
+  it("lien explicite prioritaire même si le courriel désigne une autre fiche", async () => {
+    // a_cli a un profil vers c1 ; on lui donne le courriel de la fiche c2 : le profil l'emporte.
+    const link = await resolveClientLink(db, { id: "a_cli", companyId: "co_a", email: "a.cli2@recette.test" })
+    assert.deepEqual(link, { ok: true, clientId: "a_c1", via: "PROFILE" })
+  })
+  it("courriel partagé par deux fiches de la société : refus ; message clair dans l'assistant", async () => {
+    await db.user.create({ data: { id: "a_dup", email: "a.dup@recette.test", password: "x", role: "CLIENT", companyId: "co_a" } })
+    await db.client.createMany({ data: [
+      { id: "a_d1", name: "Doublon 1", companyId: "co_a", email: "a.dup@recette.test" },
+      { id: "a_d2", name: "Doublon 2", companyId: "co_a", email: "a.dup@recette.test" },
+    ] })
+    assert.deepEqual(await resolveClientLink(db, { id: "a_dup", companyId: "co_a", email: "a.dup@recette.test" }), { ok: false, reason: "AMBIGUOUS" })
+    const c = await ctx("a", "dup", "CLIENT")
+    assert.equal(c.clientId, null)
+    const r = await runRoleTool(db, c, "mes_chantiers", {}, TODAY)
+    assert.equal(r.ok, false)
+    assert.match((r as { error: string }).error, /plusieurs fiches client/)
+  })
+  it("même courriel dans une autre société : n'entre pas en compte (correspondance unique dans SA société)", async () => {
+    await db.client.create({ data: { id: "b_x", name: "Homonyme B", companyId: "co_b", email: "a.cli2@recette.test" } })
+    assert.deepEqual(await resolveClientLink(db, { id: "a_cli2", companyId: "co_a", email: "a.cli2@recette.test" }), { ok: true, clientId: "a_c2", via: "EMAIL" })
+  })
+  it("aucune fiche : refus « aucune fiche »", async () => {
+    assert.deepEqual(await resolveClientLink(db, { id: "a_emp", companyId: "co_a", email: "inconnu@recette.test" }), { ok: false, reason: "NONE" })
   })
 })
 

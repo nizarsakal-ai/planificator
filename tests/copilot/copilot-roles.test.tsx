@@ -32,13 +32,16 @@ describe("fiches liées résolues côté serveur", () => {
   const db = {
     employee: { findFirst: async (a: { where: Record<string, unknown> }) => (a.where.userId === "u1" && a.where.companyId === "co1" && a.where.active === true ? { id: "e1" } : null) },
     clientProfile: { findFirst: async (a: { where: { userId: string } }) => (a.where.userId === "u9" ? { clientId: "c1" } : null) },
-    client: { findFirst: async (a: { where: Record<string, unknown> }) => (a.where.email === "x@y.fr" && a.where.companyId === "co1" ? { id: "c2" } : null) },
+    client: { findMany: async (a: { where: Record<string, unknown> }) => (a.where.email === "x@y.fr" && a.where.companyId === "co1" ? [{ id: "c2" }] : a.where.email === "double@y.fr" ? [{ id: "c3" }, { id: "c4" }] : []) },
   } as never
   it("employé, client par profil, client par courriel (repli du portail)", async () => {
     assert.equal((await resolveRoleContext(db, { id: "u1", companyId: "co1", role: "EMPLOYEE" })).employeeId, "e1")
     assert.equal((await resolveRoleContext(db, { id: "u1", companyId: "co2", role: "EMPLOYEE" })).employeeId, null)
     assert.equal((await resolveRoleContext(db, { id: "u9", companyId: "co1", role: "CLIENT" })).clientId, "c1")
     assert.equal((await resolveRoleContext(db, { id: "u8", companyId: "co1", role: "CLIENT", email: "x@y.fr" })).clientId, "c2")
+    const amb = await resolveRoleContext(db, { id: "u7", companyId: "co1", role: "CLIENT", email: "double@y.fr" })
+    assert.equal(amb.clientId, null)
+    assert.equal(amb.clientLinkIssue, "AMBIGUOUS")
   })
 })
 

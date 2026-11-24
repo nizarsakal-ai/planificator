@@ -7,6 +7,7 @@
 import type { PrismaClient } from "@prisma/client"
 import type Anthropic from "@anthropic-ai/sdk"
 import { CopilotToolInputError, parseDay, parseRange, MAX_ROWS } from "@/lib/copilot/copilot-tools"
+import { CLIENT_LINK_MESSAGE, resolveClientLink } from "@/lib/client-portal/client-link"
 
 type Env = Record<string, string | undefined>
 type Db = Pick<PrismaClient, "employee" | "employeeAssignment" | "absence" | "assignment" | "teamMember" | "worksite" | "clientProfile" | "client">
@@ -29,7 +30,7 @@ export function isCopilotRoleAllowed(role: unknown, env: Env = process.env): rol
   return typeof role === "string" && allowedCopilotRoles(env).has(role as CopilotRole)
 }
 
-export interface RoleContext { role: CopilotRole; companyId: string; userId: string; employeeId: string | null; clientId: string | null; email?: string | null }
+export interface RoleContext { role: CopilotRole; companyId: string; userId: string; employeeId: string | null; clientId: string | null; email?: string | null; clientLinkIssue?: "NONE" | "AMBIGUOUS" }
 
 /** Fiche employé (rôles internes) ou fiche client (rôle client) de l'utilisateur, dans la société de la session. */
 export async function resolveRoleContext(db: Db, user: { id: string; companyId: string; role: CopilotRole; email?: string | null }): Promise<RoleContext> {
@@ -39,13 +40,9 @@ export async function resolveRoleContext(db: Db, user: { id: string; companyId: 
     return { ...base, employeeId: e?.id ?? null }
   }
   if (user.role === "CLIENT") {
-    const p = await db.clientProfile.findFirst({ where: { userId: user.id, client: { companyId: user.companyId } }, select: { clientId: true } })
-    if (p) return { ...base, clientId: p.clientId }
-    // Repli identique au portail client : fiche client de la société dont le courriel est celui du compte.
-    if (user.email) {
-      const c = await db.client.findFirst({ where: { companyId: user.companyId, email: user.email }, select: { id: true } })
-      return { ...base, clientId: c?.id ?? null }
-    }
+    // Règle commune avec le portail client : lien explicite prioritaire, courriel accepté seulement s'il est sans ambiguïté.
+    const link = await resolveClientLink(db, user)
+    return link.ok ? { ...base, clientId: link.clientId } : { ...base, clientLinkIssue: link.reason }
   }
   return base
 }
@@ -126,7 +123,7 @@ const handlers: Record<string, Handler> = {
     return rows.map(a => ({ employe: `${a.employee.firstName} ${a.employee.lastName}`.trim(), type: a.type, statut: a.status, debut: day(a.startDate), fin: day(a.endDate) }))
   },
   async mes_chantiers(db, ctx, _input, today) {
-    if (!ctx.clientId) throw new CopilotToolInputError("Aucune fiche client n'est liée à votre compte : contactez votre interlocuteur.")
+    if (!ctx.clientId) throw new CopilotToolInputError(CLIENT_LINK_MESSAGE[ctx.clientLinkIssue ?? "NONE"])
     const rows = await db.worksite.findMany({
       where: { clientId: ctx.clientId, companyId: ctx.companyId, status: { not: "ARCHIVED" } },
       orderBy: { startDate: "asc" }, take: MAX_ROWS,
