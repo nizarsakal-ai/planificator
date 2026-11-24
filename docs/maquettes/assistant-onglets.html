@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Assistant IA, onglets Discussion / Propositions / Journal</title>
+<style>
+  :root { --navy: #0f3460; --navy2: #143e72; --line: #e2e8f0; --muted: #64748b; --bg: #f6f1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: #0f172a; }
+  header.page { padding: 24px 32px 8px; }
+  header.page h1 { margin: 0 0 4px; font-size: 22px; color: var(--navy); }
+  header.page p { margin: 0; color: var(--muted); font-size: 14px; max-width: 900px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 24px; padding: 24px 32px 40px; }
+  .case h2 { font-size: 14px; margin: 0 0 8px; color: #334155; }
+  .case h2 span { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .ok { background: #dcfce7; color: #166534; } .mid { background: #fef3c7; color: #92400e; } .no { background: #e2e8f0; color: #334155; }
+  .panel { background: #fff; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: 0 12px 30px -18px rgba(15,52,96,.5); min-height: 520px; display: flex; flex-direction: column; }
+  .bar { background: var(--navy); color: #fff; padding: 12px 14px; display: flex; align-items: center; gap: 8px; }
+  .bar b { font-size: 14px; } .bar small { display: block; font-size: 11px; color: #bfdbfe; }
+  .tabs { display: flex; border-bottom: 1px solid var(--line); background: #f8fafc; }
+  .tab { flex: 1; text-align: center; padding: 10px 6px; font-size: 13px; font-weight: 600; color: var(--muted); border-bottom: 2px solid transparent; }
+  .tab.on { color: var(--navy); border-bottom-color: var(--navy); background: #fff; }
+  .tab .n { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 5px; border-radius: 999px; background: #e0e7ff; color: var(--navy); font-size: 11px; }
+  .body { padding: 14px; font-size: 13px; flex: 1; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+  .card .t { font-weight: 600; } .card .s { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .btn { display: inline-block; margin-top: 8px; padding: 6px 10px; border-radius: 8px; background: var(--navy); color: #fff; font-size: 12px; font-weight: 600; }
+  .btn.ghost { background: #fff; color: var(--navy); border: 1px solid #cbd5e1; }
+  .src { display: inline-block; padding: 0 6px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+  .src.r { background: #ecfeff; color: #155e75; } .src.ia { background: #eef2ff; color: #3730a3; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; } td { padding: 6px 4px; border-top: 1px solid var(--line); vertical-align: top; }
+  .bubble { background: #f1f5f9; border-radius: 12px; padding: 8px 10px; margin: 6px 0; }
+  .me { background: var(--navy); color: #fff; margin-left: 30%; }
+  .input { margin: 0 14px 14px; border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px; color: #94a3b8; font-size: 13px; }
+  .note { font-size: 12px; color: var(--muted); padding: 0 14px 12px; }
+  footer { padding: 0 32px 32px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<header class="page">
+  <h1>Assistant IA — maquette des onglets</h1>
+  <p>Maquette statique (aucun code de l'application). Une seule entrée « Assistant IA » ; les onglets visibles dépendent des droits calculés par le serveur. Moteurs séparés : règles locales (lot F) et copilote IA.</p>
+</header>
+
+<div class="grid">
+
+  <section class="case">
+    <h2>Administrateur — lot F actif <span class="ok">3 onglets</span></h2>
+    <div class="panel">
+      <div class="bar">✦ <div><b>Assistant IA</b><small>Rien n'est fait sans votre confirmation</small></div></div>
+      <div class="tabs" role="tablist">
+        <div class="tab" role="tab" aria-selected="false">Discussion</div>
+        <div class="tab on" role="tab" aria-selected="true">Propositions <span class="n">2</span></div>
+        <div class="tab" role="tab" aria-selected="false">Journal</div>
+      </div>
+      <div class="body">
+        <div class="card">
+          <div class="t">Relancer l'opportunité « Festival Vienne »</div>
+          <div class="s">Règle : relance d'opportunité en retard · source : pipeline commercial · 22/11</div>
+          <span class="btn">Décider</span>
+        </div>
+        <div class="card">
+          <div class="t">Réapprovisionner « Bâche 6×4 »</div>
+          <div class="s">Règle : stock sous le seuil minimal · source : entrepôt Lyon · 23/11</div>
+          <span class="btn">Décider</span>
+        </div>
+        <span class="btn ghost">Analyser maintenant</span>
+      </div>
+      <p class="note">« Décider » ouvre la page complète <code>/assistant</code> (formulaire d'approbation existant).</p>
+    </div>
+  </section>
+
+  <section class="case">
+    <h2>Administrateur — lot F actif, onglet Journal <span class="ok">lecture seule</span></h2>
+    <div class="panel">
+      <div class="bar">✦ <div><b>Assistant IA</b><small>Rien n'est fait sans votre confirmation</small></div></div>
+      <div class="tabs" role="tablist">
+        <div class="tab" role="tab" aria-selected="false">Discussion</div>
+        <div class="tab" role="tab" aria-selected="false">Propositions <span class="n">2</span></div>
+        <div class="tab on" role="tab" aria-selected="true">Journal</div>
+      </div>
+      <div class="body">
+        <table>
+          <tr><td>24/11 10:42</td><td><span class="src ia">Assistant IA</span></td><td>Tâche créée après confirmation</td></tr>
+          <tr><td>24/11 09:15</td><td><span class="src r">Règles locales</span></td><td>Proposition approuvée : tâche « Relancer Mairie »</td></tr>
+          <tr><td>23/11 17:03</td><td><span class="src ia">Assistant IA</span></td><td>Brouillon de devis créé après confirmation</td></tr>
+          <tr><td>23/11 08:30</td><td><span class="src r">Règles locales</span></td><td>Proposition refusée : « Stock tentes »</td></tr>
+        </table>
+      </div>
+      <p class="note">Le journal de l'assistant IA ne conserve que le type d'action, l'auteur et la date (aucune question ni réponse).</p>
+    </div>
+  </section>
+
+  <section class="case">
+    <h2>Administrateur — lot F inactif <span class="mid">2 onglets</span></h2>
+    <div class="panel">
+      <div class="bar">✦ <div><b>Assistant IA</b><small>Rien n'est fait sans votre confirmation</small></div></div>
+      <div class="tabs" role="tablist">
+        <div class="tab on" role="tab" aria-selected="true">Discussion</div>
+        <div class="tab" role="tab" aria-selected="false">Journal</div>
+      </div>
+      <div class="body">
+        <div class="card"><div class="t">☀ Briefing du jour</div><div class="s">2 chantiers aujourd'hui · 1 facture en retard</div><span class="btn">Analyser et proposer des actions</span></div>
+        <div class="bubble me">Qui travaille demain ?</div>
+        <div class="bubble">Montage sur [Vienne] et Levage sur [Lyon].</div>
+      </div>
+      <div class="input">Votre question… (ou dictez au micro)</div>
+      <p class="note">Onglet Propositions masqué ; Journal limité aux actions de l'assistant IA ; <code>/assistant</code> en 404.</p>
+    </div>
+  </section>
+
+  <section class="case">
+    <h2>Employé ou chef d'équipe <span class="no">sans barre d'onglets</span></h2>
+    <div class="panel">
+      <div class="bar">✦ <div><b>Assistant IA</b><small>Consultation seule · ne modifie rien</small></div></div>
+      <div class="body">
+        <div class="card"><div class="t">Où est-ce que je travaille demain ?</div></div>
+        <div class="card"><div class="t">Quel est mon planning de la semaine ?</div></div>
+        <div class="card"><div class="t">Où en sont mes demandes d'absence ?</div></div>
+      </div>
+      <div class="input">Votre question… (ou dictez au micro)</div>
+      <p class="note">Identique à aujourd'hui. Les routes Propositions et Journal répondent « accès refusé ».</p>
+    </div>
+  </section>
+
+</div>
+<footer>Planificator · maquette du cadrage <code>docs/assistant-navigation-onglets.cadrage.md</code> · données fictives.</footer>
+</body>
+</html>
