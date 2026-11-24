@@ -10,7 +10,7 @@ import type { RegisterIncomingMessageInput } from "@/lib/validations/acquisition
 import { MailShadowBridgeService } from "@/lib/integration/connectors/mail-bridge/mail-shadow-bridge.service"
 import { createMailShadowRunStats } from "@/lib/integration/connectors/mail-bridge/mail-shadow-run-stats"
 import { MAIL_SHADOW_CONNECTOR_TYPE } from "@/lib/integration/flags/platform-flag-names"
-import { isRoutingActiveForCompany } from "@/lib/integration/flags/platform-flags"
+import { isRoutingActiveForCompany, isRoutingShadowActiveForCompany } from "@/lib/integration/flags/platform-flags"
 import { InboundEnvelopeRepository } from "@/lib/integration/persistence/inbound-envelope.repository"
 import { NormalizedInboundRepository } from "@/lib/integration/persistence/normalized-inbound.repository"
 import { RoutingConfigSnapshotRepository } from "@/lib/integration/persistence/routing-config-snapshot.repository"
@@ -35,7 +35,10 @@ const bindingSchema = z.object({
   })).min(1),
 })
 
-/** Budget de la comparaison de parité après admission ; au-delà, observation UNCOMPARABLE (ROUTER_TIMEOUT). */
+/**
+ * Budget total de la parité après la décision LOT-3 (attente de la référence + observation).
+ * Au-delà : référence inconnue (PARITY_UNCOMPARABLE) ou routage abandonné (ROUTER_TIMEOUT).
+ */
 export const LEGACY_REFERENCE_PARITY_BUDGET_MS = 2_000
 
 export interface GmailConsultationsAdmissionOptions {
@@ -43,9 +46,26 @@ export interface GmailConsultationsAdmissionOptions {
   env?: NodeJS.ProcessEnv
   /** Référence historique en lecture seule (tests) ; défaut : registre partenaires. */
   legacyReference?: LegacyEligibilityReader
-  /** Observation de parité (tests) ; défaut : shadow LOT-2D, actif selon ses propres flags. */
+  /** Observation de parité (tests) ; défaut : shadow LOT-2D. */
   parity?: Pick<RoutingShadowService, "observe">
+  /** Budget de parité (tests) ; défaut LEGACY_REFERENCE_PARITY_BUDGET_MS. */
+  parityBudgetMs?: number
   now?: () => number
+}
+
+const REFERENCE_TIMED_OUT = Symbol("legacy-reference-timeout")
+
+/** Attend `work` au plus `ms` ; au-delà renvoie REFERENCE_TIMED_OUT. Un rejet tardif est absorbé. */
+async function settleWithin<T>(work: Promise<T>, ms: number): Promise<T | typeof REFERENCE_TIMED_OUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<typeof REFERENCE_TIMED_OUT>((resolve) => {
+    timer = setTimeout(() => resolve(REFERENCE_TIMED_OUT), Math.max(0, ms))
+  })
+  try {
+    return await Promise.race([work, timeout])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 export function isGmailConsultationsAdmissionEnabled(
@@ -65,6 +85,17 @@ export async function admitGmailConsultation(
   const { db = prisma, env = process.env, now = Date.now } = options
   const { companyId, sourceMailboxKey } = input
   if (!isGmailConsultationsAdmissionEnabled(companyId, env)) return legacy(input)
+
+  // Référence indépendante (lecture seule), seulement si le shadow matching est actif pour la société.
+  // Lancée en parallèle : la décision LOT-3 ne l'attend jamais ; une panne devient « inconnue ».
+  const parityActive = isRoutingShadowActiveForCompany(companyId, env)
+  const referenceRead: Promise<LegacyEligibilityReferenceOutcome | null> | null = parityActive
+    ? Promise.resolve()
+      .then(() => evaluateLegacyEligibilityReference(
+        companyId, input.senderEmail, options.legacyReference ?? defaultLegacyEligibilityReader(db)
+      ))
+      .catch(() => null)
+    : null
 
   const mailbox = await db.acquisitionGmailConnection.findFirst({
     where: { id: sourceMailboxKey, companyId, active: true },
@@ -107,16 +138,6 @@ export async function admitGmailConsultation(
   const inbound = await normalized.findByEnvelopeVersion(companyId, envelope.id, INBOUND_FAMILY.MESSAGE, PLATFORM_SCHEMA_VERSION_V1)
   if (inbound.message.sender?.email !== sender.email) throw new Error("Expéditeur incohérent avec le message normalisé")
 
-  // Référence indépendante (lecture seule) évaluée avant toute écriture d'admission ; jamais bloquante.
-  let reference: LegacyEligibilityReferenceOutcome | null = null
-  try {
-    reference = await evaluateLegacyEligibilityReference(
-      companyId, input.senderEmail, options.legacyReference ?? defaultLegacyEligibilityReader(db)
-    )
-  } catch {
-    reference = null
-  }
-
   const router = new TenantRouterService({
     normalized, config: new RoutingConfigSnapshotRepository(db), decisions: new RoutingDecisionRepository(db), env,
   })
@@ -145,21 +166,29 @@ export async function admitGmailConsultation(
     },
   })
 
+  if (!referenceRead) return result
+
   // Parité Router ↔ règles historiques : la décision LOT-3 est déjà prise et n'est jamais modifiée.
-  // Le Router réutilise la décision existante (même message, même configuration) : aucun double comptage.
-  // `observe` ne lève jamais ; il ne fait rien si le shadow matching n'est pas actif pour la société.
-  const parity = options.parity ?? new RoutingShadowService({
-    env, router, observations: new RoutingParityObservationRepository(db), now,
-    findNormalizedId: async () => inbound.id,
-  })
-  await parity.observe({
-    companyId,
-    connectionId: binding.id,
-    idempotencyKey: dto.idempotencyKey,
-    externalId: input.externalMessageId,
-    legacyOutcome: reference,
-    deadlineAtMs: now() + LEGACY_REFERENCE_PARITY_BUDGET_MS,
-  }).catch(() => undefined)
+  // Un seul budget borne l'attente de la référence et l'observation. Le Router réutilise la décision
+  // existante (même message, même configuration) : aucun double comptage. Rien ne lève vers l'appelant.
+  try {
+    const deadlineAtMs = now() + (options.parityBudgetMs ?? LEGACY_REFERENCE_PARITY_BUDGET_MS)
+    const settled = await settleWithin(referenceRead, deadlineAtMs - now())
+    const parity = options.parity ?? new RoutingShadowService({
+      env, router, observations: new RoutingParityObservationRepository(db), now,
+      findNormalizedId: async () => inbound.id,
+    })
+    await parity.observe({
+      companyId,
+      connectionId: binding.id,
+      idempotencyKey: dto.idempotencyKey,
+      externalId: input.externalMessageId,
+      legacyOutcome: settled === REFERENCE_TIMED_OUT ? null : settled,
+      deadlineAtMs,
+    })
+  } catch {
+    // Best-effort : la parité n'altère jamais l'admission.
+  }
 
   return result
 }

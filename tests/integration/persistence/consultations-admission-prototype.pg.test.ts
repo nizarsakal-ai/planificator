@@ -374,9 +374,40 @@ it("parité : référence ou observation en panne → décision LOT-3 inchangée
   assert.equal(brokenParity.outcome, "DRAFT_CREATED")
 })
 
-it("parité : shadow matching coupé → aucune observation, admission identique", async () => {
-  const id = "parite-shadow-off"
-  const r = await admitViaGmail(id, "devis@partenaire.example", { env: { ...parityEnv(), INTEGRATION_ROUTING_SHADOW_ENABLED: "false" } })
-  assert.equal(r.outcome, "DRAFT_CREATED")
-  assert.equal((await observationFor(id)).length, 0)
+it("parité : lecteur historique qui ne répond jamais → admission rendue dans le budget, référence inconnue", async () => {
+  const id = "parite-lecteur-bloque"
+  let readerCalls = 0
+  const started = Date.now()
+  const r = await admitViaGmail(id, "devis@partenaire.example", {
+    parityBudgetMs: 100,
+    legacyReference: { resolveEligibleSender: () => { readerCalls++; return new Promise(() => undefined) } },
+  })
+  const elapsed = Date.now() - started
+  assert.equal(r.outcome, "DRAFT_CREATED", "la décision LOT-3 n'attend pas la référence")
+  assert.equal(readerCalls, 1)
+  assert.ok(elapsed < 1_500, `attente bornée (${elapsed} ms)`)
+  const [obs] = await observationFor(id)
+  // Le budget unique est épuisé par l'attente : observation hors budget, sans second routage.
+  assert.deepEqual(
+    [obs.legacyOutcome, obs.routerOutcome, obs.parityOutcome, obs.comparisonCode],
+    ["UNKNOWN", null, "PARITY_UNCOMPARABLE", "BUDGET_EXCEEDED"]
+  )
+  const saved = await db.acquisitionMessage.findFirstOrThrow({ where: { companyId, externalMessageId: id }, include: { draft: true } })
+  assert.ok(saved.draft)
+})
+
+it("parité : shadow matching coupé → zéro lecture de référence, aucune observation, admission identique", async () => {
+  for (const value of ["false", "", "TRUE"]) {
+    const id = `parite-shadow-off-${value || "vide"}`
+    let readerCalls = 0
+    let observeCalls = 0
+    const r = await admitViaGmail(id, "devis@partenaire.example", {
+      env: { ...parityEnv(), INTEGRATION_ROUTING_SHADOW_ENABLED: value },
+      legacyReference: { resolveEligibleSender: async () => { readerCalls++; return null } },
+      parity: { observe: async () => { observeCalls++; return { status: "DISABLED" as const } } },
+    })
+    assert.equal(r.outcome, "DRAFT_CREATED")
+    assert.deepEqual([readerCalls, observeCalls], [0, 0], `flag « ${value} »`)
+    assert.equal((await observationFor(id)).length, 0)
+  }
 })
