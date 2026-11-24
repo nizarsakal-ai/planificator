@@ -123,6 +123,7 @@ describe("chef d'équipe : ses équipes seulement", () => {
     const abs = await run(c, "absences_equipe", range)
     const names = abs.map(a => a.employe).sort()
     assert.deepEqual(names, ["Emma A", "Malo A"])
+    assert.ok(abs.every(a => !("type" in a)), "motif d'absence jamais transmis à l'IA")
     assert.ok(!names.some(n => String(n).startsWith("Oscar")))
   })
 })
