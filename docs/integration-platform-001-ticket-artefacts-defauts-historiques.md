@@ -2,7 +2,7 @@
 
 | Champ | Valeur |
 |---|---|
-| Statut | **Ouvert — préparé, non corrigé** |
+| Statut | **Corrigé sur branche locale** `claude/fix-artefacts-defauts-historiques` (non poussée, non fusionnée) |
 | Origine | Revue LOT-4B (24/11/2026), décision Codex : ticket séparé, LOT-4B reste désactivé |
 | Périmètre | `attachment-download.service.ts`, `message-content.service.ts`, `resolve-acquisition-mailbox.ts` (chemin historique) |
 | Tests défensifs | `tests/integration/persistence/artifact-historical-defects.pg.test.ts` — `npm run test:integration:artifact-defects:pg` (PostgreSQL jetable) |
@@ -70,3 +70,24 @@ Les tests figent le comportement **actuel** de `main`. Un correctif doit modifie
 1. Modifier uniquement les assertions « comportement actuel à corriger » des tests défensifs.
 2. Faire passer `test:acquisition` avec base jetable : 1008/1012 attendu, les 4 échecs d'extraction planifiée existant déjà sur `main`.
 3. Vérifier que le flag LOT-4B coupé et le flag posé donnent le même code pour D2.
+
+## Correctif appliqué (24/11/2026)
+
+Code unique pour les deux chemins (flag LOT-4B coupé et posé), dans `resolveMailArtifactProvider` (`resolveOwnedMailbox`) :
+
+- **D2** : après la résolution historique, une clé de boîte explicite doit désigner une boîte de la société du message (`findFirst {id, companyId}`), sinon `ARTIFACT_CAPABILITY_UNAVAILABLE` / `MAILBOX_NOT_OWNED`.
+  - Non repris pour les pièces, `CONFIG_TENANT` pour le contenu.
+  - Aucun jeton n'est lu et aucun appel distant n'a lieu.
+  - Le contrôle porte sur l'appartenance seule : une boîte inactive de la bonne société garde son échec `GMAIL_NOT_CONNECTED`.
+  - C'est le même refus que le chemin flag posé.
+- **D1** : toute exception de la résolution (lecture des boîtes, vérification d'appartenance) rend `ARTIFACT_RESOLUTION_FAILED`.
+  - Pièce : `FAILED`, réservation levée, reprise planifiée.
+  - Contenu : `RETRYABLE`.
+  - Les workers ne lèvent plus d'exception à ce stade.
+- **Journal** : flag coupé, une lecture réussie reste silencieuse ; refus et pannes sont journalisés sans valeur (`acquisition.artifact_resolution`).
+- **Tests** : `artifact-historical-defects.pg.test.ts` réécrit pour le comportement corrigé, chaque cas joué sur les deux chemins (14/14). Il couvre la reprise complète d'une pièce après panne : `FAILED` → pas de reprise avant l'échéance → `DISCOVERED` à l'échéance → `STORED` par la bonne boîte.
+- **Mocks complétés** (`acquisitionGmailConnection.findFirst`) : `attachment-download.service.test.ts`, `message-content.service.test.ts`. Tests unitaires du résolveur mis à jour (`artifact-resolution-flag.test.ts`, 7/7).
+
+Compatibilité constatée :
+- une requête de plus par lecture pour une clé explicite ;
+- chaque panne d'infrastructure compte un essai (`downloadRetryCount`) : une très longue panne de base peut atteindre `maxRetries`. C'est le comportement voulu par la politique de reprise PLAN-ACQ-004D, à surveiller.

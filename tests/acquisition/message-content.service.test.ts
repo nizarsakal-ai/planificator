@@ -104,7 +104,7 @@ describe("message-content.service", () => {
     }
 
     const db = {
-      inboundEnvelope: { findMany: async () => [] },
+      inboundEnvelope: { findMany: async () => [] }, acquisitionGmailConnection: { findFirst: async () => ({ id: "conn-1" }) },
       acquisitionMessage: {
         findFirst: async () => ({
           id: "msg1",
@@ -156,7 +156,7 @@ describe("message-content.service", () => {
       {
         source,
         db: {
-          inboundEnvelope: { findMany: async () => [] },
+          inboundEnvelope: { findMany: async () => [] }, acquisitionGmailConnection: { findFirst: async () => ({ id: "conn-1" }) },
           acquisitionMessage: {
             findFirst: async () => ({
               id: "msg1",
@@ -214,7 +214,7 @@ describe("message-content.service", () => {
       {
         source,
         db: {
-          inboundEnvelope: { findMany: async () => [] },
+          inboundEnvelope: { findMany: async () => [] }, acquisitionGmailConnection: { findFirst: async () => ({ id: "conn-1" }) },
           acquisitionMessage: {
             findFirst: async () => ({
               id: "msg1",
@@ -270,7 +270,7 @@ describe("message-content.service", () => {
           },
         },
         db: {
-          inboundEnvelope: { findMany: async () => [] },
+          inboundEnvelope: { findMany: async () => [] }, acquisitionGmailConnection: { findFirst: async () => ({ id: "conn-1" }) },
           acquisitionMessage: {
             findFirst: async () => ({
               id: "msg1",
@@ -307,7 +307,7 @@ describe("message-content.service", () => {
           },
         },
         db: {
-          inboundEnvelope: { findMany: async () => [] },
+          inboundEnvelope: { findMany: async () => [] }, acquisitionGmailConnection: { findFirst: async () => ({ id: "conn-1" }) },
           acquisitionMessage: {
             findFirst: async () => ({
               id: "msg1",
@@ -344,7 +344,7 @@ describe("message-content.service", () => {
           },
         },
         db: {
-          inboundEnvelope: { findMany: async () => [] },
+          inboundEnvelope: { findMany: async () => [] }, acquisitionGmailConnection: { findFirst: async () => ({ id: "conn-1" }) },
           acquisitionMessage: {
             findFirst: async () => ({
               id: "msg1",
@@ -402,7 +402,7 @@ describe("message-content.service", () => {
         {
           source,
           db: {
-            inboundEnvelope: { findMany: async () => [] },
+            inboundEnvelope: { findMany: async () => [] }, acquisitionGmailConnection: { findFirst: async () => ({ id: "conn-1" }) },
             acquisitionMessage: {
               findFirst: async () => ({
                 id: "msg1",

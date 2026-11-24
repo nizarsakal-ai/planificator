@@ -146,8 +146,8 @@ export async function fetchAndStoreMessageContentCore(
     return fail("NOT_FOUND", "CONTENT_NOT_FOUND", publicMessage("CONTENT_NOT_FOUND"))
   }
 
-  // Flag coupé : résolution historique, une exception remonte comme sur main.
-  // Flag posé : jamais d'exception ; une panne de lecture rend ARTIFACT_RESOLUTION_FAILED (reprise).
+  // Jamais d'exception : boîte d'une autre société → ARTIFACT_CAPABILITY_UNAVAILABLE (non repris) ;
+  // panne de lecture → ARTIFACT_RESOLUTION_FAILED (repris). Flag posé : contrôles de capacité en plus.
   const resolved = await resolveMailArtifactProvider(db, message, "CONTENT_FETCH", {
     id: message.id, externalArtifactId: message.externalMessageId,
   }, { env: deps.env, log: deps.artifactLog })
