@@ -1,4 +1,4 @@
-// Lot F Planificator V2 : assistant. Propositions issues de règles locales (aucun fournisseur d'IA externe), chacune
+// Lot F Planificator V2 : assistant. Propositions issues de règles locales (aucun fournisseur d'IA externe pour ces propositions), chacune
 // avec ses sources ; aucune action sans approbation explicite d'un administrateur ; journal des actions.
 // Drapeau ASSISTANT_ENABLED + ADMIN/SUPER_ADMIN.
 // Intégration FGHI v2 (incident Chrome) : retour explicite par le mécanisme qualifié E4, comme les Connecteurs : écran

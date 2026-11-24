@@ -98,7 +98,7 @@ describe("lot H : catégories et câblage", () => {
     for (const f of ["src/components/layout/Sidebar.tsx", "src/components/layout/MobileNav.tsx"]) {
       const src = read(f)
       assert.ok(src.includes("const navItems = withMarketingShopNavItems(withPayrollPrepNavItem(withDocumentStudioNavItem(withAssistantConnectorNavItems(withFuelTicketNavItem(withStockPurchasingNavItems("), f)
-      assert.ok(src.includes("user.stockPurchasingNavVisible === true), user.fuelTicketNavVisible === true), user.assistantNavVisible === true, user.connectorsNavVisible === true), user.documentStudioNavVisible === true), user.payrollPrepNavVisible === true), user.marketingShopNavVisible === true)"), f)
+      assert.ok(src.includes("user.stockPurchasingNavVisible === true), user.fuelTicketNavVisible === true), user.assistantNavVisible === true && user.assistantMenuReplaced !== true, user.connectorsNavVisible === true), user.documentStudioNavVisible === true), user.payrollPrepNavVisible === true), user.marketingShopNavVisible === true)"), f)
       assert.equal((src.match(/withPayrollPrepNavItem\(/g) ?? []).length, 1, `${f} : helper H appliqué une seule fois`)
       assert.ok(src.includes("withSupplierIntakeNavItem(withCrmAutomationNavItems(withBillingNavItems("), `${f} : chaîne E intacte`)
       assert.doesNotMatch(code(src), /PAYROLL_PREP_ENABLED|process\.env|isPayrollPrepEnabled|prepay-feature-flag/, `${f} : aucun drapeau lu côté client`)

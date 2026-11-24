@@ -93,7 +93,7 @@ const LOT_SETS: Lots[] = Array.from({ length: 32 }, (_, n) => ({ assistant: !!(n
 const ENTRIES: [keyof Lots, NavItem][] = [["assistant", ASSISTANT_NAV_ITEM], ["connectors", CONNECTORS_NAV_ITEM], ["studio", DOCUMENT_STUDIO_NAV_ITEM], ["prepay", PAYROLL_PREP_NAV_ITEM], ["shop", MARKETING_NAV_ITEM], ["shop", SHOP_NAV_ITEM]]
 const LOT_HREFS = new Set(ENTRIES.map(([, e]) => e.href))
 const CHAIN_HEAD = "const navItems = withMarketingShopNavItems(withPayrollPrepNavItem(withDocumentStudioNavItem(withAssistantConnectorNavItems(withFuelTicketNavItem(withStockPurchasingNavItems("
-const CHAIN_TAIL = "user.stockPurchasingNavVisible === true), user.fuelTicketNavVisible === true), user.assistantNavVisible === true, user.connectorsNavVisible === true), user.documentStudioNavVisible === true), user.payrollPrepNavVisible === true), user.marketingShopNavVisible === true)"
+const CHAIN_TAIL = "user.stockPurchasingNavVisible === true), user.fuelTicketNavVisible === true), user.assistantNavVisible === true && user.assistantMenuReplaced !== true, user.connectorsNavVisible === true), user.documentStudioNavVisible === true), user.payrollPrepNavVisible === true), user.marketingShopNavVisible === true)"
 
 describe("navigation intégrée : bureau et mobile", () => {
   it("Sidebar.tsx et MobileNav.tsx : même chaîne exacte, chaque helper une seule fois, chaîne E intacte", () => {

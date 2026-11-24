@@ -25,6 +25,7 @@ import { isAutomationsEnabled } from "@/lib/automation/automation-feature-flag"
 import { isAssistantEnabledForCompany } from "@/lib/assistant/assistant-feature-flag"
 import { copilotAdminGuard, rulesSourceGuard } from "@/lib/copilot/copilot-guards"
 import { resolveCopilotTabs } from "@/lib/copilot/copilot-tabs"
+import { isAssistantMenuReplaced } from "@/lib/navigation/assistant-entry"
 import { isConnectorCenterEnabledForCompany } from "@/lib/connectors/connector-feature-flag"
 import { isDocumentStudioEnabled } from "@/lib/document-studio/studio-feature-flag"
 import { isPayrollPrepEnabledForCompany } from "@/lib/payroll-prep/prepay-feature-flag"
@@ -99,13 +100,16 @@ export default async function DashboardLayout({
   const copilotTabs = copilotVisible
     ? resolveCopilotTabs({ copilotVisible, rules: await rulesSourceGuard(), copilotAdmin: await copilotAdminGuard() })
     : []
+  // Étape 3 (drapeau ASSISTANT_MENU_CONSOLIDATED, absent par défaut) : l'entrée « Propositions » du menu n'est retirée que si
+  // l'onglet Propositions est servi (mêmes gardes serveur) ; sinon composition inchangée. Affichage seulement.
+  const assistantMenuReplaced = isAssistantMenuReplaced(copilotTabs)
   const company = companyId ? await prisma.company.findUnique({
     where: { id: companyId }, select: { name: true, logoUrl: true },
   }) : null
   // Correctif #418 : adresse courte d'affichage, jamais la data URL dans la charge RSC de la coquille (voir companyLogoDisplaySrc).
   const companyLogo = companyLogoDisplaySrc(company?.logoUrl)
   const hrNavigation = await resolveHrDocumentNavigation()
-  const user = { ...hrNavigation, ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, worksitePhotosNavVisible, prospectionNavVisible, stockPurchasingNavVisible, equipmentNavVisible, budgetNavVisible, fuelTicketNavVisible, companyLogo, companyName: company?.name, documentStudioNavVisible, payrollPrepNavVisible, marketingShopNavVisible, crmNavVisible, automationNavVisible, assistantNavVisible, connectorsNavVisible, reservesNavVisible, salesDashboardNavVisible, searchVisible, copilotVisible }
+  const user = { ...hrNavigation, ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, worksitePhotosNavVisible, prospectionNavVisible, stockPurchasingNavVisible, equipmentNavVisible, budgetNavVisible, fuelTicketNavVisible, companyLogo, companyName: company?.name, documentStudioNavVisible, payrollPrepNavVisible, marketingShopNavVisible, crmNavVisible, automationNavVisible, assistantNavVisible, connectorsNavVisible, reservesNavVisible, salesDashboardNavVisible, searchVisible, copilotVisible, assistantMenuReplaced }
 
   return (
     <div data-app-backdrop="" className="flex h-screen overflow-hidden bg-[#f6f1e7] bg-[radial-gradient(45%_55%_at_4%_0%,rgba(120,160,255,0.65)_0,transparent_70%),radial-gradient(40%_45%_at_100%_100%,rgba(70,120,250,0.45)_0,transparent_70%),radial-gradient(28%_34%_at_100%_8%,rgba(140,175,255,0.4)_0,transparent_70%),radial-gradient(30%_36%_at_55%_45%,rgba(255,250,240,0.85)_0,transparent_70%)]">
