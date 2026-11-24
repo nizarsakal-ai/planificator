@@ -41,11 +41,18 @@ async function gate(request: Request, d: GoogleRouteDeps): Promise<Gate> {
   return { ok: true, ctx: { companyId: a.context.companyId, userId: a.context.userId } }
 }
 
+/** Preview utilise le même domaine fixe à l'aller et au retour, pour conserver le cookie de corrélation. */
+function readRouteConfig(request: Request, env: NonNullable<GoogleRouteDeps["env"]> = process.env) {
+  const config = readGoogleCalendarOAuthConfig(env)
+  if (config && env.VERCEL_ENV === "preview" && new URL(request.url).origin !== new URL(config.redirectUri).origin) return null
+  return config
+}
+
 /** GET …/connect : crée un état à usage unique et renvoie vers Google (cookie de corrélation posé). */
 export async function handleGoogleCalendarConnect(request: Request, d: GoogleRouteDeps): Promise<Response> {
   const g = await gate(request, d)
   if (!g.ok) return g.response
-  const cfg = readGoogleCalendarOAuthConfig(d.env)
+  const cfg = readRouteConfig(request, d.env)
   if (!cfg) return backToConnectors(request, false, GOOGLE_OAUTH_MESSAGES.notConfigured)
   // LOT-8D (§25) : démarrages OAuth bornés par utilisateur et par société.
   const limited = await checkOAuthStartLimit(d.db, g.ctx, d.now?.() ?? new Date())
@@ -58,7 +65,7 @@ export async function handleGoogleCalendarConnect(request: Request, d: GoogleRou
 export async function handleGoogleCalendarCallback(request: Request, d: GoogleRouteDeps): Promise<Response> {
   const g = await gate(request, d)
   if (!g.ok) return g.response
-  const cfg = readGoogleCalendarOAuthConfig(d.env)
+  const cfg = readRouteConfig(request, d.env)
   if (!cfg) return backToConnectors(request, false, GOOGLE_OAUTH_MESSAGES.notConfigured)
   const q = new URL(request.url).searchParams
   const now = d.now ?? (() => new Date())

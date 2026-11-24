@@ -87,6 +87,18 @@ export async function projectMailShadowAfterLegacy(
   try {
     if (nowMs() >= ctx.deadlineAtMs) {
       ctx.stats.skippedBudget++
+      // LOT-2D (plan §7) : le message hors budget reste compté dans la parité (UNCOMPARABLE / BUDGET_EXCEEDED,
+      // une insertion légère, sans routage). Ne lève jamais.
+      if (ctx.routingShadow && message.externalMessageId) {
+        await ctx.routingShadow.observe({
+          companyId,
+          connectionId: ctx.connectionId,
+          idempotencyKey: message.externalMessageId,
+          externalId: message.externalMessageId,
+          legacyOutcome,
+          deadlineAtMs: ctx.deadlineAtMs,
+        })
+      }
       return
     }
 

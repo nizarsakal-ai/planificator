@@ -17,7 +17,7 @@ import { runLiveConnectorSync } from "@/lib/integration/connectors/live/live-syn
 import {
   GOOGLE_CALENDAR_SCOPE, GOOGLE_OAUTH_MESSAGES, googleAccessTokenForSync, readGoogleCalendarOAuthConfig, startGoogleCalendarOAuth, type TokenPost,
 } from "@/lib/integration/connectors/oauth/google-calendar-oauth"
-import { handleGoogleCalendarCallback, type GoogleRouteDeps } from "@/lib/integration/connectors/oauth/google-calendar-routes"
+import { handleGoogleCalendarConnect, handleGoogleCalendarCallback, type GoogleRouteDeps } from "@/lib/integration/connectors/oauth/google-calendar-routes"
 import { loadKeyring } from "@/lib/integration/secrets/keyring"
 
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL requis (base PostgreSQL jetable migrée)")
@@ -174,6 +174,26 @@ describe("retour Google et coffre", () => {
     assert.deepEqual(c.config, { calendarId: "primary" })
     const v = await db.integrationCredentialVersion.findMany({ where: { connectionId: c.id } })
     assert.deepEqual(v.map((x) => [x.secretKind, x.status]), [["OAUTH_REFRESH_TOKEN", "ACTIVE"]])
+  })
+  it("Preview conserve le domaine fixe et ne consomme pas un état reçu sur un autre hôte", async () => {
+    const origin = "https://preview.test"
+    const env = { ...ENV, VERCEL_ENV: "preview", GOOGLE_CALENDAR_PREVIEW_ORIGIN: origin }
+    const d = routeDeps(B, { env })
+    const connect = await handleGoogleCalendarConnect(new Request(origin + "/api/connecteurs/google-agenda/connect"), d)
+    const authorize = new URL(connect.headers.get("location")!)
+    const redirect = origin + "/api/connecteurs/google-agenda/callback"
+    assert.equal(authorize.searchParams.get("redirect_uri"), redirect)
+    const cookie = connect.headers.get("set-cookie")!.split(";")[0]
+    const q = new URLSearchParams({ code: "code-preview", state: authorize.searchParams.get("state")! })
+    const callsBefore = google.tokenCalls.length
+    const wrong = await handleGoogleCalendarCallback(new Request("https://branch-preview.test/api/connecteurs/google-agenda/callback?" + q, { headers: { cookie } }), d)
+    assert.ok(new URL(wrong.headers.get("location")!).searchParams.get("erreur"))
+    assert.equal(google.tokenCalls.length, callsBefore)
+    const callback = await handleGoogleCalendarCallback(new Request(redirect + "?" + q, { headers: { cookie } }), d)
+    const destination = new URL(callback.headers.get("location")!)
+    assert.equal(destination.origin, origin)
+    assert.equal(destination.searchParams.get("ok"), GOOGLE_OAUTH_MESSAGES.connected)
+    assert.equal(google.tokenCalls.at(-1)?.form.redirect_uri, redirect)
   })
   it("aucun jeton en clair en base (versions, audit, historique, connexions, états)", async () => {
     for (const t of ["integration_credential_versions", "integration_secret_audit_logs", "history_logs", "integration_connections", "integration_oauth_states", "connector_settings"]) {

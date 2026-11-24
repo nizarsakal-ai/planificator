@@ -36,6 +36,11 @@ export function isCopilotRole(role: unknown): boolean {
   return role === "ADMIN" || role === "SUPER_ADMIN"
 }
 
+/** IA-6 : rôle maître (consultation d'un expert, modèle plus puissant). Drapeau distinct, désactivé par défaut. */
+export function isCopilotExpertEnabled(env: Env = process.env): boolean {
+  return env.COPILOT_EXPERT_ENABLED === "true"
+}
+
 /** IA-2 : propositions d'action (cartes « Je confirme »). Drapeau distinct, désactivé par défaut. */
 export function isCopilotActionsEnabled(env: Env = process.env): boolean {
   return env.COPILOT_ACTIONS_ENABLED === "true"

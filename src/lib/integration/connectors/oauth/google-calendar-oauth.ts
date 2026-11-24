@@ -6,7 +6,7 @@
  *   seule son empreinte SHA-256 est stockée (table `integration_oauth_states`) ;
  * - cookie de corrélation du navigateur (HttpOnly, SameSite=Lax, chemin du flux) dont seule l'empreinte est stockée ;
  * - PKCE S256 ; portée minimale `calendar.readonly` ; `access_type=offline` + `prompt=consent` (refresh token) ;
- * - adresse de retour en liste fermée : une seule, dérivée de NEXTAUTH_URL.
+ * - adresse de retour en liste fermée : une seule par environnement, configurée côté serveur.
  * Retour : `state` consommé atomiquement (une seule fois, non expiré, même société, même utilisateur, même navigateur)
  * AVANT l'échange du code ; échange hors transaction ; portée vérifiée ; refresh token chiffré dans le coffre
  * (`OAUTH_REFRESH_TOKEN`, PENDING → lecture de vérification → ACTIVE) ; jeton d'accès jamais stocké.
@@ -64,11 +64,19 @@ export function readGoogleCalendarOAuthConfig(env: Env = process.env): GoogleOAu
   const clientSecret = (env.GOOGLE_CALENDAR_CLIENT_SECRET ?? "").trim()
   if (!/^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$/.test(clientId) || clientSecret.length < 10) return null
   if (clientId === (env.GOOGLE_CLIENT_ID ?? "").trim()) return null // §16.3 : jamais le client Gmail/Drive
+  const preview = env.VERCEL_ENV === "preview"
+  const originSetting = preview ? env.GOOGLE_CALENDAR_PREVIEW_ORIGIN : env.NEXTAUTH_URL
   let origin: URL
-  try { origin = new URL((env.NEXTAUTH_URL ?? "").trim().replace(/\/+$/, "")) } catch { return null }
+  try { origin = new URL((originSetting ?? "").trim()) } catch { return null }
   const local = origin.hostname === "localhost" || origin.hostname === "127.0.0.1"
-  if (origin.pathname !== "/" || origin.search || (origin.protocol !== "https:" && !(local && origin.protocol === "http:"))) return null
-  if (env.VERCEL_ENV === "production" && local) return null
+  if (origin.pathname !== "/" || origin.search || origin.hash || origin.username || origin.password) return null
+  if (origin.protocol !== "https:" && !(local && origin.protocol === "http:")) return null
+  if ((preview || env.VERCEL_ENV === "production") && (local || origin.protocol !== "https:")) return null
+  if (preview) {
+    const authOrigin = URL.parse(env.NEXTAUTH_URL ?? "")
+    const productionHost = env.VERCEL_PROJECT_PRODUCTION_URL?.trim().toLowerCase()
+    if (origin.hostname === authOrigin?.hostname || origin.hostname === productionHost) return null
+  }
   return { clientId, clientSecret, redirectUri: `${origin.origin}${CALLBACK_PATH}` }
 }
 

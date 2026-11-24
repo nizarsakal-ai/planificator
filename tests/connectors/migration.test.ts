@@ -26,7 +26,10 @@ describe("migration du lot F", () => {
     // Seuls les lots G, H, I suivent F ; les migrations ultérieures hors lots (photos, espace PDF du Studio…) ne comptent pas.
     assert.deepEqual(dirs.filter((d) => d > MIGRATION_DIR && /_v2_lot_/.test(d)), ["20261119130000_v2_lot_g_document_studio", "20261119140000_v2_lot_h_payroll_prep", "20261119150000_v2_lot_i_marketing_shop"], "seules G, H, I après F")
     assert.equal(dirs.filter((d) => /lot_f/.test(d)).length, 1, "une seule migration du lot F")
-    assert.ok(dirs.every((d) => !/lot_d|reserve/.test(d)), "aucune migration du lot D")
+    // Le lot D (réserves et réception) a été intégré depuis (commit « Intègre le lot D et le correctif DG02 ») : sa migration
+    // unique existe et précède F ; l'invariant de F reste qu'elle ne crée aucun objet du lot D (assertion suivante).
+    assert.deepEqual(dirs.filter((d) => /lot_d|reserve/.test(d)), ["20261112120000_v2_lot_d_reserves_reception"], "une seule migration du lot D")
+    assert.ok(dirs.filter((d) => /lot_d/.test(d)).every((d) => d < MIGRATION_DIR), "lot D avant F")
     assert.doesNotMatch(sql, /worksite_reserves|reception_report/, "aucun objet du lot D")
   })
   it("additive : aucun objet existant modifié (ni table, ni type), aucune donnée lue ni écrite", () => {
@@ -112,8 +115,12 @@ describe("gardes et menus", () => {
     for (const v of [
       `const assistantNavVisible = isAssistantEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`,
       `const connectorsNavVisible = isConnectorCenterEnabledForCompany(companyId) && (role === "ADMIN" || role === "SUPER_ADMIN")`,
-      "crmNavVisible, automationNavVisible, assistantNavVisible, connectorsNavVisible }",
     ]) assert.ok(layout.includes(v), v)
+    // Les drapeaux sont transmis au menu via l'objet `user` ; d'autres modules (lot D, tableau de bord commercial, recherche,
+    // copilote) y ont été ajoutés après eux : on vérifie leur présence, pas leur position en fin d'objet.
+    const userObject = /const user = \{([^}]*)\}/.exec(layout)?.[1] ?? ""
+    const passed = userObject.split(",").map((s) => s.trim())
+    for (const k of ["crmNavVisible", "automationNavVisible", "assistantNavVisible", "connectorsNavVisible"]) assert.ok(passed.includes(k), `user.${k}`)
   })
   it("assistant : sources CRM et stock seulement, chacune sous son drapeau ; aucune source du lot D", () => {
     const a = read("src/lib/actions/assistant.actions.ts")

@@ -88,6 +88,13 @@ async function lockSourceAndRules(
 export class InboundSourceIdentityTx implements InboundSourceIdentityTxPort {
   constructor(private readonly db: PrismaClient = prisma) {}
 
+  /** Ouvre une transaction, ou réutilise celle de l'appelant si le client reçu en est déjà une (audit atomique). */
+  private run<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+    const client = this.db as unknown as { $transaction?: unknown }
+    if (typeof client.$transaction === "function") return this.db.$transaction(fn)
+    return fn(this.db as unknown as Tx)
+  }
+
   async setSourceEnabled(
     companyId: string,
     sourceId: string,
@@ -96,7 +103,7 @@ export class InboundSourceIdentityTx implements InboundSourceIdentityTxPort {
     if (!companyId || !sourceId) throw new InboundSourceNotFoundError()
 
     try {
-      return await this.db.$transaction(async (tx) => {
+      return await this.run(async (tx) => {
         await lockSourceAndRules(tx, companyId, sourceId)
 
         const source = await tx.inboundSource.findUnique({
@@ -137,7 +144,7 @@ export class InboundSourceIdentityTx implements InboundSourceIdentityTxPort {
     if (!companyId || !ruleId) throw new InboundSourceNotFoundError()
 
     try {
-      return await this.db.$transaction(async (tx) => {
+      return await this.run(async (tx) => {
         const existing = await tx.inboundSourceRule.findUnique({
           where: { id_companyId: { id: ruleId, companyId } },
         })

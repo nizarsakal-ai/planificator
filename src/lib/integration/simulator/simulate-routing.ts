@@ -61,7 +61,7 @@ export async function simulateRouting(
   if (rows.limitExceeded) {
     result = {
       outcome: "ERROR", matchedSourceIds: [], pipelineIds: [], reasonCode: ROUTING_REASON_CODES.CONFIG_LIMIT_EXCEEDED, rulesEvaluated: 0,
-      diagnostics: { qualifierGap: false, subjectKeywordRuleActive: false, bodyKeywordRuleActive: false, subjectPresent: false, bodyAvailable: false },
+      diagnostics: { qualifierGap: false, subjectGap: false, bodyGap: false, subjectKeywordRuleActive: false, bodyKeywordRuleActive: false, subjectPresent: false, bodyAvailable: false },
     }
   } else {
     const body = snapshotNeedsBody(rows)

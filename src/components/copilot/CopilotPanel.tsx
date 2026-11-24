@@ -98,12 +98,25 @@ export function ProposalCardView({ proposal, state, onConfirm, onCancel, onNavig
   )
 }
 
-const SUGGESTIONS = [
-  "Qui travaille demain et sur quel chantier ?",
-  "Quelles factures sont en retard de paiement ?",
-  "Quelles équipes sont libres lundi prochain ?",
-  "Résume les consultations à traiter.",
-]
+/** IA-6 : public du panneau (calculé côté serveur à partir du rôle). */
+export type CopilotAudience = "admin" | "team" | "employee" | "client"
+export const SUGGESTIONS: Record<CopilotAudience, string[]> = {
+  admin: [
+    "Qui travaille demain et sur quel chantier ?",
+    "Quelles factures sont en retard de paiement ?",
+    "Organise la semaine prochaine pour mes équipes.",
+    "Résume les consultations à traiter.",
+  ],
+  team: ["Où travaille mon équipe cette semaine ?", "Quelles affectations dois-je confirmer ?", "Qui est absent dans mon équipe la semaine prochaine ?"],
+  employee: ["Où est-ce que je travaille demain ?", "Quel est mon planning de la semaine ?", "Où en sont mes demandes d'absence ?"],
+  client: ["Où en sont mes chantiers ?", "Quand est la prochaine intervention ?"],
+}
+export const INTRO: Record<CopilotAudience, string> = {
+  admin: "Posez une question sur votre planning, vos chantiers, vos factures, vos absences ou votre stock.",
+  team: "Posez une question sur votre planning, celui de vos équipes ou leurs absences.",
+  employee: "Posez une question sur votre planning ou vos absences.",
+  client: "Posez une question sur vos chantiers et les prochaines interventions.",
+}
 
 /** Rendu sûr : texte brut, **gras** et liens internes [libellé](/chemin) seulement (tout autre lien reste du texte). */
 export function renderCopilotText(text: string, onNavigate?: () => void): ReactNode {
@@ -127,7 +140,8 @@ export function renderCopilotText(text: string, onNavigate?: () => void): ReactN
   return parts
 }
 
-export function CopilotPanel() {
+export function CopilotPanel({ audience = "admin", launcher = false }: { audience?: CopilotAudience; launcher?: boolean } = {}) {
+  const isAdmin = audience === "admin"
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
   const [turns, setTurns] = useState<Turn[]>([])
@@ -151,8 +165,9 @@ export function CopilotPanel() {
       setBriefingState("error")
     }
   }, [])
-  useEffect(() => { void loadBriefing() }, [loadBriefing])
-  useEffect(() => { if (open) void loadBriefing() }, [open, loadBriefing])
+  // Briefing et pastille : administration seulement (le point d'accès refuse les autres rôles).
+  useEffect(() => { if (isAdmin) void loadBriefing() }, [isAdmin, loadBriefing])
+  useEffect(() => { if (open && isAdmin) void loadBriefing() }, [open, isAdmin, loadBriefing])
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -230,6 +245,17 @@ export function CopilotPanel() {
 
   return (
     <>
+      {launcher && !open && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Ouvrir l'assistant IA"
+          title="Assistant IA (Ctrl+J)"
+          className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-[#0f3460] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-900/30 transition hover:bg-[#143e72] focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+        >
+          <Sparkles className="h-4 w-4" aria-hidden /> Assistant
+        </button>
+      )}
       {open && (
         <aside
           role="dialog"
@@ -240,7 +266,7 @@ export function CopilotPanel() {
             <Sparkles className="h-5 w-5" aria-hidden />
             <div className="flex-1">
               <p className="text-sm font-semibold">Assistant IA</p>
-              <p className="text-xs text-sky-100/80">Rien n&apos;est fait sans votre confirmation</p>
+              <p className="text-xs text-sky-100/80">{isAdmin ? "Rien n'est fait sans votre confirmation" : "Consultation seule · ne modifie rien"}</p>
             </div>
             {speech.supported && (
               <button type="button" onClick={speech.toggle} aria-pressed={speech.enabled} aria-label={speech.enabled ? "Couper la lecture à voix haute" : "Lire les réponses à voix haute"} title={speech.enabled ? "Lecture à voix haute activée" : "Lire les réponses à voix haute"} className="rounded p-1.5 hover:bg-white/10">
@@ -268,10 +294,10 @@ export function CopilotPanel() {
                   </button>
                 )}
                 <p className="text-sm text-slate-600 dark:text-slate-300">
-                  Posez une question sur votre planning, vos chantiers, vos factures, vos absences ou votre stock.
+                  {INTRO[audience]}
                 </p>
                 <div className="flex flex-col gap-2">
-                  {SUGGESTIONS.map(s => (
+                  {SUGGESTIONS[audience].map(s => (
                     <button key={s} type="button" onClick={() => send(s)} className="rounded-lg border border-slate-200 px-3 py-2 text-left text-sm text-slate-700 transition hover:border-[#0f3460] hover:bg-blue-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
                       {s}
                     </button>

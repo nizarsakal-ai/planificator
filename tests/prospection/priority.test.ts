@@ -104,6 +104,9 @@ describe("câblage", () => {
   })
 
   it("la CI exécute les tests de la veille prospection", () => {
-    assert.match(read(".github/workflows/lot-c-release.yml"), /test:navigation test:database test:prospection; do/)
+    // La suite doit figurer dans la boucle des tests unitaires ; sa position n'est pas un invariant (d'autres suites, comme
+    // test:lot-f, y sont ajoutées après elle).
+    const loop = /for suite in ([^;\n]*); do/.exec(read(".github/workflows/lot-c-release.yml"))?.[1] ?? ""
+    assert.ok(loop.split(/\s+/).includes("test:prospection"), "test:prospection dans la boucle Unit tests")
   })
 })
