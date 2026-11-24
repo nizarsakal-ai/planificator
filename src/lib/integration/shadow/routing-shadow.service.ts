@@ -37,7 +37,23 @@ export const ROUTING_SHADOW_COMPARISON_CODES = {
   NORMALIZED_NOT_FOUND: "NORMALIZED_NOT_FOUND",
   ROUTER_DISABLED: "ROUTER_DISABLED",
   ROUTER_FAILED: "ROUTER_FAILED",
+  /** Routage non terminé dans le budget restant du run : abandonné côté shadow, la synchronisation n'attend pas. */
+  ROUTER_TIMEOUT: "ROUTER_TIMEOUT",
 } as const
+
+const ROUTER_TIMED_OUT = Symbol("router-timeout")
+
+/** Attend `work` au plus `ms` millisecondes ; au-delà renvoie ROUTER_TIMED_OUT (l'éventuel échec tardif est absorbé). */
+async function withinBudget<T>(work: Promise<T>, ms: number): Promise<T | typeof ROUTER_TIMED_OUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<typeof ROUTER_TIMED_OUT>((resolve) => { timer = setTimeout(() => resolve(ROUTER_TIMED_OUT), Math.max(0, ms)) })
+  work.catch(() => undefined)
+  try {
+    return await Promise.race([work, timeout])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
 
 export interface RoutingShadowInput {
   companyId: string
@@ -139,7 +155,15 @@ export class RoutingShadowService {
 
     let routed: Awaited<ReturnType<TenantRouterService["route"]>>
     try {
-      routed = await this.deps.router.route({ companyId: input.companyId, normalizedInboundId })
+      // Revue indépendante du 24/11, point 3 : le routage ne doit jamais dépasser le budget restant du run.
+      const outcome = await withinBudget(
+        this.deps.router.route({ companyId: input.companyId, normalizedInboundId }),
+        input.deadlineAtMs - this.deps.now()
+      )
+      if (outcome === ROUTER_TIMED_OUT) {
+        return this.finish(input, noRouter(normalizedInboundId, ROUTING_SHADOW_COMPARISON_CODES.ROUTER_TIMEOUT), false)
+      }
+      routed = outcome
     } catch {
       return this.finish(input, noRouter(normalizedInboundId, ROUTING_SHADOW_COMPARISON_CODES.ROUTER_FAILED, true), false)
     }

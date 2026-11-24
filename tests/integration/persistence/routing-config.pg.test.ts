@@ -100,3 +100,22 @@ describe("garde-fous en base", () => {
     assert.match(await sqlError(`UPDATE integration_inbound_sources SET "displayName" = '   ' WHERE id = '${src.id}'`), /values_check/)
   })
 })
+
+describe("audit atomique (revue du 24/11, point 5)", () => {
+  it("audit impossible (acteur inconnu) : la mutation est annulée, aucune Source orpheline", async () => {
+    const svcTx = RoutingConfigAdminService.transactional(db)
+    const before = await db.inboundSource.count({ where: { companyId: A } })
+    await assert.rejects(svcTx.createSource({ companyId: A, userId: `inconnu${run}`, role: "ADMIN" }, "Sans trace"))
+    assert.equal(await db.inboundSource.count({ where: { companyId: A } }), before)
+  })
+  it("chemin transactionnel complet : Source, règle, Binding, activation, chacun avec son audit", async () => {
+    const svcTx = RoutingConfigAdminService.transactional(db)
+    const src = await svcTx.createSource(admin, "Transactionnelle")
+    await svcTx.createRule(admin, { sourceId: src.id, type: "SENDER_DOMAIN", value: "transaction.fr" })
+    const b = await svcTx.createBinding(admin, { sourceId: src.id })
+    await svcTx.setBindingEnabled(admin, b.id, true)
+    const on = await svcTx.setSourceEnabled(admin, src.id, true)
+    assert.equal(on.enabled, true)
+    assert.equal(await db.historyLog.count({ where: { companyId: A, entityId: { in: [src.id, b.id] } } }), 4)
+  })
+})

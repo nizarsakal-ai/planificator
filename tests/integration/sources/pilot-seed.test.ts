@@ -37,12 +37,40 @@ describe("buildPilotSeedPlan", () => {
   it("valeurs invalides comptées et ignorées ; deux partenaires du même nom → un seul créé", () => {
     const plan = buildPilotSeedPlan([partner({ id: "a", domains: [{ value: "pas un domaine", active: true }] }), partner({ id: "b" })], [])
     assert.equal(plan.sources[0]!.invalidValues, 1)
-    assert.deepEqual(plan.skipped, [{ partnerId: "b", code: "ALREADY_SEEDED" }])
+    assert.deepEqual(plan.skipped, [{ partnerId: "b", code: "DUPLICATE_NAME" }])
   })
   it("résumé : compteurs et noms seulement, aucune valeur de domaine ni d'email", () => {
     const s = summarizePilotSeedPlan(buildPilotSeedPlan([partner(), partner({ id: "x", active: false })], []))
     assert.deepEqual([s.sourcesToCreate, s.rulesToCreate, s.senderDomainRules, s.senderEmailRules, s.skipped], [1, 2, 1, 1, { INACTIVE: 1 }])
     assert.doesNotMatch(JSON.stringify(s), /maison-martin\.fr|contact@/i)
+  })
+})
+
+describe("rejeu après un échec partiel (revue du 24/11)", () => {
+  it("Source du même nom restée incomplète : règles manquantes ajoutées, Binding réactivé, Source activée", () => {
+    const plan = buildPilotSeedPlan([partner()], [{ id: "src1", displayName: "Maison Martin", enabled: false, ruleKeys: ["SENDER_DOMAIN|maison-martin.fr"], activeBindingId: null, inactiveBindingIds: ["b9"] }])
+    assert.deepEqual(plan.sources, [])
+    assert.deepEqual(plan.completions, [{ partnerId: "p1", sourceId: "src1", displayName: "Maison Martin", missingRules: [{ type: "SENDER_EMAIL", value: "contact@maison-martin.fr" }], bindingToEnable: "b9", createBinding: false, enableSource: true }])
+  })
+  it("Source complète : écartée (ALREADY_SEEDED) ; sans Binding : création prévue", () => {
+    const complete = { id: "src1", displayName: "Maison Martin", enabled: true, ruleKeys: ["SENDER_DOMAIN|maison-martin.fr", "SENDER_EMAIL|contact@maison-martin.fr"], activeBindingId: "b1", inactiveBindingIds: [] }
+    assert.deepEqual(buildPilotSeedPlan([partner()], [complete]).skipped, [{ partnerId: "p1", code: "ALREADY_SEEDED" }])
+    const noBinding = buildPilotSeedPlan([partner()], [{ ...complete, activeBindingId: null }])
+    assert.deepEqual([noBinding.completions[0]!.createBinding, noBinding.completions[0]!.bindingToEnable, noBinding.completions[0]!.missingRules], [true, null, []])
+  })
+  it("application : complète la Source existante", async () => {
+    const calls: string[] = []
+    const admin = {
+      createSource: async () => { throw new Error("pas de création") },
+      createRule: async (_a: unknown, i: { type: string; sourceId: string }) => { calls.push(`rule:${i.type}:${i.sourceId}`); return {} as never },
+      createBinding: async () => { calls.push("binding"); return { id: "bN" } as never },
+      setBindingEnabled: async (_a: unknown, id: string) => { calls.push(`binding:on:${id}`); return {} as never },
+      setSourceEnabled: async (_a: unknown, id: string) => { calls.push(`source:on:${id}`); return {} as never },
+    }
+    const plan = buildPilotSeedPlan([partner()], [{ id: "src1", displayName: "Maison Martin", enabled: false, ruleKeys: [], activeBindingId: null, inactiveBindingIds: [] }])
+    const r = await applyPilotSeedPlan(plan, { companyId: "coA", userId: "u1", role: "ADMIN" }, admin)
+    assert.deepEqual([r.created.length, r.completed, r.failed], [0, [{ partnerId: "p1", sourceId: "src1", rulesAdded: 2 }], []])
+    assert.deepEqual(calls, ["rule:SENDER_DOMAIN:src1", "rule:SENDER_EMAIL:src1", "binding", "binding:on:bN", "source:on:src1"])
   })
 })
 

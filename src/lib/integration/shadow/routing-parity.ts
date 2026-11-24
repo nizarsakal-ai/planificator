@@ -49,6 +49,8 @@ export interface ParityInput {
   routerReasonCode?: string
   diagnostics?: {
     qualifierGap: boolean
+    subjectGap?: boolean
+    bodyGap?: boolean
     subjectKeywordRuleActive: boolean
     bodyKeywordRuleActive: boolean
     subjectPresent: boolean
@@ -67,10 +69,14 @@ export function computeParity(input: ParityInput): ParityResult {
   const explained = new Set<ExplainedCode>()
   const d = input.diagnostics
   if (input.router === "MATCH") explained.add(EXPLAINED_CODES.MATCH_NO_DRAFT)
-  if (input.routerReasonCode === "NO_ENABLED_SOURCE") explained.add(EXPLAINED_CODES.CONFIG_NOT_SEEDED)
-  if (d?.subjectKeywordRuleActive && !d.subjectPresent) explained.add(EXPLAINED_CODES.SUBJECT_ABSENT)
-  if (d?.bodyKeywordRuleActive && !d.bodyAvailable) explained.add(EXPLAINED_CODES.BODY_UNAVAILABLE)
-  if (d?.qualifierGap && input.legacy === "ADMIT" && input.router !== "MATCH") explained.add(EXPLAINED_CODES.QUALIFIER_GAP)
+  if (input.routerReasonCode === "NO_ENABLED_SOURCE" && input.legacy === "ADMIT") explained.add(EXPLAINED_CODES.CONFIG_NOT_SEEDED)
+  // Explications d'un admis legacy manqué par le Router : seulement si l'écart vient d'une Source dont l'identité
+  // a matché (revue indépendante du 24/11, point 1). Jamais pour un ROUTER_ONLY : ni l'objet absent ni le corps
+  // indisponible ne peuvent produire un MATCH en trop.
+  const legacyMissedByRouter = input.legacy === "ADMIT" && input.router !== null && input.router !== "MATCH"
+  if (legacyMissedByRouter && d?.subjectGap) explained.add(EXPLAINED_CODES.SUBJECT_ABSENT)
+  if (legacyMissedByRouter && d?.bodyGap) explained.add(EXPLAINED_CODES.BODY_UNAVAILABLE)
+  if (legacyMissedByRouter && d?.qualifierGap) explained.add(EXPLAINED_CODES.QUALIFIER_GAP)
   const explainedCodes = [...explained].sort()
 
   if (input.comparisonFailed) return { parityOutcome: PARITY_OUTCOMES.ERROR, explainedCodes }
