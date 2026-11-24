@@ -21,6 +21,10 @@ export const PLATFORM_FLAG_NAMES = {
   ROUTING_COMPANY_ALLOWLIST: "INTEGRATION_ROUTING_COMPANY_ALLOWLIST",
   /** LOT-2 (I1). Comparaison de parité shadow (LOT-2D). */
   ROUTING_SHADOW_ENABLED: "INTEGRATION_ROUTING_SHADOW_ENABLED",
+  /** LOT-4B. Résolution contenu / pièces par capacité de connexion (fail-closed, défaut OFF). */
+  ARTIFACT_RESOLUTION_ENABLED: "INTEGRATION_ARTIFACT_RESOLUTION_ENABLED",
+  /** LOT-4B. Allowlist CSV d'ids d'entreprise pour la résolution par capacité (vide ⇒ aucune). */
+  ARTIFACT_RESOLUTION_COMPANY_ALLOWLIST: "INTEGRATION_ARTIFACT_RESOLUTION_COMPANY_ALLOWLIST",
 } as const
 
 /** Défaut documenté — budget global du run shadow. */

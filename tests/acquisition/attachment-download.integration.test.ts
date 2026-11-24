@@ -28,6 +28,14 @@ const RUN = { skip: enabled ? undefined : "TEST_ACQUISITION_DATABASE_URL non dé
 
 const PDF_BUFFER = Buffer.from("%PDF-1.4 integration test")
 
+/** LOT-4B : la résolution par capacité est coupée par défaut ; ces cas la posent explicitement. */
+const ARTIFACT_RESOLUTION_ON = (companyId: string) => ({
+  ...process.env,
+  INTEGRATION_PLATFORM_FOUNDATION_ENABLED: "true",
+  INTEGRATION_ARTIFACT_RESOLUTION_ENABLED: "true",
+  INTEGRATION_ARTIFACT_RESOLUTION_COMPANY_ALLOWLIST: companyId,
+})
+
 describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
   let companyA = ""
   let companyB = ""
@@ -136,7 +144,7 @@ describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
     const fixture = await seedAdmission(externalMessageId, ["CONTENT_FETCHABLE", "ATTACHMENTS_FETCHABLE"])
     const body = await fetchAndStoreMessageContentCore(
       { companyId: companyA, acquisitionMessageId: fixture.messageId },
-      { db, source: { fetchMessageBody: async (input) => {
+      { db, env: ARTIFACT_RESOLUTION_ON(companyA), source: { fetchMessageBody: async (input) => {
         assert.equal(input.companyId, companyA)
         assert.equal(input.connectionId, mailboxA)
         assert.equal(input.externalMessageId, externalMessageId)
@@ -151,7 +159,7 @@ describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
     const result = await downloadAcquisitionAttachment(
       { companyId: companyA, attachmentId: fixture.attachmentId },
       {
-        db, repository: new AcquisitionAttachmentRepository(db), storage: mockStorage(), log: () => {},
+        db, env: ARTIFACT_RESOLUTION_ON(companyA), repository: new AcquisitionAttachmentRepository(db), storage: mockStorage(), log: () => {},
         source: { fetchAttachment: async (input) => {
           assert.equal(input.companyId, companyA)
           assert.equal(input.connectionId, mailboxA)
@@ -165,6 +173,7 @@ describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
     const resolved = await resolveMailArtifactProvider(
       db, { companyId: companyA, sourceMailboxKey: mailboxA, externalMessageId }, "ARTIFACT_FETCH",
       { id: fixture.attachmentId, externalArtifactId: "piece-fictive" },
+      { env: ARTIFACT_RESOLUTION_ON(companyA), log: () => undefined },
     )
     assert.ok(resolved.ok)
     assert.equal(resolved.artifact?.connectionId, connection.id)
@@ -174,14 +183,14 @@ describe("acquisition attachments — intégration (BDD de test)", RUN, () => {
     const blocked = await seedAdmission("admission-sans-capacites", [])
     const blockedBody = await fetchAndStoreMessageContentCore(
       { companyId: companyA, acquisitionMessageId: blocked.messageId },
-      { db, source: { fetchMessageBody: async () => assert.fail("Aucun appel sans capacité de contenu") } },
+      { db, env: ARTIFACT_RESOLUTION_ON(companyA), source: { fetchMessageBody: async () => assert.fail("Aucun appel sans capacité de contenu") } },
     )
     assert.ok(!blockedBody.ok)
     assert.equal(blockedBody.code, "ARTIFACT_CAPABILITY_UNAVAILABLE")
     const blockedAttachment = await downloadAcquisitionAttachment(
       { companyId: companyA, attachmentId: blocked.attachmentId },
       {
-        db, repository: new AcquisitionAttachmentRepository(db), storage: mockStorage(), log: () => {},
+        db, env: ARTIFACT_RESOLUTION_ON(companyA), repository: new AcquisitionAttachmentRepository(db), storage: mockStorage(), log: () => {},
         source: { fetchAttachment: async () => assert.fail("Aucun appel sans capacité de pièce") },
       },
     )

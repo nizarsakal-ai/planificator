@@ -13,6 +13,7 @@ describe("attachment-retry.policy", () => {
     assert.deepEqual([...RETRYABLE_ATTACHMENT_ERROR_CODES], [
       "GMAIL_NOT_CONNECTED",
       "ATTACHMENT_STORAGE_FAILED",
+      "ARTIFACT_RESOLUTION_FAILED",
     ])
   })
 

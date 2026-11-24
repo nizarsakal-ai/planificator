@@ -13,6 +13,7 @@ export function classifyContentFetchError(code: MessageContentErrorCode): Conten
     case "GMAIL_UNAVAILABLE":
     case "CONTENT_FETCH_FAILED":
     case "CONTENT_PERSIST_FAILED":
+    case "ARTIFACT_RESOLUTION_FAILED":
       return "RETRYABLE"
     case "CONTENT_EMPTY":
     case "ACQUISITION_CONTENT_TOO_LARGE":

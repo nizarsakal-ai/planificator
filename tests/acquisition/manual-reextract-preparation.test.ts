@@ -42,7 +42,7 @@ function deps(over: Partial<ManualReExtractPreparationDeps> & {
     listAttachments: async () => over.attachments ?? [],
     scheduleRetryToDiscovered: async (i) => {
       calls.schedules.push(i.attachmentId)
-      assert.deepEqual(i.retryableErrorCodes, ["GMAIL_NOT_CONNECTED", "ATTACHMENT_STORAGE_FAILED"])
+      assert.deepEqual(i.retryableErrorCodes, ["GMAIL_NOT_CONNECTED", "ATTACHMENT_STORAGE_FAILED", "ARTIFACT_RESOLUTION_FAILED"])
       return "TRANSITIONED"
     },
     downloadAttachment: async (i) => {

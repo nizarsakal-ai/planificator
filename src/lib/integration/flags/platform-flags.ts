@@ -161,6 +161,22 @@ export function isRoutingActiveForCompany(
   )
 }
 
+/**
+ * LOT-4B : résolution du contenu et des pièces par capacité de connexion.
+ * Fail-closed : foundation ∧ flag strictement "true" ∧ allowlist. Sinon, chemin Gmail historique inchangé.
+ */
+export function isArtifactResolutionActiveForCompany(
+  companyId: string,
+  env: PlatformFlagEnv = process.env
+): boolean {
+  if (!companyId) return false
+  return (
+    isPlatformFoundationEnabled(env) &&
+    isExactTrue(readRaw(env, PLATFORM_FLAG_NAMES.ARTIFACT_RESOLUTION_ENABLED)) &&
+    parseCompanyAllowlist(readRaw(env, PLATFORM_FLAG_NAMES.ARTIFACT_RESOLUTION_COMPANY_ALLOWLIST)).has(companyId)
+  )
+}
+
 /** Parité shadow (LOT-2D) : exige en plus le Router actif pour la société. */
 export function isRoutingShadowActiveForCompany(
   companyId: string,

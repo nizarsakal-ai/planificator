@@ -30,6 +30,10 @@ export interface MessageContentServiceDeps {
   db?: PrismaClient
   source?: AcquisitionMessageContentSourcePort
   repository?: AcquisitionMessageContentRepository
+  /** LOT-4B (tests) : flags de résolution par capacité ; défaut process.env. */
+  env?: NodeJS.ProcessEnv
+  /** LOT-4B (tests) : journal de résolution. */
+  artifactLog?: (fields: Record<string, unknown>) => void
 }
 
 function fail(
@@ -58,6 +62,8 @@ function mapContentSourceCode(code: string): MessageContentErrorCode {
 
 function publicMessage(code: MessageContentErrorCode): string {
   switch (code) {
+    case "ARTIFACT_RESOLUTION_FAILED":
+      return "Récupération du contenu momentanément impossible"
     case "ARTIFACT_CAPABILITY_UNAVAILABLE":
       return "La connexion ne permet pas de récupérer ce contenu"
     case "CONTENT_FETCH_DISABLED":
@@ -140,14 +146,11 @@ export async function fetchAndStoreMessageContentCore(
     return fail("NOT_FOUND", "CONTENT_NOT_FOUND", publicMessage("CONTENT_NOT_FOUND"))
   }
 
-  let resolved
-  try {
-    resolved = await resolveMailArtifactProvider(db, message, "CONTENT_FETCH", {
-      id: message.id, externalArtifactId: message.externalMessageId,
-    })
-  } catch {
-    return fail("FAILED", "CONTENT_FETCH_FAILED", publicMessage("CONTENT_FETCH_FAILED"))
-  }
+  // Flag coupé : résolution historique, une exception remonte comme sur main.
+  // Flag posé : jamais d'exception ; une panne de lecture rend ARTIFACT_RESOLUTION_FAILED (reprise).
+  const resolved = await resolveMailArtifactProvider(db, message, "CONTENT_FETCH", {
+    id: message.id, externalArtifactId: message.externalMessageId,
+  }, { env: deps.env, log: deps.artifactLog })
   if (!resolved.ok) return fail("FAILED", resolved.code, publicMessage(resolved.code))
   const source = deps.source ?? resolved.provider.content
 

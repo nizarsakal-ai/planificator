@@ -14,11 +14,9 @@ import type { AttachmentStoragePort } from "@/lib/acquisition/attachments/attach
 import { cloudinaryAttachmentStorage } from "@/lib/acquisition/attachments/attachment-storage.port"
 import type { AttachmentSourcePort } from "@/lib/acquisition/attachments/attachment-source.port"
 import { resolveMailArtifactProvider } from "@/lib/acquisition/artifacts/resolve-mail-artifact-provider"
-import { legacyMailArtifactSources } from "@/lib/acquisition/artifacts/legacy-mail-artifact-sources"
 import { getAttachmentRecoveryCronConfig } from "@/lib/acquisition/attachments/attachment-recovery-cron-feature-flag"
 import { isRetryableAttachmentErrorCode } from "@/lib/acquisition/attachments/attachment-retry.policy"
 import { computeRetrySchedule } from "@/lib/acquisition/attachments/attachment-retry-schedule"
-import { resolveAcquisitionMailboxForMessage } from "@/lib/acquisition/connector/resolve-acquisition-mailbox"
 import { prisma } from "@/lib/prisma"
 import type {
   AttachmentDownloadErrorCode,
@@ -46,6 +44,10 @@ export interface AttachmentDownloadServiceDeps {
   gmailSource?: AttachmentSourcePort
   storage?: AttachmentStoragePort
   log?: (event: string, payload?: Record<string, unknown>) => void
+  /** LOT-4B (tests) : flags de résolution par capacité ; défaut process.env. */
+  env?: NodeJS.ProcessEnv
+  /** LOT-4B (tests) : journal de résolution. */
+  artifactLog?: (fields: Record<string, unknown>) => void
 }
 
 function defaultLog(event: string, payload?: Record<string, unknown>): void {
@@ -284,19 +286,14 @@ export async function downloadAcquisitionAttachment(
     return failureResult(input.attachmentId, "GMAIL_ATTACHMENT_NOT_FOUND")
   }
 
-  let resolved
-  try {
-    resolved = deps.gmailSource && !deps.source
-      ? await resolveAcquisitionMailboxForMessage(scoped.message, db)
-      : await resolveMailArtifactProvider(db, scoped.message, "ARTIFACT_FETCH", {
-        id: claimed.id, externalArtifactId: claimed.externalAttachmentId,
-        filename: claimed.filename || undefined, mimeType: claimed.mimeType || undefined,
-        sizeBytes: claimed.sizeBytes,
-      })
-  } catch {
-    await markFail("FAILED", "ATTACHMENT_PERSISTENCE_FAILED")
-    return failureResult(input.attachmentId, "ATTACHMENT_PERSISTENCE_FAILED")
-  }
+  // Une source injectée (y compris l'ancienne `gmailSource`) ne contourne jamais la résolution :
+  // flag coupé, résolution historique (une exception remonte comme sur main) ; flag posé, contrôles de capacité,
+  // et une panne de lecture rend ARTIFACT_RESOLUTION_FAILED (reprise).
+  const resolved = await resolveMailArtifactProvider(db, scoped.message, "ARTIFACT_FETCH", {
+    id: claimed.id, externalArtifactId: claimed.externalAttachmentId,
+    filename: claimed.filename || undefined, mimeType: claimed.mimeType || undefined,
+    sizeBytes: claimed.sizeBytes,
+  }, { env: deps.env, log: deps.artifactLog })
   if (!resolved.ok) {
     await markFail("FAILED", resolved.code)
     log("DOWNLOAD_FAILED", { attachmentId: input.attachmentId, errorCode: resolved.code })
@@ -305,10 +302,8 @@ export async function downloadAcquisitionAttachment(
 
   let binary: Buffer
   try {
-    const source = deps.source ?? deps.gmailSource ?? (
-      "provider" in resolved ? resolved.provider.attachment : legacyMailArtifactSources.attachment
-    )
-    const artifact = "artifact" in resolved ? resolved.artifact : undefined
+    const source = deps.source ?? deps.gmailSource ?? resolved.provider.attachment
+    const artifact = resolved.artifact
     const fetched = await source.fetchAttachment({
       companyId: input.companyId,
       externalMessageId: scoped.message.externalMessageId,

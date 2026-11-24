@@ -33,3 +33,22 @@ Pour un message admis via la plateforme, le résolveur retrouve son enveloppe à
 Les messages sans enveloppe d’admission associée restent sur le chemin Gmail historique. Le lien LOT‑3 est déduit de la configuration de boîte et de la clé d’admission actuelles. Cette livraison ne persiste pas de nouvelle relation et n’ajoute aucune migration.
 
 Recette PostgreSQL 17 jetable avec 117 migrations existantes et fournisseurs simulés. 46 tests réussis sans échec ni test ignoré. Le scénario de bout en bout vérifie la boîte et la connexion d’un message admis, la lecture du corps et de la pièce, et le refus des deux lectures lorsque les capacités manquent.
+
+## LOT‑4B — Résolution gardée et observable
+
+- **Flag fail-closed** `INTEGRATION_ARTIFACT_RESOLUTION_ENABLED` + `INTEGRATION_ARTIFACT_RESOLUTION_COMPANY_ALLOWLIST` (foundation requise, strictement `"true"`, défaut OFF). Flag coupé : chemin de `main` à l'identique (résolution de boîte, adaptateurs Gmail, exceptions inchangées), sans journal.
+- **Flag posé** :
+  - la clé de boîte explicite doit appartenir à la société du message (`MAILBOX_NOT_OWNED`), avant toute lecture et y compris pour le repli historique ;
+  - puis les contrôles de connexion, d'enveloppe, de capacités et de boîte active de #212.
+- **Pannes transitoires** : une exception de lecture pendant la résolution rend `ARTIFACT_RESOLUTION_FAILED`, repris pour le contenu (`RETRYABLE`) et pour les pièces (allowlist de reprise). `ARTIFACT_CAPABILITY_UNAVAILABLE` n'est pas repris.
+- **Journal** `acquisition.artifact_resolution` : capacité, chemin (`PLATFORM`, `LEGACY_FALLBACK`), issue, motif fermé, durée ; aucun identifiant externe, adresse, objet, nom de fichier ni identifiant de boîte.
+- **Injection** : `gmailSource` (déprécié) ne contourne plus la résolution.
+- **Architecture** : les deux services n'importent aucun module Gmail, connecteur ni composition historique (`artifact-workers.architecture.test.ts`).
+- **Emplacement (E4)** : la façade reste sous `src/lib/acquisition/artifacts/`. Les règles d'import interdisent à `integration/**` d'importer les adaptateurs Acquisition qu'elle assemble ; la déplacer exigerait d'injecter les fournisseurs. La décision est reportée à LOT‑5 ou LOT‑7.
+- **Recette** `npm run test:integration:lot4b:pg` (PostgreSQL jetable), depuis la vraie admission `admitGmailConsultation`, avec boîtes et connecteurs fictifs. Cas couverts :
+  - sorties identiques flag coupé et flag posé ;
+  - deux boîtes distinctes ;
+  - refus intersociété sans appel fournisseur ;
+  - connexion désactivée ;
+  - panne transitoire reprise ;
+  - repli historique journalisé sans donnée personnelle.

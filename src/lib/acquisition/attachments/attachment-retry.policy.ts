@@ -7,6 +7,8 @@ import type { AttachmentDownloadErrorCode } from "@/lib/acquisition/attachments/
 export const RETRYABLE_ATTACHMENT_ERROR_CODES = [
   "GMAIL_NOT_CONNECTED",
   "ATTACHMENT_STORAGE_FAILED",
+  /** LOT-4B : panne de lecture pendant la résolution par capacité (flag posé). */
+  "ARTIFACT_RESOLUTION_FAILED",
 ] as const satisfies readonly AttachmentDownloadErrorCode[]
 
 export type RetryableAttachmentErrorCode = (typeof RETRYABLE_ATTACHMENT_ERROR_CODES)[number]
