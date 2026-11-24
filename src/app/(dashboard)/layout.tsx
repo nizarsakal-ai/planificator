@@ -23,6 +23,7 @@ import { isVehiclesV3Enabled } from "@/lib/vehicules/v3/v3-feature-flag"
 import { isCrmEnabled } from "@/lib/crm/crm-feature-flag"
 import { isAutomationsEnabled } from "@/lib/automation/automation-feature-flag"
 import { isAssistantEnabledForCompany } from "@/lib/assistant/assistant-feature-flag"
+import { resolveAssistantAccess } from "@/lib/assistant/access"
 import { isConnectorCenterEnabledForCompany } from "@/lib/connectors/connector-feature-flag"
 import { isDocumentStudioEnabled } from "@/lib/document-studio/studio-feature-flag"
 import { isPayrollPrepEnabledForCompany } from "@/lib/payroll-prep/prepay-feature-flag"
@@ -91,6 +92,9 @@ export default async function DashboardLayout({
   // IA-6 : rôles ouverts par COPILOT_ROLES (administration seule par défaut) ; public du panneau selon le rôle.
   const copilotVisible = isCopilotRoleAllowed(role) && copilotConfig(companyId) !== null
   const copilotAudience = role === "TEAM_LEADER" ? "team" : role === "EMPLOYEE" ? "employee" : "admin"
+  // Lien « Propositions et journal » du panneau : MÊME contrôle d'accès que la route /assistant (lot F : drapeau, société
+  // active exactement égale à la cible, rôle ADMIN ou SUPER_ADMIN). Affichage seulement : la page refuse côté serveur.
+  const copilotProposalsVisible = copilotVisible && (await resolveAssistantAccess().then((r) => r.ok, () => false))
   const company = companyId ? await prisma.company.findUnique({
     where: { id: companyId }, select: { name: true, logoUrl: true },
   }) : null
@@ -110,7 +114,7 @@ export default async function DashboardLayout({
         </main>
       </div>
       <InstallPrompt />
-      {copilotVisible && <CopilotPanel audience={copilotAudience} />}
+      {copilotVisible && <CopilotPanel audience={copilotAudience} proposalsHref={copilotProposalsVisible ? "/assistant" : undefined} />}
     </div>
   )
 }

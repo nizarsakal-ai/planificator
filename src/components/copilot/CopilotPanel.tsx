@@ -5,7 +5,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Camera, Check, CheckCircle2, Loader2, Mic, MicOff, RefreshCw, Send, Sparkles, Sun, Trash2, Volume2, VolumeX, X, XCircle } from "lucide-react"
+import { Camera, Check, CheckCircle2, ClipboardList, Loader2, Mic, MicOff, RefreshCw, Send, Sparkles, Sun, Trash2, Volume2, VolumeX, X, XCircle } from "lucide-react"
 import { preparePhoto, useDictation, useSpeech, type PreparedPhoto } from "@/components/copilot/copilot-field"
 import { COPILOT_OPEN_EVENT, publishCopilotBadge } from "@/components/copilot/copilot-events"
 
@@ -140,7 +140,20 @@ export function renderCopilotText(text: string, onNavigate?: () => void): ReactN
   return parts
 }
 
-export function CopilotPanel({ audience = "admin", launcher = false }: { audience?: CopilotAudience; launcher?: boolean } = {}) {
+/** Lien vers les propositions du lot F (règles locales) et leur journal. Rendu seulement si le serveur l'a autorisé. */
+export function ProposalsLink({ href, onNavigate }: { href: string; onNavigate?: () => void }) {
+  return (
+    <Link
+      href={href}
+      onClick={onNavigate}
+      className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-[#0f3460] hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:text-sky-300 dark:hover:bg-slate-700"
+    >
+      <ClipboardList className="h-4 w-4" aria-hidden /> Propositions et journal
+    </Link>
+  )
+}
+
+export function CopilotPanel({ audience = "admin", launcher = false, proposalsHref }: { audience?: CopilotAudience; launcher?: boolean; proposalsHref?: string } = {}) {
   const isAdmin = audience === "admin"
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
@@ -282,6 +295,7 @@ export function CopilotPanel({ audience = "admin", launcher = false }: { audienc
               <X className="h-5 w-5" aria-hidden />
             </button>
           </header>
+          {proposalsHref && <ProposalsLink href={proposalsHref} onNavigate={() => setOpen(false)} />}
 
           <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4" aria-live="polite">
             {turns.length === 0 && (

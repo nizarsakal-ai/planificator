@@ -35,7 +35,7 @@ export default async function AssistantPage({ searchParams }: { searchParams: Pr
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900"><Sparkles className="h-6 w-6 text-[#0f3460]" /> Assistant</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900"><Sparkles className="h-6 w-6 text-[#0f3460]" /> Propositions</h1>
           <p className="mt-1 text-sm text-slate-500">Propositions avec leurs sources · rien n&apos;est fait sans votre approbation · journal des actions</p>
         </div>
         <FormulaireRetour action={analyseAction}><Button type="submit">Analyser maintenant</Button></FormulaireRetour>

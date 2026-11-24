@@ -1,0 +1,60 @@
+/**
+ * Navigation assistant, étape 1 (24/11/2026) : l'entrée du lot F devient « Propositions » (route /assistant inchangée) et
+ * le panneau Assistant IA affiche « Propositions et journal » seulement si le contrôle d'accès de la route /assistant
+ * l'autorise (drapeau lot F, société active = cible, rôle ADMIN ou SUPER_ADMIN).
+ */
+process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
+
+import { describe, it } from "node:test"
+import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
+import React from "react"
+import { renderToStaticMarkup } from "react-dom/server"
+;(globalThis as { React?: typeof React }).React = React
+import { resolveAssistantAccessCore } from "@/lib/assistant/access"
+import { readAssistantPilotCompanyId } from "@/lib/assistant/assistant-feature-flag"
+import { ASSISTANT_NAV_ITEM } from "@/lib/navigation/nav-config"
+import { ProposalsLink } from "@/components/copilot/CopilotPanel"
+
+const PILOT = "co_pilote"
+const session = (role: string, companyId: string | null = PILOT) => ({ user: { id: "u1", role, companyId } })
+const read = (p: string) => readFileSync(p, "utf8")
+
+describe("contrôle d'accès réutilisé (route /assistant)", () => {
+  it("administrateur autorisé : ADMIN et SUPER_ADMIN de la société pilote", () => {
+    for (const role of ["ADMIN", "SUPER_ADMIN"]) assert.equal(resolveAssistantAccessCore(PILOT, session(role)).ok, true, role)
+  })
+  it("rôle non administrateur : refusé, même dans la société pilote", () => {
+    for (const role of ["TEAM_LEADER", "EMPLOYEE", "CLIENT"]) assert.equal(resolveAssistantAccessCore(PILOT, session(role)).ok, false, role)
+  })
+  it("lot inactif : drapeau coupé ou cible absente ⇒ refusé ; autre société ⇒ refusé", () => {
+    assert.equal(readAssistantPilotCompanyId({ LOT_F_PILOT_COMPANY_ID: PILOT }), null, "drapeau coupé")
+    assert.equal(readAssistantPilotCompanyId({ ASSISTANT_PILOT_ENABLED: "true" }), null, "cible absente")
+    assert.equal(readAssistantPilotCompanyId({ ASSISTANT_PILOT_ENABLED: "true", LOT_F_PILOT_COMPANY_ID: PILOT }), PILOT)
+    assert.deepEqual(resolveAssistantAccessCore(null, session("ADMIN")), { ok: false, reason: "MODULE_DISABLED" })
+    assert.deepEqual(resolveAssistantAccessCore(PILOT, session("ADMIN", "co_autre")), { ok: false, reason: "MODULE_DISABLED" })
+  })
+})
+
+describe("câblage du lien dans le panneau", () => {
+  const layout = read("src/app/(dashboard)/layout.tsx")
+  it("le layout calcule le lien avec resolveAssistantAccess, seulement si le copilote est visible", () => {
+    assert.ok(layout.includes('import { resolveAssistantAccess } from "@/lib/assistant/access"'))
+    assert.ok(layout.includes("const copilotProposalsVisible = copilotVisible && (await resolveAssistantAccess().then((r) => r.ok, () => false))"))
+    assert.ok(layout.includes('proposalsHref={copilotProposalsVisible ? "/assistant" : undefined}'))
+  })
+  it("le panneau n'affiche le lien que si le serveur fournit l'adresse", () => {
+    const panel = read("src/components/copilot/CopilotPanel.tsx")
+    assert.ok(panel.includes("{proposalsHref && <ProposalsLink href={proposalsHref}"))
+    const html = renderToStaticMarkup(<ProposalsLink href="/assistant" />)
+    assert.match(html, /href="\/assistant"/)
+    assert.match(html, /Propositions et journal/)
+  })
+})
+
+describe("renommage « Propositions », route inchangée", () => {
+  it("entrée de menu et titre de page", () => {
+    assert.deepEqual([ASSISTANT_NAV_ITEM.label, ASSISTANT_NAV_ITEM.href], ["Propositions", "/assistant"])
+    assert.ok(read("src/app/(dashboard)/assistant/page.tsx").includes('<Sparkles className="h-6 w-6 text-[#0f3460]" /> Propositions</h1>'))
+  })
+})
