@@ -109,4 +109,6 @@ Revue statique Codex du diff de la suite (rapportée par Nizar le 24/11/2026) : 
 
 Critères encore ouverts avant publication (enregistrés par Codex) : parcours dans le navigateur et tests PostgreSQL, à faire sur le Mac.
 
-Prochaine action : navigateur et PostgreSQL sur le Mac avec le troisième bundle, puis publication par Nizar (aucun accès en écriture au dépôt depuis le VPS).
+Recette réelle par Codex sur le Mac (24/11/2026, Chromium et PostgreSQL jetable, données fictives, copie identique au bundle v3 hors `STATE.md`) : suites PostgreSQL 35/35 ; parcours navigateur **20/22**, PDF en HTTP 200, filtres conservés dans les deux sens. Les deux écarts sont attribués au scénario de recette, pas à l'application (analyse sur le VPS par lecture du code, non confirmée dans un navigateur) : écart 13, le formulaire GET envoie `etat=` vide, lu par la page comme « tous les états » ; écart 22, écart d'hydratation (attribut `style` vide sur des champs) causé par la capture d'écran Playwright prise avant l'hydratation — le HTML serveur ne contient aucun `style`, le champ du hub est identique sur `6452eb0`, `8c3533b` et `d770287`. Aucun code du produit modifié. Scénario version 2 et analyse : `outbox/2026-11-24-planificator-studio-documents-g2-recette-navigateur-v2/`.
+
+Prochaine action : rejouer le scénario version 2 sur le Mac (attendu 22/22) et son mode « hydratation seule » pour confirmer la cause de l'écart 22, puis publication par Nizar (aucun accès en écriture au dépôt depuis le VPS).
