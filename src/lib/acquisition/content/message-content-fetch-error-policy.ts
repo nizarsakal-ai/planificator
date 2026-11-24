@@ -13,6 +13,7 @@ export function classifyContentFetchError(code: MessageContentErrorCode): Conten
     case "GMAIL_UNAVAILABLE":
     case "CONTENT_FETCH_FAILED":
     case "CONTENT_PERSIST_FAILED":
+    case "ARTIFACT_RESOLUTION_FAILED":
       return "RETRYABLE"
     case "CONTENT_EMPTY":
     case "ACQUISITION_CONTENT_TOO_LARGE":
@@ -20,6 +21,7 @@ export function classifyContentFetchError(code: MessageContentErrorCode): Conten
     case "GMAIL_MESSAGE_PARSE_ERROR":
     case "CONTENT_NOT_FOUND":
       return "PERMANENT"
+    case "ARTIFACT_CAPABILITY_UNAVAILABLE":
     case "GMAIL_NOT_CONNECTED":
     case "GMAIL_TOKEN_REFRESH_FAILED":
     case "GMAIL_UNAUTHORIZED":

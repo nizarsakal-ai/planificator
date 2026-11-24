@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+import { gmailAdmissionKey } from "@/lib/acquisition/artifacts/gmail-admission-key"
 import { z } from "zod"
 import type { PrismaClient } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
@@ -129,8 +129,7 @@ export async function admitGmailConsultation(
   // L’admission reconstruit son instantané depuis le message du poll.
   // Les projections shadow antérieures restent immuables, même si leur
   // expéditeur est différent. L’identité métier Acquisition reste la même.
-  const digest = createHash("sha256").update(mapped.dto.externalId).digest("hex")
-  const dto = { ...mapped.dto, idempotencyKey: `consultations-gmail-v1:${digest}` }
+  const dto = { ...mapped.dto, idempotencyKey: gmailAdmissionKey(mapped.dto.externalId) }
   const envelopes = new InboundEnvelopeRepository(db)
   const normalized = new NormalizedInboundRepository(db)
   await new MailShadowBridgeService(db).project(dto, { stats: createMailShadowRunStats() })

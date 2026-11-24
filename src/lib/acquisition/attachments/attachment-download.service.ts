@@ -12,12 +12,11 @@ import {
 } from "@/lib/acquisition/attachments/attachment-policy"
 import type { AttachmentStoragePort } from "@/lib/acquisition/attachments/attachment-storage.port"
 import { cloudinaryAttachmentStorage } from "@/lib/acquisition/attachments/attachment-storage.port"
-import type { GmailAttachmentSourcePort } from "@/lib/acquisition/attachments/gmail-attachment-source.adapter"
-import { gmailAttachmentSource } from "@/lib/acquisition/attachments/gmail-attachment-source.adapter"
+import type { AttachmentSourcePort } from "@/lib/acquisition/attachments/attachment-source.port"
+import { resolveMailArtifactProvider } from "@/lib/acquisition/artifacts/resolve-mail-artifact-provider"
 import { getAttachmentRecoveryCronConfig } from "@/lib/acquisition/attachments/attachment-recovery-cron-feature-flag"
 import { isRetryableAttachmentErrorCode } from "@/lib/acquisition/attachments/attachment-retry.policy"
 import { computeRetrySchedule } from "@/lib/acquisition/attachments/attachment-retry-schedule"
-import { resolveAcquisitionMailboxForMessage } from "@/lib/acquisition/connector/resolve-acquisition-mailbox"
 import { prisma } from "@/lib/prisma"
 import type {
   AttachmentDownloadErrorCode,
@@ -40,9 +39,15 @@ export interface DownloadAcquisitionAttachmentInput {
 export interface AttachmentDownloadServiceDeps {
   db?: PrismaClient
   repository?: AcquisitionAttachmentRepositoryPort
-  gmailSource?: GmailAttachmentSourcePort
+  source?: AttachmentSourcePort
+  /** @deprecated Utiliser source. */
+  gmailSource?: AttachmentSourcePort
   storage?: AttachmentStoragePort
   log?: (event: string, payload?: Record<string, unknown>) => void
+  /** LOT-4B (tests) : flags de résolution par capacité ; défaut process.env. */
+  env?: NodeJS.ProcessEnv
+  /** LOT-4B (tests) : journal de résolution. */
+  artifactLog?: (fields: Record<string, unknown>) => void
 }
 
 function defaultLog(event: string, payload?: Record<string, unknown>): void {
@@ -202,7 +207,6 @@ export async function downloadAcquisitionAttachment(
 ): Promise<AttachmentDownloadResult> {
   const db = deps.db ?? prisma
   const repository = deps.repository ?? acquisitionAttachmentRepository
-  const gmailSource = deps.gmailSource ?? gmailAttachmentSource
   const storage = deps.storage ?? cloudinaryAttachmentStorage
   const log = deps.log ?? defaultLog
   const now = input.now ?? (() => new Date())
@@ -282,26 +286,29 @@ export async function downloadAcquisitionAttachment(
     return failureResult(input.attachmentId, "GMAIL_ATTACHMENT_NOT_FOUND")
   }
 
-  const mailbox = await resolveAcquisitionMailboxForMessage(
-    {
-      companyId: input.companyId,
-      sourceMailboxKey: scoped.message.sourceMailboxKey,
-    },
-    db
-  )
-  if (!mailbox.ok) {
-    await markFail("FAILED", mailbox.code)
-    log("DOWNLOAD_FAILED", { attachmentId: input.attachmentId, errorCode: mailbox.code })
-    return failureResult(input.attachmentId, mailbox.code)
+  // Une source injectée (y compris l'ancienne `gmailSource`) ne contourne jamais la résolution :
+  // flag coupé, résolution historique (une exception remonte comme sur main) ; flag posé, contrôles de capacité,
+  // et une panne de lecture rend ARTIFACT_RESOLUTION_FAILED (reprise).
+  const resolved = await resolveMailArtifactProvider(db, scoped.message, "ARTIFACT_FETCH", {
+    id: claimed.id, externalArtifactId: claimed.externalAttachmentId,
+    filename: claimed.filename || undefined, mimeType: claimed.mimeType || undefined,
+    sizeBytes: claimed.sizeBytes,
+  }, { env: deps.env, log: deps.artifactLog })
+  if (!resolved.ok) {
+    await markFail("FAILED", resolved.code)
+    log("DOWNLOAD_FAILED", { attachmentId: input.attachmentId, errorCode: resolved.code })
+    return failureResult(input.attachmentId, resolved.code)
   }
 
   let binary: Buffer
   try {
-    const fetched = await gmailSource.fetchAttachment({
+    const source = deps.source ?? deps.gmailSource ?? resolved.provider.attachment
+    const artifact = resolved.artifact
+    const fetched = await source.fetchAttachment({
       companyId: input.companyId,
       externalMessageId: scoped.message.externalMessageId,
-      externalAttachmentId: claimed.externalAttachmentId,
-      connectionId: mailbox.connectionId,
+      externalAttachmentId: artifact?.externalArtifactId ?? claimed.externalAttachmentId,
+      connectionId: resolved.connectionId,
     })
     binary = fetched.data
   } catch (error) {
