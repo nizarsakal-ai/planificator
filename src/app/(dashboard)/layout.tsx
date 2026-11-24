@@ -9,7 +9,8 @@ import { Sidebar } from "@/components/layout/Sidebar"
 import { Navbar } from "@/components/layout/Navbar"
 import { InstallPrompt } from "@/components/pwa/InstallPrompt"
 import { CopilotPanel } from "@/components/copilot/CopilotPanel"
-import { copilotConfig, isCopilotRole } from "@/lib/copilot/copilot-config"
+import { copilotConfig } from "@/lib/copilot/copilot-config"
+import { isCopilotRoleAllowed } from "@/lib/copilot/copilot-roles"
 import { isAccountingModuleEnabled } from "@/lib/accounting/accounting-feature-flag"
 import { isAccountingNavVisible } from "@/lib/accounting/access/accounting-access.core"
 import { isBillingCompleteEnabled } from "@/lib/billing/billing-feature-flag"
@@ -87,7 +88,9 @@ export default async function DashboardLayout({
   const salesDashboardNavVisible = isSalesDashboardEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
   const searchVisible = isGlobalSearchEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId
   // IA-1 : copilote en lecture seule ; drapeau + société cible + clé + quota valides, rôle ADMIN/SUPER_ADMIN. Affichage seulement.
-  const copilotVisible = isCopilotRole(role) && copilotConfig(companyId) !== null
+  // IA-6 : rôles ouverts par COPILOT_ROLES (administration seule par défaut) ; public du panneau selon le rôle.
+  const copilotVisible = isCopilotRoleAllowed(role) && copilotConfig(companyId) !== null
+  const copilotAudience = role === "TEAM_LEADER" ? "team" : role === "EMPLOYEE" ? "employee" : "admin"
   const company = companyId ? await prisma.company.findUnique({
     where: { id: companyId }, select: { name: true, logoUrl: true },
   }) : null
@@ -107,7 +110,7 @@ export default async function DashboardLayout({
         </main>
       </div>
       <InstallPrompt />
-      {copilotVisible && <CopilotPanel />}
+      {copilotVisible && <CopilotPanel audience={copilotAudience} />}
     </div>
   )
 }

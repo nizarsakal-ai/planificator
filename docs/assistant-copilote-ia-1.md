@@ -136,3 +136,34 @@ l'approbation habituelle dans la page Automatisations (deux étapes, comme à la
   sens.
 - Outil de lecture `automatisations` : règles existantes, pour éviter les doublons.
 - Outil offert seulement si `AUTOMATIONS_ENABLED=true` (et IA-2 active).
+
+---
+
+# IA-6 : rôle maître et ouverture aux autres rôles
+
+## Chaque rôle limité à ses droits
+
+| Rôle | Outils (lecture seule) | Où |
+|---|---|---|
+| Administrateur | Tous les outils de la société, actions IA-2 / IA-5, briefing IA-3, expert | Menu « Assistant IA » |
+| Chef d'équipe | `mon_planning`, `mes_absences`, `planning_equipe`, `affectations_a_confirmer`, `absences_equipe` (équipes qu'il dirige) | Menu « Assistant IA » |
+| Employé | `mon_planning`, `mes_absences` | Menu « Assistant IA » |
+| Client | `mes_chantiers` (ses chantiers et prochaines interventions) | Bouton « Assistant » du portail client |
+
+- La fiche employé (rôles internes) ou la fiche client (`ClientProfile`, sinon courriel comme le portail) est résolue
+  côté serveur depuis la session ; le modèle ne fournit jamais ces identifiants.
+- Seuls les outils offerts au rôle peuvent s'exécuter : toute autre demande est refusée par le serveur.
+- Pas de briefing, de pastille, d'action ni d'expert hors administration ; les points d'accès d'action et de briefing
+  restent réservés à l'administration.
+- Ouverture progressive : `COPILOT_ROLES` (ex. `ADMIN,SUPER_ADMIN,TEAM_LEADER`) ; absent = administration seule.
+  Le quota quotidien reste celui de la société.
+
+## Rôle maître et experts
+
+L'assistant principal (Claude Haiku 5.5) répond aux questions courantes. Pour une question difficile, il appelle
+`consulter_expert` : un expert du domaine (planning, commercial, finance, RH, stock) tourne sur **Claude Sonnet 5.5**,
+avec les seuls outils de lecture de son domaine, puis le maître reformule et prépare lui-même les actions.
+
+- Une consultation au plus par question ; elle compte une question de plus dans le quota (refusée si le quota est atteint).
+- L'expert ne propose aucune action et ne peut pas consulter d'expert.
+- Administration seule, drapeau `COPILOT_EXPERT_ENABLED=true` (désactivé par défaut).
