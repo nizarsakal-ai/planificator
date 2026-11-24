@@ -4,6 +4,7 @@
 // Portage sur ef36578f : refus rendu sur place avant toute lecture (AdminOnlyNotice), retour explicite E4 (ZoneRetour,
 // MessageRetour, FormulaireRetour), liens HTML natifs (modèle, PDF), champ de signature local au lot G ; la lecture de
 // l'écran n'inclut pas les octets de la signature (aucune image dans les propriétés de la page).
+// Lot G2 : affichage des blocs enrichis (listes, tableaux, gras) ; lien « nouveau document à partir de celui-ci ».
 import { notFound } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { studioPageAccess } from "@/lib/document-studio/access"
@@ -18,6 +19,7 @@ import { FormulaireRetour, MessageRetour, ZoneRetour } from "@/components/crm/Re
 import { fmtInstant } from "@/components/equipment/labels"
 import { StudioSignatureField } from "@/components/document-studio/StudioSignatureField"
 import { DOC_STATUS_CLASS, DOC_STATUS_LABEL } from "@/components/document-studio/labels"
+import { StudioBlocks } from "@/components/document-studio/StudioBlocks"
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/
 
@@ -41,12 +43,15 @@ export default async function GeneratedDocumentPage({ params, searchParams }: { 
         <p className="text-sm text-slate-500">{d.number} · créé le {fmtInstant(d.createdAt)} · <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${DOC_STATUS_CLASS[d.status] ?? ""}`}>{DOC_STATUS_LABEL[d.status] ?? d.status}</span></p>
       </div>
       <MessageRetour><StockFlash params={sp} /></MessageRetour>
-      {!d.intact && <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">Empreinte du contenu non conforme : le PDF est bloqué.</p>}
-      {d.intact && <a href={`/studio-documents/documents/${d.id}/pdf`} className="inline-block text-sm text-[#0f3460] underline">Télécharger le PDF</a>}
+      {!d.intact && <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">Empreinte du contenu non conforme : le PDF est bloqué{d.status === "PENDING_APPROVAL" ? " et ce document ne peut pas être validé (il peut seulement être refusé)" : ""}.</p>}
+      <p className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        {d.intact && <a href={`/studio-documents/documents/${d.id}/pdf`} className="inline-block text-sm text-[#0f3460] underline">Télécharger le PDF</a>}
+        <a href={`/studio-documents/${d.version.templateId}?depuis=${d.id}#generer`} className="text-[#0f3460] underline">Nouveau document à partir de celui-ci</a>
+      </p>
 
       {d.snapshot && (
         <Card><CardContent className="space-y-2 p-4 text-sm">
-          {d.snapshot.blocks.map((b, i) => b.kind === "heading" ? <h2 key={i} className="pt-2 font-semibold text-[#0f3460]">{b.text}</h2> : <p key={i} className="whitespace-pre-line">{b.text}</p>)}
+          <StudioBlocks blocks={d.snapshot.blocks} />
           <p className="pt-2 text-xs text-slate-500">Modèle « {d.snapshot.template.name} » v{d.snapshot.template.version} · empreinte {d.snapshotSha256.slice(0, 16)}</p>
         </CardContent></Card>
       )}
@@ -58,13 +63,14 @@ export default async function GeneratedDocumentPage({ params, searchParams }: { 
         <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">Vous êtes l&apos;auteur de ce document : sa validation revient à un autre administrateur.</p>
       ) : (
         <Card><CardContent className="space-y-4 p-4">
-          <FormulaireRetour action={approveDocumentAction} className="grid gap-2">
+          {/* Empreinte non conforme : la validation est retirée (le service la refuse aussi) ; le refus reste possible. */}
+          {d.intact && <FormulaireRetour action={approveDocumentAction} className="grid gap-2">
             <input type="hidden" name="documentId" value={d.id} />
             <Input name="signerName" required minLength={2} maxLength={120} placeholder="Nom du signataire" aria-label="Nom du signataire" />
             <StudioSignatureField label="Signature du valideur" />
             <label className="flex items-center gap-1 text-xs"><input type="checkbox" name="confirm" value="oui" required /> Je valide ce document</label>
             <div><Button type="submit">Valider et signer</Button></div>
-          </FormulaireRetour>
+          </FormulaireRetour>}
           <FormulaireRetour action={rejectDocumentAction} className="flex flex-wrap items-center gap-2">
             <input type="hidden" name="documentId" value={d.id} />
             <Input name="reason" required minLength={3} maxLength={500} placeholder="Motif du refus" aria-label="Motif du refus" className="max-w-md" />

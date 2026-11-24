@@ -7,13 +7,17 @@
 // sections à ancres stables : #outils, #nouveau-modele, #modeles, #documents, #generer, #validation, #pdf.
 // Espace PDF (lots 1 et 2, 20/11/2026) : #importer (dépôt d'un PDF reçu) et #fichiers (PDF importés, vers leur fiche).
 // Lot 3 : #combiner (plusieurs PDF importés en un nouveau PDF ; les PDF chiffrés ne sont pas proposés).
+// Lot G2 : éditeur visuel avec aperçu pour la création, modèles de départ (?depart=, liste fermée, rien n'est créé avant
+// l'envoi), recherche dans les documents générés (?q=, ?etat=, relus et bornés ici, filtrés dans la requête).
 import { FilePenLine } from "lucide-react"
 import { prisma } from "@/lib/prisma"
 import { studioPageAccess } from "@/lib/document-studio/access"
 import { AdminOnlyNotice } from "@/components/stock/AdminOnlyNotice"
 import { CATEGORIES, CATEGORY_LABEL, type Category } from "@/lib/document-studio/studio.core"
+import { STARTERS, lireDepart } from "@/lib/document-studio/starters"
+import { formatDay, parisToday } from "@/lib/equipment/equipment.core"
 import { listGeneratedDocuments, listPdfDocuments, listPendingDocuments, listPublishedTemplates, listTemplates } from "@/lib/document-studio/queries"
-import { lireVue } from "@/lib/document-studio/tool-hub"
+import { lireRecherche, lireVue } from "@/lib/document-studio/tool-hub"
 import { createTemplateAction, importPdfAction } from "@/lib/actions/document-studio.actions"
 import { listStudioPdfs } from "@/lib/document-studio/pdf-workspace.queries"
 import { PDF_UPLOAD_LABEL } from "@/lib/document-studio/pdf-workspace.core"
@@ -24,8 +28,10 @@ import { Input } from "@/components/ui/input"
 import { SELECT_CLASS, StockFlash } from "@/components/stock/StockFlash"
 import { FormulaireRetour, MessageRetour, ZoneRetour } from "@/components/crm/RetourFormulaire"
 import { fmtInstant } from "@/components/equipment/labels"
-import { DOC_STATUS_CLASS, DOC_STATUS_LABEL, FIELDS_HELP, VERSION_STATUS_LABEL } from "@/components/document-studio/labels"
+import { DOC_STATUS_CLASS, DOC_STATUS_LABEL, VERSION_STATUS_LABEL } from "@/components/document-studio/labels"
 import { StudioToolHub } from "@/components/document-studio/StudioToolHub"
+import { StudioTemplateEditor } from "@/components/document-studio/StudioTemplateEditor"
+import { StudioDocumentSearch } from "@/components/document-studio/StudioDocumentSearch"
 
 const LIEN = "text-[#0f3460] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f3460] rounded-sm"
 const ACCES_RAPIDES = [
@@ -46,7 +52,15 @@ export default async function StudioPage({ searchParams }: { searchParams: Promi
   if (!ctx) return <AdminOnlyNotice />
   const params = await searchParams
   const vue = lireVue(params.vue)
-  const [templates, docs, fichiers] = await Promise.all([listTemplates(prisma, ctx.companyId), listGeneratedDocuments(prisma, ctx.companyId), listStudioPdfs(prisma, ctx.companyId)])
+  const recherche = lireRecherche(params.q, params.etat)
+  const depart = lireDepart(params.depart)
+  const [templates, docs, company, fichiers] = await Promise.all([
+    listTemplates(prisma, ctx.companyId),
+    listGeneratedDocuments(prisma, ctx.companyId, 50, { q: recherche.q, status: recherche.etat }),
+    prisma.company.findUnique({ where: { id: ctx.companyId }, select: { name: true } }),
+    listStudioPdfs(prisma, ctx.companyId),
+  ])
+  const filtre = recherche.q !== "" || recherche.etat !== null
   const publies = vue === "generer" ? await listPublishedTemplates(prisma, ctx.companyId) : []
   const enAttente = vue === "validation" ? await listPendingDocuments(prisma, ctx.companyId) : []
   const pdfs = vue === "pdf" ? await listPdfDocuments(prisma, ctx.companyId) : []
@@ -136,9 +150,7 @@ export default async function StudioPage({ searchParams }: { searchParams: Promi
                 {pdfs.map((d) => (
                   <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
                     <span className="min-w-0"><a href={`/studio-documents/documents/${d.id}`} className={`font-mono text-xs ${LIEN}`}>{d.number}</a> <span className="text-slate-800">{d.title}</span> <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${DOC_STATUS_CLASS[d.status] ?? ""}`}>{DOC_STATUS_LABEL[d.status] ?? d.status}</span></span>
-                    {d.intact
-                      ? <a href={`/studio-documents/documents/${d.id}/pdf`} className={`text-sm font-medium ${LIEN}`}>Télécharger le PDF <span className="sr-only">du document {d.number}</span></a>
-                      : <span className="text-xs text-red-700">PDF bloqué : empreinte non conforme</span>}
+                    <a href={`/studio-documents/documents/${d.id}/pdf`} className={`text-sm font-medium ${LIEN}`}>Télécharger le PDF <span className="sr-only">du document {d.number}</span></a>
                   </li>
                 ))}
               </ul>
@@ -212,26 +224,37 @@ export default async function StudioPage({ searchParams }: { searchParams: Promi
       <section id="nouveau-modele" aria-labelledby="nouveau-modele-titre" className="scroll-mt-4">
       <Card><CardContent className="space-y-3 p-4">
         <h2 id="nouveau-modele-titre" className="text-sm font-semibold text-slate-900">Nouveau modèle (version 1 en brouillon)</h2>
-        <FormulaireRetour action={createTemplateAction} className="grid gap-2 sm:grid-cols-2">
-          <Input name="name" required minLength={3} maxLength={120} placeholder="Nom du modèle" aria-label="Nom du modèle" />
-          <select name="category" required defaultValue="" className={SELECT_CLASS} aria-label="Catégorie"><option value="" disabled>Catégorie…</option>{CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_LABEL[c]}</option>)}</select>
-          <Input name="title" required minLength={3} maxLength={200} placeholder="Titre du document, ex. Attestation de travaux {{numero}}" aria-label="Titre du document" className="sm:col-span-2" />
-          <textarea name="body" required maxLength={20000} rows={8} placeholder={"# Objet\nNous attestons que les travaux {{nature}} ont été réalisés pour {{client}}."} aria-label="Corps du document" className="rounded-md border border-input bg-background p-2 text-sm sm:col-span-2" />
-          <textarea name="fields" rows={4} placeholder="nature | Nature des travaux | TEXT | obligatoire" aria-label="Champs déclarés" className="rounded-md border border-input bg-background p-2 font-mono text-xs sm:col-span-2" />
-          <p className="text-xs text-slate-500 sm:col-span-2">{FIELDS_HELP}</p>
-          <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" name="requiresApproval" value="oui" /> Validation par un second administrateur avant émission</label>
-          <div><Button type="submit">Créer le modèle</Button></div>
+        <div className="space-y-1.5">
+          <p className="text-xs text-slate-600">Partir d&apos;une trame (à relire et adapter avant de publier : ce ne sont pas des documents juridiques validés) :</p>
+          <ul className="flex flex-wrap gap-2 text-sm">
+            {STARTERS.map((st) => (
+              <li key={st.id}><a href={`/studio-documents?depart=${st.id}#nouveau-modele`} title={st.description} aria-current={depart?.id === st.id ? "true" : undefined} className={`inline-block rounded-full border px-3 py-1 ${depart?.id === st.id ? "border-[#0f3460] bg-[#0f3460] text-white" : "border-slate-300 text-[#0f3460] hover:bg-slate-50"}`}>{st.label}</a></li>
+            ))}
+            {depart && <li><a href="/studio-documents#nouveau-modele" className={`inline-block px-1 py-1 text-xs ${LIEN}`}>Repartir d&apos;une page blanche</a></li>}
+          </ul>
+        </div>
+        <FormulaireRetour action={createTemplateAction} className="grid gap-3">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Input key={`nom-${depart?.id ?? "vide"}`} name="name" required minLength={3} maxLength={120} defaultValue={depart?.name ?? ""} placeholder="Nom du modèle" aria-label="Nom du modèle" />
+            <select key={`categorie-${depart?.id ?? "vide"}`} name="category" required defaultValue={depart?.category ?? ""} className={SELECT_CLASS} aria-label="Catégorie"><option value="" disabled>Catégorie…</option>{CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_LABEL[c]}</option>)}</select>
+          </div>
+          <StudioTemplateEditor
+            key={depart?.id ?? "vide"}
+            initial={depart ? { title: depart.title, body: depart.body, fields: depart.fields, requiresApproval: depart.requiresApproval } : { title: "", body: "", fields: [], requiresApproval: false }}
+            companyName={company?.name ?? "Votre entreprise"} today={formatDay(parisToday(new Date()))} submitLabel="Créer le modèle"
+          />
         </FormulaireRetour>
       </CardContent></Card>
       </section>
 
       <section id="documents" aria-label="Documents générés" className="scroll-mt-4">
       <Card><CardContent className="overflow-x-auto p-0">
+        <StudioDocumentSearch q={recherche.q} etat={recherche.etat} />
         <table className="w-full text-sm">
-          <caption className="px-3 py-2 text-left text-sm font-semibold text-slate-900">Documents générés</caption>
+          <caption className="px-3 py-2 text-left text-sm font-semibold text-slate-900">Documents générés{filtre ? ` — ${docs.length} résultat${docs.length > 1 ? "s" : ""}${docs.length === 50 ? " (50 premiers)" : ""}` : ""}</caption>
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th scope="col" className="px-3 py-2">Numéro</th><th scope="col" className="px-3 py-2">Document</th><th scope="col" className="px-3 py-2">État</th><th scope="col" className="px-3 py-2">Date</th></tr></thead>
           <tbody>
-            {docs.length === 0 && <tr><td colSpan={4} className="px-3 py-6 text-center text-slate-400">Aucun document.</td></tr>}
+            {docs.length === 0 && <tr><td colSpan={4} className="px-3 py-6 text-center text-slate-400">{filtre ? "Aucun document ne correspond à cette recherche." : "Aucun document."}</td></tr>}
             {docs.map((d) => (
               <tr key={d.id} className="border-t">
                 <td className="px-3 py-2"><a href={`/studio-documents/documents/${d.id}`} className="font-mono text-xs text-[#0f3460] underline">{d.number}</a></td>

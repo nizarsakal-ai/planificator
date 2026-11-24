@@ -11,14 +11,18 @@
  *   rendu, figé et empreint ; état « en attente de validation » si la version l'exige, sinon « émis ».
  * - Validation : par un AUTRE administrateur que l'auteur, avec signature manuscrite (analyseur local au lot G : PNG
  *   borné, empreinte SHA-256, mêmes règles que la v6) ; refus motivé. Décision unique (garanti en base).
+ * - Lot G2 : champs système étendus (coordonnées de l'entreprise, du client, adresse et dates du chantier), lus dans la
+ *   transaction de génération et figés dans l'instantané ; duplication d'un modèle (nouveau modèle, version 1 en brouillon
+ *   copiée de la dernière version).
  */
 import { Prisma, type PrismaClient } from "@prisma/client"
 import { businessYear } from "@/lib/billing/business-day"
 import { serverNow } from "@/lib/billing/clock"
 import { formatDay, parisToday } from "@/lib/equipment/equipment.core"
 import { parseStudioSignature } from "@/lib/document-studio/signature"
+import { logoForPdf } from "@/lib/company-logo"
 import {
-  STUDIO_ERRORS, documentSha256, readFields, renderDocument, validateReason, validateSignerName, validateTemplateIdentity,
+  STUDIO_ERRORS, copyName, documentSha256, readFields, readSnapshot, renderDocument, validateReason, validateSignerName, validateTemplateIdentity,
   validateValues, validateVersionContent, versionSha256, type VersionContent,
 } from "@/lib/document-studio/studio.core"
 
@@ -104,6 +108,20 @@ export async function createDraft(db: Db, ctx: StudioContext, templateId: string
   })
 }
 
+/** Duplique un modèle : nouveau modèle « Nom (copie) », version 1 en brouillon copiée de la dernière version de l'original. */
+export async function duplicateTemplate(db: Db, ctx: StudioContext, templateId: string): Promise<StudioResult<{ templateId: string }>> {
+  return inTx(db, async (tx) => {
+    const t = (await tx.documentTemplate.findFirst({ where: { id: templateId, companyId: ctx.companyId }, select: { id: true, name: true, category: true } })) ?? fail(STUDIO_ERRORS.notFound)
+    const last = (await tx.documentTemplateVersion.findFirst({ where: { templateId: t.id, companyId: ctx.companyId }, orderBy: { version: "desc" }, select: { title: true, body: true, fields: true, requiresApproval: true } })) ?? fail(STUDIO_ERRORS.notFound)
+    const taken = new Set((await tx.documentTemplate.findMany({ where: { companyId: ctx.companyId }, select: { name: true }, take: 2000 })).map((n) => n.name))
+    const name = copyName(t.name, taken) ?? fail(STUDIO_ERRORS.copyName)
+    const copy = await tx.documentTemplate.create({ data: { companyId: ctx.companyId, name, category: t.category, createdById: ctx.userId }, select: { id: true } })
+    await tx.documentTemplateVersion.create({ data: { companyId: ctx.companyId, templateId: copy.id, version: 1, title: last.title, body: last.body, fields: (last.fields ?? []) as Prisma.InputJsonValue, requiresApproval: last.requiresApproval, createdById: ctx.userId } })
+    await audit(tx, ctx, { action: "CREATED", entityType: "DocumentTemplate", entityId: copy.id, detail: `Modèle « ${name} » créé par copie de « ${t.name} » (version 1 en brouillon)` })
+    return { templateId: copy.id }
+  })
+}
+
 export async function publishVersion(db: Db, ctx: StudioContext, versionId: string, now: Date = serverNow()): Promise<StudioResult<{ sha256: string }>> {
   return inTx(db, async (tx) => {
     const v0 = await draftOf(tx, ctx, versionId)
@@ -130,22 +148,31 @@ async function nextNumber(tx: Tx, companyId: string, now: Date): Promise<string>
   return `DOC-${year}-${String(c.lastValue).padStart(4, "0")}`
 }
 
-export interface GenerateInput { values: Record<string, string>; clientId?: string | null; worksiteId?: string | null }
+/** `versionId` : version publiée AFFICHÉE dans le formulaire ; la génération est refusée si une autre a été publiée depuis.
+ * L'action serveur le transmet toujours (une valeur absente ou invalide y vaut refus) ; facultatif pour les appels internes. */
+export interface GenerateInput { versionId?: string; values: Record<string, string>; clientId?: string | null; worksiteId?: string | null }
 
 export async function generateDocument(db: Db, ctx: StudioContext, templateId: string, input: GenerateInput, now: Date = serverNow()): Promise<StudioResult<{ id: string; number: string; status: "PENDING_APPROVAL" | "ISSUED" }>> {
   return inTx(db, async (tx) => {
     const t = (await tx.documentTemplate.findFirst({ where: { id: templateId, companyId: ctx.companyId }, select: { id: true, name: true } })) ?? fail(STUDIO_ERRORS.notFound)
     const rows = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "document_template_versions" WHERE "templateId" = ${t.id} AND "companyId" = ${ctx.companyId} AND "status" = 'PUBLISHED' FOR SHARE`
     if (rows.length !== 1) fail(STUDIO_ERRORS.noPublished)
+    if (input.versionId !== undefined && rows[0].id !== input.versionId) fail(STUDIO_ERRORS.versionChanged)
     const v = (await tx.documentTemplateVersion.findFirst({ where: { id: rows[0].id, companyId: ctx.companyId }, select: { id: true, version: true, title: true, body: true, fields: true, requiresApproval: true, contentSha256: true } })) ?? fail(STUDIO_ERRORS.noPublished)
     const fields = readFields(v.fields) ?? fail(STUDIO_ERRORS.notFound)
     const values = must(validateValues(fields, input.values))
-    const client = input.clientId ? (await tx.client.findFirst({ where: { id: input.clientId, companyId: ctx.companyId }, select: { id: true, name: true } })) ?? fail(STUDIO_ERRORS.notFound) : null
-    const worksite = input.worksiteId ? (await tx.worksite.findFirst({ where: { id: input.worksiteId, companyId: ctx.companyId }, select: { id: true, name: true } })) ?? fail(STUDIO_ERRORS.notFound) : null
-    const company = (await tx.company.findUnique({ where: { id: ctx.companyId }, select: { name: true } })) ?? fail(STUDIO_ERRORS.notFound)
+    const client = input.clientId ? (await tx.client.findFirst({ where: { id: input.clientId, companyId: ctx.companyId }, select: { id: true, name: true, address: true, siret: true, email: true, phone: true } })) ?? fail(STUDIO_ERRORS.notFound) : null
+    const worksite = input.worksiteId ? (await tx.worksite.findFirst({ where: { id: input.worksiteId, companyId: ctx.companyId }, select: { id: true, name: true, address: true, startDate: true, endDate: true } })) ?? fail(STUDIO_ERRORS.notFound) : null
+    const company = (await tx.company.findUnique({ where: { id: ctx.companyId }, select: { name: true, address: true, siret: true, phone: true, email: true, logoUrl: true } })) ?? fail(STUDIO_ERRORS.notFound)
+    const day = (d: Date | null) => (d ? formatDay(parisToday(d)) : null)
     const number = await nextNumber(tx, ctx.companyId, now)
     const content: VersionContent = { title: v.title, body: v.body, fields, requiresApproval: v.requiresApproval }
-    const snapshot = renderDocument(content, values, { entreprise: company.name, numero: number, date_document: formatDay(parisToday(now)), client: client?.name ?? null, chantier: worksite?.name ?? null }, { templateName: t.name, version: v.version, versionSha256: v.contentSha256 ?? "" })
+    const snapshot = renderDocument(content, values, {
+      entreprise: company.name, numero: number, date_document: formatDay(parisToday(now)), client: client?.name ?? null, chantier: worksite?.name ?? null,
+      entreprise_adresse: company.address, entreprise_siret: company.siret, entreprise_telephone: company.phone, entreprise_email: company.email,
+      client_adresse: client?.address ?? null, client_siret: client?.siret ?? null, client_email: client?.email ?? null, client_telephone: client?.phone ?? null,
+      chantier_adresse: worksite?.address ?? null, chantier_debut: day(worksite?.startDate ?? null), chantier_fin: day(worksite?.endDate ?? null),
+    }, { templateName: t.name, version: v.version, versionSha256: v.contentSha256 ?? "", logo: logoForPdf(company.logoUrl) })
     const status = v.requiresApproval ? "PENDING_APPROVAL" as const : "ISSUED" as const
     const d = await tx.generatedDocument.create({
       data: {
@@ -162,7 +189,7 @@ export async function generateDocument(db: Db, ctx: StudioContext, templateId: s
 async function lockPending(tx: Tx, ctx: StudioContext, id: string) {
   const rows = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "generated_documents" WHERE "id" = ${id} AND "companyId" = ${ctx.companyId} FOR UPDATE`
   if (rows.length !== 1) fail(STUDIO_ERRORS.notFound)
-  const d = (await tx.generatedDocument.findFirst({ where: { id, companyId: ctx.companyId }, select: { id: true, number: true, status: true, createdById: true, worksiteId: true } })) ?? fail(STUDIO_ERRORS.notFound)
+  const d = (await tx.generatedDocument.findFirst({ where: { id, companyId: ctx.companyId }, select: { id: true, number: true, status: true, createdById: true, worksiteId: true, snapshot: true, snapshotSha256: true } })) ?? fail(STUDIO_ERRORS.notFound)
   if (d.status !== "PENDING_APPROVAL") fail(STUDIO_ERRORS.notPending)
   return d
 }
@@ -175,6 +202,9 @@ export async function approveDocument(db: Db, ctx: StudioContext, id: string, in
   return inTx(db, async (tx) => {
     const d = await lockPending(tx, ctx, id)
     if (d.createdById === ctx.userId) fail(STUDIO_ERRORS.selfApproval)
+    // Revue Codex du 23/11/2026 : on ne signe jamais un contenu dont l'empreinte ne correspond plus (le refus reste possible).
+    const snap = readSnapshot(d.snapshot)
+    if (!snap || documentSha256(snap) !== d.snapshotSha256) fail(STUDIO_ERRORS.notIntact)
     await tx.generatedDocument.update({ where: { id: d.id }, data: { status: "ISSUED", approvedById: ctx.userId, approvedAt: now, signerName: n.value, signaturePng: sig.value.png, signatureSha256: sig.value.sha256 } })
     await audit(tx, ctx, { action: "STATUS_CHANGED", entityType: "GeneratedDocument", entityId: d.id, worksiteId: d.worksiteId, detail: `Document ${d.number} validé et signé par ${n.value}` })
     return undefined

@@ -65,3 +65,13 @@ export type StudioVue = (typeof STUDIO_VUES)[number]
 export function lireVue(valeur: unknown): StudioVue | null {
   return typeof valeur === "string" && (STUDIO_VUES as readonly string[]).includes(valeur) ? (valeur as StudioVue) : null
 }
+
+// ── Lot G2 : recherche dans les documents générés (paramètres d'adresse bornés). ─────────────────────────────────────────
+export const DOC_ETATS = ["PENDING_APPROVAL", "ISSUED", "REJECTED"] as const
+export type DocEtat = (typeof DOC_ETATS)[number]
+/** Paramètres `q` (texte, 80 caractères au plus, caractères de contrôle retirés) et `etat` (liste fermée, sinon tous). */
+export function lireRecherche(q: unknown, etat: unknown): { q: string; etat: DocEtat | null } {
+  // eslint-disable-next-line no-control-regex
+  const texte = typeof q === "string" ? q.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 80) : ""
+  return { q: texte, etat: typeof etat === "string" && (DOC_ETATS as readonly string[]).includes(etat) ? (etat as DocEtat) : null }
+}

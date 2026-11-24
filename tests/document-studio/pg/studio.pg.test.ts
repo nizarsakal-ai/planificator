@@ -188,3 +188,71 @@ describe("garanties de la base", () => {
     assert.equal((await db.documentTemplateVersion.findUniqueOrThrow({ where: { id: draft.versionId }, select: { status: true } })).status, "DRAFT")
   })
 })
+
+// Lot G2 (22/11/2026) — ajoutés sur le VPS SANS exécution (aucune base jetable sur le VPS) : à lancer sur le Mac avec la
+// commande d'en-tête avant toute fusion.
+describe("lot G2 : champs enrichis, champs système étendus, duplication, recherche", () => {
+  const G2_FIELDS: FieldDef[] = [
+    { key: "decision", label: "Décision", type: "CHOICE", required: true, options: ["sans réserve", "avec réserves"] },
+    { key: "accord", label: "Accord du client", type: "CHECKBOX", required: false },
+  ]
+  const G2 = { title: "PV {{numero}}", body: "# Réception\n**{{client}}**, {{client_adresse}} — chantier {{chantier_adresse}}, début {{chantier_debut}}.\n\n- Décision : {{decision}}\n- Accord : {{accord}}\n\n| Émetteur | SIRET |\n| {{entreprise}} | {{entreprise_siret}} |", fields: G2_FIELDS, requiresApproval: false }
+  let g2 = ""
+  it("génération : liste de choix contrôlée, case à cocher, coordonnées lues en base et figées dans l'instantané", async () => {
+    await db.$executeRawUnsafe(`UPDATE companies SET address = '1 rue A, Paris', siret = '12345678900012' WHERE id = 'coA'`)
+    await db.$executeRawUnsafe(`UPDATE clients SET address = '2 rue B, Lyon' WHERE id = 'clA'`)
+    await db.$executeRawUnsafe(`UPDATE worksites SET address = '3 rue C, Lille', "startDate" = '2026-11-02T00:00:00Z' WHERE id = 'wA'`)
+    const t = ok(await svc.createTemplate(db, A, { name: "PV de réception", category: "REPORT", ...G2 }))
+    g2 = t.templateId
+    ok(await svc.publishVersion(db, A, t.versionId, T0))
+    assert.deepEqual(await svc.generateDocument(db, A, g2, { values: { decision: "autre" } }, T0), { ok: false, error: STUDIO_ERRORS.invalidValue("Décision") })
+    const r = ok(await svc.generateDocument(db, A, g2, { values: { decision: "avec réserves", accord: "oui" }, clientId: "clA", worksiteId: "wA" }, T0))
+    const d = await getGeneratedDocument(db, "coA", r.id)
+    assert.ok(d?.intact && d.snapshot)
+    assert.deepEqual(d.snapshot.issuer, { address: "1 rue A, Paris", siret: "12345678900012" })
+    assert.deepEqual(d.snapshot.blocks.map((b) => b.kind), ["heading", "paragraph", "list", "table"])
+    assert.equal(d.snapshot.blocks[1].text, "Durand, 2 rue B, Lyon — chantier 3 rue C, Lille, début 2 novembre 2026.")
+    assert.deepEqual(d.snapshot.blocks[2].items?.map((i) => i.text), ["Décision : avec réserves", "Accord : Oui"])
+    assert.deepEqual(d.snapshot.blocks[3].rows, [["Émetteur", "SIRET"], ["BTP A", "12345678900012"]])
+    assert.deepEqual(await db.generatedDocument.findUniqueOrThrow({ where: { id: r.id }, select: { values: true } }), { values: { decision: "avec réserves", accord: "oui" } })
+  })
+  it("duplication : nouveau modèle « (copie) » en brouillon v1, contenu de la dernière version ; isolée par entreprise", async () => {
+    const c = ok(await svc.duplicateTemplate(db, A, g2))
+    const copy = await db.documentTemplate.findUniqueOrThrow({ where: { id: c.templateId }, select: { name: true, category: true, companyId: true, versions: { select: { version: true, status: true, body: true, fields: true } } } })
+    assert.deepEqual([copy.name, copy.category, copy.companyId], ["PV de réception (copie)", "REPORT", "coA"])
+    assert.deepEqual(copy.versions.map((v) => [v.version, v.status, v.body]), [[1, "DRAFT", G2.body]])
+    assert.deepEqual(readFields(copy.versions[0].fields), G2_FIELDS)
+    assert.equal((await db.documentTemplate.findUniqueOrThrow({ where: { id: ok(await svc.duplicateTemplate(db, A, g2)).templateId }, select: { name: true } })).name, "PV de réception (copie 2)")
+    assert.deepEqual(await svc.duplicateTemplate(db, B, g2), { ok: false, error: STUDIO_ERRORS.notFound })
+  })
+  it("recherche et réutilisation : filtrées par société dans la requête ; document d'un autre modèle refusé", async () => {
+    const { listGeneratedDocuments, getDocumentForReuse } = await import("@/lib/document-studio/queries")
+    const found = await listGeneratedDocuments(db, "coA", 50, { q: "pv de réc" })
+    assert.ok(found.length >= 1 && found.every((d) => d.version.template.name === "PV de réception"))
+    assert.deepEqual(await listGeneratedDocuments(db, "coB", 50, { q: "pv de réc" }), [])
+    assert.deepEqual(await listGeneratedDocuments(db, "coA", 50, { q: "pv", status: "REJECTED" }), [])
+    assert.deepEqual((await getDocumentForReuse(db, "coA", g2, found[0].id))?.values, { decision: "avec réserves", accord: "oui" })
+    assert.equal(await getDocumentForReuse(db, "coA", tpl, found[0].id), null)
+    assert.equal(await getDocumentForReuse(db, "coB", g2, found[0].id), null)
+  })
+  // Corrections après la revue Codex du 23/11/2026 (cas NON exécutés sur le VPS : aucune base jetable).
+  it("génération liée à la version affichée ; logo figé dans l'instantané, indépendant du logo courant", async () => {
+    const LOGO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+    const v1 = (await db.documentTemplateVersion.findFirstOrThrow({ where: { templateId: g2, status: "PUBLISHED" }, select: { id: true } })).id
+    const v2 = ok(await svc.createDraft(db, A, g2)).versionId
+    ok(await svc.publishVersion(db, A, v2, T0))
+    // Le formulaire affichait v1 ; v2 a été publiée entre-temps : refus, aucun document créé.
+    const before = await db.generatedDocument.count({ where: { companyId: "coA" } })
+    assert.deepEqual(await svc.generateDocument(db, A, g2, { versionId: v1, values: { decision: "sans réserve" } }, T0), { ok: false, error: STUDIO_ERRORS.versionChanged })
+    assert.equal(await db.generatedDocument.count({ where: { companyId: "coA" } }), before)
+    await db.company.update({ where: { id: "coA" }, data: { logoUrl: LOGO } })
+    const r = ok(await svc.generateDocument(db, A, g2, { versionId: v2, values: { decision: "sans réserve" } }, T0))
+    await db.company.update({ where: { id: "coA" }, data: { logoUrl: null } })
+    const d = await getGeneratedDocument(db, "coA", r.id)
+    assert.ok(d?.intact && d.snapshot)
+    assert.equal(d.snapshot.logo, LOGO)
+    // Sans logo géré au moment de la génération : aucune clé « logo » dans l'instantané.
+    const sans = await getGeneratedDocument(db, "coA", ok(await svc.generateDocument(db, A, g2, { versionId: v2, values: { decision: "sans réserve" } }, T0)).id)
+    assert.ok(sans?.intact && sans.snapshot && !("logo" in sans.snapshot))
+  })
+})

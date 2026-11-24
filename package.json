@@ -82,7 +82,7 @@
     "test:connectors:pg": "node --import tsx --test --test-concurrency=1 tests/connectors/pg/connectors.pg.test.ts",
     "test:assistant:pg": "node --import tsx --test --test-concurrency=1 tests/assistant/pg/assistant.pg.test.ts",
     "test:lot-f:pg": "sh tests/billing/pg/with-disposable-db.sh lotf_connectors npm run test:connectors:pg && sh tests/billing/pg/with-disposable-db.sh lotf_assistant npm run test:assistant:pg",
-    "test:lot-g": "node --import tsx --test tests/document-studio/pdf-workspace.test.ts tests/document-studio/studio-core.test.ts tests/document-studio/migration.test.ts tests/document-studio/portage-g.test.ts tests/document-studio/accueil-outils.test.ts tests/navigation/nav-lot-g.test.ts",
+    "test:lot-g": "node --import tsx --test tests/document-studio/pdf-workspace.test.ts tests/document-studio/studio-core.test.ts tests/document-studio/studio-g2.test.tsx tests/document-studio/migration.test.ts tests/document-studio/portage-g.test.ts tests/document-studio/accueil-outils.test.ts tests/navigation/nav-lot-g.test.ts",
     "test:studio:pg": "node --import tsx --test --test-concurrency=1 tests/document-studio/pg/studio.pg.test.ts",
     "test:lot-g:pg": "sh tests/billing/pg/with-disposable-db.sh lotg_studio npm run test:studio:pg",
     "test:studio-pdf:pg": "node --import tsx --test --test-concurrency=1 tests/document-studio/pg/pdf-workspace.pg.test.ts",
