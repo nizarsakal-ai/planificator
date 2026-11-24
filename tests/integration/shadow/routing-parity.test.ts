@@ -10,7 +10,7 @@ import {
   type ParityInput,
 } from "@/lib/integration/shadow/routing-parity"
 
-const NONE = { qualifierGap: false, subjectKeywordRuleActive: false, bodyKeywordRuleActive: false, subjectPresent: true, bodyAvailable: false }
+const NONE = { qualifierGap: false, subjectGap: false, bodyGap: false, subjectKeywordRuleActive: false, bodyKeywordRuleActive: false, subjectPresent: true, bodyAvailable: false }
 
 describe("classe legacy L1", () => {
   it("DRAFT_CREATED → ADMIT, REJECTED → REJECT, le reste → UNKNOWN", () => {
@@ -54,7 +54,7 @@ describe("divergences expliquées §14.6", () => {
       legacy: "ADMIT",
       router: "NO_MATCH",
       routerReasonCode: "NO_ENABLED_SOURCE",
-      diagnostics: { qualifierGap: true, subjectKeywordRuleActive: true, bodyKeywordRuleActive: true, subjectPresent: false, bodyAvailable: false },
+      diagnostics: { qualifierGap: true, subjectGap: true, bodyGap: true, subjectKeywordRuleActive: true, bodyKeywordRuleActive: true, subjectPresent: false, bodyAvailable: false },
     })
     assert.equal(r.parityOutcome, "PARITY_LEGACY_ONLY")
     assert.deepEqual(r.explainedCodes, ["EXPLAINED_BODY_UNAVAILABLE", "EXPLAINED_CONFIG_NOT_SEEDED", "EXPLAINED_QUALIFIER_GAP", "EXPLAINED_SUBJECT_ABSENT"])
@@ -67,5 +67,13 @@ describe("divergences expliquées §14.6", () => {
   it("qualificatif manquant ne s'applique qu'à un admit legacy", () => {
     const r = computeParity({ legacy: "REJECT", router: "NO_MATCH", diagnostics: { ...NONE, qualifierGap: true } })
     assert.deepEqual(r.explainedCodes, [])
+  })
+  it("revue du 24/11 : une règle mots-clés ailleurs dans la société n'explique pas un écart d'une autre Source", () => {
+    const r = computeParity({ legacy: "ADMIT", router: "NO_MATCH", routerReasonCode: "NO_CANDIDATE", diagnostics: { ...NONE, subjectKeywordRuleActive: true, bodyKeywordRuleActive: true, subjectPresent: false } })
+    assert.deepEqual([r.explainedCodes, isUnexplainedDivergence(r)], [[], true])
+  })
+  it("revue du 24/11 : un ROUTER_ONLY n'est jamais expliqué par l'objet absent, le corps indisponible ou un qualificatif", () => {
+    const r = computeParity({ legacy: "REJECT", router: "MATCH", diagnostics: { ...NONE, qualifierGap: true, subjectGap: true, bodyGap: true } })
+    assert.deepEqual([r.parityOutcome, r.explainedCodes, isUnexplainedDivergence(r)], ["PARITY_ROUTER_ONLY", ["EXPLAINED_MATCH_NO_DRAFT"], true])
   })
 })

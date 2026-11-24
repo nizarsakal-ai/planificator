@@ -57,6 +57,10 @@ export interface RouterResult {
 export interface RouterDiagnostics {
   /** Au moins une Source dont l'identité matche mais aucun qualificatif actif ne matche. */
   qualifierGap: boolean
+  /** Une telle Source a un qualificatif SUBJECT_KEYWORD et le message n'a pas d'objet (écart lié à cette Source). */
+  subjectGap: boolean
+  /** Une telle Source a un qualificatif BODY_KEYWORD et le corps local est indisponible (écart lié à cette Source). */
+  bodyGap: boolean
   subjectKeywordRuleActive: boolean
   bodyKeywordRuleActive: boolean
   subjectPresent: boolean
@@ -135,6 +139,8 @@ export function routeMessage(input: RouterInput): RouterResult {
   const facts = factsOf(input.message, input.body)
   const diagnostics: RouterDiagnostics = {
     qualifierGap: false,
+    subjectGap: false,
+    bodyGap: false,
     subjectKeywordRuleActive: snap.rules.some((r) => r.type === INBOUND_SOURCE_RULE_TYPES.SUBJECT_KEYWORD),
     bodyKeywordRuleActive: snap.rules.some((r) => r.type === INBOUND_SOURCE_RULE_TYPES.BODY_KEYWORD),
     subjectPresent: facts.subject !== undefined,
@@ -165,7 +171,12 @@ export function routeMessage(input: RouterInput): RouterResult {
       rulesEvaluated++
       if (ruleMatches(r, facts)) { qualifierOk = true; break }
     }
-    if (!qualifierOk) { diagnostics.qualifierGap = true; continue }
+    if (!qualifierOk) {
+      diagnostics.qualifierGap = true
+      if (!facts.subject && qualifiers.some((r) => r.type === INBOUND_SOURCE_RULE_TYPES.SUBJECT_KEYWORD)) diagnostics.subjectGap = true
+      if (!facts.body && qualifiers.some((r) => r.type === INBOUND_SOURCE_RULE_TYPES.BODY_KEYWORD)) diagnostics.bodyGap = true
+      continue
+    }
 
     if (binding?.connectionId && binding.connectionId !== input.connectionId) continue
     candidates.push({ sourceId: source.id, pipelineId: binding ? binding.pipelineId : null })

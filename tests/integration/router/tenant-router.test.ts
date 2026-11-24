@@ -104,6 +104,19 @@ describe("Router — outcomes", () => {
   })
 })
 
+describe("Router — diagnostics liés à la Source (revue du 24/11)", () => {
+  it("subjectGap seulement pour une Source dont l'identité matche et qui exige un mot-clé d'objet", () => {
+    const withKw = snap({ rules: [rule("r1", "s1", "SENDER_DOMAIN", "maison-martin.fr"), rule("r2", "s1", "SUBJECT_KEYWORD", "devis")] })
+    assert.deepEqual([route(withKw, msg({ subject: undefined })).diagnostics.subjectGap, route(withKw, msg({ subject: undefined })).diagnostics.qualifierGap], [true, true])
+    const otherSource = snap({
+      sources: [{ id: "s1", enabled: true }, { id: "s2", enabled: true }],
+      rules: [rule("r1", "s1", "SENDER_DOMAIN", "maison-martin.fr"), rule("r9", "s2", "SENDER_DOMAIN", "autre.fr"), rule("r8", "s2", "SUBJECT_KEYWORD", "devis")],
+    })
+    const r = route(otherSource, msg({ sender: { email: "x@inconnu.fr" }, subject: undefined }))
+    assert.deepEqual([r.outcome, r.diagnostics.subjectGap, r.diagnostics.subjectKeywordRuleActive], ["NO_MATCH", false, true])
+  })
+})
+
 describe("routingConfigurationVersion (I2)", () => {
   const base = snap({ rules: [rule("r1", "s1", "SENDER_DOMAIN", "maison-martin.fr"), rule("r2", "s1", "SUBJECT_KEYWORD", "devis")] })
   const v = computeRoutingConfigurationVersion(base)

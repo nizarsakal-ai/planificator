@@ -80,4 +80,14 @@ describe("acquisition-gmail-sync — shadow matching LOT-2D", () => {
     const { result } = await runSync(c, ["DRAFT_CREATED"])
     assert.equal(result.status, "SUCCESS")
   })
+  it("budget épuisé : chaque message ignoré reçoit tout de même une observation (sans routage ni projection)", async () => {
+    const seen: RoutingShadowInput[] = []
+    let projects = 0
+    const c = ctx(async (i) => { seen.push(i); return { status: "OBSERVED" } }, async () => { projects++ })
+    c.deadlineAtMs = 0
+    const { result } = await runSync(c, ["DRAFT_CREATED", "REJECTED"])
+    assert.equal(projects, 0)
+    assert.deepEqual(seen.map((s) => [s.externalId, s.legacyOutcome, s.deadlineAtMs]), [["m1", "DRAFT_CREATED", 0], ["m2", "REJECTED", 0]])
+    assert.deepEqual([result.status, result.stats.ingested, result.stats.rejected], ["SUCCESS", 1, 1])
+  })
 })

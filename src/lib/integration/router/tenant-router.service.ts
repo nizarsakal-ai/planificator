@@ -38,6 +38,8 @@ import {
 
 const NO_DIAGNOSTICS: RouterDiagnostics = {
   qualifierGap: false,
+  subjectGap: false,
+  bodyGap: false,
   subjectKeywordRuleActive: false,
   bodyKeywordRuleActive: false,
   subjectPresent: false,

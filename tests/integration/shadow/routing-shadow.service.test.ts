@@ -14,7 +14,7 @@ const ON = {
 }
 const RCV = "rcv1_" + "a".repeat(64)
 const input = { companyId: "coA", connectionId: "cn1", idempotencyKey: "gmail-123", externalId: "gmail-123", legacyOutcome: "DRAFT_CREATED", deadlineAtMs: 10_000 }
-const diag = { qualifierGap: false, subjectKeywordRuleActive: false, bodyKeywordRuleActive: false, subjectPresent: true, bodyAvailable: false }
+const diag = { qualifierGap: false, subjectGap: false, bodyGap: false, subjectKeywordRuleActive: false, bodyKeywordRuleActive: false, subjectPresent: true, bodyAvailable: false }
 
 function harness(over: Partial<RoutingShadowDeps> = {}, outcome: "MATCH" | "NO_MATCH" | "ERROR" = "MATCH") {
   const observations: RecordParityObservationInput[] = []
@@ -100,5 +100,15 @@ describe("RoutingShadowService", () => {
     assert.doesNotMatch(line, /gmail-123/)
     for (const k of ["parityBaselineCode", "parityOutcome", "legacyOutcome", "routerOutcome", "explainedCodes"]) assert.ok(k in h.logs[0]!, k)
     assert.equal(h.logs[0]!.parityBaselineCode, "L1_REGISTER_INCOMING_MESSAGE")
+  })
+  it("routage plus long que le budget restant : abandon côté shadow (ROUTER_TIMEOUT), la synchronisation n'attend pas", async () => {
+    let clock = 0
+    const slow = { route: () => new Promise<never>(() => undefined) }
+    const h = harness({ now: () => clock, router: slow as never })
+    const started = Date.now()
+    const r = await h.svc.observe({ ...input, deadlineAtMs: 50 })
+    assert.ok(Date.now() - started < 1_000, "attente bornée au budget restant")
+    assert.equal(r.status, "OBSERVED")
+    assert.deepEqual([h.observations[0]!.parityOutcome, h.observations[0]!.comparisonCode, h.observations[0]!.routerOutcome], ["PARITY_UNCOMPARABLE", "ROUTER_TIMEOUT", null])
   })
 })

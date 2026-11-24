@@ -8,7 +8,8 @@
  *
  * - Simulation par défaut : lit, calcule et affiche le plan ; n'écrit rien.
  * - `--apply` : crée Sources, Rules et Bindings via la façade d'administration (AuthZ + audit history_logs,
- *   aucune valeur journalisée). Rejouable : une Source déjà présente (même nom) n'est pas recréée.
+ *   aucune valeur journalisée). Rejouable : une Source déjà complète (même nom) n'est pas recréée ; une Source
+ *   restée incomplète après un échec est complétée.
  * - L'acteur doit être ADMIN de cette société, ou SUPER_ADMIN (vérifié en base).
  * - Sortie : compteurs et noms de partenaires seulement — jamais de domaine ni d'email.
  * - N'active AUCUN flag : sans INTEGRATION_ROUTING_*, la configuration n'a aucun effet sur le routage.
@@ -54,8 +55,22 @@ async function main() {
     domains: p.domains.map((d) => ({ value: d.domainNormalized, active: d.active })),
     emails: p.emails.map((e) => ({ value: e.emailNormalized, active: e.active })),
   }))
-  const existing = await prisma.inboundSource.findMany({ where: { companyId }, select: { displayName: true } })
-  const plan = buildPilotSeedPlan(input, existing.map((s) => s.displayName))
+  const existing = await prisma.inboundSource.findMany({
+    where: { companyId },
+    select: {
+      id: true, displayName: true, enabled: true,
+      rules: { where: { enabled: true }, select: { type: true, normalizedValue: true } },
+      bindings: { select: { id: true, enabled: true } },
+    },
+  })
+  const plan = buildPilotSeedPlan(input, existing.map((s) => ({
+    id: s.id,
+    displayName: s.displayName,
+    enabled: s.enabled,
+    ruleKeys: s.rules.map((r) => `${r.type}|${r.normalizedValue}`),
+    activeBindingId: s.bindings.find((b) => b.enabled)?.id ?? null,
+    inactiveBindingIds: s.bindings.filter((b) => !b.enabled).map((b) => b.id),
+  })))
   const summary = summarizePilotSeedPlan(plan)
 
   if (!apply) {
@@ -63,7 +78,7 @@ async function main() {
     return
   }
   const result = await applyPilotSeedPlan(plan, { companyId, userId: user.id, role: user.role }, new RoutingConfigAdminService())
-  console.info(JSON.stringify({ mode: "apply", companyId, partnersRead: partners.length, ...summary, created: result.created.length, failed: result.failed }, null, 2))
+  console.info(JSON.stringify({ mode: "apply", companyId, partnersRead: partners.length, ...summary, created: result.created.length, completed: result.completed.length, failed: result.failed }, null, 2))
   if (result.failed.length > 0) process.exit(2)
 }
 
