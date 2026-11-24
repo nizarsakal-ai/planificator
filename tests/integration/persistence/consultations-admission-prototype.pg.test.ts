@@ -16,6 +16,8 @@ import { InboundSourceRuleRepository } from "@/lib/integration/persistence/inbou
 import { InboundSourceIdentityTx } from "@/lib/integration/persistence/inbound-source-identity.tx"
 import { PipelineBindingRepository } from "@/lib/integration/persistence/pipeline-binding.repository"
 import { InboundSourceWriteService } from "@/lib/integration/sources/inbound-source-write.service"
+import { admitGmailConsultation } from "@/lib/acquisition/admission/gmail-consultations-admission"
+import { hashExternalId } from "@/lib/integration/shadow/routing-shadow.service"
 import { assertSafeDisposableTestDatabaseUrl } from "./helpers/safe-test-database-url"
 
 const url = process.env.TEST_LOT3_DATABASE_URL
@@ -287,4 +289,94 @@ it("Gmail : ancienne projection, admission, rejeu et retour historique", async (
   assert.equal(await db.routingDecision.count({
     where: { companyId, normalizedInbound: { envelope: { externalId: externalMessageId } }, outcome: "MATCH" },
   }), 1)
+})
+
+// ─── LOT-2 : référence de parité indépendante sous LOT-3 (règles historiques en lecture seule) ───────────────
+
+const parityEnv = () => ({
+  ...process.env,
+  INTEGRATION_PLATFORM_FOUNDATION_ENABLED: "true",
+  INTEGRATION_ROUTING_ENABLED: "true",
+  INTEGRATION_ROUTING_SHADOW_ENABLED: "true",
+  INTEGRATION_ROUTING_COMPANY_ALLOWLIST: companyId,
+  INTEGRATION_CONSULTATIONS_ADMISSION_ENABLED: "true",
+})
+
+async function admitViaGmail(externalMessageId: string, sender: string, options: Partial<Parameters<typeof admitGmailConsultation>[3]> = {}) {
+  const mailbox = await db.acquisitionGmailConnection.findFirstOrThrow({ where: { companyId } })
+  const canonical = {
+    externalMessageId, fromHeader: sender, subject: "Consultation fictive", receivedAt: new Date("2026-01-02T12:00:00Z"),
+    threadId: null, labels: [], snippet: null, attachments: [], providerMetadata: {},
+  }
+  const input = { ...message(externalMessageId), sourceMailboxKey: mailbox.id, senderEmail: sender }
+  return admitGmailConsultation(canonical, input, dependencies.legacy, { db, env: parityEnv(), ...options })
+}
+
+async function observationFor(externalMessageId: string) {
+  return db.routingParityObservation.findMany({ where: { companyId, externalIdHash: hashExternalId(externalMessageId) } })
+}
+
+it("parité : Router et règles historiques d'accord → PARITY_MATCH liée à la décision LOT-3, sans seconde décision", async () => {
+  const id = "parite-accord"
+  const r = await admitViaGmail(id, "Devis <devis@partenaire.example>")
+  assert.equal(r.outcome, "DRAFT_CREATED")
+  const [obs, ...rest] = await observationFor(id)
+  assert.equal(rest.length, 0)
+  assert.deepEqual([obs.legacyOutcome, obs.routerOutcome, obs.parityOutcome], ["ADMIT", "MATCH", "PARITY_MATCH"])
+  const decisions = await db.routingDecision.findMany({ where: { companyId, normalizedInboundId: obs.normalizedInboundId! } })
+  assert.deepEqual(decisions.map(d => d.id), [obs.routingDecisionId])
+  // Rejeu : ni nouvelle décision ni nouvelle observation.
+  await admitViaGmail(id, "Devis <devis@partenaire.example>")
+  assert.equal((await observationFor(id)).length, 1)
+  assert.equal(await db.routingDecision.count({ where: { companyId, normalizedInboundId: obs.normalizedInboundId! } }), 1)
+})
+
+it("parité : partenaire historique absent de la configuration Router → PARITY_LEGACY_ONLY ; LOT-3 n'admet toujours pas", async () => {
+  const oublie = await db.acquisitionPartner.create({ data: { companyId, name: "Partenaire oublié", code: "oublie" } })
+  await db.acquisitionPartnerDomain.create({ data: { companyId, partnerId: oublie.id, domainNormalized: "oublie.example" } })
+  const id = "parite-legacy-seul"
+  const partnersBefore = await db.acquisitionPartner.count({ where: { companyId } })
+  assert.deepEqual(await admitViaGmail(id, "devis@oublie.example"), { outcome: "NOT_ADMITTED" })
+  const [obs] = await observationFor(id)
+  assert.deepEqual([obs.legacyOutcome, obs.routerOutcome, obs.parityOutcome, obs.explainedCodes], ["ADMIT", "NO_MATCH", "PARITY_LEGACY_ONLY", []])
+  // La référence n'écrit rien : ni message, ni brouillon, ni partenaire.
+  assert.equal(await db.acquisitionMessage.count({ where: { companyId, externalMessageId: id } }), 0)
+  assert.equal(await db.acquisitionPartner.count({ where: { companyId } }), partnersBefore)
+})
+
+it("parité : expéditeur inconnu des deux côtés → PARITY_REJECT", async () => {
+  const id = "parite-refus"
+  assert.deepEqual(await admitViaGmail(id, "x@inconnu.example"), { outcome: "NOT_ADMITTED" })
+  const [obs] = await observationFor(id)
+  assert.deepEqual([obs.legacyOutcome, obs.routerOutcome, obs.parityOutcome], ["REJECT", "NO_MATCH", "PARITY_REJECT"])
+})
+
+it("parité : règle Router sans équivalent historique → PARITY_ROUTER_ONLY ; LOT-3 admet comme avant", async () => {
+  const writes = new InboundSourceWriteService(new InboundSourceRepository(db), new InboundSourceRuleRepository(db), new InboundSourceIdentityTx(db))
+  await writes.createRule({ companyId, sourceId, type: "SENDER_DOMAIN", value: "routeur-seul.example" })
+  const id = "parite-routeur-seul"
+  const r = await admitViaGmail(id, "devis@routeur-seul.example")
+  assert.equal(r.outcome, "DRAFT_CREATED")
+  const [obs] = await observationFor(id)
+  assert.deepEqual([obs.legacyOutcome, obs.routerOutcome, obs.parityOutcome], ["REJECT", "MATCH", "PARITY_ROUTER_ONLY"])
+})
+
+it("parité : référence ou observation en panne → décision LOT-3 inchangée", async () => {
+  const brokenRef = await admitViaGmail("parite-ref-panne", "devis@partenaire.example", {
+    legacyReference: { resolveEligibleSender: async () => { throw new Error("Panne fictive") } },
+  })
+  assert.equal(brokenRef.outcome, "DRAFT_CREATED")
+  const [obs] = await observationFor("parite-ref-panne")
+  assert.deepEqual([obs.legacyOutcome, obs.parityOutcome], ["UNKNOWN", "PARITY_UNCOMPARABLE"])
+  const brokenParity = await admitViaGmail("parite-obs-panne", "devis@partenaire.example", {
+    parity: { observe: async () => { throw new Error("Panne fictive") } },
+  })
+  assert.equal(brokenParity.outcome, "DRAFT_CREATED")
+})
+
+it("parité : shadow matching coupé → aucune observation, admission identique", async () => {
+  const id = "parite-shadow-off"
+  const r = await admitViaGmail(id, "devis@partenaire.example", { env: { ...parityEnv(), INTEGRATION_ROUTING_SHADOW_ENABLED: "false" } })
+  assert.equal(r.outcome, "DRAFT_CREATED")
+  assert.equal((await observationFor(id)).length, 0)
 })
