@@ -181,6 +181,12 @@ describe("rattachement client sans ambiguïté (règle commune portail et assist
     await db.client.create({ data: { id: "b_x", name: "Homonyme B", companyId: "co_b", email: "a.cli2@recette.test" } })
     assert.deepEqual(await resolveClientLink(db, { id: "a_cli2", companyId: "co_a", email: "a.cli2@recette.test" }), { ok: true, clientId: "a_c2", via: "EMAIL" })
   })
+  it("comparaison exacte du courriel, comme l'ancien portail : aucun nettoyage des espaces ni de la casse", async () => {
+    assert.deepEqual(await resolveClientLink(db, { id: "a_cli2", companyId: "co_a", email: " a.cli2@recette.test" }), { ok: false, reason: "NONE" })
+    assert.deepEqual(await resolveClientLink(db, { id: "a_cli2", companyId: "co_a", email: "a.cli2@recette.test " }), { ok: false, reason: "NONE" })
+    assert.deepEqual(await resolveClientLink(db, { id: "a_cli2", companyId: "co_a", email: "A.CLI2@recette.test" }), { ok: false, reason: "NONE" })
+    assert.deepEqual(await resolveClientLink(db, { id: "a_cli2", companyId: "co_a", email: "a.cli2@recette.test" }), { ok: true, clientId: "a_c2", via: "EMAIL" })
+  })
   it("aucune fiche : refus « aucune fiche »", async () => {
     assert.deepEqual(await resolveClientLink(db, { id: "a_emp", companyId: "co_a", email: "inconnu@recette.test" }), { ok: false, reason: "NONE" })
   })

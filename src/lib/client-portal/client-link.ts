@@ -4,7 +4,8 @@
  * 2. À défaut, repli historique par courriel : accepté seulement si UNE SEULE fiche de la société porte exactement ce
  *    courriel. Plusieurs fiches avec la même adresse ⇒ refus (rattachement ambigu), au lieu de choisir l'une d'elles au
  *    hasard comme le faisait `findFirst`. Revue Codex IA-6 du 24/11/2026.
- * La comparaison reste exacte (comme avant) : aucun compte n'est rattaché à une fiche qu'il ne voyait pas déjà.
+ * La comparaison reste exacte (comme avant, sans nettoyage des espaces ni de la casse) : aucun compte n'est rattaché à une
+ * fiche qu'il ne voyait pas déjà. Revue Codex de la PR #223.
  */
 import type { PrismaClient } from "@prisma/client"
 
@@ -26,7 +27,7 @@ export async function resolveClientLink(db: Db, user: { id: string; companyId: s
     select: { clientId: true },
   })
   if (profile) return { ok: true, clientId: profile.clientId, via: "PROFILE" }
-  const email = user.email?.trim()
+  const email = user.email
   if (!email) return { ok: false, reason: "NONE" }
   const matches = await db.client.findMany({
     where: { companyId: user.companyId, email },
