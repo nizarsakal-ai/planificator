@@ -52,7 +52,7 @@ export default async function AssistantPage({ searchParams }: { searchParams: Pr
           const payload = readPayload(p.payload)
           const sources = readSources(p.sources)
           return (
-            <Card key={p.id}><CardContent className="space-y-2 p-4">
+            <Card key={p.id} id={`proposition-${p.id}`} className="scroll-mt-24"><CardContent className="space-y-2 p-4">
               <p className="text-xs uppercase text-slate-500">{ruleLabel(p.rule)} · {fmtInstant(p.createdAt)}</p>
               <p className="font-medium text-slate-900">{p.title}</p>
               <p className="text-sm text-slate-600">{p.rationale}</p>
