@@ -17,7 +17,7 @@ import { InboundSourceIdentityTx } from "@/lib/integration/persistence/inbound-s
 import { PipelineBindingRepository } from "@/lib/integration/persistence/pipeline-binding.repository"
 import { InboundSourceWriteService } from "@/lib/integration/sources/inbound-source-write.service"
 import { admitGmailConsultation } from "@/lib/acquisition/admission/gmail-consultations-admission"
-import { hashExternalId } from "@/lib/integration/shadow/routing-shadow.service"
+import { RoutingShadowService, hashExternalId } from "@/lib/integration/shadow/routing-shadow.service"
 import { assertSafeDisposableTestDatabaseUrl } from "./helpers/safe-test-database-url"
 
 const url = process.env.TEST_LOT3_DATABASE_URL
@@ -379,7 +379,7 @@ it("parité : lecteur historique qui ne répond jamais → admission rendue dans
   let readerCalls = 0
   const started = Date.now()
   const r = await admitViaGmail(id, "devis@partenaire.example", {
-    parityBudgetMs: 100,
+    parityBudgetMs: 400,
     legacyReference: { resolveEligibleSender: () => { readerCalls++; return new Promise(() => undefined) } },
   })
   const elapsed = Date.now() - started
@@ -392,6 +392,45 @@ it("parité : lecteur historique qui ne répond jamais → admission rendue dans
     [obs.legacyOutcome, obs.routerOutcome, obs.parityOutcome, obs.comparisonCode],
     ["UNKNOWN", null, "PARITY_UNCOMPARABLE", "BUDGET_EXCEEDED"]
   )
+  const saved = await db.acquisitionMessage.findFirstOrThrow({ where: { companyId, externalMessageId: id }, include: { draft: true } })
+  assert.ok(saved.draft)
+})
+
+it("parité : observation qui ne termine jamais → admission rendue dans le budget", async () => {
+  const budgetMs = 300
+  // a) service d'observation entièrement bloqué
+  let started = Date.now()
+  const blockedObserve = await admitViaGmail("parite-observe-bloque", "devis@partenaire.example", {
+    parityBudgetMs: budgetMs,
+    parity: { observe: () => new Promise(() => undefined) },
+  })
+  let elapsed = Date.now() - started
+  assert.equal(blockedObserve.outcome, "DRAFT_CREATED")
+  assert.ok(elapsed < budgetMs + 500, `observe bloqué : ${elapsed} ms`)
+
+  // b) vrai service shadow et vrai Router, seule l'écriture de l'observation ne répond jamais
+  let recordCalls = 0
+  const env = parityEnv()
+  const id = "parite-record-bloque"
+  started = Date.now()
+  const blockedRecord = await admitViaGmail(id, "devis@partenaire.example", {
+    parityBudgetMs: budgetMs,
+    parity: new RoutingShadowService({
+      env,
+      log: () => undefined,
+      router: new TenantRouterService({ normalized, config: new RoutingConfigSnapshotRepository(db), decisions: new RoutingDecisionRepository(db), env, log: () => undefined }),
+      observations: { record: () => { recordCalls++; return new Promise(() => undefined) } },
+      findNormalizedId: async (c, conn, key) => {
+        const e = await envelopes.findByIdempotencyKey(c, conn, key)
+        return (await normalized.findByEnvelopeVersion(c, e.id, "MESSAGE", "1.0.0")).id
+      },
+    }),
+  })
+  elapsed = Date.now() - started
+  assert.equal(blockedRecord.outcome, "DRAFT_CREATED")
+  assert.equal(recordCalls, 1, "l'écriture a bien été tentée")
+  assert.ok(elapsed < budgetMs + 500, `écriture bloquée : ${elapsed} ms`)
+  assert.equal((await observationFor(id)).length, 0)
   const saved = await db.acquisitionMessage.findFirstOrThrow({ where: { companyId, externalMessageId: id }, include: { draft: true } })
   assert.ok(saved.draft)
 })

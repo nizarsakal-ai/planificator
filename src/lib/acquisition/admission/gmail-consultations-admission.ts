@@ -36,8 +36,9 @@ const bindingSchema = z.object({
 })
 
 /**
- * Budget total de la parité après la décision LOT-3 (attente de la référence + observation).
- * Au-delà : référence inconnue (PARITY_UNCOMPARABLE) ou routage abandonné (ROUTER_TIMEOUT).
+ * Budget total de la parité après la décision LOT-3 : attente de la référence, routage et écriture de
+ * l'observation (un quart réservé à l'écriture). Au-delà : référence inconnue (PARITY_UNCOMPARABLE),
+ * routage abandonné (ROUTER_TIMEOUT) ou observation abandonnée ; l'admission rend la main.
  */
 export const LEGACY_REFERENCE_PARITY_BUDGET_MS = 2_000
 
@@ -169,23 +170,29 @@ export async function admitGmailConsultation(
   if (!referenceRead) return result
 
   // Parité Router ↔ règles historiques : la décision LOT-3 est déjà prise et n'est jamais modifiée.
-  // Un seul budget borne l'attente de la référence et l'observation. Le Router réutilise la décision
+  // Un seul budget borne TOUT ce qui suit la décision : attente de la référence, routage et écriture de
+  // l'observation. Un quart est réservé à l'écriture ; l'appel entier est abandonné à l'échéance (une
+  // écriture tardive est absorbée, l'index unique empêche tout doublon). Le Router réutilise la décision
   // existante (même message, même configuration) : aucun double comptage. Rien ne lève vers l'appelant.
   try {
-    const deadlineAtMs = now() + (options.parityBudgetMs ?? LEGACY_REFERENCE_PARITY_BUDGET_MS)
-    const settled = await settleWithin(referenceRead, deadlineAtMs - now())
+    const budgetMs = options.parityBudgetMs ?? LEGACY_REFERENCE_PARITY_BUDGET_MS
+    const deadlineAtMs = now() + budgetMs
+    const routingDeadlineAtMs = deadlineAtMs - Math.floor(budgetMs / 4)
+    const settled = await settleWithin(referenceRead, routingDeadlineAtMs - now())
     const parity = options.parity ?? new RoutingShadowService({
       env, router, observations: new RoutingParityObservationRepository(db), now,
       findNormalizedId: async () => inbound.id,
     })
-    await parity.observe({
+    const observing = Promise.resolve().then(() => parity.observe({
       companyId,
       connectionId: binding.id,
       idempotencyKey: dto.idempotencyKey,
       externalId: input.externalMessageId,
       legacyOutcome: settled === REFERENCE_TIMED_OUT ? null : settled,
-      deadlineAtMs,
-    })
+      deadlineAtMs: routingDeadlineAtMs,
+    }))
+    observing.catch(() => undefined)
+    await settleWithin(observing, deadlineAtMs - now())
   } catch {
     // Best-effort : la parité n'altère jamais l'admission.
   }
