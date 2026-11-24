@@ -95,4 +95,10 @@ Report sur `main` : nouvelle branche locale `feat/studio-documents-g2-sur-main`,
 
 Push : IMPOSSIBLE depuis le VPS le 24/11/2026 — aucun identifiant GitHub en écriture pour le compte aiteam (essai à blanc `git push --dry-run` refusé faute d'identifiant ; lecture publique seule). Aucun contournement tenté. Rien n'est poussé, fusionné ni déployé. À noter : `vercel.json` ne désactive les déploiements Git que pour une autre branche ; un push déclencherait vraisemblablement un déploiement de prévisualisation Vercel.
 
-Prochaine action : décision de Nizar sur la manière de publier `feat/studio-documents-g2-sur-main` (correctif ou bundle déposé pour le Mac, ou accès en écriture fourni par une session autorisée).
+Dépôt pour le Mac (24/11/2026) : bundle et correctif du commit `2acdf98` déposés dans `outbox/2026-11-24-planificator-studio-documents-g2-sur-main/` avec la marche à suivre. Réception sur le Mac non vérifiée depuis le VPS.
+
+5e revue Codex (lecture seule, 24/11/2026) sur `2acdf98` : report jugé fidèle, aucun défaut bloquant ni important, verdict « publiable » ; revue statique, sans tests PostgreSQL. Deux remarques mineures : (1) la recherche de documents faisait perdre `?vue=` et `?depart=` ; (2) dans la vue PDF, une empreinte non conforme n'est signalée qu'après le clic (409 expliqué), conséquence assumée de la solution retenue. Rapport : `outbox/2026-11-23-planificator-studio-documents-g2-revue-codex/revue-codex-5-report-sur-main-2acdf98.md`.
+
+Correction de la remarque (1), commitée sur `feat/studio-documents-g2-sur-main` au-dessus de `2acdf98` (autorisation de Nizar du 24/11/2026) : `StudioDocumentSearch` reconduit la vue et le modèle de départ déjà validés par la page (champs cachés, lien « Effacer ») ; test étendu dans `studio-g2.test.tsx`. Vérifié sur le VPS : `test:lot-g` 110/112 (mêmes deux échecs préexistants), `tsc --noEmit` sans erreur dans le Studio, `npm run build` réussi. Non vérifié : navigateur, PostgreSQL ; non relu par Codex. Le premier bundle (`2acdf98`) ne contient pas cette correction ; un second bundle, portant les deux commits, est déposé dans `outbox/2026-11-24-planificator-studio-documents-g2-sur-main-v2/` (réception sur le Mac non vérifiée depuis le VPS).
+
+Prochaine action : publication de la branche par Nizar depuis le Mac avec le second bundle (aucun accès en écriture au dépôt depuis le VPS).

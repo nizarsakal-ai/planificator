@@ -25,6 +25,7 @@ import { GeneratedDocumentPdf, issuerLine } from "@/lib/document-studio/document
 import { formatEuro, parseEuroInputToCents } from "@/lib/billing/money"
 import { StudioTemplateEditor } from "@/components/document-studio/StudioTemplateEditor"
 import { StudioBlocks } from "@/components/document-studio/StudioBlocks"
+import { StudioDocumentSearch } from "@/components/document-studio/StudioDocumentSearch"
 
 // tsconfig "jsx": "preserve" → sous tsx, le JSX est compilé en React.createElement (runtime classique) — convention du dépôt.
 ;(globalThis as { React?: typeof React }).React = React
@@ -327,6 +328,16 @@ describe("PDF et frontières des modules", () => {
     const search = code(read("src/components/document-studio/StudioDocumentSearch.tsx"))
     assert.ok(search.includes(`<form method="get" action="/studio-documents#documents"`))
     assert.doesNotMatch(search, /"use client"|@\/lib\/actions|@\/lib\/prisma/)
+    // La recherche reconduit la vue ouverte et le modèle de départ (valeurs déjà validées par la page), « Effacer » aussi.
+    assert.ok(accueil.includes("<StudioDocumentSearch q={recherche.q} etat={recherche.etat} vue={vue} depart={depart?.id ?? null} />"))
+    assert.ok(search.includes(`{vue && <input type="hidden" name="vue" value={vue} />}`) && search.includes(`{depart && <input type="hidden" name="depart" value={depart} />}`))
+    assert.ok(search.includes("<a href={effacer}"))
+    const rendu = (props: Parameters<typeof StudioDocumentSearch>[0]) => renderToStaticMarkup(<StudioDocumentSearch {...props} />)
+    assert.match(rendu({ q: "", etat: null }), /^(?![\s\S]*type="hidden")/)
+    const avecVue = rendu({ q: "devis", etat: null, vue: "pdf", depart: STARTERS[0].id })
+    assert.ok(avecVue.includes(`<input type="hidden" name="vue" value="pdf"/>`) && avecVue.includes(`<input type="hidden" name="depart" value="${STARTERS[0].id}"/>`))
+    assert.ok(avecVue.includes(`href="/studio-documents?vue=pdf&amp;depart=${STARTERS[0].id}#documents"`))
+    assert.ok(rendu({ q: "devis", etat: null }).includes(`href="/studio-documents#documents"`))
     assert.ok(modele.includes("getDocumentForReuse(prisma, ctx.companyId, t.id, sp.depuis)") && modele.includes("ID.test(sp.depuis)"))
     assert.ok(read("src/lib/document-studio/queries.ts").includes("where: { id: documentId, companyId, version: { templateId } }"))
     assert.ok(doc.includes("<a href={`/studio-documents/${d.version.templateId}?depuis=${d.id}#generer`}") && doc.includes("<StudioBlocks blocks={d.snapshot.blocks} />"))

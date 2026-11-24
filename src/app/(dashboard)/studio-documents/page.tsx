@@ -249,7 +249,7 @@ export default async function StudioPage({ searchParams }: { searchParams: Promi
 
       <section id="documents" aria-label="Documents générés" className="scroll-mt-4">
       <Card><CardContent className="overflow-x-auto p-0">
-        <StudioDocumentSearch q={recherche.q} etat={recherche.etat} />
+        <StudioDocumentSearch q={recherche.q} etat={recherche.etat} vue={vue} depart={depart?.id ?? null} />
         <table className="w-full text-sm">
           <caption className="px-3 py-2 text-left text-sm font-semibold text-slate-900">Documents générés{filtre ? ` — ${docs.length} résultat${docs.length > 1 ? "s" : ""}${docs.length === 50 ? " (50 premiers)" : ""}` : ""}</caption>
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th scope="col" className="px-3 py-2">Numéro</th><th scope="col" className="px-3 py-2">Document</th><th scope="col" className="px-3 py-2">État</th><th scope="col" className="px-3 py-2">Date</th></tr></thead>
