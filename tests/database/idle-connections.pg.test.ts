@@ -7,6 +7,7 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 import { PrismaClient } from "@prisma/client"
 import { withServerlessPoolDefaults } from "@/lib/database-url"
+import { logPrismaEngineError } from "@/lib/prisma-error-log"
 
 const base = process.env.DATABASE_IDLE_TEST_URL?.trim()
 if (!base) throw new Error("DATABASE_IDLE_TEST_URL requis (base PostgreSQL locale jetable)")
@@ -22,8 +23,9 @@ function withParams(url: string, extra: Record<string, string>) {
 }
 
 /** Ouvre POOL connexions, les fait fermer par le serveur, attend, puis renvoie le résultat de POOL + 1 requêtes. */
-async function queriesAfterServerClose(url: string, idleMs: number) {
-  const app = new PrismaClient({ datasources: { db: { url } }, log: [] })
+async function queriesAfterServerClose(url: string, idleMs: number, engineErrors?: string[]) {
+  const app = new PrismaClient({ datasources: { db: { url } }, log: [{ emit: "event", level: "error" }] })
+  app.$on("error", (event) => engineErrors?.push(event.message))
   const admin = new PrismaClient({ datasources: { db: { url: withParams(base!, { application_name: "idle-admin", connection_limit: "1" }) } }, log: [] })
   try {
     await Promise.all(Array.from({ length: POOL }, () => app.$queryRawUnsafe("SELECT pg_sleep(0.2)::text AS s")))
@@ -54,4 +56,17 @@ test("with the serverless defaults, idle server-closed connections are discarded
   // 11 s : au-delà du délai d'inactivité de 10 s, en deçà du contrôle de santé du pool (15 s).
   const outcomes = await queriesAfterServerClose(withServerlessPoolDefaults(withParams(base, victim))!, 11_000)
   assert.deepEqual(outcomes, Array(POOL + 1).fill("ok"))
+})
+
+test("arrêt explicite par le serveur (E57P01) : requêtes réussies et message toujours journalisé (hors filtre)", async () => {
+  // pg_terminate_backend envoie un FATAL explicite, différent de la fermeture silencieuse de Neon
+  // (« kind: Closed, cause: None »), seule écartée par le filtre : ce signal-ci reste visible.
+  const engineErrors: string[] = []
+  const outcomes = await queriesAfterServerClose(withServerlessPoolDefaults(withParams(base, victim))!, 11_000, engineErrors)
+  assert.deepEqual(outcomes, Array(POOL + 1).fill("ok"))
+  assert.ok(engineErrors.length > 0)
+  const written: string[] = []
+  for (const message of engineErrors) logPrismaEngineError({ message }, (line) => written.push(line))
+  assert.equal(written.length, engineErrors.length)
+  assert.ok(written.every((line) => line.startsWith("prisma:error ") && line.includes("E57P01")))
 })
