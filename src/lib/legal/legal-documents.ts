@@ -32,9 +32,22 @@ export function legalDocument(key: LegalDocumentKey): LegalDocument {
   return doc
 }
 
+/** Lot 2b : page web publique de demande de suppression de compte (exigée par Google Play, sans téléchargement). */
+export const ACCOUNT_DELETION_ROUTE = "/suppression-compte"
+
+/**
+ * Adresse de contact pour les données personnelles, fixée par la variable d'environnement publique
+ * NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL (lue au build). Null tant qu'elle n'est pas configurée.
+ */
+export function privacyContactEmail(env: Record<string, string | undefined> = process.env): string | null {
+  const value = env.NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL?.trim()
+  return value && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? value : null
+}
+
 /** Pages légales : publiques, connecté ou non (jamais de redirection vers le tableau de bord). */
 export function isLegalPublicPath(pathname: string): boolean {
-  return LEGAL_DOCUMENTS.some((d) => pathname === d.route || pathname === `${d.route}/`)
+  const routes = [...LEGAL_DOCUMENTS.map((d) => d.route), ACCOUNT_DELETION_ROUTE]
+  return routes.some((route) => pathname === route || pathname === `${route}/`)
 }
 
 /** Lien interne vers un autre fichier .md du dossier docs/legal → route publique correspondante, sinon inchangé. */

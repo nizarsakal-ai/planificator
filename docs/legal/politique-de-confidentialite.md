@@ -58,7 +58,7 @@ Certaines fonctions envoient des données au service d'IA **Anthropic** (sociét
 
 - Ces envois n'ont lieu qu'après votre accord, donné dans l'appli lors de la première utilisation. Vous pouvez le retirer à tout moment.
 - Seules les données utiles à la tâche demandée sont envoyées.
-- [À VÉRIFIER : selon les conditions commerciales d'Anthropic, les données envoyées par API ne servent pas à entraîner ses modèles. Indiquer la durée de conservation chez Anthropic.]
+- Selon les conditions commerciales d'Anthropic, les données envoyées ne servent pas à entraîner ses modèles. Anthropic les conserve au plus 30 jours, sauf exceptions prévues par ses conditions (par exemple sécurité ou obligation légale).
 - Les propositions de l'IA sont vérifiées par une personne avant toute décision. Aucune décision à effet juridique n'est prise de manière entièrement automatique (RGPD art. 22).
 
 ## 5. Qui reçoit vos données
@@ -68,11 +68,11 @@ Certaines fonctions envoient des données au service d'IA **Anthropic** (sociét
 
 | Prestataire | Rôle | Lieu des données | Base du transfert hors UE |
 |---|---|---|---|
-| Vercel Inc. | Hébergement de l'application | Serveurs à Francfort (Allemagne) ; société américaine | [À VÉRIFIER : Data Privacy Framework ou clauses contractuelles types] |
-| Neon Inc. | Base de données | Francfort (Allemagne) ; société américaine | [À VÉRIFIER] |
-| Cloudinary | Stockage des photos, justificatifs et pièces jointes | [À VÉRIFIER : région de stockage] | [À VÉRIFIER] |
-| Anthropic PBC | Intelligence artificielle | États-Unis | [À VÉRIFIER] |
-| Resend | Envoi des e-mails (invitations, devis, factures, relances) | [À VÉRIFIER] | [À VÉRIFIER] |
+| Vercel Inc. | Hébergement de l'application | Serveurs à Francfort (Allemagne) ; société américaine | Data Privacy Framework (certification active) |
+| Databricks, Inc. (service Neon) | Base de données | Francfort (Allemagne) ; société américaine | Data Privacy Framework (certification active) |
+| Cloudinary Inc. | Stockage des photos, justificatifs et pièces jointes | États-Unis | Data Privacy Framework (certification active) |
+| Anthropic PBC | Intelligence artificielle | États-Unis | Clauses contractuelles types de la Commission européenne |
+| Plus Five Five, Inc. (Resend) | Envoi des e-mails (invitations, devis, factures, relances) | États-Unis | Data Privacy Framework [À VÉRIFIER : recertification en cours d'examen au 25/11/2026] |
 | Google | Gmail, Google Agenda et Google Drive, **seulement si la société les connecte** ; les documents RH sont stockés sur le Google Drive de la société | Selon le contrat Google Workspace de la société | Contrat Google de la société |
 | Fondation OpenStreetMap | Fonds de carte et recherche d'adresses | Royaume-Uni (pays reconnu « adéquat » par l'UE) | Décision d'adéquation |
 
@@ -91,7 +91,7 @@ Certaines fonctions envoient des données au service d'IA **Anthropic** (sociét
 | E-mails importés et non transformés en chantier | [À COMPLÉTER : par exemple 12 mois] |
 | Prospects sans réponse | 3 ans après le dernier contact |
 | Journaux de connexion et de sécurité | 1 an |
-| Sauvegardes | [À VÉRIFIER : durée des sauvegardes Neon] |
+| Sauvegardes de la base | Selon l'offre de l'hébergeur, de 1 à 30 jours [À VÉRIFIER : offre souscrite] |
 
 ## 7. Sécurité
 
@@ -108,7 +108,7 @@ En cas de violation de données à risque, la CNIL et les personnes concernées 
 ## 8. Vos droits
 
 Vous pouvez demander :
-- l'accès à vos données et une copie ;
+- l'accès à vos données et une copie (depuis l'appli : Mon profil, puis « Télécharger mes données ») ;
 - leur rectification ;
 - leur effacement ;
 - la limitation de leur utilisation ;
@@ -117,7 +117,7 @@ Vous pouvez demander :
 
 Vous pouvez aussi retirer votre accord pour l'IA à tout moment.
 
-- **Supprimer votre compte :** depuis l'appli (Profil, puis « Supprimer mon compte ») ou depuis la page [À COMPLÉTER : adresse de la page web de demande de suppression].
+- **Supprimer votre compte :** depuis l'appli (Mon profil, puis « Supprimer mon compte ») ou depuis la page [Suppression de compte](/suppression-compte), accessible sans l'application.
 - **Autres demandes :** [À COMPLÉTER : e-mail de contact]. Réponse sous un mois.
 - **Réclamation :** vous pouvez saisir la CNIL (www.cnil.fr, 3 place de Fontenoy, TSA 80715, 75334 Paris Cedex 07).
 

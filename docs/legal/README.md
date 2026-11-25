@@ -24,12 +24,15 @@ Ces textes décrivent ce que fait l'application au 25/11/2026. Ils ont été éc
 6. La ville du tribunal compétent (en général celle du siège).
 7. Y a-t-il un CSE dans chacune des sociétés qui utilisent le pointage ?
 
-## Ce qu'il faut vérifier auprès des fournisseurs (repéré par « [À VÉRIFIER] »)
+## Fournisseurs : vérifiés le 25/11/2026 (détail dans les notes partagées)
 
-- Signer ou accepter le contrat RGPD (DPA) de chacun : Vercel, Neon, Cloudinary, Anthropic, Resend, Google (Workspace / Cloud).
-- Pour chacun : pays de stockage, et base du transfert hors UE (certification « Data Privacy Framework » ou clauses contractuelles types).
-- Cloudinary : région de stockage des fichiers (par défaut aux États-Unis).
-- Neon : durée de conservation des sauvegardes.
+Les textes reprennent ces vérifications. Il reste quatre actions :
+- **Cloudinary** : les fichiers sont stockés aux États-Unis (l'Europe n'est possible qu'en offre Enterprise). Il faut confirmer avec Cloudinary que son contrat RGPD couvre un compte sans bon de commande.
+- **Google** : vérifier dans la console d'administration Google que l'avenant de traitement des données (CDPA) est accepté. Le cocontractant est Google Cloud France.
+- **Resend** : sa certification DPF est en cours de renouvellement ; à revérifier.
+- **Neon** : la restauration de la base n'est gardée que 1 jour par défaut sur les offres payantes (7 jours en Launch, 30 jours en Scale) ; vérifier l'offre souscrite.
+
+Anthropic n'est pas certifié DPF : le transfert repose sur les clauses contractuelles types de son contrat, ce qui est valable.
 
 ## Ce que ces textes engagent pour le lot 2 (code)
 
@@ -38,9 +41,10 @@ Les textes promettent certaines choses ; l'appli devra les faire avant la mise e
 - Effacer automatiquement les coordonnées GPS des pointages au bout de **2 mois**, en gardant les heures. Le registre et la note salariés l'annoncent ; aucune purge n'existe aujourd'hui.
 - Afficher un écran d'information et recueillir l'accord avant d'utiliser l'assistant IA (exigence Apple 5.1.2).
 - Permettre à chaque société de désactiver les fonctions d'IA (le DPA le promet).
-- Proposer la suppression du compte et l'export des données, avec un export disponible 30 jours après la fermeture.
-- Ajouter la case d'acceptation des CGU à l'inscription, et les liens vers les pages légales.
-- Retirer de l'appli iOS la demande de position « toujours » : la note salariés promet qu'il n'y a aucun suivi en continu.
+- ~~Proposer la suppression du compte et l'export des données~~ : fait au lot 2b (Mon profil, page `/suppression-compte`). Reste à prévoir l'export des données d'une société pendant 30 jours après la fermeture de son espace.
+- Configurer la variable `NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL` sur Vercel : sans elle, la page de suppression affiche « Adresse de contact en cours de configuration ».
+- ~~Ajouter la case d'acceptation des CGU à l'inscription, et les liens vers les pages légales~~ : fait au lot 2a.
+- ~~Retirer de l'appli iOS la demande de position « toujours »~~ : fait au lot 2a.
 
 ## Points à trancher avec le juriste
 

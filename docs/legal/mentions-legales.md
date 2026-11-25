@@ -20,8 +20,8 @@ Le service **Planificator**, accessible à l'adresse https://www.galyaevents.fr 
 
 L'application et ses données sont hébergées par :
 
-- **Vercel Inc.**, 440 N Barranca Ave #4133, Covina, CA 91723, États-Unis, https://vercel.com. Les serveurs utilisés sont situés à Francfort (Allemagne). [À VÉRIFIER : adresse à jour sur vercel.com]
-- **Base de données :** Neon Inc., https://neon.tech, sur des serveurs situés à Francfort (Allemagne, région AWS eu-central-1). [À VÉRIFIER : adresse postale de Neon]
+- **Vercel Inc.**, 440 N Barranca Ave #4133, Covina, CA 91723, États-Unis, https://vercel.com. Les serveurs utilisés sont situés à Francfort (Allemagne).
+- **Base de données :** service Neon de Databricks, Inc., https://neon.tech, sur des serveurs situés à Francfort (Allemagne, région AWS eu-central-1). [À VÉRIFIER : adresse postale de Databricks, Inc.]
 
 ## Données personnelles
 

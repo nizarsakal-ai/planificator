@@ -53,7 +53,7 @@ Certains sous-traitants sont des sociétés établies hors UE, ou traitent des d
 
 Les fonctions d'IA envoient au prestataire Anthropic les données nécessaires à la tâche demandée, et seulement après l'accord de l'Utilisateur dans l'application. Le Client peut désactiver ces fonctions pour sa société. [À VÉRIFIER : réglage à ajouter au lot 2 s'il n'existe pas]
 
-[À VÉRIFIER : engagement d'Anthropic de ne pas entraîner ses modèles avec ces données, et durée de conservation chez Anthropic.]
+Selon ses conditions commerciales, Anthropic n'entraîne pas ses modèles avec ces données et les conserve au plus 30 jours, sauf exceptions prévues par ces conditions.
 
 ## 7. Obligations du Client
 
@@ -80,7 +80,7 @@ Chaque partie répond de ses propres manquements au RGPD, dans les limites prév
 ## Annexe 1 : mesures de sécurité
 
 - **Chiffrement des échanges :** HTTPS (TLS) pour tous les accès.
-- **Chiffrement au repos :** assuré par l'hébergeur de la base. [À VÉRIFIER : confirmation Neon]
+- **Chiffrement au repos :** assuré par l'hébergeur de la base (AES-256).
 - **Mots de passe :** jamais stockés en clair. Seule une empreinte irréversible est gardée (bcrypt).
 - **Clés d'accès aux services connectés** (Gmail, Agenda, Drive…) : chiffrées en base avec une clé distincte de la base de données.
 - **Séparation des sociétés :** chaque donnée est rattachée à une société. Les accès sont filtrés par société et par rôle.
@@ -94,10 +94,10 @@ Chaque partie répond de ses propres manquements au RGPD, dans les limites prév
 
 | Sous-traitant | Service | Lieu des données | Base du transfert |
 |---|---|---|---|
-| Vercel Inc. (États-Unis) | Hébergement de l'application | Francfort (Allemagne) | [À VÉRIFIER] |
-| Neon Inc. (États-Unis) | Base de données | Francfort (Allemagne) | [À VÉRIFIER] |
-| Cloudinary (États-Unis) | Stockage de fichiers (photos, justificatifs, pièces jointes, logos) | [À VÉRIFIER] | [À VÉRIFIER] |
-| Anthropic PBC (États-Unis) | Intelligence artificielle | États-Unis | [À VÉRIFIER] |
-| Resend (États-Unis) | Envoi d'e-mails | [À VÉRIFIER] | [À VÉRIFIER] |
-| Google (Irlande / États-Unis) | Gmail, Agenda, Drive, seulement si le Client les connecte à son propre compte Google | Selon le contrat Google du Client | Contrat Google du Client |
+| Vercel Inc. (États-Unis) | Hébergement de l'application | Francfort (Allemagne) | Data Privacy Framework |
+| Databricks, Inc. (service Neon, États-Unis) | Base de données | Francfort (Allemagne) | Data Privacy Framework |
+| Cloudinary Inc. (États-Unis) | Stockage de fichiers (photos, justificatifs, pièces jointes, logos) | États-Unis | Data Privacy Framework [À VÉRIFIER : DPA applicable à un compte sans bon de commande] |
+| Anthropic PBC (États-Unis) | Intelligence artificielle | États-Unis | Clauses contractuelles types |
+| Plus Five Five, Inc. (Resend, États-Unis) | Envoi d'e-mails | États-Unis | Data Privacy Framework [À VÉRIFIER : recertification en cours] |
+| Google (Google Cloud France pour une facturation en France ; Google LLC) | Gmail, Agenda, Drive, seulement si le Client les connecte à son propre compte Google | Selon le contrat Google du Client | Contrat Google du Client ; Google LLC certifiée Data Privacy Framework |
 | Fondation OpenStreetMap (Royaume-Uni) | Fonds de carte et recherche d'adresses (adresse IP et adresse recherchée) | Royaume-Uni | Décision d'adéquation |
