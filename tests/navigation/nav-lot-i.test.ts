@@ -92,16 +92,16 @@ describe("lot I : drapeau activé", () => {
 
 describe("lot I : catégories et câblage", () => {
   it("listes de main et extension E inchangées ; extension I distincte et exacte", () => {
-    assert.deepEqual(NAV_CATEGORY_DEFINITIONS.find((c) => c.id === "commercial")?.hrefs, ["/clients", "/consultations", "/opportunites", "/articles"])
+    assert.deepEqual(NAV_CATEGORY_DEFINITIONS.find((c) => c.id === "commercial")?.hrefs, ["/clients", "/consultations", "/opportunites", "/articles", "/tableaux-de-bord"])
     assert.deepEqual(NAV_CATEGORY_EXTENSIONS.map((e) => [e.href, e.id]), [["/crm/opportunites", "commercial"], ["/automatisations", "administration"]])
     assert.deepEqual(NAV_CATEGORY_EXTENSIONS_LOT_I.map((e) => [e.href, e.id, e.rank]), [["/marketing", "commercial", 3.5], ["/boutique", "commercial", 3.6]])
   })
-  it("Sidebar.tsx et MobileNav.tsx : helper I le plus extérieur de la chaîne intégrée FGHI, visibilité serveur ; aucun drapeau lu côté client", () => {
-    // Intégration FGHI : I reste le plus extérieur ; F, G et H s'intercalent entre I et la base (chaîne exacte).
+  it("Sidebar.tsx et MobileNav.tsx : helper I le plus extérieur des lots FGHI (seule l’entrée Budget l’enveloppe), visibilité serveur ; aucun drapeau lu côté client", () => {
+    // Intégration FGHI : I reste le plus extérieur des lots FGHI, sous la seule entrée Budget ; F, G et H s'intercalent entre I et la base (chaîne exacte).
     for (const f of ["src/components/layout/Sidebar.tsx", "src/components/layout/MobileNav.tsx"]) {
       const src = read(f)
-      assert.ok(src.includes("const navItems = withMarketingShopNavItems(withPayrollPrepNavItem(withDocumentStudioNavItem(withAssistantConnectorNavItems(withFuelTicketNavItem(withStockPurchasingNavItems("), f)
-      assert.ok(src.includes("user.stockPurchasingNavVisible === true), user.fuelTicketNavVisible === true), user.assistantNavVisible === true && user.assistantMenuReplaced !== true, user.connectorsNavVisible === true), user.documentStudioNavVisible === true), user.payrollPrepNavVisible === true), user.marketingShopNavVisible === true)"), f)
+      assert.ok(src.includes("const navItems = withBudgetNavItem(withMarketingShopNavItems(withPayrollPrepNavItem(withDocumentStudioNavItem(withAssistantConnectorNavItems(withFuelTicketNavItem(withStockPurchasingNavItems("), f)
+      assert.ok(src.includes("user.stockPurchasingNavVisible === true), user.fuelTicketNavVisible === true), user.assistantNavVisible === true && user.assistantMenuReplaced !== true, user.connectorsNavVisible === true), user.documentStudioNavVisible === true), user.payrollPrepNavVisible === true), user.marketingShopNavVisible === true), user.budgetNavVisible === true)"), f)
       assert.equal((src.match(/withMarketingShopNavItems\(/g) ?? []).length, 1, `${f} : helper I appliqué une seule fois`)
       assert.ok(src.includes("withSupplierIntakeNavItem(withCrmAutomationNavItems(withBillingNavItems("), `${f} : chaîne E intacte`)
       assert.doesNotMatch(code(src), /MARKETING_SHOP_ENABLED|process\.env|isMarketingShopEnabled|marketing-shop-feature-flag/, f)

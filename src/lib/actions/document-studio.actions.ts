@@ -5,10 +5,11 @@
 // revalidatePath + redirection serveur. Le client (FormulaireRetour) ouvre ensuite, par une navigation native du document,
 // la cible CALCULÉE ICI (fiche du modèle créé, document généré) ou rouvre la page courante ; les adresses sont limitées par
 // la liste blanche de retour-action.ts. Seule redirection serveur conservée : /login si la session est absente.
+// Lot G2 : champs envoyés en JSON par l'éditeur visuel ; duplication d'un modèle (ouvre la fiche de la copie).
 import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { StudioAccessError, requireStudioAdmin, studioAccessMessage, type StudioAccessContext } from "@/lib/document-studio/access"
-import { STUDIO_ERRORS, parseFieldLines } from "@/lib/document-studio/studio.core"
+import { STUDIO_ERRORS, parseFieldLines, parseFieldsJson } from "@/lib/document-studio/studio.core"
 import { STUDIO_SIGNATURE_MAX_CHARS } from "@/lib/document-studio/signature"
 import * as svc from "@/lib/document-studio/studio.service"
 import * as pdfSvc from "@/lib/document-studio/pdf-workspace.service"
@@ -38,7 +39,8 @@ async function run(fn: (ctx: StudioAccessContext) => Promise<Outcome>): Promise<
   return result.ok ? retour(true, result.okMessage, result.cible) : retour(false, result.error)
 }
 function content(form: FormData) {
-  const fields = parseFieldLines(str(form, "fields", 20_000))
+  // Lot G2 : l'éditeur visuel envoie les champs en JSON (« fieldsJson ») ; l'ancien format en lignes reste accepté.
+  const fields = form.has("fieldsJson") ? parseFieldsJson(str(form, "fieldsJson", 60_000)) : parseFieldLines(str(form, "fields", 20_000))
   return { title: str(form, "title", 1000), body: str(form, "body", 25_000), fields: fields ?? "invalide", requiresApproval: str(form, "requiresApproval", 5) === "oui" }
 }
 
@@ -67,6 +69,13 @@ export async function createDraftAction(a: RetourAction | FormData, b?: FormData
     return r.ok ? { ok: true, okMessage: "Nouveau brouillon créé depuis la dernière version." } : r
   })
 }
+export async function duplicateTemplateAction(a: RetourAction | FormData, b?: FormData) {
+  const form = formulaireDe(a, b)
+  return run(async (ctx) => {
+    const r = await svc.duplicateTemplate(prisma, ctx, reqId(form, "templateId"))
+    return r.ok ? { ok: true, okMessage: "Modèle dupliqué : la copie démarre en brouillon.", cible: ficheModele(r.value.templateId) } : r
+  })
+}
 export async function publishVersionAction(a: RetourAction | FormData, b?: FormData) {
   const form = formulaireDe(a, b)
   return run(async (ctx) => {
@@ -80,7 +89,7 @@ export async function generateDocumentAction(a: RetourAction | FormData, b?: For
   return run(async (ctx) => {
     const values: Record<string, string> = {}
     for (const [k, v] of form.entries()) if (k.startsWith("f_") && typeof v === "string") values[k.slice(2)] = v.slice(0, 5000)
-    const r = await svc.generateDocument(prisma, ctx, reqId(form, "templateId"), { values, clientId: reqId(form, "clientId") || null, worksiteId: reqId(form, "worksiteId") || null })
+    const r = await svc.generateDocument(prisma, ctx, reqId(form, "templateId"), { versionId: reqId(form, "versionId"), values, clientId: reqId(form, "clientId") || null, worksiteId: reqId(form, "worksiteId") || null })
     return r.ok ? { ok: true, okMessage: r.value.status === "ISSUED" ? `Document ${r.value.number} émis.` : `Document ${r.value.number} créé : en attente de validation par un autre administrateur.`, cible: ficheDocument(r.value.id) } : r
   })
 }

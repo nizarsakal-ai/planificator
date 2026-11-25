@@ -110,7 +110,7 @@ describe("lot E : câblage", () => {
     assert.ok(layout.includes(`const automationNavVisible = isAutomationsEnabled() && (role === "ADMIN" || role === "SUPER_ADMIN") && !!companyId`))
   })
   it("catégories : listes de main inchangées (Prospection), rattachement E par extension, ordre Opportunités → Pipeline commercial", () => {
-    assert.deepEqual(NAV_CATEGORY_DEFINITIONS.find((c) => c.id === "commercial")?.hrefs, ["/clients", "/consultations", "/opportunites", "/articles"])
+    assert.deepEqual(NAV_CATEGORY_DEFINITIONS.find((c) => c.id === "commercial")?.hrefs, ["/clients", "/consultations", "/opportunites", "/articles", "/tableaux-de-bord"])
     assert.deepEqual(NAV_CATEGORY_DEFINITIONS.find((c) => c.id === "administration")?.hrefs, ["/super-admin/entreprises", "/parametres"])
     assert.deepEqual(NAV_CATEGORY_EXTENSIONS.map((e) => [e.href, e.id]), [["/crm/opportunites", "commercial"], ["/automatisations", "administration"]])
     const g = groupNavItems(lotE("SUPER_ADMIN", ALL_ON, true, true))

@@ -5,7 +5,7 @@
     <key>CAPACITOR_DEBUG</key>
 	<string>$(CAPACITOR_DEBUG)</string>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>en</string>
+	<string>fr</string>
 	<key>CFBundleDisplayName</key>
         <string>Planificator</string>
 	<key>CFBundleExecutable</key>
@@ -30,13 +30,7 @@
 	<string>Main</string>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
-		<string>armv7</string>
-	</array>
-	<key>UISupportedInterfaceOrientations</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
+		<string>arm64</string>
 	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
@@ -50,9 +44,7 @@
 
 	<!-- Géolocalisation (pointage GPS) -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Planificator utilise votre position pour enregistrer vos pointages d'arrivée et de départ sur les chantiers.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Planificator utilise votre position pour enregistrer vos pointages d'arrivée et de départ sur les chantiers.</string>
+	<string>Planificator utilise votre position uniquement au moment où vous pointez votre arrivée ou votre départ sur un chantier. Aucun suivi en continu.</string>
 
 	<!-- Caméra (photo justificatif de frais) -->
 	<key>NSCameraUsageDescription</key>
@@ -61,10 +53,6 @@
 	<!-- Galerie photos (sélection d'un justificatif) -->
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Planificator accède à votre galerie pour sélectionner un justificatif de note de frais.</string>
-
-	<!-- Face ID (authentification future) -->
-	<key>NSFaceIDUsageDescription</key>
-	<string>Planificator utilise Face ID pour sécuriser votre accès.</string>
 
 	<!-- Portrait uniquement sur iPhone -->
 	<key>UISupportedInterfaceOrientations</key>
