@@ -286,6 +286,7 @@ function createPgLikeFake(
               if (options.raceDomainOnOtherPartner) {
                 const other: Partner = {
                   id: nextId("other_partner"),
+                  clientId: null,
                   companyId: args.data.companyId,
                   name: "OTHER",
                   code: "other",

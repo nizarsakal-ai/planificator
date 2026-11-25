@@ -967,14 +967,14 @@ describe("FIX-001 — persistExtraction mapping R1/R2", () => {
     const { DraftExtractionRepository } = await import(
       "@/lib/acquisition/extraction/extraction.repository"
     )
-    let written: Record<string, unknown> | null = null
+    const writeCapture: { data?: Record<string, unknown> } = {}
     const db = {
       $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
         const tx = {
           worksiteImportDraft: {
             findFirst: async () => ({ acquisitionMessageId: "m1" }),
             updateMany: async (args: { data: Record<string, unknown> }) => {
-              written = args.data
+              writeCapture.data = args.data
               return { count: 1 }
             },
           },
@@ -1014,13 +1014,14 @@ describe("FIX-001 — persistExtraction mapping R1/R2", () => {
       now: new Date(),
     })
     assert.equal(outcome, "OK")
+    const written = writeCapture.data
     assert.ok(written)
-    assert.equal(written!.proposedContactEmail, "marco@example.com")
-    assert.equal(written!.proposedContactPhone, "+33645097611")
-    assert.equal(written!.proposedContactName, "Marco")
-    assert.equal(written!.proposedPostalCode, "49000")
-    assert.equal(written!.proposedCity, "Angers")
-    assert.notEqual(written!.proposedContactEmail, "compta@example.com")
+    assert.equal(written.proposedContactEmail, "marco@example.com")
+    assert.equal(written.proposedContactPhone, "+33645097611")
+    assert.equal(written.proposedContactName, "Marco")
+    assert.equal(written.proposedPostalCode, "49000")
+    assert.equal(written.proposedCity, "Angers")
+    assert.notEqual(written.proposedContactEmail, "compta@example.com")
   })
 })
 
