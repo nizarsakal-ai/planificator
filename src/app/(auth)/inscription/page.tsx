@@ -128,6 +128,25 @@ export default function InscriptionPage() {
             />
           </div>
 
+          {/* Lot 2a juridique : acceptation des CGU et de l'accord de sous-traitance, vérifiée aussi côté serveur. */}
+          <div className="flex items-start gap-2 pt-1">
+            <input
+              id="acceptTerms"
+              name="acceptTerms"
+              type="checkbox"
+              required
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 accent-[#0f3460]"
+            />
+            <label htmlFor="acceptTerms" className="text-sm leading-snug text-slate-600">
+              J&apos;accepte les{" "}
+              <Link href="/cgu" target="_blank" className="text-[#0f3460] underline">conditions générales d&apos;utilisation</Link>{" "}
+              et l&apos;
+              <Link href="/accord-sous-traitance" target="_blank" className="text-[#0f3460] underline">accord de sous-traitance des données</Link>
+              , au nom de mon entreprise. J&apos;ai lu la{" "}
+              <Link href="/confidentialite" target="_blank" className="text-[#0f3460] underline">politique de confidentialité</Link>.
+            </label>
+          </div>
+
           {error && (
             <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
           )}
