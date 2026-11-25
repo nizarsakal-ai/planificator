@@ -403,7 +403,7 @@ export async function runQuoteReminders(db: Db, now: Date, limit = 200): Promise
   const runClock = decisionClock(now) // instant courant de l'exécution (longue) : `now` avancé du temps réellement écoulé, créée dès l'entrée
   // P2-04 : « aujourd'hui » = jour civil en Europe/Paris ; un devis est périmé dès que validUntil < ce jour (fin de validité révolue).
   const today = calendarDayIn(now)
-  const toExpire = await db.quote.findMany({ where: { status: "SENT", validUntil: { lt: today } }, select: { id: true, companyId: true, createdById: true }, take: limit })
+  const toExpire = await db.quote.findMany({ where: { status: "SENT", validUntil: { lt: today }, company: { active: true } }, select: { id: true, companyId: true, createdById: true }, take: limit })
   let expired = 0
   for (const q of toExpire) {
     const r = await db.$transaction((tx) => transitionQuoteCore(tx, { companyId: q.companyId, quoteId: q.id, to: "EXPIRED", actorId: q.createdById, now, detail: "Devis expiré (validité dépassée)" }))
@@ -413,7 +413,8 @@ export async function runQuoteReminders(db: Db, now: Date, limit = 200): Promise
   const threshold3 = new Date(now.getTime() - 3 * 86_400_000)
   const candidates = await db.quote.findMany({
     // V2 06/11/2026 : la relance part vers le destinataire EFFECTIF du dernier envoi (sinon, devis antérieurs, l'adresse du client).
-    where: { status: "SENT", sentAt: { lte: threshold3 }, AND: [{ OR: [{ validUntil: null }, { validUntil: { gte: today } }] }, { OR: [{ recipientEmail: { not: null } }, { client: { email: { not: null } } }] }] },
+    // Société désactivée (`Company.active = false`) : ni expiration automatique ni relance en son nom (sélection ET réclamation).
+    where: { status: "SENT", sentAt: { lte: threshold3 }, company: { active: true }, AND: [{ OR: [{ validUntil: null }, { validUntil: { gte: today } }] }, { OR: [{ recipientEmail: { not: null } }, { client: { email: { not: null } } }] }] },
     select: { id: true, companyId: true, number: true, sentAt: true, validUntil: true, totalTTC: true, reminderJ3SentAt: true, reminderJ7SentAt: true, reminderJ15SentAt: true, signatureTokenHash: true, signatureTokenExpiresAt: true, recipientName: true, recipientEmail: true, client: { select: { name: true, email: true } }, company: { select: { name: true } } },
     take: limit,
   })
@@ -429,7 +430,7 @@ export async function runQuoteReminders(db: Db, now: Date, limit = 200): Promise
     for (const s of dueSteps) data[s.column] = now
     // Même protocole que P1-05/R3 : la relance est conditionnée au hachage lu (un renvoi committé entre-temps l'emporte : aucun jeton
     // frais écrasé) et l'expiration est évaluée à l'instant courant du traitement, pas au début d'une exécution longue.
-    const where: Record<string, unknown> = { id: q.id, companyId: q.companyId, status: "SENT", [top.column]: null, signatureTokenHash: q.signatureTokenHash }
+    const where: Record<string, unknown> = { id: q.id, companyId: q.companyId, status: "SENT", [top.column]: null, signatureTokenHash: q.signatureTokenHash, company: { active: true } }
     const at = runClock()
     const tokenExpired = !q.signatureTokenExpiresAt || q.signatureTokenExpiresAt < at
     let signatureUrl: string | null = null
