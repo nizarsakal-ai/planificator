@@ -107,9 +107,19 @@ describe("tâche planifiée", () => {
     process.env.CRON_SECRET = "cron-test-" + "x".repeat(16)
     const denied = await cron(new Request("https://planificator.test/api/cron/connector-retention"))
     assert.ok(denied.status === 401 || denied.status === 403)
-    const ok = await cron(new Request("https://planificator.test/api/cron/connector-retention", { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } }), undefined, { db })
+    const logged: unknown[][] = []
+    const original = console.info
+    console.info = (...args: unknown[]) => { logged.push(args) }
+    let ok: Response
+    try {
+      ok = await cron(new Request("https://planificator.test/api/cron/connector-retention", { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } }), undefined, { db })
+    } finally {
+      console.info = original
+    }
     assert.equal(ok.status, 200)
     const body = await ok.json()
     assert.deepEqual(Object.keys(body).sort(), ["credentialsDestroyed", "stagedPurged"])
+    // Journal de preuve d'exécution : une ligne, les mêmes compteurs, rien d'autre.
+    assert.deepEqual(logged, [["[connecteurs][retention] terminé", body]])
   })
 })

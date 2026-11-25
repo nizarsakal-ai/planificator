@@ -49,6 +49,7 @@ import {
   Store,
   ClipboardCheck,
   TrendingUp,
+  Printer,
 } from "lucide-react"
 
 export interface NavItem {
@@ -57,7 +58,7 @@ export interface NavItem {
   icon: ElementType
   badge?: string // ex: "Bientôt"
   /** Correctif E4 (preuves e3y) : ouvrir par une navigation NATIVE du document (lien <a> ordinaire) plutôt que par une transition
-   * du routeur client. Réservé aux entrées dont la transition est restée suspendue en recette (« Pipeline commercial »). */
+   * du routeur client, sans préchargement. */
   documentNavigation?: true
 }
 
@@ -188,6 +189,14 @@ export function withBillingNavItems(items: readonly NavItem[], visible: boolean)
 /** Entrées de menu d'un rôle (CLIENT et rôle inconnu → aucune entrée). */
 export function getNavItems(role: Role): NavItem[] {
   return [...(NAV_ITEMS_BY_ROLE[role] ?? [])]
+}
+
+export function withImprimerieNavItem(items: readonly NavItem[], visible: boolean): NavItem[] {
+  const result = [...items]
+  if (visible && !result.some((item) => item.href === "/imprimerie")) {
+    result.push({ label: "Imprimerie", href: "/imprimerie", icon: Printer, documentNavigation: true })
+  }
+  return result
 }
 
 /**

@@ -74,6 +74,14 @@ function defaultLog(event: string, payload?: Record<string, unknown>): void {
   }
 }
 
+/** Domaine d'une adresse pour les journaux (« gmail.com ») ; jamais la partie locale. */
+export function mailboxDomainForLog(address: string): string | null {
+  const at = address.lastIndexOf("@")
+  if (at < 0) return null
+  const domain = address.slice(at + 1).trim().toLowerCase()
+  return /^[a-z0-9.-]{1,190}\.[a-z]{2,24}$/.test(domain) ? domain : null
+}
+
 function companyLogEvent(status: MailSyncResult["status"]): string {
   switch (status) {
     case "SUCCESS":
@@ -199,7 +207,9 @@ export async function runAcquisitionGmailSyncDriver(
   for (const connection of connections) {
     const companyStart = now()
     const { companyId, connectionId, gmailAddress } = connection
-    log("SYNC_COMPANY_START", { companyId, connectionId, gmailAddress })
+    // Journaux : domaine seul, jamais la partie locale de l'adresse (donnée personnelle).
+    const mailboxDomain = mailboxDomainForLog(gmailAddress)
+    log("SYNC_COMPANY_START", { companyId, connectionId, mailboxDomain })
 
     let result: MailSyncResult
     try {
@@ -212,7 +222,7 @@ export async function runAcquisitionGmailSyncDriver(
       log("SYNC_COMPANY_FAILED", {
         companyId,
         connectionId,
-        gmailAddress,
+        mailboxDomain,
         durationMs,
         code: publicError.code,
         internalCode: safeInternalErrorCode(error),
@@ -255,7 +265,7 @@ export async function runAcquisitionGmailSyncDriver(
     log(companyLogEvent(result.status), {
       companyId,
       connectionId,
-      gmailAddress,
+      mailboxDomain,
       durationMs,
       status: result.status,
       ...(result.status === "SUCCESS" || result.status === "PARTIAL" ? { stats: result.stats } : {}),

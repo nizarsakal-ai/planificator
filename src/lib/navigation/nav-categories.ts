@@ -109,6 +109,7 @@ const CATEGORY_BY_HREF: ReadonlyMap<string, { id: NavCategoryId; rank: number }>
   ...NAV_CATEGORY_EXTENSIONS_LOT_G.map((e) => [e.href, { id: e.id, rank: e.rank }] as const),
   ...NAV_CATEGORY_EXTENSIONS_LOT_H.map((e) => [e.href, { id: e.id, rank: e.rank }] as const),
   ...NAV_CATEGORY_EXTENSIONS_LOT_I.map((e) => [e.href, { id: e.id, rank: e.rank }] as const),
+  ["/imprimerie", { id: "terrain", rank: 0.5 }],
 ])
 
 /** Catégorie d'un href (cartographie exacte) ; `null` pour une entrée du pied ; « autres » si inconnu. */

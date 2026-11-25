@@ -9,7 +9,7 @@ import {
   isAcquisitionContentFetchEnabled,
 } from "@/lib/acquisition/content/content-fetch-feature-flag"
 import type { AcquisitionMessageContentSourcePort } from "@/lib/acquisition/content/message-content-source.port"
-import { gmailMessageContentSource } from "@/lib/acquisition/content/gmail-message-content-source.adapter"
+import { resolveMailArtifactProvider } from "@/lib/acquisition/artifacts/resolve-mail-artifact-provider"
 import { AcquisitionMessageContentRepository } from "@/lib/acquisition/content/message-content.repository"
 import { sanitizeMessageBodyParts } from "@/lib/acquisition/content/message-content-sanitizer"
 import type {
@@ -17,8 +17,6 @@ import type {
   MessageContentErrorCode,
   MessageContentRecord,
 } from "@/lib/acquisition/content/message-content.types"
-import { isGmailProviderError } from "@/lib/acquisition/connector/gmail-api.client"
-import { resolveAcquisitionMailboxForMessage } from "@/lib/acquisition/connector/resolve-acquisition-mailbox"
 
 const ALLOWED_ROLES = new Set<Role>(["ADMIN", "SUPER_ADMIN"])
 
@@ -32,6 +30,10 @@ export interface MessageContentServiceDeps {
   db?: PrismaClient
   source?: AcquisitionMessageContentSourcePort
   repository?: AcquisitionMessageContentRepository
+  /** LOT-4B (tests) : flags de résolution par capacité ; défaut process.env. */
+  env?: NodeJS.ProcessEnv
+  /** LOT-4B (tests) : journal de résolution. */
+  artifactLog?: (fields: Record<string, unknown>) => void
 }
 
 function fail(
@@ -42,7 +44,7 @@ function fail(
   return { ok: false, outcome, code, message }
 }
 
-function mapGmailCode(code: string): MessageContentErrorCode {
+function mapContentSourceCode(code: string): MessageContentErrorCode {
   switch (code) {
     case "GMAIL_NOT_CONNECTED":
     case "LEGACY_MAILBOX_AMBIGUOUS":
@@ -60,6 +62,10 @@ function mapGmailCode(code: string): MessageContentErrorCode {
 
 function publicMessage(code: MessageContentErrorCode): string {
   switch (code) {
+    case "ARTIFACT_RESOLUTION_FAILED":
+      return "Récupération du contenu momentanément impossible"
+    case "ARTIFACT_CAPABILITY_UNAVAILABLE":
+      return "La connexion ne permet pas de récupérer ce contenu"
     case "CONTENT_FETCH_DISABLED":
       return "Récupération du contenu désactivée"
     case "CONTENT_UNAUTHORIZED":
@@ -130,7 +136,6 @@ export async function fetchAndStoreMessageContentCore(
   const companyId = input.companyId
   const db = deps.db ?? prisma
   const repository = deps.repository ?? new AcquisitionMessageContentRepository(db)
-  const source = deps.source ?? gmailMessageContentSource
 
   const message = await db.acquisitionMessage.findFirst({
     where: { id: input.acquisitionMessageId, companyId },
@@ -141,27 +146,25 @@ export async function fetchAndStoreMessageContentCore(
     return fail("NOT_FOUND", "CONTENT_NOT_FOUND", publicMessage("CONTENT_NOT_FOUND"))
   }
 
-  const mailbox = await resolveAcquisitionMailboxForMessage(
-    { companyId, sourceMailboxKey: message.sourceMailboxKey },
-    db
-  )
-  if (!mailbox.ok) {
-    return fail("FAILED", mailbox.code, publicMessage(mailbox.code))
-  }
+  // Jamais d'exception : boîte d'une autre société → ARTIFACT_CAPABILITY_UNAVAILABLE (non repris) ;
+  // panne de lecture → ARTIFACT_RESOLUTION_FAILED (repris). Flag posé : contrôles de capacité en plus.
+  const resolved = await resolveMailArtifactProvider(db, message, "CONTENT_FETCH", {
+    id: message.id, externalArtifactId: message.externalMessageId,
+  }, { env: deps.env, log: deps.artifactLog })
+  if (!resolved.ok) return fail("FAILED", resolved.code, publicMessage(resolved.code))
+  const source = deps.source ?? resolved.provider.content
 
   let parts
   try {
     parts = await source.fetchMessageBody({
       companyId,
-      externalMessageId: message.externalMessageId,
-      connectionId: mailbox.connectionId,
+      externalMessageId: resolved.artifact?.externalArtifactId ?? message.externalMessageId,
+      connectionId: resolved.connectionId,
     })
   } catch (error) {
-    if (isGmailProviderError(error)) {
-      const code = mapGmailCode(error.code)
-      return fail("FAILED", code, publicMessage(code))
-    }
-    return fail("FAILED", "CONTENT_FETCH_FAILED", publicMessage("CONTENT_FETCH_FAILED"))
+    const providerCode = resolved.provider.contentFailureCode(error)
+    const code = providerCode ? mapContentSourceCode(providerCode) : "CONTENT_FETCH_FAILED"
+    return fail("FAILED", code, publicMessage(code))
   }
 
   if (parts.byteLengthOriginal > getContentFetchMaxRawBytes()) {

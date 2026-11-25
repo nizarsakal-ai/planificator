@@ -14,6 +14,11 @@ export async function GET(req: Request, _context?: unknown, deps: { db: PrismaCl
   const headers = { "Cache-Control": "private, no-store" }
   try {
     const summary = await runConnectorRetention(deps.db)
+    // Preuve d'exécution quotidienne dans les journaux : compteurs seulement, aucune donnée.
+    console.info("[connecteurs][retention] terminé", {
+      stagedPurged: summary.stagedPurged,
+      credentialsDestroyed: summary.credentialsDestroyed,
+    })
     return NextResponse.json(summary, { headers })
   } catch (error) {
     console.error("[connecteurs][retention] échec", { name: error instanceof Error ? error.name : typeof error })

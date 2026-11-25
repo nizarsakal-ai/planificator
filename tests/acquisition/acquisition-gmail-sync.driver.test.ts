@@ -2,7 +2,7 @@ process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 
 import { describe, it, beforeEach } from "node:test"
 import assert from "node:assert/strict"
-import { runAcquisitionGmailSyncDriver } from "@/lib/acquisition/connector/acquisition-gmail-sync.driver"
+import { runAcquisitionGmailSyncDriver, mailboxDomainForLog } from "@/lib/acquisition/connector/acquisition-gmail-sync.driver"
 import type { MailSyncResult } from "@/lib/acquisition/connector/connector.types"
 import type { AcquisitionGmailConnectionRef } from "@/lib/acquisition/persistence/acquisition-gmail-connection.listing.adapter"
 import { syncAcquisitionMailForCompany } from "@/lib/acquisition/connector/acquisition-gmail-sync.service"
@@ -452,5 +452,56 @@ describe("runAcquisitionGmailSyncDriver", () => {
 
     assert.equal(result.globalStats.fetched, 20)
     assert.equal(result.globalStats.ingested, 10)
+  })
+})
+
+describe("journaux de synchronisation sans adresse Gmail", () => {
+  beforeEach(() => {
+    process.env.ACQUISITION_GMAIL_CRON_ENABLED = "true"
+    process.env.PLANIFICATOR_ACQUISITION_ENABLED = "true"
+  })
+
+  it("mailboxDomainForLog : domaine seul ; entrée invalide → null", () => {
+    assert.equal(mailboxDomainForLog("Boite.Fictive+x@Gmail.com"), "gmail.com")
+    assert.equal(mailboxDomainForLog("sans-arobase"), null)
+    assert.equal(mailboxDomainForLog("a@"), null)
+    assert.equal(mailboxDomainForLog("a@pas un domaine"), null)
+  })
+
+  it("START, SUCCESS, FAILED (retour et exception) : domaine journalisé, jamais la partie locale", async () => {
+    const logs: { event: string; payload?: Record<string, unknown> }[] = []
+    const local = "boite-fictive-locale"
+    const connections = ["ok", "ko", "boom"].map((id) => ({
+      connectionId: `conn-${id}`,
+      companyId: id,
+      gmailAddress: `${local}-${id}@gmail.com`,
+    }))
+
+    const result = await runAcquisitionGmailSyncDriver({
+      listConnections: async () => connections,
+      runSyncForConnection: async (c) => {
+        if (c.companyId === "boom") throw new Error("panne")
+        if (c.companyId === "ko") {
+          return syncResult({
+            companyId: c.companyId,
+            status: "FAILED",
+            error: { code: "PROVIDER_LIST_FAILED", message: "x", retryable: true },
+          })
+        }
+        return syncResult({ companyId: c.companyId })
+      },
+      now: () => NOW,
+      log: (event, payload) => logs.push({ event, payload }),
+    })
+
+    const perCompany = logs.filter((l) => l.event.startsWith("SYNC_COMPANY_"))
+    assert.equal(perCompany.length, 6)
+    for (const l of perCompany) {
+      assert.equal(l.payload?.mailboxDomain, "gmail.com", l.event)
+      assert.equal("gmailAddress" in (l.payload ?? {}), false, l.event)
+    }
+    assert.doesNotMatch(JSON.stringify(logs), new RegExp(local))
+    // Le résultat interne (non journalisé) garde l'adresse pour l'appelant.
+    assert.equal(result.companies[0].gmailAddress, `${local}-ok@gmail.com`)
   })
 })

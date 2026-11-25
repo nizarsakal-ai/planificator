@@ -91,27 +91,39 @@ export class InboundEnvelopeRepository
 
     const data = toPrismaCreateEnvelopeData(parsed, connection.connectorType)
 
+    const findExisting = () =>
+      this.db.inboundEnvelope.findUnique({
+        where: {
+          companyId_connectionId_idempotencyKey: {
+            companyId: data.companyId,
+            connectionId: data.connectionId,
+            idempotencyKey: data.idempotencyKey,
+          },
+        },
+      })
+    const reuse = (existing: NonNullable<Awaited<ReturnType<typeof findExisting>>>) => {
+      if (!areEnvelopeImmutablesCompatible(existing, data)) {
+        throw new IntegrationInboundIdempotencyConflictError()
+      }
+      return mapRowToInboundEnvelope(existing)
+    }
+
+    // Relecture d'abord : le rejeu nominal (même message relu à chaque passage) ne tente
+    // pas d'insertion, donc Prisma ne journalise plus un faux « prisma:error » de doublon.
+    const already = await findExisting()
+    if (already) return reuse(already)
+
     try {
       const row = await this.db.inboundEnvelope.create({ data })
       return mapRowToInboundEnvelope(row)
     } catch (error) {
       if (isPrismaUniqueConstraintError(error)) {
         const constraint = prismaUniqueConstraintName(error)
+        // Course entre deux écritures concurrentes : même contrat qu'avant.
         if (constraint === INBOUND_CONSTRAINT.IDEMPOTENCY) {
-          const existing = await this.db.inboundEnvelope.findUnique({
-            where: {
-              companyId_connectionId_idempotencyKey: {
-                companyId: data.companyId,
-                connectionId: data.connectionId,
-                idempotencyKey: data.idempotencyKey,
-              },
-            },
-          })
+          const existing = await findExisting()
           if (!existing) throw new IntegrationInboundPersistenceError()
-          if (!areEnvelopeImmutablesCompatible(existing, data)) {
-            throw new IntegrationInboundIdempotencyConflictError()
-          }
-          return mapRowToInboundEnvelope(existing)
+          return reuse(existing)
         }
         throw new IntegrationInboundPersistenceError()
       }

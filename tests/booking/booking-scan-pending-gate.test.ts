@@ -172,6 +172,7 @@ describe("evaluatePendingCreationGate", () => {
 
   it("cutoff 2026-07-30 inclus sans décalage civil", () => {
     const cutoff = getBookingScanCutoffDate({
+      NODE_ENV: "test",
       BOOKING_SCAN_CUTOFF_DATE: "2026-07-30",
     })
     assert.equal(cutoff.toISOString(), "2026-07-30T00:00:00.000Z")

@@ -1,3 +1,4 @@
+import type { AttachmentSourcePort } from "@/lib/acquisition/attachments/attachment-source.port"
 import type { GmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
 import { createDefaultGmailApiClient } from "@/lib/acquisition/connector/gmail-api.client"
 import type { AcquisitionGmailConnectionClient } from "@/lib/acquisition/connector/acquisition-gmail-connection.client"
@@ -7,21 +8,19 @@ import {
   decodeBase64Url,
 } from "@/lib/acquisition/attachments/attachment-policy"
 import type {
-  GmailAttachmentFetchInput,
-  GmailAttachmentFetchResult,
+  AttachmentFetchInput,
+  AttachmentFetchResult,
 } from "@/lib/acquisition/attachments/attachment.types"
 
-export interface GmailAttachmentSourcePort {
-  fetchAttachment(input: GmailAttachmentFetchInput): Promise<GmailAttachmentFetchResult>
-}
+export type GmailAttachmentSourcePort = AttachmentSourcePort
 
-export class GmailAttachmentSourceAdapter implements GmailAttachmentSourcePort {
+export class GmailAttachmentSourceAdapter implements AttachmentSourcePort {
   constructor(
     private readonly connection: AcquisitionGmailConnectionClient = new PrismaAcquisitionGmailConnectionClient(),
     private readonly gmail: GmailApiClient = createDefaultGmailApiClient()
   ) {}
 
-  async fetchAttachment(input: GmailAttachmentFetchInput): Promise<GmailAttachmentFetchResult> {
+  async fetchAttachment(input: AttachmentFetchInput): Promise<AttachmentFetchResult> {
     if (!input.companyId || !input.externalMessageId || !input.externalAttachmentId) {
       throw new Error("GMAIL_ATTACHMENT_NOT_FOUND")
     }

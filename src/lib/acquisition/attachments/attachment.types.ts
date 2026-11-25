@@ -14,6 +14,8 @@ export type AttachmentDownloadErrorCode =
   | "ATTACHMENT_PERSISTENCE_FAILED"
   | "ATTACHMENT_COMPENSATION_FAILED"
   | "ATTACHMENT_ALREADY_IN_PROGRESS"
+  | "ARTIFACT_CAPABILITY_UNAVAILABLE"
+  | "ARTIFACT_RESOLUTION_FAILED"
   | "GMAIL_NOT_CONNECTED"
   | "LEGACY_MAILBOX_AMBIGUOUS"
   | "TENANT_MISMATCH"
@@ -61,17 +63,20 @@ export interface AttachmentMessageContext {
   sourceMailboxKey: string
 }
 
-export interface GmailAttachmentFetchInput {
+export interface AttachmentFetchInput {
   companyId: string
   externalMessageId: string
   externalAttachmentId: string
   connectionId?: string
 }
 
-export interface GmailAttachmentFetchResult {
+export interface AttachmentFetchResult {
   data: Buffer
   sizeBytes: number
 }
+
+export type GmailAttachmentFetchInput = AttachmentFetchInput
+export type GmailAttachmentFetchResult = AttachmentFetchResult
 
 export interface AttachmentStorageInput {
   companyId: string

@@ -99,7 +99,7 @@ function createFakeRepo() {
       return { ...content }
     },
     async findMessage() {
-      return { id: "msg1", subject: "Consultation Tour Alpha" }
+      return { id: "msg1", subject: "Consultation Tour Alpha", receivedAt: new Date("2026-10-01T00:00:00Z") }
     },
     async listAttachmentMetadata() {
       return []

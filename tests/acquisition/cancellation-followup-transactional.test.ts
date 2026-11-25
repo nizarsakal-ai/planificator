@@ -767,7 +767,7 @@ describe("CORRECTION-4B — applyCancellationFollowUpTransactionally", () => {
       ],
     })
     const origTx = db.$transaction.bind(db)
-    db.$transaction = async (fn: (tx: never) => Promise<unknown>) =>
+    db.$transaction = (fn) =>
       origTx(async (tx) => {
         const t = tx as {
           worksiteImportDraft: {
@@ -801,8 +801,8 @@ describe("CORRECTION-4B — applyCancellationFollowUpTransactionally", () => {
                 : drafts.find((d) => d.id === row.draft!.id) ?? row.draft,
           }))
         }
-        return fn(tx as never)
-      }) as typeof db.$transaction
+        return fn(tx)
+      })
 
     const r = await applyCancellationFollowUpTransactionally({
       companyId: "co1",
@@ -847,7 +847,7 @@ describe("CORRECTION-4B — applyCancellationFollowUpTransactionally", () => {
       ],
     })
     const origTx = db.$transaction.bind(db)
-    db.$transaction = async (fn: (tx: never) => Promise<unknown>) =>
+    db.$transaction = (fn) =>
       origTx(async (tx) => {
         const t = tx as {
           worksiteImportDraft: {
@@ -873,8 +873,8 @@ describe("CORRECTION-4B — applyCancellationFollowUpTransactionally", () => {
                 : drafts.find((d) => d.id === row.draft!.id) ?? row.draft,
           }))
         }
-        return fn(tx as never)
-      }) as typeof db.$transaction
+        return fn(tx)
+      })
 
     const r = await applyCancellationFollowUpTransactionally({
       companyId: "co1",
@@ -918,17 +918,13 @@ describe("CORRECTION-4B — applyCancellationFollowUpTransactionally", () => {
       ],
     })
     const origTx = db.$transaction.bind(db)
-    db.$transaction = async (fn: (tx: never) => Promise<unknown>) =>
+    db.$transaction = (fn) =>
       origTx(async (tx) => {
-        const t = tx as {
-          worksiteImportDraft: {
-            updateMany: () => Promise<{ count: number }>
-          }
-        }
+        const t = tx
         // count=0 mais état inchangé (encore REJECTABLE) → inconsistent
         t.worksiteImportDraft.updateMany = async () => ({ count: 0 })
-        return fn(tx as never)
-      }) as typeof db.$transaction
+        return fn(tx)
+      })
 
     await assert.rejects(
       () =>
@@ -977,7 +973,7 @@ describe("CORRECTION-4B — applyCancellationFollowUpTransactionally", () => {
       ],
     })
     const origTx = db.$transaction.bind(db)
-    db.$transaction = async (fn: (tx: never) => Promise<unknown>) =>
+    db.$transaction = (fn) =>
       origTx(async (tx) => {
         const t = tx as {
           acquisitionDecisionJournal: {
@@ -987,8 +983,8 @@ describe("CORRECTION-4B — applyCancellationFollowUpTransactionally", () => {
         t.acquisitionDecisionJournal.create = async () => {
           throw new Error("JOURNAL_WRITE_FORCED_FAIL")
         }
-        return fn(tx as never)
-      }) as typeof db.$transaction
+        return fn(tx)
+      })
 
     await assert.rejects(() =>
       applyCancellationFollowUpTransactionally({
@@ -1035,21 +1031,16 @@ describe("CORRECTION-4B — applyCancellationFollowUpTransactionally", () => {
       ],
     })
     const origTx = db.$transaction.bind(db)
-    db.$transaction = async (fn: (tx: never) => Promise<unknown>) =>
+    db.$transaction = (fn) =>
       origTx(async (tx) => {
-        const t = tx as {
-          worksiteImportDraft: {
-            updateMany: () => Promise<{ count: number }>
-          }
-          acquisitionMessage: { findMany: Function }
-        }
+        const t = tx
         t.worksiteImportDraft.updateMany = async () => {
           drafts[1]!.status = "CONVERTED"
           drafts[1]!.createdWorksiteId = null
           return { count: 0 }
         }
         const origFind = t.acquisitionMessage.findMany.bind(t.acquisitionMessage)
-        t.acquisitionMessage.findMany = async (args: unknown) => {
+        t.acquisitionMessage.findMany = async (args) => {
           const rows = await origFind(args)
           return rows.map((row: { id: string; draft: DraftRow | null }) => ({
             id: row.id,
@@ -1059,8 +1050,8 @@ describe("CORRECTION-4B — applyCancellationFollowUpTransactionally", () => {
                 : drafts.find((d) => d.id === row.draft!.id) ?? row.draft,
           }))
         }
-        return fn(tx as never)
-      }) as typeof db.$transaction
+        return fn(tx)
+      })
 
     await assert.rejects(
       () =>
