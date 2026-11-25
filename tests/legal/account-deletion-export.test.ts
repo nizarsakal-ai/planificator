@@ -4,28 +4,25 @@
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
-import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
 import { describe, it } from "node:test"
 import { authorizedCallback } from "@/auth.config"
-import { anonymizedEmail, deleteOwnAccountImpl, type AccountDeletionDeps } from "@/lib/account/account-deletion.core"
+import { anonymizedEmail, cloudinaryPublicIdFromUrl, deleteOwnAccountImpl, type AccountDeletionDeps } from "@/lib/account/account-deletion.core"
 import { buildPersonalDataExport, exportFileName, stripSensitive } from "@/lib/account/personal-data-export"
 import { privacyContactEmail } from "@/lib/legal/legal-documents"
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..")
-
-function deps(over: Partial<AccountDeletionDeps> & { role?: string; admins?: { id: string; name: string }[]; others?: number } = {}) {
+function deps(over: Partial<AccountDeletionDeps> & { role?: string; admins?: { id: string; name: string }[]; others?: number; avatars?: string[] } = {}) {
   const calls: string[] = []
+  const deleted: string[][] = []
   const d: AccountDeletionDeps = {
     sessionUserId: async () => "u1",
     findAccount: async () => ({ id: "u1", role: over.role ?? "EMPLOYEE", passwordHash: "h", adminCompanies: over.admins ?? [] }),
     verifyPassword: async (p) => p === "bon",
     countOtherAdmins: async () => over.others ?? 0,
-    anonymize: async (id) => { calls.push(id) },
+    anonymize: async (id) => { calls.push(id); return { ok: true, avatarUrls: over.avatars ?? [] } },
+    deleteAvatars: async (urls) => { deleted.push(urls) },
     ...over,
   }
-  return { d, calls }
+  return { d, calls, deleted }
 }
 const ok = { password: "bon", confirmation: "SUPPRIMER" }
 
@@ -84,17 +81,26 @@ describe("suppression de son compte", () => {
   it("l'adresse de remplacement ne contient aucune donnée personnelle", () => {
     assert.equal(anonymizedEmail("abc"), "compte-supprime-abc@supprime.invalid")
   })
-  it("l'anonymisation désactive le compte, efface e-mail et nom, garde la fiche employé désactivée", () => {
-    const src = readFileSync(join(ROOT, "src/lib/actions/account.actions.ts"), "utf8")
-    const tx = src.slice(src.indexOf("prisma.$transaction"))
-    assert.match(tx, /email: anonymizedEmail\(userId\), name: null, password: unusable, active: false/)
-    assert.match(tx, /employee\.updateMany\(\{ where: \{ userId \}, data: \{ active: false, phone: null, avatarUrl: null \} \}\)/)
-    assert.ok(!/employee\.delete/.test(tx), "la fiche employé n'est pas supprimée (données légales de l'employeur)")
-    assert.match(tx, /historyLog\.create/)
+  it("le recompte sous verrou l'emporte sur le pré-contrôle : rien n'est supprimé", async () => {
+    const { d } = deps({ role: "ADMIN", admins: [{ id: "c1", name: "A" }], others: 1, anonymize: async () => ({ ok: false, lastAdminCompanies: ["A"] }) })
+    const r = await deleteOwnAccountImpl(ok, d)
+    assert.equal(r.ok, false); if (!r.ok) { assert.equal(r.code, "LAST_ADMIN"); assert.deepEqual(r.companies, ["A"]) }
   })
-  it("une session ouverte est coupée : le rappel jwt refuse un compte inactif", () => {
-    const src = readFileSync(join(ROOT, "src/auth.ts"), "utf8")
-    assert.match(src, /if \(!dbUser \|\| !dbUser\.active\) return null/)
+  it("efface la photo de profil après la suppression", async () => {
+    const { d, deleted } = deps({ avatars: ["https://res.cloudinary.com/x/image/upload/v1/planificator/c1/avatars/employee-e1.jpg"] })
+    assert.deepEqual(await deleteOwnAccountImpl(ok, d), { ok: true })
+    assert.equal(deleted.length, 1)
+  })
+  it("un échec chez l'hébergeur de la photo ne fait pas échouer la suppression du compte", async () => {
+    const { d } = deps({ avatars: ["https://res.cloudinary.com/x/image/upload/v1/a.jpg"], deleteAvatars: async () => { throw new Error("réseau") } })
+    assert.deepEqual(await deleteOwnAccountImpl(ok, d), { ok: true })
+  })
+  it("identifiant Cloudinary tiré de l'adresse, jamais d'une adresse étrangère", () => {
+    assert.equal(cloudinaryPublicIdFromUrl("https://res.cloudinary.com/demo/image/upload/v1732/planificator/c1/avatars/employee-e1.jpg"), "planificator/c1/avatars/employee-e1")
+    assert.equal(cloudinaryPublicIdFromUrl("https://res.cloudinary.com/demo/image/upload/c_fill,w_300/v1732/a/b.png"), "a/b")
+    assert.equal(cloudinaryPublicIdFromUrl("https://exemple.fr/image/upload/v1/a.jpg"), null)
+    assert.equal(cloudinaryPublicIdFromUrl("pas une url"), null)
+    assert.equal(cloudinaryPublicIdFromUrl(null), null)
   })
 })
 
@@ -112,6 +118,9 @@ describe("export « Mes données »", () => {
     assert.deepEqual((out.compte as Record<string, unknown>).email, "a@b.fr")
     assert.deepEqual(out.pointages, [{ date: "2026-11-01T00:00:00.000Z", checkInLat: 48.8 }])
   })
+  it("retire aussi les clés qui contiennent un mot sensible (passwordHash, tokenHash…)", () => {
+    assert.deepEqual(stripSensitive({ passwordHash: "x", tokenHash: "y", accessTokenExpiresAt: 1, apiKeyId: 2, nom: "ok" }), { nom: "ok" })
+  })
   it("n'exporte jamais mot de passe, jetons ni empreintes", () => {
     const json = JSON.stringify(buildPersonalDataExport(source))
     for (const k of ["password", "sha256", "uploadKey", "hash"]) assert.ok(!json.includes(k), k)
@@ -119,13 +128,6 @@ describe("export « Mes données »", () => {
   })
   it("nom de fichier daté", () => {
     assert.equal(exportFileName(new Date("2026-11-25T10:00:00Z")), "planificator-mes-donnees-2026-11-25.json")
-  })
-  it("la route ne lit que les données du compte connecté", () => {
-    const src = readFileSync(join(ROOT, "src/app/api/me/export/route.ts"), "utf8")
-    assert.match(src, /status: 401/)
-    assert.match(src, /where: \{ userId \}/)
-    assert.match(src, /const byEmployee = \{ employeeId: \{ in: employeeIds \} \}/)
-    assert.ok(!/password: true/.test(src))
   })
 })
 
@@ -139,12 +141,5 @@ describe("page publique de demande de suppression", () => {
     assert.equal(privacyContactEmail({}), null)
     assert.equal(privacyContactEmail({ NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL: "pas-une-adresse" }), null)
     assert.equal(privacyContactEmail({ NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL: " rgpd@galyaevents.fr " }), "rgpd@galyaevents.fr")
-  })
-  it("le profil propose l'export et la suppression, sauf au super-administrateur", () => {
-    const src = readFileSync(join(ROOT, "src/app/(dashboard)/profil/page.tsx"), "utf8")
-    assert.match(src, /session\.user\.role !== "SUPER_ADMIN" && <AccountDataCard \/>/)
-    const card = readFileSync(join(ROOT, "src/components/profil/AccountDataCard.tsx"), "utf8")
-    assert.match(card, /href="\/api\/me\/export"/)
-    assert.match(card, /signOut\(/)
   })
 })

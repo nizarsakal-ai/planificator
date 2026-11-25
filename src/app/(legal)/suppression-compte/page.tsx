@@ -54,10 +54,16 @@ export default function SuppressionComptePage() {
           <li><strong>Supprimés :</strong> votre accès, votre adresse e-mail, votre nom de compte, votre téléphone, votre photo, vos notifications.</li>
           <li>
             <strong>Conservés par votre employeur ou la société cliente</strong>, pour les durées fixées par la loi : heures de
-            travail (5 ans), documents de paie (5 ans), notes de frais et factures (10 ans). Les positions GPS des pointages
-            sont effacées au bout de 2 mois.
+            travail (5 ans), documents de paie (5 ans), notes de frais et factures (10 ans).
           </li>
-          <li>À la fermeture de l&apos;espace d&apos;une société, ses données sont exportables pendant 30 jours, puis effacées.</li>
+          <li>
+            Les positions GPS enregistrées lors des pointages sont conservées 2 mois au plus. Leur effacement automatique est
+            en cours de mise en place ; d&apos;ici là, vous pouvez demander leur effacement par e-mail.
+          </li>
+          <li>
+            La fermeture de l&apos;espace d&apos;une société se fait sur demande : nous convenons avec elle de l&apos;export de ses
+            données, puis nous les effaçons, sauf ce que la loi oblige à conserver.
+          </li>
         </ul>
         <p>
           Détails : <Link href="/confidentialite" className="text-blue-700 underline">politique de confidentialité</Link>.

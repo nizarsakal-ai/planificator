@@ -23,13 +23,21 @@ export function AccountDataCard() {
     e.preventDefault()
     setPending(true)
     setError("")
-    const result = await deleteOwnAccount(new FormData(e.currentTarget))
-    if (result.ok) {
-      await signOut({ callbackUrl: "/login" })
-      return
+    let signingOut = false
+    try {
+      const result = await deleteOwnAccount(new FormData(e.currentTarget))
+      if (result.ok) {
+        signingOut = true
+        await signOut({ callbackUrl: "/login" })
+        return
+      }
+      setError(result.error)
+    } catch {
+      setError("La suppression n'a pas pu aboutir. Vérifiez votre connexion et réessayez.")
+    } finally {
+      // Le bouton redevient utilisable dans tous les cas, sauf pendant la déconnexion qui suit une suppression réussie.
+      if (!signingOut) setPending(false)
     }
-    setError(result.error)
-    setPending(false)
   }
 
   return (
@@ -41,7 +49,7 @@ export function AccountDataCard() {
         <div className="space-y-2">
           <p className="text-sm text-slate-600">
             Téléchargez une copie des données personnelles liées à votre compte : profil, pointages, absences, notes de
-            frais, affectations.
+            frais, affectations, titres des notifications.
           </p>
           <Button asChild variant="outline">
             <a href="/api/me/export" download>

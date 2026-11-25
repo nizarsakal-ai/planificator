@@ -19,7 +19,8 @@ export interface PersonalDataSource {
   notifications: Row[]
 }
 
-const FORBIDDEN_KEYS = /^(password|token|secret|apiKey|refreshToken|accessToken|uploadKey|sha256)$/i
+// Non ancrée : toute clé qui CONTIENT l'un de ces mots est retirée (passwordHash, tokenHash, accessToken, apiKeyId…).
+const FORBIDDEN_KEYS = /(password|token|secret|apikey|hash|uploadkey|sha256|credential)/i
 
 /** Retire récursivement toute clé sensible, au cas où une requête en sélectionnerait une par erreur. */
 export function stripSensitive(value: unknown): unknown {
