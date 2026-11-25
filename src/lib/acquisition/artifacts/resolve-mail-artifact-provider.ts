@@ -2,8 +2,10 @@
  * PLAN-INTEGRATION-PLATFORM-001 — LOT-4 / LOT-4B
  * Résolution du fournisseur de contenu et de pièces jointes pour les workers Acquisition.
  *
- * - Flag coupé (défaut) : chemin historique de `main`, à l'identique (résolution de boîte puis adaptateurs Gmail ;
- *   une exception de lecture remonte comme avant).
+ * - Commun aux deux chemins (ticket « défauts historiques ») : la clé de boîte explicite doit appartenir à la société
+ *   du message (MAILBOX_NOT_OWNED, non repris) ; une panne de lecture pendant la résolution rend
+ *   ARTIFACT_RESOLUTION_FAILED (repris) au lieu d'une exception.
+ * - Flag coupé (défaut) : résolution historique puis adaptateurs Gmail ; une lecture réussie reste silencieuse.
  * - Flag posé (foundation ∧ INTEGRATION_ARTIFACT_RESOLUTION_ENABLED ∧ allowlist) : un message admis par le LOT-3 est
  *   relié à sa connexion d'intégration ; connexion, enveloppe, capacités du connecteur et du message, boîte active sont
  *   vérifiées AVANT toute lecture distante. Une panne de lecture devient ARTIFACT_RESOLUTION_FAILED (reprise).
@@ -85,19 +87,17 @@ export async function resolveMailArtifactProvider(
   options: ResolveMailArtifactOptions = {}
 ): Promise<MailArtifactResolution> {
   const { companyId } = message
-
-  // Flag coupé : comportement de main, sans journal ni capture d'exception.
-  if (!isArtifactResolutionActiveForCompany(companyId, options.env ?? process.env)) {
-    const mailbox = await resolveAcquisitionMailboxForMessage(message, db)
-    if (!mailbox.ok) return mailbox
-    return { ok: true, path: "LEGACY", connectionId: mailbox.connectionId, provider: legacyMailArtifactSources, artifact: undefined }
-  }
-
+  const platform = isArtifactResolutionActiveForCompany(companyId, options.env ?? process.env)
   const log = options.log ?? defaultLog
   const started = Date.now()
   let result: MailArtifactResolution
   try {
-    result = await resolvePlatform(db, message, capability, metadata)
+    // Commun aux deux chemins (ticket « défauts historiques ») : boîte résolue PUIS appartenance vérifiée,
+    // avant toute lecture distante ; une panne de lecture devient ARTIFACT_RESOLUTION_FAILED (reprise).
+    const mailbox = await resolveOwnedMailbox(db, message)
+    if (!mailbox.ok) result = mailbox
+    else if (platform) result = await resolvePlatform(db, message, mailbox.connectionId, capability, metadata)
+    else result = { ok: true, path: "LEGACY", connectionId: mailbox.connectionId, provider: legacyMailArtifactSources, artifact: undefined }
   } catch (error) {
     log({
       message: "artifact_resolution_failed", companyId, capability, outcome: "ARTIFACT_RESOLUTION_FAILED",
@@ -106,6 +106,8 @@ export async function resolveMailArtifactProvider(
     })
     return { ok: false, code: "ARTIFACT_RESOLUTION_FAILED", reason: "READ_FAILED" }
   }
+  // Flag coupé : une lecture historique réussie reste silencieuse (comme main) ; refus et pannes sont journalisés.
+  if (!platform && result.ok) return result
   log({
     message: result.ok ? "artifact_resolved" : "artifact_resolution_refused",
     companyId,
@@ -119,27 +121,39 @@ export async function resolveMailArtifactProvider(
   return result
 }
 
+const refuse = (reason: ArtifactResolutionReason): MailArtifactResolution =>
+  ({ ok: false, code: "ARTIFACT_CAPABILITY_UNAVAILABLE", reason })
+
+/**
+ * Résolution historique de la boîte, puis refus intersociété : une clé de boîte explicite doit désigner une boîte
+ * de la société du message (active ou non : une boîte inactive garde son échec GMAIL_NOT_CONNECTED habituel).
+ * Refus non repris (ARTIFACT_CAPABILITY_UNAVAILABLE / MAILBOX_NOT_OWNED), sans aucune lecture de jeton ni appel distant.
+ */
+async function resolveOwnedMailbox(
+  db: PrismaClient,
+  message: { companyId: string; sourceMailboxKey: string }
+): Promise<{ ok: true; connectionId: string } | Extract<MailArtifactResolution, { ok: false }>> {
+  const mailbox = await resolveAcquisitionMailboxForMessage(message, db)
+  if (!mailbox.ok) return mailbox
+  if (message.sourceMailboxKey.trim()) {
+    const owned = await db.acquisitionGmailConnection.findFirst({
+      where: { id: mailbox.connectionId, companyId: message.companyId },
+      select: { id: true },
+    })
+    if (!owned) return refuse(ARTIFACT_RESOLUTION_REASONS.MAILBOX_NOT_OWNED) as Extract<MailArtifactResolution, { ok: false }>
+  }
+  return { ok: true, connectionId: mailbox.connectionId }
+}
+
 async function resolvePlatform(
   db: PrismaClient,
   message: { companyId: string; sourceMailboxKey: string; externalMessageId: string },
+  mailboxConnectionId: string,
   capability: ArtifactFetchCapability,
   metadata: ArtifactMetadata
 ): Promise<MailArtifactResolution> {
   const { companyId, sourceMailboxKey, externalMessageId } = message
-  const mailbox = await resolveAcquisitionMailboxForMessage(message, db)
-  if (!mailbox.ok) return mailbox
-  const refuse = (reason: ArtifactResolutionReason): MailArtifactResolution =>
-    ({ ok: false, code: "ARTIFACT_CAPABILITY_UNAVAILABLE", reason })
-
-  // Refus intersociété, avant toute lecture distante et quel que soit le chemin (y compris le repli historique) :
-  // une clé de boîte explicite doit désigner une boîte de la société du message.
-  if (sourceMailboxKey.trim()) {
-    const owned = await db.acquisitionGmailConnection.findFirst({
-      where: { id: mailbox.connectionId, companyId },
-      select: { id: true },
-    })
-    if (!owned) return refuse(ARTIFACT_RESOLUTION_REASONS.MAILBOX_NOT_OWNED)
-  }
+  const mailbox = { connectionId: mailboxConnectionId }
 
   // Les messages historiques à boîte implicite ne peuvent pas référencer une
   // admission LOT-3, qui exige une boîte Acquisition explicite.

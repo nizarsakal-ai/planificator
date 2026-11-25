@@ -287,8 +287,9 @@ export async function downloadAcquisitionAttachment(
   }
 
   // Une source injectée (y compris l'ancienne `gmailSource`) ne contourne jamais la résolution :
-  // flag coupé, résolution historique (une exception remonte comme sur main) ; flag posé, contrôles de capacité,
-  // et une panne de lecture rend ARTIFACT_RESOLUTION_FAILED (reprise).
+  // jamais d'exception ici, donc la pièce réservée n'est jamais laissée en PENDING_DOWNLOAD : boîte d'une autre société
+  // → ARTIFACT_CAPABILITY_UNAVAILABLE (non repris) ; panne de lecture → ARTIFACT_RESOLUTION_FAILED (FAILED + reprise
+  // planifiée). Flag posé : contrôles de capacité en plus.
   const resolved = await resolveMailArtifactProvider(db, scoped.message, "ARTIFACT_FETCH", {
     id: claimed.id, externalArtifactId: claimed.externalAttachmentId,
     filename: claimed.filename || undefined, mimeType: claimed.mimeType || undefined,

@@ -1,3 +1,4 @@
+import type { PrismaClient } from "@prisma/client"
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test"
 
 import { describe, it, beforeEach, afterEach } from "node:test"
@@ -39,6 +40,11 @@ function baseAttachment(overrides: Partial<AttachmentRecord> = {}): AttachmentRe
     ...overrides,
   }
 }
+
+/** Ticket défauts historiques : la boîte explicite « conn-1 » appartient à la société du message. */
+const ownedMailboxDb = {
+  acquisitionGmailConnection: { findFirst: async () => ({ id: "conn-1" }) },
+} as unknown as PrismaClient
 
 function baseMessage(): AttachmentMessageContext {
   return {
@@ -127,7 +133,7 @@ describe("attachment-download.service", () => {
     const r = await downloadAcquisitionAttachment(
       { companyId: "co-1", attachmentId: "att-1" },
       {
-        repository: claimedRepo({
+        db: ownedMailboxDb, repository: claimedRepo({
           claimForDownload: async () => {
             claims += 1
             return { status: "CLAIMED", attachment: baseAttachment() }
@@ -163,7 +169,7 @@ describe("attachment-download.service", () => {
     const r = await downloadAcquisitionAttachment(
       { companyId: "co-1", attachmentId: "att-1" },
       {
-        repository: claimedRepo({
+        db: ownedMailboxDb, repository: claimedRepo({
           claimForDownload: async () => {
             claims += 1
             return { status: "CLAIMED", attachment: baseAttachment() }
@@ -194,7 +200,7 @@ describe("attachment-download.service", () => {
     process.env.ACQUISITION_ATTACHMENT_DOWNLOAD_ENABLED = "false"
     const r = await downloadAcquisitionAttachment(
       { companyId: "co-1", attachmentId: "att-1" },
-      { repository: claimedRepo(), gmailSource: mockGmail({}), storage: mockStorage({}) }
+      { db: ownedMailboxDb, repository: claimedRepo(), gmailSource: mockGmail({}), storage: mockStorage({}) }
     )
     assert.equal(r.outcome, "SKIPPED")
     assert.equal(r.errorCode, "ATTACHMENT_DOWNLOAD_DISABLED")
@@ -210,7 +216,7 @@ describe("attachment-download.service", () => {
     const r = await downloadAcquisitionAttachment(
       { companyId: "co-1", attachmentId: "att-1" },
       {
-        repository: claimedRepo({
+        db: ownedMailboxDb, repository: claimedRepo({
           claimForDownload: async () => ({ status: "ALREADY_STORED", attachment }),
         }),
         gmailSource: mockGmail({}),
@@ -226,7 +232,7 @@ describe("attachment-download.service", () => {
     const r = await downloadAcquisitionAttachment(
       { companyId: "co-1", attachmentId: "att-1" },
       {
-        repository: claimedRepo({
+        db: ownedMailboxDb, repository: claimedRepo({
           claimForDownload: async () => ({ status: "ALREADY_IN_PROGRESS" }),
         }),
         gmailSource: mockGmail({ fetchAttachment: async () => { gmailCalls.push(1); return { data: PDF_BUFFER, sizeBytes: PDF_BUFFER.length } } }),
@@ -242,7 +248,7 @@ describe("attachment-download.service", () => {
     const r = await downloadAcquisitionAttachment(
       { companyId: "co-1", attachmentId: "att-1" },
       {
-        repository: claimedRepo({
+        db: ownedMailboxDb, repository: claimedRepo({
           claimForDownload: async () => ({
             status: "NOT_RETRYABLE",
             attachment: baseAttachment({ status: "FAILED", lastErrorCode: "GMAIL_ATTACHMENT_NOT_FOUND" }),
@@ -260,7 +266,7 @@ describe("attachment-download.service", () => {
     const r = await downloadAcquisitionAttachment(
       { companyId: "co-1", attachmentId: "att-1" },
       {
-        repository: claimedRepo({
+        db: ownedMailboxDb, repository: claimedRepo({
           claimForDownload: async () => ({
             status: "NOT_RETRYABLE",
             attachment: baseAttachment({ status: "REJECTED" }),
@@ -277,7 +283,7 @@ describe("attachment-download.service", () => {
     const r = await downloadAcquisitionAttachment(
       { companyId: "co-1", attachmentId: "att-1" },
       {
-        repository: claimedRepo(),
+        db: ownedMailboxDb, repository: claimedRepo(),
         gmailSource: mockGmail({
           fetchAttachment: async () => ({ data: PDF_BUFFER, sizeBytes: PDF_BUFFER.length }),
         }),
@@ -297,7 +303,7 @@ describe("attachment-download.service", () => {
     const r = await downloadAcquisitionAttachment(
       { companyId: "co-1", attachmentId: "att-1" },
       {
-        repository: claimedRepo(),
+        db: ownedMailboxDb, repository: claimedRepo(),
         gmailSource: mockGmail({
           fetchAttachment: async () => ({ data: PDF_BUFFER, sizeBytes: PDF_BUFFER.length }),
         }),
@@ -321,7 +327,7 @@ describe("attachment-download.service", () => {
     const r = await downloadAcquisitionAttachment(
       { companyId: "co-1", attachmentId: "att-1" },
       {
-        repository: claimedRepo({
+        db: ownedMailboxDb, repository: claimedRepo({
           markStored: async () => ({ status: "FAILED" }),
         }),
         gmailSource: mockGmail({
@@ -346,7 +352,7 @@ describe("attachment-download.service", () => {
     const r = await downloadAcquisitionAttachment(
       { companyId: "co-1", attachmentId: "att-1" },
       {
-        repository: claimedRepo({
+        db: ownedMailboxDb, repository: claimedRepo({
           markStored: async () => ({ status: "FAILED" }),
         }),
         gmailSource: mockGmail({
@@ -373,7 +379,7 @@ describe("attachment-download.service", () => {
     const r = await downloadAcquisitionAttachment(
       { companyId: "co-1", attachmentId: "att-1" },
       {
-        repository: claimedRepo({
+        db: ownedMailboxDb, repository: claimedRepo({
           markStored: async () => {
             markStoredCalls += 1
             return { status: "FAILED" }
@@ -418,7 +424,7 @@ describe("attachment-download.service", () => {
     const r = await downloadAcquisitionAttachment(
       { companyId: "co-1", attachmentId: "att-1" },
       {
-        repository: claimedRepo({
+        db: ownedMailboxDb, repository: claimedRepo({
           markStored: async () => {
             throw new Error("markStored ne doit pas être appelé")
           },
@@ -442,7 +448,7 @@ describe("attachment-download.service", () => {
     const r = await downloadAcquisitionAttachment(
       { companyId: "co-1", attachmentId: "att-1" },
       {
-        repository: claimedRepo({
+        db: ownedMailboxDb, repository: claimedRepo({
           markStored: async () => {
             throw new Error("markStored ne doit pas être appelé")
           },
@@ -470,7 +476,7 @@ describe("attachment-download.service", () => {
     const r = await downloadAcquisitionAttachment(
       { companyId: "co-A", attachmentId: "att-1" },
       {
-        repository: claimedRepo({
+        db: ownedMailboxDb, repository: claimedRepo({
           findAttachmentWithMessage: async () => null,
         }),
         gmailSource: mockGmail({}),
