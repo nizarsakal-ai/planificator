@@ -92,8 +92,8 @@ const BASES: Base[] = [ALL_ON, ALL_OFF, { ...ALL_ON, crm: false, auto: false }, 
 const LOT_SETS: Lots[] = Array.from({ length: 32 }, (_, n) => ({ assistant: !!(n & 1), connectors: !!(n & 2), studio: !!(n & 4), prepay: !!(n & 8), shop: !!(n & 16) }))
 const ENTRIES: [keyof Lots, NavItem][] = [["assistant", ASSISTANT_NAV_ITEM], ["connectors", CONNECTORS_NAV_ITEM], ["studio", DOCUMENT_STUDIO_NAV_ITEM], ["prepay", PAYROLL_PREP_NAV_ITEM], ["shop", MARKETING_NAV_ITEM], ["shop", SHOP_NAV_ITEM]]
 const LOT_HREFS = new Set(ENTRIES.map(([, e]) => e.href))
-const CHAIN_HEAD = "const navItems = withMarketingShopNavItems(withPayrollPrepNavItem(withDocumentStudioNavItem(withAssistantConnectorNavItems(withFuelTicketNavItem(withStockPurchasingNavItems("
-const CHAIN_TAIL = "user.stockPurchasingNavVisible === true), user.fuelTicketNavVisible === true), user.assistantNavVisible === true && user.assistantMenuReplaced !== true, user.connectorsNavVisible === true), user.documentStudioNavVisible === true), user.payrollPrepNavVisible === true), user.marketingShopNavVisible === true)"
+const CHAIN_HEAD = "const navItems = withBudgetNavItem(withMarketingShopNavItems(withPayrollPrepNavItem(withDocumentStudioNavItem(withAssistantConnectorNavItems(withFuelTicketNavItem(withStockPurchasingNavItems("
+const CHAIN_TAIL = "user.stockPurchasingNavVisible === true), user.fuelTicketNavVisible === true), user.assistantNavVisible === true && user.assistantMenuReplaced !== true, user.connectorsNavVisible === true), user.documentStudioNavVisible === true), user.payrollPrepNavVisible === true), user.marketingShopNavVisible === true), user.budgetNavVisible === true)"
 
 describe("navigation intégrée : bureau et mobile", () => {
   it("Sidebar.tsx et MobileNav.tsx : même chaîne exacte, chaque helper une seule fois, chaîne E intacte", () => {
@@ -222,6 +222,8 @@ describe("migrations F, G, H, I", () => {
     assert.equal(dirs[i - 1], "20261117120000_vehicle_tour_auto_km")
     assert.deepEqual(dirs.filter((d) => /_v2_lot_[fghi]_/.test(d)), lots.map(([d]) => d))
     for (const [d, sha] of lots) assert.equal(createHash("sha256").update(readFileSync(`prisma/migrations/${d}/migration.sql`)).digest("hex"), sha, d)
-    assert.ok(dirs.every((d) => !/lot_d|reserve/.test(d)))
+    // Lot D (réserves) intégré séparément le 23/11/2026 (939c05b) : sa seule migration est antérieure aux lots F à I.
+    assert.deepEqual(dirs.filter((d) => /lot_d|reserve/.test(d)), ["20261112120000_v2_lot_d_reserves_reception"])
+    assert.ok(dirs.indexOf("20261112120000_v2_lot_d_reserves_reception") < i)
   })
 })

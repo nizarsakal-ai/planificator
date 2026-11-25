@@ -13,3 +13,110 @@ Coordination : gateway.py context consulté10:59:37UTC, VPS Hostinger srv2065452
 Dossier détaillé : docs/coordination/VEHICLE_EDIT_RELEASE.md. Preuves : outputs/vehicle-edit-final dans l’espace de reprise. Dépôt initial utilisateur laissé intact ; modifications et commits dans la branche de travail isolée. Pas de push ni de fusion distante revendiqués.
 
 Prochaine action : rafraîchir la fiche véhicule, ouvrir Modifier, compléter les champs puis Valider les modifications. Aucun travail de correction connu restant dans le périmètre de cette demande.
+
+---
+
+# Lot G2 — Document Studio « plus puissant », 22 novembre 2026
+
+Section ajoutée par Claude (VPS aiteam) ; l'état véhicules ci-dessus est inchangé. Plan validé explicitement par Nizar dans la session (« Oui, lance G2 »).
+
+Répertoire de travail : `/home/aiteam/planificator-fghi-sur-90ae644-20261119`, branche locale `feat/studio-documents-g2` créée depuis `90ae644` (HEAD détaché auparavant). Les lots F, G, H et I y étaient déjà présents NON commités ; ils sont conservés tels quels. Aucun commit, push, fusion ni déploiement. Module toujours désactivé par défaut (`DOCUMENT_STUDIO_ENABLED`). Aucune migration ajoutée.
+
+Livré (fichiers du Studio uniquement) :
+- `src/lib/document-studio/studio.format.ts` (nouveau) : règles pures de contenu, utilisables dans le navigateur ; `studio.core.ts` les réexporte et garde les empreintes.
+- Champs : liste de choix, case à cocher, aide, valeur par défaut ; 11 champs automatiques de plus (coordonnées entreprise et client, adresse et dates du chantier).
+- Mise en forme : sous-titres, gras, listes à puces et numérotées, tableaux, saut de page. La mise en forme est lue dans le modèle avant le remplacement des champs : une valeur saisie n'est jamais réinterprétée.
+- Éditeur visuel avec aperçu (`StudioTemplateEditor`), modèles de départ (`starters.ts`, 5 trames), duplication d'un modèle, nouveau document prérempli depuis un précédent (`?depuis=`), recherche dans les documents générés (`?q=`, `?etat=`).
+- PDF : logo géré de l'entreprise, pied de page avec coordonnées figées dans l'instantané et pagination. Défaut du lot G corrigé au passage : le pied de page ne s'imprimait pas (interligne déclaré sur la page, même cause que pour les devis et factures).
+
+Vérifié sur le VPS : `npm run test:lot-g` 71/71 (53 tests d'origine conservés, dont 2 assertions de `portage-g.test.ts` adaptées à la duplication) ; `test:fghi` 22/22, `test:lot-f` 52/52, `test:lot-h` 42/42, `test:lot-i` 36/36 ; `tsc --noEmit` sans erreur dans les fichiers du Studio (les erreurs restantes sont celles, déjà connues, des tests acquisition/booking non modifiés) ; rendu PDF réel contrôlé (texte extrait page par page et lecture visuelle) ; `npm run build` réussi (variable `DATABASE_URL` factice, `DOCUMENT_STUDIO_ENABLED=true`), les quatre routes `/studio-documents…` compilées, éditeur client compris.
+
+NON vérifié :
+- Tests PostgreSQL (`npm run test:lot-g:pg`) : aucune base jetable sur le VPS. Trois cas G2 ont été ajoutés à `tests/document-studio/pg/studio.pg.test.ts` sans exécution ; à lancer sur le Mac avant toute fusion.
+- Parcours dans un navigateur (éditeur, génération, recherche) : aucune base applicative sur le VPS. L'éditeur n'est couvert que par un test de rendu initial.
+- `next lint` : non configuré dans le dépôt (il ouvre un assistant interactif) ; non exécuté.
+
+Points d'attention pour la revue (Codex) :
+- Un corps publié AVANT G2 contenant des lignes « - … », « 1. … », « | … | », « ## … », « **…** » ou « [saut de page] » sera désormais mis en forme à la génération. Les versions publiées restent figées (empreinte inchangée) ; seul le rendu des FUTURS documents change. Sans conséquence connue : module désactivé, jamais déployé.
+- Les 11 nouvelles clés de champs automatiques sont réservées : un champ déclaré portant l'une d'elles serait refusé.
+- Le logo du PDF est lu au moment du rendu (présentation), il n'entre pas dans l'empreinte du document.
+- Dépendances installées localement par `npm ci` (répertoire `node_modules` absent auparavant ; `package-lock.json` inchangé).
+
+Livrable : `/srv/aiteam-exchange/outbox/2026-11-22-planificator-studio-documents-g2/exemple-pdf-contrat-donnees-fictives.pdf` (données fictives).
+
+Décision de Nizar du 23/11/2026 : recette sur le Mac AVANT tout commit. Dossier de recette déposé dans `/srv/aiteam-exchange/outbox/2026-11-23-planificator-studio-documents-g2-recette/` : correctif de l'arbre de travail complet (lots F, G, H, I + G2) applicable sur `90ae644` (application vérifiée sur une copie propre du commit ; ce correctif précède la présente ligne de STATE.md) et fiche `RECETTE-G2.md`. Réception sur le Mac non vérifiée.
+
+Recette Mac : déclarée conforme par Nizar le 23/11/2026 (« Recette OK »). Le détail (résultat de `npm run test:lot-g:pg`, étapes du parcours navigateur) n'a pas été transmis au VPS : ce point repose sur la déclaration de Nizar, pas sur une sortie de test consultée ici.
+
+Commit local : `7a76b16` sur `feat/studio-documents-g2`, autorisé par Nizar le 23/11/2026, précédé de `npm run test:lot-g` 71/71 sur le VPS. Il contient tout l'arbre de travail (lots F, G, H, I + G2), les lots F à I n'ayant jamais été commités dans ce répertoire. Identité git reprise du commit `90ae644` pour ce commit seulement (aucune n'était configurée). Ni poussé, ni fusionné, ni déployé.
+
+Revue indépendante Codex (lecture seule, `codex exec -s read-only`, lancée à la demande de Nizar le 23/11/2026) sur `7a76b16`, limitée au Studio : verdict « non fusionnable en l'état », 1 constat bloquant, 4 importants, 1 mineur, tous retrouvés dans le code par Claude. Rapport : `/srv/aiteam-exchange/outbox/2026-11-23-planificator-studio-documents-g2-revue-codex/revue-codex-commit-7a76b16.md`. Rien à signaler par Codex sur le cloisonnement par société, les rôles, le drapeau, la frontière client/serveur et la réinterprétation des valeurs.
+
+Corrections faites le 23/11/2026 sur accord de Nizar (« Oui, corrige tout ») :
+1. Logo FIGÉ dans l'instantané à la génération (clé `logo`, data URL PNG gérée, présente seulement s'il y a un logo) ; la route PDF ne lit plus la société. Documents antérieurs : pas de clé, donc en-tête au nom de l'entreprise.
+2. Génération liée à la version affichée : champ caché `versionId`, refus « republié entre-temps » si la version publiée a changé.
+3. Les 11 clés devenues système avec G2 restent lisibles dans une version stockée (le champ déclaré l'emporte) ; elles sont refusées à l'enregistrement d'une version, avec un message qui demande de renommer.
+4. Tableau : seule une ligne contenant au moins un tiret est un séparateur ; une ligne de cellules vides est conservée.
+5. Validation : empreinte recalculée dans la transaction, refus si non conforme ; à l'écran la validation est retirée, le refus reste possible.
+6. Test : empreintes de référence en dur (version : sha256 d'une chaîne canonique écrite à la main, calculé avec node:crypto seul).
+
+Vérifié après corrections (VPS) : `npm run test:lot-g` 76/76 ; `test:fghi` 22/22, `test:lot-f` 52/52, `test:lot-h` 42/42, `test:lot-i` 36/36 ; `tsc --noEmit` sans erreur dans les fichiers du Studio ; `npm run build` réussi.
+
+Non vérifié : `npm run test:lot-g:pg` (un cas ajouté pour la version affichée et le logo figé, jamais exécuté) ; parcours navigateur des corrections ; seconde revue Codex de la version corrigée. La recette Mac du 23/11 portait sur `7a76b16`, AVANT ces corrections.
+
+Points à connaître : un logo lourd (600 Ko au plus) est recopié dans chaque document généré, et la liste des documents relit les instantanés pour contrôler leur empreinte ; le refus d'une validation sur empreinte non conforme n'est couvert que par un contrôle du code source (un déclencheur de la base interdit de modifier un instantané, ce cas ne se fabrique pas simplement en test).
+
+Commit local des corrections : `871fbb3` (accord de Nizar du 23/11/2026).
+
+Seconde revue Codex (lecture seule) sur `871fbb3` : « fusionnable après corrections ». Constats d'origine 2 à 6 corrigés, constat 1 partiel. Nouveaux points : anciens documents sans logo figé (accepté : le logo d'époque n'est enregistré nulle part, et seule la base de recette est concernée), coût de la liste PDF, contrôle du logo stocké, message incomplet. Rapport : `.../2026-11-23-planificator-studio-documents-g2-revue-codex/revue-codex-2-commit-871fbb3.md`. Codex relève aussi que les tests de la version affichée et du refus de valider lisent le code source ; le comportement de la version affichée n'est exercé que par le cas PostgreSQL, non exécuté.
+
+Corrections faites sur accord de Nizar (« Oui, solution simple »), NON commitées :
+- liste « Télécharger un PDF » : ne charge plus les instantanés et n'affiche plus l'état de l'empreinte ; le contrôle reste fait sur l'écran du document, par la route PDF (409) et à la validation ;
+- logo d'instantané : base64 canonique, signature PNG, 600 Kio au plus ;
+- message d'empreinte non conforme : précise qu'un document en attente ne peut pas être validé.
+
+Vérifié après ces corrections (VPS) : `npm run test:lot-g` 76/76 ; `test:fghi` 22/22, `test:lot-f` 52/52, `test:lot-h` 42/42, `test:lot-i` 36/36 ; `tsc --noEmit` sans erreur dans les fichiers du Studio ; `npm run build` réussi. Toujours non vérifié : `npm run test:lot-g:pg`, parcours navigateur, relecture Codex de cette dernière version.
+
+Décision de Nizar du 24/11/2026 (« Les deux ») : commit local de ces dernières corrections et nouveau dossier de recette dans `/srv/aiteam-exchange/outbox/2026-11-24-planificator-studio-documents-g2-recette-v2/` (correctif de la tête de branche par rapport à `90ae644` + fiche). L'ancien dossier du 23/11 correspond à la version d'avant les revues Codex.
+
+Commit local : `58f3330`. Seconde recette Mac (sur le correctif de `58f3330`) : déclarée conforme par Nizar le 24/11/2026 (« Recette OK ») ; le détail des résultats, dont `npm run test:lot-g:pg`, n'a pas été transmis au VPS.
+
+Troisième revue Codex (lecture seule) sur `58f3330`, demandée par Nizar le 24/11/2026 : coût de la liste PDF corrigé, message corrigé, contrôle du logo PARTIEL (base64 pas entièrement canonique : les bits inutilisés avant « = » ne sont pas vérifiés ; constat exact à la lecture du code, sans effet sur un logo produit par le réglage de la société). Un constat mineur : un téléchargement depuis la liste sur empreinte non conforme renvoie un 409 sans explication. Aucun autre défaut bloquant ou important relevé. Verdict : « fusionnable après correction du contrôle de canonicalité base64 ». Rapport : `.../2026-11-23-planificator-studio-documents-g2-revue-codex/revue-codex-3-commit-58f3330.md`. Ces deux points ont été corrigés ensuite (paragraphe suivant).
+
+Corrections après la troisième revue, sur accord de Nizar du 24/11/2026 (« Oui, corrige et commite ») : le contrôle du logo exige un base64 canonique (groupes de quatre caractères, aucun bit inutilisé avant « = » ou « == ») ; la route PDF répond toujours 409 sur empreinte non conforme, mais avec un court message en clair au lieu d'une réponse vide. Vérifié sur le VPS : `npm run test:lot-g` 76/76, `test:fghi` 22/22, `test:lot-f` 52/52, `test:lot-h` 42/42, `test:lot-i` 36/36, `tsc --noEmit` sans erreur dans les fichiers du Studio, `npm run build` réussi. Non vérifié : `test:lot-g:pg` (pas de PostgreSQL sur le VPS), navigateur. Ces deux retouches n'ont été ni relues par Codex ni recettées sur le Mac : la recette du 24/11/2026 portait sur `58f3330`.
+
+Quatrième revue Codex (lecture seule) sur `a1eebf5`, demandée par Nizar le 24/11/2026 : les deux points sont jugés CORRIGÉS, aucun défaut bloquant ou important, aucune régression relevée. Verdict : « fusionnable ». Revue statique (tests PostgreSQL non exécutés par Codex). Rapport : `.../2026-11-23-planificator-studio-documents-g2-revue-codex/revue-codex-4-commit-a1eebf5.md`.
+
+Recette rejouée par Claude sur le VPS le 24/11/2026, à la demande de Nizar, depuis le correctif livré (`.../2026-11-24-planificator-studio-documents-g2-recette-v3/`, SHA-256 contrôlé) appliqué sur une copie propre de `90ae644` : `npm ci`, `prisma generate`, `test:lot-g` 76/76, `test:fghi` 22/22, `test:lot-f` 52/52, `test:lot-h` 42/42, `test:lot-i` 36/36, `npm run build` réussi. NON FAIT : `test:lot-g:pg` et le parcours dans le navigateur, faute de PostgreSQL sur le VPS (l'installation de binaires PostgreSQL en espace utilisateur a été refusée par le contrôle des permissions de la session ; aucun contournement tenté). La partie avec base de la recette reste donc à faire sur le Mac.
+
+Vérification avant push (24/11/2026, demandée par Nizar) : les lots F à I sont DÉJÀ sur `main` (commit `b7e6603`, enfant direct de `90ae644`), et `main` a avancé depuis (tête `6452eb0`), notamment l'espace PDF du Studio (#174, #175, #177). L'écart entre `b7e6603` et `feat/studio-documents-g2` est exactement le travail G2 (23 fichiers, tous du Studio, plus `package.json` et ce fichier) ; les quatre migrations des lots sont identiques à celles de `main`. La branche `feat/studio-documents-g2` (base `90ae644`) n'est donc pas publiable telle quelle : elle est conservée intacte en local.
+
+Report sur `main` : nouvelle branche locale `feat/studio-documents-g2-sur-main`, créée depuis `6452eb0`, portant le seul travail G2. Trois conflits résolus à la main par réunion des deux côtés : `package.json` (script `test:lot-g`), `src/app/(dashboard)/studio-documents/page.tsx` (espace PDF + G2), `tests/document-studio/portage-g.test.ts`. Vérifié sur le VPS : `test:lot-g` 110/112, `test:fghi` 20/22, `test:lot-f` 63/63, `test:lot-h` 54/56, `test:lot-i` 43/46 — les échecs sont IDENTIQUES sur `main` seul (87/89, 20/22, 54/56, 43/46 : préexistants, hors de ce travail) ; `tsc --noEmit` sans erreur dans les fichiers du Studio ; `npm run build` réussi (avec `NODE_OPTIONS=--max-old-space-size=6144`, le premier essai ayant manqué de mémoire). Non vérifié : tests PostgreSQL, navigateur. Cette combinaison (G2 + espace PDF) n'a été ni relue par Codex ni recettée ; les revues et recettes précédentes portaient sur la branche d'origine.
+
+Push : IMPOSSIBLE depuis le VPS le 24/11/2026 — aucun identifiant GitHub en écriture pour le compte aiteam (essai à blanc `git push --dry-run` refusé faute d'identifiant ; lecture publique seule). Aucun contournement tenté. Rien n'est poussé, fusionné ni déployé. À noter : `vercel.json` ne désactive les déploiements Git que pour une autre branche ; un push déclencherait vraisemblablement un déploiement de prévisualisation Vercel.
+
+Dépôt pour le Mac (24/11/2026) : bundle et correctif du commit `2acdf98` déposés dans `outbox/2026-11-24-planificator-studio-documents-g2-sur-main/` avec la marche à suivre. Réception sur le Mac non vérifiée depuis le VPS.
+
+5e revue Codex (lecture seule, 24/11/2026) sur `2acdf98` : report jugé fidèle, aucun défaut bloquant ni important, verdict « publiable » ; revue statique, sans tests PostgreSQL. Deux remarques mineures : (1) la recherche de documents faisait perdre `?vue=` et `?depart=` ; (2) dans la vue PDF, une empreinte non conforme n'est signalée qu'après le clic (409 expliqué), conséquence assumée de la solution retenue. Rapport : `outbox/2026-11-23-planificator-studio-documents-g2-revue-codex/revue-codex-5-report-sur-main-2acdf98.md`.
+
+Correction de la remarque (1), commitée sur `feat/studio-documents-g2-sur-main` au-dessus de `2acdf98` (autorisation de Nizar du 24/11/2026) : `StudioDocumentSearch` reconduit la vue et le modèle de départ déjà validés par la page (champs cachés, lien « Effacer ») ; test étendu dans `studio-g2.test.tsx`. Vérifié sur le VPS : `test:lot-g` 110/112 (mêmes deux échecs préexistants), `tsc --noEmit` sans erreur dans le Studio, `npm run build` réussi. Non vérifié : navigateur, PostgreSQL ; non relu par Codex. Le premier bundle (`2acdf98`) ne contient pas cette correction ; un second bundle, portant les deux commits, est déposé dans `outbox/2026-11-24-planificator-studio-documents-g2-sur-main-v2/` (réception sur le Mac non vérifiée depuis le VPS).
+
+Revue Codex de `8c3533b` (rapportée par Nizar le 24/11/2026) : conservation de la vue et du modèle lors de la recherche jugée cohérente.
+
+Suite préparée en copie isolée (`/home/aiteam/planificator-g2-suite-20261124`, branche `feat/studio-documents-g2-suite`, depuis `8c3533b`), commitée sur cette branche (autorisation de Nizar du 24/11/2026) : les liens qui ouvrent une vue ou choisissent un modèle de départ conservent `q` et `etat` (fonctions pures `adresseStudio` / `adresseVue`). Vérifié sur le VPS : `test:lot-g` 111/113 (les deux échecs de référence), `tsc --noEmit` sans erreur dans le Studio, `npm run build` réussi. NON FAIT : navigateur (aucun navigateur sur le VPS, page réelle dépendante d'une base) ; tests PostgreSQL jetable (aucun PostgreSQL sur le VPS, installation en espace utilisateur refusée par le contrôle d'autorisations, non contournée). Les deux échecs de référence sont analysés (tests périmés de `main`, non modifiés). Dossier de preuves pour Codex : `outbox/2026-11-24-planificator-studio-documents-g2-suite-preuves/`.
+
+Revue statique Codex du diff de la suite (rapportée par Nizar le 24/11/2026) : conservation de la vue, du modèle et de la recherche validée lorsqu'un lien change l'un des trois ; les deux échecs préexistants restent hors de ce correctif. Préparation clôturée côté VPS. Troisième bundle (les trois commits au-dessus de `6452eb0`) déposé dans `outbox/2026-11-24-planificator-studio-documents-g2-sur-main-v3/` ; réception sur le Mac non vérifiée depuis le VPS. La branche `feat/studio-documents-g2-sur-main` du dépôt de travail reste à `8c3533b`.
+
+Critères encore ouverts avant publication (enregistrés par Codex) : parcours dans le navigateur et tests PostgreSQL, à faire sur le Mac.
+
+Recette réelle par Codex sur le Mac (24/11/2026, Chromium et PostgreSQL jetable, données fictives, copie identique au bundle v3 hors `STATE.md`) : suites PostgreSQL 35/35 ; parcours navigateur **20/22**, PDF en HTTP 200, filtres conservés dans les deux sens. Les deux écarts sont attribués au scénario de recette, pas à l'application (analyse sur le VPS par lecture du code, non confirmée dans un navigateur) : écart 13, le formulaire GET envoie `etat=` vide, lu par la page comme « tous les états » ; écart 22, écart d'hydratation (attribut `style` vide sur des champs) causé par la capture d'écran Playwright prise avant l'hydratation — le HTML serveur ne contient aucun `style`, le champ du hub est identique sur `6452eb0`, `8c3533b` et `d770287`. Aucun code du produit modifié. Scénario version 2 et analyse : `outbox/2026-11-24-planificator-studio-documents-g2-recette-navigateur-v2/`.
+
+Rejeu du scénario version 2 sur le Mac (rapporté par Nizar le 24/11/2026) : **22/22**. Le premier passage reste consigné à 20/22 ; les deux écarts venaient bien du scénario (paramètre `etat=` vide, capture d'écran avant l'hydratation). Suites PostgreSQL : 35/35. Mode « hydratation seule » sur le Mac (rapporté par Nizar le 24/11/2026, commit testé non précisé) : aucun écart, ce qui confirme que l'écart 22 du premier passage venait de la capture d'écran du scénario et non de l'application. Cette ligne est postérieure au bundle v5, dont `STATE.md` et la notice indiquent encore « non communiqué » ; elle figure dans le sixième bundle, déposé dans `outbox/2026-11-24-planificator-studio-documents-g2-sur-main-v6/` (identique au v3 hors `STATE.md` ; réception sur le Mac non vérifiée depuis le VPS). Quatrième bundle (`cb5c2be`, identique au v3 hors `STATE.md`) déposé dans `outbox/2026-11-24-planificator-studio-documents-g2-sur-main-v4/` ; il ne contient pas la présente mise à jour. Cinquième bundle (code et preuves ensemble, identique au v3 hors `STATE.md`) déposé dans `outbox/2026-11-24-planificator-studio-documents-g2-sur-main-v5/` ; réception sur le Mac non vérifiée depuis le VPS.
+
+Contrôle final par Codex sur le Mac (rapporté le 24/11/2026) : bundle v6 reçu, SHA-256 vérifié ; commit exact `6d71228` extrait et scénario version 2 rejoué dans Chromium avec PostgreSQL jetable sur localhost : 2/2 en mode « hydratation seule », 22/22 au parcours complet, PDF en HTTP 200 ; ressources jetables arrêtées. Ce contrôle lève la mention « commit testé non précisé » et confirme la réception du bundle. Ligne postérieure au bundle v6.
+
+Report sur le nouveau `main` (24/11/2026, demandé par Nizar) : `main` ayant avancé de `6452eb0` à `3f8a529` (PR 221, 222, 225, 226), la branche a été rebasée sans conflit dans la copie isolée, sur `feat/studio-documents-g2-sur-main-v7` ; l'ancienne lignée reste sur `feat/studio-documents-g2-suite-v6` (`6d71228`). Le changement G2 est identique avant et après rebase, hors `package.json` (fusion automatique de deux lignes de scripts distinctes). Vérifié sur le VPS après rebase : `test:lot-g` 111/113, mêmes deux échecs que `main` seul à `3f8a529` (87/89) ; `tsc --noEmit` sans erreur dans le Studio ; `npm run build` réussi. NON REFAIT sur le contenu rebasé : suites PostgreSQL et parcours navigateur (les résultats 35/35, 22/22 et 2/2 portent sur `6d71228`, base `6452eb0`). Les quatre commits de `main` n'ont touché ni le Studio ni le schéma. Septième bundle déposé dans `outbox/2026-11-24-planificator-studio-documents-g2-sur-main-v7/` ; réception sur le Mac non vérifiée depuis le VPS.
+
+Contrôle par Codex sur le Mac du contenu rebasé (rapporté le 24/11/2026) : bundle v7 reçu ; sur son commit exact `b434ac3`, suites PostgreSQL 35/35, parcours Chromium 22/22, mode « hydratation seule » 2/2, PDF en HTTP 200, données fictives, ressources arrêtées. Ce contrôle lève la réserve « non refait après rebase ». Bundle v7 conservé tel quel ; cette ligne lui est postérieure (commit local de coordination, hors bundle).
+
+Prochaine action : publication par Nizar depuis le Mac avec le bundle v7 (aucun accès en écriture au dépôt depuis le VPS). Aucun push ni déploiement fait.

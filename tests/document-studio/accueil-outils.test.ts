@@ -82,10 +82,11 @@ describe("écran d'accueil", () => {
     assert.equal((c.match(/Retour aux listes complètes/g) ?? []).length, 3)
     for (const vide of ["Aucun modèle publié.", "Aucun document en attente de validation.", "Aucun document généré.", "Aucun modèle.", "Aucun document."]) assert.ok(c.includes(vide), vide)
   })
-  it("PDF : route protégée existante, proposée seulement si l'empreinte est intacte ; génération vers l'ancre du modèle", () => {
+  it("PDF : route protégée existante (elle refuse une empreinte non conforme) ; génération vers l'ancre du modèle", () => {
     const c = code(read(PAGE))
     assert.ok(c.includes("<a href={`/studio-documents/documents/${d.id}/pdf`}"))
-    assert.ok(c.includes("{d.intact"))
+    assert.match(code(read("src/app/(dashboard)/studio-documents/documents/[id]/pdf/route.tsx")), /if \(!d\.intact \|\| !d\.snapshot\) \{[\s\S]*?return blocked\(\)/)
+    assert.match(read("src/app/(dashboard)/studio-documents/documents/[id]/pdf/route.tsx"), /const blocked = \(\) => new NextResponse\("Empreinte du contenu non conforme[^"]+", \{\n\s+status: 409,\n\s+headers: \{ "Content-Type": "text\/plain; charset=utf-8"/, "refus expliqué en clair, toujours en 409")
     assert.ok(c.includes("<a href={`/studio-documents/${t.id}#generer`}"))
     assert.ok(code(read("src/app/(dashboard)/studio-documents/[templateId]/page.tsx")).includes(`<h2 id="generer"`))
   })
@@ -93,7 +94,7 @@ describe("écran d'accueil", () => {
     const c = code(read(PAGE))
     assert.ok(c.includes(`<nav aria-labelledby="acces-rapides-titre"`))
     assert.ok(c.includes("lg:grid-cols-[minmax(0,1fr)_15rem]"), "rail à droite sur grand écran seulement, dans le flux sinon")
-    assert.ok(c.includes("<StudioToolHub />"))
+    assert.ok(c.includes("<StudioToolHub contexte={horsVue} />"))
     // Deux formulaires : nouveau modèle, et import d'un PDF (espace PDF, lot 1).
     assert.equal((c.match(/<FormulaireRetour /g) ?? []).length, 2)
     assert.ok(c.includes("<FormulaireRetour action={importPdfAction}"))
@@ -105,7 +106,9 @@ describe("écran d'accueil", () => {
     assert.ok(q.includes(`where: { companyId, status: "PENDING_APPROVAL" }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take,`))
     assert.ok(q.includes(`where: { companyId, versions: { some: { status: "PUBLISHED" } } }`))
     const pdf = q.slice(q.indexOf("export async function listPdfDocuments"), q.indexOf("const DOCUMENT_SELECT"))
-    assert.ok(pdf.includes("where: { companyId }") && pdf.includes("intact: !!s && documentSha256(s) === snapshotSha256"))
+    assert.ok(pdf.includes("where: { companyId }"))
+    // Liste légère : aucun instantané chargé (il peut porter le logo figé).
+    assert.doesNotMatch(code(pdf), /snapshot/)
     assert.doesNotMatch(pdf, /signaturePng/)
   })
 })
