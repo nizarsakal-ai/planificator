@@ -2,6 +2,7 @@ import type { NextAuthConfig } from "next-auth"
 import type { JWT } from "next-auth/jwt"
 import type { Session } from "next-auth"
 import { refusLecturePageLotDParCacheDeNavigation } from "@/lib/reserves/garde-cache-sw"
+import { isLegalPublicPath } from "@/lib/legal/legal-documents"
 
 /**
  * Callbacks Edge-safe (pas de Prisma).
@@ -54,6 +55,9 @@ export function authorizedCallback({
   const isLoggedIn = !!auth?.user
   const role = auth?.user?.role as string | undefined
   const pathname = nextUrl.pathname
+
+  // Lot 2a juridique : pages légales publiques, connecté ou non, sans redirection (stores et RGPD : lien toujours accessible).
+  if (isLegalPublicPath(pathname)) return true
 
   // ── Routes publiques ────────────────────────────────────────────────
   if (

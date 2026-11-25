@@ -7,6 +7,7 @@ import { sendInvitationEmail } from "@/lib/email"
 import bcrypt from "bcryptjs"
 import crypto from "crypto"
 import { z } from "zod"
+import { LEGAL_TERMS_VERSION } from "@/lib/legal/legal-documents"
 
 // ─── Utilitaire slug ─────────────────────────────────────────────────────────
 
@@ -31,6 +32,9 @@ async function uniqueSlug(base: string): Promise<string> {
 
 // ─── Inscription publique ─────────────────────────────────────────────────────
 
+/** Type d'entité de l'historique qui trace l'acceptation des CGU à l'inscription. */
+const TERMS_ACCEPTANCE_ENTITY = "TermsAcceptance"
+
 const registerSchema = z.object({
   companyName: z.string().min(2, "Nom de l'entreprise requis (2 caractères min.)"),
   adminName:   z.string().min(2, "Votre nom est requis"),
@@ -48,6 +52,10 @@ export async function registerCompany(formData: FormData) {
 
   const parsed = registerSchema.safeParse(raw)
   if (!parsed.success) return { error: parsed.error.errors[0].message }
+  // Lot 2a juridique : l'inscription engage l'entreprise ; sans acceptation des CGU, rien n'est créé.
+  if (formData.get("acceptTerms") !== "on") {
+    return { error: "Vous devez accepter les conditions générales d'utilisation pour créer votre espace." }
+  }
 
   const existingUser = await prisma.user.findUnique({ where: { email: parsed.data.email } })
   if (existingUser) return { error: "Cet email est déjà utilisé." }
@@ -62,13 +70,25 @@ export async function registerCompany(formData: FormData) {
     await tx.companySettings.create({
       data: { companyId: company.id, defaultDailyHours: 8 },
     })
-    await tx.user.create({
+    const user = await tx.user.create({
       data: {
         email:     parsed.data.email,
         name:      parsed.data.adminName,
         password:  hashed,
         role:      "ADMIN",
         companyId: company.id,
+      },
+    })
+    // Preuve d'acceptation (version, date) dans l'historique existant : aucune migration de schéma.
+    await tx.historyLog.create({
+      data: {
+        companyId:  company.id,
+        actorId:    user.id,
+        action:     "CREATED",
+        entityType: TERMS_ACCEPTANCE_ENTITY,
+        entityId:   user.id,
+        detail:     `Acceptation des CGU et de l'accord de sous-traitance (version ${LEGAL_TERMS_VERSION})`,
+        newValue:   { version: LEGAL_TERMS_VERSION, acceptedAt: new Date().toISOString() },
       },
     })
   })
