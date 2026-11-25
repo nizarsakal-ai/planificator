@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
+import { CLIENT_LINK_MESSAGE, resolveClientLink } from "@/lib/client-portal/client-link"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { HardHat, MapPin, Calendar, Users, Clock, ChevronRight } from "lucide-react"
@@ -26,24 +27,13 @@ export default async function MesChantiersPage() {
   const session = await auth()
   if (!session?.user) redirect("/login")
 
-  // Trouver le Client lié à cet utilisateur
-  const client = await prisma.client.findFirst({
-    where: { companyId: session.user.companyId!, active: true },
-    // Un compte CLIENT est lié à un client via son email
-    // On cherche le client dont l'email correspond à l'utilisateur
-  })
+  // Fiche client du compte : lien explicite prioritaire, sinon courriel s'il ne correspond qu'à UNE fiche (règle commune
+  // avec l'assistant IA, src/lib/client-portal/client-link.ts). Rattachement ambigu ⇒ aucun chantier affiché.
+  const link = await resolveClientLink(prisma, { id: session.user.id, companyId: session.user.companyId, email: session.user.email })
 
-  // On cherche via l'email de l'utilisateur
-  const clientRecord = await prisma.client.findFirst({
-    where: {
-      companyId: session.user.companyId!,
-      email: session.user.email!,
-    },
-  })
-
-  const worksites = clientRecord
+  const worksites = link.ok
     ? await prisma.worksite.findMany({
-        where: { clientId: clientRecord.id },
+        where: { clientId: link.clientId, companyId: session.user.companyId! },
         include: {
           assignments: {
             include: { team: { select: { name: true } } },
@@ -75,8 +65,14 @@ export default async function MesChantiersPage() {
         <Card>
           <CardContent className="py-16 text-center">
             <HardHat className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-            <p className="text-slate-400 font-medium">Aucun chantier pour le moment.</p>
-            <p className="text-slate-400 text-sm mt-1">Vos chantiers apparaîtront ici.</p>
+            {!link.ok && link.reason === "AMBIGUOUS" ? (
+              <p className="text-slate-500 font-medium">{CLIENT_LINK_MESSAGE.AMBIGUOUS}</p>
+            ) : (
+              <>
+                <p className="text-slate-400 font-medium">Aucun chantier pour le moment.</p>
+                <p className="text-slate-400 text-sm mt-1">Vos chantiers apparaîtront ici.</p>
+              </>
+            )}
           </CardContent>
         </Card>
       ) : (

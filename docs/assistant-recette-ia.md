@@ -16,7 +16,7 @@ TEST_PG_ADMIN_URL=postgresql://postgres@127.0.0.1:<port>/postgres \
   sh tests/billing/pg/with-disposable-db.sh copilot npm run test:copilot:pg
 ```
 
-Résultat : **11 scénarios sur 11 conformes** (`tests/copilot/pg/copilot-roles.pg.test.ts`).
+Résultat : **15 scénarios sur 15 conformes** (`tests/copilot/pg/copilot-roles.pg.test.ts`), dont 4 sur le rattachement client (réserve de la revue Codex du 24/11 : lien explicite prioritaire, courriel accepté seulement s'il ne désigne qu'une fiche de la société, doublon refusé ; même règle dans le portail client, `src/lib/client-portal/client-link.ts`).
 
 | Contrôle | Résultat |
 |---|---|
