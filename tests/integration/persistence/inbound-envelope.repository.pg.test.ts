@@ -206,6 +206,28 @@ describe("LOT-1B2 InboundEnvelope — PostgreSQL", () => {
     assert.equal(second.receivedAt, first.receivedAt)
   })
 
+  it("rejeu nominal : aucune tentative d'insertion, donc aucun prisma:error de doublon", async () => {
+    const input = envelopeInput(companyA, connA, { idempotencyKey: `replay-${runId}` })
+    const first = await repo.createIdempotent(input)
+    const creates: string[] = []
+    const spyDb = new Proxy(db, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver)
+        if (prop !== "inboundEnvelope") return value
+        return new Proxy(value as object, {
+          get(model, method, r) {
+            const fn = Reflect.get(model, method, r)
+            if (method === "create") creates.push("create")
+            return typeof fn === "function" ? fn.bind(model) : fn
+          },
+        })
+      },
+    }) as PrismaClient
+    const again = await new InboundEnvelopeRepository(spyDb).createIdempotent(input)
+    assert.equal(again.id, first.id)
+    assert.deepEqual(creates, [])
+  })
+
   it("collision incompatible → IDEMPOTENCY_CONFLICT", async () => {
     const key = `conflict-${runId}`
     await repo.createIdempotent(
