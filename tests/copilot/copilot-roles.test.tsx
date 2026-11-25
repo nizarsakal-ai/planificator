@@ -77,6 +77,9 @@ describe("outils limités au rôle", () => {
     const abs = await runRoleTool(db, LEAD, "absences_equipe", { debut: "2026-11-24", fin: "2026-11-30" }, TODAY)
     assert.ok(abs.ok)
     assert.ok(JSON.stringify(calls[2].args.where).includes('"in":["e2","e3"]'))
+    // Minimisation : le motif de l'absence n'est ni lu ni renvoyé à l'IA.
+    assert.ok(!("type" in (calls[2].args.select as Record<string, unknown>)))
+    assert.ok((abs.result as Array<Record<string, unknown>>).every(a => !("type" in a)))
   })
   it("client : seulement ses chantiers ; sans fiche liée, message clair", async () => {
     const { db, calls } = roleDb()

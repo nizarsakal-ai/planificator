@@ -55,7 +55,7 @@ const T: Record<string, Anthropic.Tool> = {
   mes_absences: { name: "mes_absences", description: "Mes absences à venir et mes demandes en attente.", input_schema: { type: "object", properties: {} } },
   planning_equipe: { name: "planning_equipe", description: "Affectations des équipes que je dirige sur une période (date, équipe, chantier, statut de confirmation).", input_schema: rangeSchema },
   affectations_a_confirmer: { name: "affectations_a_confirmer", description: "Affectations de mes équipes en attente de ma confirmation, à partir d'aujourd'hui.", input_schema: { type: "object", properties: {} } },
-  absences_equipe: { name: "absences_equipe", description: "Absences des membres de mes équipes qui chevauchent une période.", input_schema: rangeSchema },
+  absences_equipe: { name: "absences_equipe", description: "Absences des membres de mes équipes qui chevauchent une période (qui, quand, validée ou en attente ; le motif n'est pas communiqué).", input_schema: rangeSchema },
   mes_chantiers: { name: "mes_chantiers", description: "Mes chantiers (statut, dates, adresse) et les prochaines interventions prévues.", input_schema: { type: "object", properties: {} } },
 }
 
@@ -118,9 +118,10 @@ const handlers: Record<string, Handler> = {
     const rows = await db.absence.findMany({
       where: { companyId: ctx.companyId, employeeId: { in: ids }, status: { in: ["APPROVED", "PENDING"] }, startDate: { lte: to }, endDate: { gte: from } },
       orderBy: { startDate: "asc" }, take: MAX_ROWS,
-      select: { type: true, status: true, startDate: true, endDate: true, employee: { select: { firstName: true, lastName: true } } },
+      // Minimisation (revue Codex IA-6) : le motif de l'absence (maladie, congé…) n'est ni lu ni envoyé au fournisseur d'IA.
+      select: { status: true, startDate: true, endDate: true, employee: { select: { firstName: true, lastName: true } } },
     })
-    return rows.map(a => ({ employe: `${a.employee.firstName} ${a.employee.lastName}`.trim(), type: a.type, statut: a.status, debut: day(a.startDate), fin: day(a.endDate) }))
+    return rows.map(a => ({ employe: `${a.employee.firstName} ${a.employee.lastName}`.trim(), statut: a.status, debut: day(a.startDate), fin: day(a.endDate) }))
   },
   async mes_chantiers(db, ctx, _input, today) {
     if (!ctx.clientId) throw new CopilotToolInputError(CLIENT_LINK_MESSAGE[ctx.clientLinkIssue ?? "NONE"])
