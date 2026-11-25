@@ -227,7 +227,8 @@ export async function runInvoiceReminders(db: Db, now: Date, limit = 200): Promi
   for (const { step, column } of STEPS) {
     const threshold = new Date(now.getTime() - step * 86_400_000)
     const due = await db.invoice.findMany({
-      where: { status: { in: ["SENT", "PARTIAL"] }, kind: { not: "CREDIT_NOTE" }, totalTTC: { gt: 0 }, dueDate: { lte: threshold }, [column]: null, client: { email: { not: null } } },
+      // Société désactivée (`Company.active = false`) : plus aucune relance automatique en son nom.
+      where: { status: { in: ["SENT", "PARTIAL"] }, kind: { not: "CREDIT_NOTE" }, totalTTC: { gt: 0 }, dueDate: { lte: threshold }, [column]: null, client: { email: { not: null } }, company: { active: true } },
       select: { id: true, companyId: true, number: true, dueDate: true, totalTTC: true, client: { select: { name: true, email: true } }, company: { select: { name: true } }, payments: { select: { amountCents: true } }, creditNotes: { where: { creditScope: "PARTIAL", status: { not: "CANCELLED" } }, select: { totalTTC: true } } },
       take: limit,
     })
@@ -239,7 +240,8 @@ export async function runInvoiceReminders(db: Db, now: Date, limit = 200): Promi
       // Même famille (audit R4, T2 #4) : le palier n'est réclamé que s'il reste quelque chose à relancer (jamais « brûlé » sans courrier) ;
       // le reste dû du courrier est RELU après la réclamation (un paiement committé entre-temps est pris en compte).
       if (remainingOf(inv) <= BigInt(0)) continue
-      const claimed = await db.invoice.updateMany({ where: { id: inv.id, companyId: inv.companyId, status: { in: ["SENT", "PARTIAL"] }, [column]: null }, data: { [column]: now } })
+      // Réclamation conditionnée aussi à la société active : une désactivation entre la lecture et la réclamation l'emporte.
+      const claimed = await db.invoice.updateMany({ where: { id: inv.id, companyId: inv.companyId, status: { in: ["SENT", "PARTIAL"] }, [column]: null, company: { active: true } }, data: { [column]: now } })
       if (claimed.count !== 1) continue
       const ttc = decimalToCents(inv.totalTTC)
       const fresh = await db.invoice.findFirst({ where: { id: inv.id }, select: { totalTTC: true, payments: { select: { amountCents: true } }, creditNotes: { where: { creditScope: "PARTIAL", status: { not: "CANCELLED" } }, select: { totalTTC: true } } } })
