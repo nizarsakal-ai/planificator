@@ -1,4 +1,4 @@
-// Lot F Planificator V2 : assistant. Propositions issues de règles locales (aucun fournisseur d'IA externe), chacune
+// Lot F Planificator V2 : assistant. Propositions issues de règles locales (aucun fournisseur d'IA externe pour ces propositions), chacune
 // avec ses sources ; aucune action sans approbation explicite d'un administrateur ; journal des actions.
 // Drapeau ASSISTANT_ENABLED + ADMIN/SUPER_ADMIN.
 // Intégration FGHI v2 (incident Chrome) : retour explicite par le mécanisme qualifié E4, comme les Connecteurs : écran
@@ -35,7 +35,7 @@ export default async function AssistantPage({ searchParams }: { searchParams: Pr
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900"><Sparkles className="h-6 w-6 text-[#0f3460]" /> Assistant</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900"><Sparkles className="h-6 w-6 text-[#0f3460]" /> Propositions</h1>
           <p className="mt-1 text-sm text-slate-500">Propositions avec leurs sources · rien n&apos;est fait sans votre approbation · journal des actions</p>
         </div>
         <FormulaireRetour action={analyseAction}><Button type="submit">Analyser maintenant</Button></FormulaireRetour>
@@ -52,7 +52,7 @@ export default async function AssistantPage({ searchParams }: { searchParams: Pr
           const payload = readPayload(p.payload)
           const sources = readSources(p.sources)
           return (
-            <Card key={p.id}><CardContent className="space-y-2 p-4">
+            <Card key={p.id} id={`proposition-${p.id}`} className="scroll-mt-24"><CardContent className="space-y-2 p-4">
               <p className="text-xs uppercase text-slate-500">{ruleLabel(p.rule)} · {fmtInstant(p.createdAt)}</p>
               <p className="font-medium text-slate-900">{p.title}</p>
               <p className="text-sm text-slate-600">{p.rationale}</p>

@@ -8,6 +8,8 @@ import { usePathname } from "next/navigation"
 import { Camera, Check, CheckCircle2, Loader2, Mic, MicOff, RefreshCw, Send, Sparkles, Sun, Trash2, Volume2, VolumeX, X, XCircle } from "lucide-react"
 import { preparePhoto, useDictation, useSpeech, type PreparedPhoto } from "@/components/copilot/copilot-field"
 import { COPILOT_OPEN_EVENT, publishCopilotBadge } from "@/components/copilot/copilot-events"
+import { CopilotTabBar, JournalTab, ProposalsTab } from "@/components/copilot/CopilotTabs"
+import type { CopilotTab } from "@/lib/copilot/copilot-tabs"
 
 interface Proposal { token: string; kind: "TASK" | "ASSIGNMENT" | "QUOTE"; title: string; details: string[]; warning?: string }
 type CardState = { status: "pending" } | { status: "busy" } | { status: "cancelled" } | { status: "done"; message: string; href?: string } | { status: "error"; message: string }
@@ -140,7 +142,11 @@ export function renderCopilotText(text: string, onNavigate?: () => void): ReactN
   return parts
 }
 
-export function CopilotPanel({ audience = "admin", launcher = false }: { audience?: CopilotAudience; launcher?: boolean } = {}) {
+export function CopilotPanel({ audience = "admin", launcher = false, tabs = [] }: { audience?: CopilotAudience; launcher?: boolean; tabs?: CopilotTab[] } = {}) {
+  // Étape 2 : onglets décidés par le serveur ; Discussion toujours présent et ouvert par défaut.
+  const [activeTab, setActiveTab] = useState<CopilotTab>("discussion")
+  const [pendingCount, setPendingCount] = useState<number | undefined>(undefined)
+  const tab: CopilotTab = tabs.includes(activeTab) ? activeTab : "discussion"
   const isAdmin = audience === "admin"
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
@@ -282,6 +288,10 @@ export function CopilotPanel({ audience = "admin", launcher = false }: { audienc
               <X className="h-5 w-5" aria-hidden />
             </button>
           </header>
+          <CopilotTabBar tabs={tabs} active={tab} onChange={setActiveTab} pendingCount={pendingCount} />
+          {tab === "propositions" && <ProposalsTab onNavigate={() => setOpen(false)} onCount={setPendingCount} />}
+          {tab === "journal" && <JournalTab />}
+          {tab === "discussion" && (<>
 
           <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4" aria-live="polite">
             {turns.length === 0 && (
@@ -394,6 +404,7 @@ export function CopilotPanel({ audience = "admin", launcher = false }: { audienc
               <Send className="h-4 w-4" aria-hidden />
             </button>
           </form>
+          </>)}
         </aside>
       )}
     </>

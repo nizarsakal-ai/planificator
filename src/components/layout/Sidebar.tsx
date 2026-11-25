@@ -44,6 +44,7 @@ interface SidebarUser {
   crmNavVisible?: boolean // Lot E V2
   automationNavVisible?: boolean // Lot E V2
   assistantNavVisible?: boolean // Lot F V2
+  assistantMenuReplaced?: boolean // Étape 3 : entrée « Propositions » remplacée par l’onglet Propositions du copilote (drapeau, désactivé)
   connectorsNavVisible?: boolean // Lot F V2
   documentStudioNavVisible?: boolean // Lot G V2
   payrollPrepNavVisible?: boolean // Lot H V2
@@ -59,7 +60,7 @@ interface SidebarUser {
 
 export function Sidebar({ user }: { user: SidebarUser }) {
   const pathname = usePathname()
-  const navItems = withBudgetNavItem(withMarketingShopNavItems(withPayrollPrepNavItem(withDocumentStudioNavItem(withAssistantConnectorNavItems(withFuelTicketNavItem(withStockPurchasingNavItems(withProspectionNavItem(withHrDocumentNavItems(withEquipmentNavItem(withWorksitePhotosNavItem(withSupplierIntakeNavItem(withCrmAutomationNavItems(withBillingNavItems(withAccountingNavItem(withImprimerieNavItem(getNavItems(user.role), user.imprimerieNavVisible === true), user.accountingNavVisible === true), user.billingNavVisible === true), user.crmNavVisible === true, user.automationNavVisible === true), user.supplierIntakeNavVisible === true), user.worksitePhotosNavVisible === true), user.equipmentNavVisible === true), user.hrDocumentsNavVisible === true, user.hrDocumentsManageNavVisible === true), user.prospectionNavVisible === true), user.stockPurchasingNavVisible === true), user.fuelTicketNavVisible === true), user.assistantNavVisible === true, user.connectorsNavVisible === true), user.documentStudioNavVisible === true), user.payrollPrepNavVisible === true), user.marketingShopNavVisible === true), user.budgetNavVisible === true)
+  const navItems = withBudgetNavItem(withMarketingShopNavItems(withPayrollPrepNavItem(withDocumentStudioNavItem(withAssistantConnectorNavItems(withFuelTicketNavItem(withStockPurchasingNavItems(withProspectionNavItem(withHrDocumentNavItems(withEquipmentNavItem(withWorksitePhotosNavItem(withSupplierIntakeNavItem(withCrmAutomationNavItems(withBillingNavItems(withAccountingNavItem(withImprimerieNavItem(getNavItems(user.role), user.imprimerieNavVisible === true), user.accountingNavVisible === true), user.billingNavVisible === true), user.crmNavVisible === true, user.automationNavVisible === true), user.supplierIntakeNavVisible === true), user.worksitePhotosNavVisible === true), user.equipmentNavVisible === true), user.hrDocumentsNavVisible === true, user.hrDocumentsManageNavVisible === true), user.prospectionNavVisible === true), user.stockPurchasingNavVisible === true), user.fuelTicketNavVisible === true), user.assistantNavVisible === true && user.assistantMenuReplaced !== true, user.connectorsNavVisible === true), user.documentStudioNavVisible === true), user.payrollPrepNavVisible === true), user.marketingShopNavVisible === true), user.budgetNavVisible === true)
   // Lot D V2 : composition de main (navItems, inchangée), puis entrées « Réserves » et « Indicateurs commerciaux » (visibilités serveur).
   const menuItems = withSalesDashboardNavItem(withReservesNavItem(navItems, user.reservesNavVisible === true), user.salesDashboardNavVisible === true)
   const activeHref = getActiveNavHref(menuItems, pathname)

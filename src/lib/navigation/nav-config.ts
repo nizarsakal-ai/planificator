@@ -340,7 +340,8 @@ export function withCrmAutomationNavItems(items: readonly NavItem[], crmVisible:
  * Transition ordinaire du routeur client (pas de `documentNavigation`, réservée au « Pipeline commercial » du lot E).
  * Affichage seulement : chaque page et action du module refuse côté serveur. Drapeau strictement `true`, idempotent.
  */
-export const ASSISTANT_NAV_ITEM: NavItem = { label: "Assistant", href: "/assistant", icon: Sparkles }
+// 24/11/2026 : libellé « Propositions » (le mot « Assistant » désigne désormais le copilote IA) ; route /assistant inchangée.
+export const ASSISTANT_NAV_ITEM: NavItem = { label: "Propositions", href: "/assistant", icon: Sparkles }
 export const CONNECTORS_NAV_ITEM: NavItem = { label: "Connecteurs", href: "/connecteurs", icon: PlugZap }
 
 export function withAssistantConnectorNavItems(items: readonly NavItem[], assistantVisible: boolean, connectorsVisible: boolean): NavItem[] {

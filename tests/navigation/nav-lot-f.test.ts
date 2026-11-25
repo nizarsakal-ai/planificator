@@ -82,7 +82,7 @@ describe("lot F : câblage", () => {
       const src = read(f)
       assert.ok(src.includes("withAssistantConnectorNavItems(withFuelTicketNavItem(withStockPurchasingNavItems("), f)
       assert.ok(src.includes("withSupplierIntakeNavItem(withCrmAutomationNavItems(withBillingNavItems("), `${f} : chaîne du lot E intacte`)
-      assert.ok(src.includes("user.fuelTicketNavVisible === true), user.assistantNavVisible === true, user.connectorsNavVisible === true)"), f)
+      assert.ok(src.includes("user.fuelTicketNavVisible === true), user.assistantNavVisible === true && user.assistantMenuReplaced !== true, user.connectorsNavVisible === true)"), f)
       assert.doesNotMatch(src, /ASSISTANT_ENABLED|CONNECTOR_CENTER_ENABLED/, `${f} : aucun drapeau lu côté client`)
     }
   })
