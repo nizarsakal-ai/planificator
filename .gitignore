@@ -43,3 +43,6 @@ Thumbs.db
 next-env.d.ts
 .vercel
 .env*
+
+# État local des outils de session (oh-my-claudecode)
+**/.omc/
