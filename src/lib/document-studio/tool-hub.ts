@@ -65,3 +65,34 @@ export type StudioVue = (typeof STUDIO_VUES)[number]
 export function lireVue(valeur: unknown): StudioVue | null {
   return typeof valeur === "string" && (STUDIO_VUES as readonly string[]).includes(valeur) ? (valeur as StudioVue) : null
 }
+
+// ── Lot G2 : recherche dans les documents générés (paramètres d'adresse bornés). ─────────────────────────────────────────
+export const DOC_ETATS = ["PENDING_APPROVAL", "ISSUED", "REJECTED"] as const
+export type DocEtat = (typeof DOC_ETATS)[number]
+/** Paramètres `q` (texte, 80 caractères au plus, caractères de contrôle retirés) et `etat` (liste fermée, sinon tous). */
+export function lireRecherche(q: unknown, etat: unknown): { q: string; etat: DocEtat | null } {
+  // eslint-disable-next-line no-control-regex
+  const texte = typeof q === "string" ? q.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 80) : ""
+  return { q: texte, etat: typeof etat === "string" && (DOC_ETATS as readonly string[]).includes(etat) ? (etat as DocEtat) : null }
+}
+
+// ── Lot G2 : contexte d'adresse de l'accueil (vue ouverte, modèle de départ, recherche). ─────────────────────────────────
+// Un lien qui change UNE dimension reconduit les autres : ouvrir une vue ou choisir un modèle de départ ne perd pas la
+// recherche en cours, et inversement. Seules des valeurs déjà validées (listes fermées, texte borné) sont reconduites.
+export interface StudioContexte { vue: StudioVue | null; depart: string | null; q: string; etat: DocEtat | null }
+/** Adresse interne de l'accueil pour ce contexte ; ordre stable des paramètres (vue, depart, q, etat). */
+export function adresseStudio(c: Partial<StudioContexte>, ancre: string): string {
+  const p = new URLSearchParams()
+  if (c.vue) p.set("vue", c.vue)
+  if (c.depart) p.set("depart", c.depart)
+  if (c.q) p.set("q", c.q)
+  if (c.etat) p.set("etat", c.etat)
+  const s = p.toString()
+  return `/studio-documents${s ? `?${s}` : ""}#${ancre}`
+}
+/** Lien d'ouverture d'une vue (`…?vue=x#x`) : même vue, reste du contexte reconduit. Tout autre lien est rendu tel quel. */
+export function adresseVue(href: string, c: Partial<Omit<StudioContexte, "vue">>): string {
+  const m = /^\/studio-documents\?vue=([a-z]+)#([a-z-]+)$/.exec(href)
+  const vue = m ? lireVue(m[1]) : null
+  return m && vue ? adresseStudio({ ...c, vue }, m[2]) : href
+}

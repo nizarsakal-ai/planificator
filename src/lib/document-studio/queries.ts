@@ -10,11 +10,24 @@ export async function listTemplates(db: Db, companyId: string) {
     select: { id: true, name: true, category: true, versions: { orderBy: { version: "desc" }, select: { id: true, version: true, status: true, publishedAt: true } }, _count: { select: { versions: true } } },
   })
 }
-export async function listGeneratedDocuments(db: Db, companyId: string, take = 50) {
+/** Documents générés, plus récents d'abord. Lot G2 : recherche (numéro, titre ou nom du modèle, sans tenir compte de la
+ * casse) et état, appliqués DANS la requête, avant la limite. */
+export async function listGeneratedDocuments(db: Db, companyId: string, take = 50, filter: { q?: string; status?: "PENDING_APPROVAL" | "ISSUED" | "REJECTED" | null } = {}) {
+  const q = filter.q?.trim()
   return db.generatedDocument.findMany({
-    where: { companyId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take,
+    where: {
+      companyId,
+      ...(filter.status ? { status: filter.status } : {}),
+      ...(q ? { OR: [{ number: { contains: q, mode: "insensitive" as const } }, { title: { contains: q, mode: "insensitive" as const } }, { version: { template: { name: { contains: q, mode: "insensitive" as const } } } }] } : {}),
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }], take,
     select: { id: true, number: true, title: true, status: true, createdAt: true, version: { select: { version: true, template: { select: { name: true } } } } },
   })
+}
+/** Lot G2 — « nouveau document à partir de celui-ci » : valeurs et liens d'un document de la MÊME société ET du MÊME modèle
+ * (sinon `null`), pour préremplir le formulaire de génération. Aucune écriture. */
+export async function getDocumentForReuse(db: Db, companyId: string, templateId: string, documentId: string) {
+  return db.generatedDocument.findFirst({ where: { id: documentId, companyId, version: { templateId } }, select: { number: true, values: true, clientId: true, worksiteId: true } })
 }
 export async function getTemplate(db: Db, companyId: string, id: string) {
   return db.documentTemplate.findFirst({
@@ -42,16 +55,15 @@ export async function listPendingDocuments(db: Db, companyId: string, take = 50)
     select: { id: true, number: true, title: true, createdAt: true, createdById: true, version: { select: { version: true, template: { select: { name: true } } } } },
   })
 }
-/** « Télécharger un PDF » : documents récents avec l'état de leur empreinte (le PDF n'est proposé que si elle est intacte). */
+/** « Télécharger un PDF » : documents récents, SANS leur instantané (il peut porter le logo figé de l'émetteur : relire
+ * cinquante instantanés pour une liste coûtait trop — revue Codex du 23/11/2026). L'empreinte reste contrôlée là où elle
+ * compte : écran du document, route PDF (409 si non conforme) et validation. */
 export async function listPdfDocuments(db: Db, companyId: string, take = 50) {
   const rows = await db.generatedDocument.findMany({
     where: { companyId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take,
-    select: { id: true, number: true, title: true, status: true, createdAt: true, snapshot: true, snapshotSha256: true },
+    select: { id: true, number: true, title: true, status: true, createdAt: true },
   })
-  return rows.map(({ snapshot, snapshotSha256, ...d }) => {
-    const s = readSnapshot(snapshot)
-    return { ...d, intact: !!s && documentSha256(s) === snapshotSha256 }
-  })
+  return rows
 }
 
 const DOCUMENT_SELECT = { id: true, number: true, status: true, snapshot: true, snapshotSha256: true, createdById: true, createdAt: true, approvedAt: true, signerName: true, rejectedAt: true, rejectReason: true, version: { select: { templateId: true } } } as const
