@@ -30,7 +30,7 @@ import { isMarketingShopEnabledForCompany } from "@/lib/marketing-shop/marketing
 import { isWorksiteReservesEnabled } from "@/lib/reserves/reserves-feature-flag"
 import { isSalesDashboardEnabled } from "@/lib/sales-dashboard/sales-feature-flag"
 import { isGlobalSearchEnabled } from "@/lib/search/search-feature-flag"
-import { imprimerieProductionDossier } from "@/lib/imprimerie/production"
+import { imprimerieProductionMenuVisible } from "@/lib/imprimerie/production"
 import type { Role } from "@prisma/client"
 
 export default async function DashboardLayout({
@@ -98,7 +98,7 @@ export default async function DashboardLayout({
   // Correctif #418 : adresse courte d'affichage, jamais la data URL dans la charge RSC de la coquille (voir companyLogoDisplaySrc).
   const companyLogo = companyLogoDisplaySrc(company?.logoUrl)
   const hrNavigation = await resolveHrDocumentNavigation()
-  const imprimerieNavVisible = Boolean(imprimerieProductionDossier({ role, companyId }))
+  const imprimerieNavVisible = imprimerieProductionMenuVisible({ role, companyId })
   const user = { ...hrNavigation, ...session.user, role, companyId, accountingNavVisible, billingNavVisible, supplierIntakeNavVisible, worksitePhotosNavVisible, prospectionNavVisible, stockPurchasingNavVisible, equipmentNavVisible, budgetNavVisible, fuelTicketNavVisible, companyLogo, companyName: company?.name, documentStudioNavVisible, payrollPrepNavVisible, marketingShopNavVisible, crmNavVisible, automationNavVisible, assistantNavVisible, connectorsNavVisible, reservesNavVisible, salesDashboardNavVisible, searchVisible, copilotVisible, imprimerieNavVisible }
 
   return (

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { imprimerieProductionDossier, PRINT_MANAGER_STUDIO_URL } from "../../src/lib/imprimerie/production"
+import {
+  imprimerieProductionDossier,
+  imprimerieProductionMenuVisible,
+  PRINT_MANAGER_STUDIO_URL,
+} from "../../src/lib/imprimerie/production"
 import { groupNavItems } from "../../src/lib/navigation/nav-categories"
 import { getNavItems, withImprimerieNavItem } from "../../src/lib/navigation/nav-config"
 
@@ -31,6 +35,18 @@ test("le dossier reste fermé en Preview et en l’absence de configuration comp
   assert.equal(imprimerieProductionDossier(owner, { ...env, IMPRIMERIE_WORKSITE_ID: undefined }), undefined)
   assert.equal(imprimerieProductionDossier(owner, { ...env, IMPRIMERIE_QUOTE_NUMBER: " " }), undefined)
   assert.equal(imprimerieProductionDossier(owner, { ...env, IMPRIMERIE_QUOTE_NUMBER: "../devis" }), undefined)
+})
+
+test("la société peut ouvrir Imprimerie sans autoriser la lecture des devis", () => {
+  const menu = { VERCEL_ENV: "production", IMPRIMERIE_MENU_COMPANY_ID: owner.companyId }
+  assert.equal(imprimerieProductionMenuVisible(owner, menu), true)
+  assert.equal(imprimerieProductionMenuVisible({ ...owner, role: "SUPER_ADMIN" }, menu), true)
+  assert.equal(imprimerieProductionMenuVisible({ ...owner, role: "EMPLOYEE" }, menu), false)
+  assert.equal(imprimerieProductionMenuVisible({ ...owner, companyId: "autre-entreprise" }, menu), false)
+  assert.equal(imprimerieProductionMenuVisible(owner, { ...menu, VERCEL_ENV: "preview" }), false)
+  assert.equal(imprimerieProductionMenuVisible(owner, {}), false)
+  assert.equal(imprimerieProductionMenuVisible(owner, env), true)
+  assert.equal(imprimerieProductionDossier(owner, menu), undefined)
 })
 
 test("Imprimerie se place après Chantiers uniquement lorsque le dossier est visible", () => {

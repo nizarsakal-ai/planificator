@@ -10,7 +10,11 @@ import {
   PRODUCTION_STATUS_LABELS,
   readPrintManagerQuote,
 } from "@/lib/imprimerie/print-manager"
-import { imprimerieProductionDossier, PRINT_MANAGER_STUDIO_URL } from "@/lib/imprimerie/production"
+import {
+  imprimerieProductionDossier,
+  imprimerieProductionMenuVisible,
+  PRINT_MANAGER_STUDIO_URL,
+} from "@/lib/imprimerie/production"
 import { prisma } from "@/lib/prisma"
 import { BUSINESS_TIMEZONE } from "@/lib/time/business-day"
 
@@ -36,18 +40,20 @@ const quoteStatuses: Record<string, string> = {
 }
 
 export default async function ImprimeriePage() {
-  const session = await auth()
-  const dossier = session?.user && imprimerieProductionDossier(session.user)
-  if (!dossier) notFound()
+  const user = (await auth())?.user
+  if (!user || !imprimerieProductionMenuVisible(user)) notFound()
 
-  const chantier = await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SET TRANSACTION READ ONLY`
-    return tx.worksite.findFirst({
-      where: { id: dossier.worksiteId, companyId: dossier.companyId, company: { active: true } },
-      select: { name: true },
+  const dossier = imprimerieProductionDossier(user)
+  const chantier = dossier
+    ? await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET TRANSACTION READ ONLY`
+      return tx.worksite.findFirst({
+        where: { id: dossier.worksiteId, companyId: dossier.companyId, company: { active: true } },
+        select: { name: true },
+      })
     })
-  })
-  const result = chantier
+    : undefined
+  const result = dossier && chantier
     ? await readPrintManagerQuote(dossier.quoteNumber, (await headers()).get("x-vercel-oidc-token") ?? process.env.VERCEL_OIDC_TOKEN)
     : undefined
   const quote = result?.state === "ready" ? result.quote : undefined
@@ -57,7 +63,8 @@ export default async function ImprimeriePage() {
   const deliveredOrders = deliveryOrders?.filter(({ status }) => status === "LIVRE") ?? []
 
   let message: string | undefined
-  if (!chantier) message = "Le chantier associé est introuvable."
+  if (!dossier) message = "Aucun devis Print Manager n’est encore associé à un chantier."
+  else if (!chantier) message = "Le chantier associé est introuvable."
   else if (result && result.state !== "ready") message = quoteMessages[result.state]
 
   return (
@@ -70,8 +77,8 @@ export default async function ImprimeriePage() {
       </div>
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0">
-          <CardTitle>Devis Print Manager associé</CardTitle>
-          <Badge variant="outline">Lecture seule</Badge>
+          <CardTitle>{dossier ? "Devis Print Manager associé" : "Suivi Print Manager"}</CardTitle>
+          {dossier && <Badge variant="outline">Lecture seule</Badge>}
         </CardHeader>
         <CardContent className="space-y-4">
           {chantier && (
