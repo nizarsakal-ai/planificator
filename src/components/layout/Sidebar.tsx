@@ -8,7 +8,7 @@ import {
   withHrDocumentNavItems, withAccountingNavItem,
   withBillingNavItems, withSupplierIntakeNavItem, withWorksitePhotosNavItem, withProspectionNavItem, withStockPurchasingNavItems, withEquipmentNavItem, withBudgetNavItem, withFuelTicketNavItem, withCrmAutomationNavItems,
   withAssistantConnectorNavItems, withDocumentStudioNavItem, withPayrollPrepNavItem, withMarketingShopNavItems,
-  withReservesNavItem, withSalesDashboardNavItem,
+  withReservesNavItem, withSalesDashboardNavItem, withImprimerieNavItem,
 } from "@/lib/navigation/nav-config"
 import { getActiveNavCategoryId, groupNavItems } from "@/lib/navigation/nav-categories"
 import { NavCategories } from "@/components/layout/NavCategories"
@@ -26,6 +26,7 @@ interface SidebarUser {
   companyId: string | null
   /** Calculé côté serveur (flag + rôle + société) ; affichage seulement, pas une autorisation. */
   accountingNavVisible?: boolean
+  imprimerieNavVisible?: boolean
   /** Lot C : lien « Devis » (drapeau BILLING_COMPLETE_ENABLED) ; affichage seulement. */
   billingNavVisible?: boolean
   hrDocumentsNavVisible?: boolean
@@ -58,7 +59,7 @@ interface SidebarUser {
 
 export function Sidebar({ user }: { user: SidebarUser }) {
   const pathname = usePathname()
-  const navItems = withBudgetNavItem(withMarketingShopNavItems(withPayrollPrepNavItem(withDocumentStudioNavItem(withAssistantConnectorNavItems(withFuelTicketNavItem(withStockPurchasingNavItems(withProspectionNavItem(withHrDocumentNavItems(withEquipmentNavItem(withWorksitePhotosNavItem(withSupplierIntakeNavItem(withCrmAutomationNavItems(withBillingNavItems(withAccountingNavItem(getNavItems(user.role), user.accountingNavVisible === true), user.billingNavVisible === true), user.crmNavVisible === true, user.automationNavVisible === true), user.supplierIntakeNavVisible === true), user.worksitePhotosNavVisible === true), user.equipmentNavVisible === true), user.hrDocumentsNavVisible === true, user.hrDocumentsManageNavVisible === true), user.prospectionNavVisible === true), user.stockPurchasingNavVisible === true), user.fuelTicketNavVisible === true), user.assistantNavVisible === true, user.connectorsNavVisible === true), user.documentStudioNavVisible === true), user.payrollPrepNavVisible === true), user.marketingShopNavVisible === true), user.budgetNavVisible === true)
+  const navItems = withBudgetNavItem(withMarketingShopNavItems(withPayrollPrepNavItem(withDocumentStudioNavItem(withAssistantConnectorNavItems(withFuelTicketNavItem(withStockPurchasingNavItems(withProspectionNavItem(withHrDocumentNavItems(withEquipmentNavItem(withWorksitePhotosNavItem(withSupplierIntakeNavItem(withCrmAutomationNavItems(withBillingNavItems(withAccountingNavItem(withImprimerieNavItem(getNavItems(user.role), user.imprimerieNavVisible === true), user.accountingNavVisible === true), user.billingNavVisible === true), user.crmNavVisible === true, user.automationNavVisible === true), user.supplierIntakeNavVisible === true), user.worksitePhotosNavVisible === true), user.equipmentNavVisible === true), user.hrDocumentsNavVisible === true, user.hrDocumentsManageNavVisible === true), user.prospectionNavVisible === true), user.stockPurchasingNavVisible === true), user.fuelTicketNavVisible === true), user.assistantNavVisible === true, user.connectorsNavVisible === true), user.documentStudioNavVisible === true), user.payrollPrepNavVisible === true), user.marketingShopNavVisible === true), user.budgetNavVisible === true)
   // Lot D V2 : composition de main (navItems, inchangée), puis entrées « Réserves » et « Indicateurs commerciaux » (visibilités serveur).
   const menuItems = withSalesDashboardNavItem(withReservesNavItem(navItems, user.reservesNavVisible === true), user.salesDashboardNavVisible === true)
   const activeHref = getActiveNavHref(menuItems, pathname)

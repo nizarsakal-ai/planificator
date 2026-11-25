@@ -16,6 +16,7 @@ interface NavbarUser {
   role: Role
   companyId: string | null
   accountingNavVisible?: boolean
+  imprimerieNavVisible?: boolean
   hrDocumentsNavVisible?: boolean
   hrDocumentsManageNavVisible?: boolean
   supplierIntakeNavVisible?: boolean
