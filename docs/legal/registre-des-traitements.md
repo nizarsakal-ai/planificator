@@ -115,7 +115,7 @@ Les durées marquées « *proposée* » sont à valider avec le juriste.
 - **Personnes :** utilisateurs ; personnes citées dans les données consultées.
 - **Données :** questions posées, données de planning et de gestion utiles à la réponse (jamais les motifs d'absence), propositions et journal des actions.
 - **Destinataires :** Anthropic (États-Unis).
-- **Durée :** *proposée* 1 an pour le journal ; chez Anthropic : [À VÉRIFIER].
+- **Durée :** *proposée* 1 an pour le journal ; chez Anthropic : 30 jours au plus, sauf exceptions de ses conditions.
 - **Remarque :** toute proposition est validée par une personne (pas de décision automatisée, art. 22).
 
 ### A13. Prospection, opportunités, marketing
@@ -149,10 +149,10 @@ L'Éditeur est aussi **responsable** d'un traitement propre : la gestion des com
 
 | Prestataire | Rôle | Données concernées | Lieu | Garantie de transfert | DPA signé ? |
 |---|---|---|---|---|---|
-| Vercel Inc. | Hébergement | Toutes (en transit) | Francfort ; société US | [À VÉRIFIER] | [ ] |
-| Neon Inc. | Base de données | Toutes | Francfort (AWS eu-central-1) ; société US | [À VÉRIFIER] | [ ] |
-| Cloudinary | Fichiers | Photos, justificatifs, pièces jointes, logos | [À VÉRIFIER] | [À VÉRIFIER] | [ ] |
-| Anthropic PBC | IA | A9, A11, A12 | États-Unis | [À VÉRIFIER] | [ ] |
-| Resend | E-mails | Destinataires et contenu des e-mails envoyés | [À VÉRIFIER] | [À VÉRIFIER] | [ ] |
-| Google | Gmail, Agenda, Drive | A6, A8, A11 | Selon contrat Google Workspace | Contrat Google | [ ] |
+| Vercel Inc. | Hébergement | Toutes (en transit) | Francfort ; société US | DPF | DPA intégré aux conditions |
+| Databricks, Inc. (Neon) | Base de données | Toutes | Francfort (AWS eu-central-1) ; société US | DPF | DPA intégré au contrat |
+| Cloudinary Inc. | Fichiers | Photos, justificatifs, pièces jointes, logos | États-Unis (UE seulement en offre Enterprise) | DPF | [ ] À confirmer avec Cloudinary |
+| Anthropic PBC | IA | A9, A11, A12 | États-Unis | Clauses contractuelles types | DPA intégré aux conditions commerciales |
+| Plus Five Five, Inc. (Resend) | E-mails | Destinataires et contenu des e-mails envoyés | États-Unis | DPF (recertification en cours) | DPA automatique |
+| Google Cloud France / Google LLC | Gmail, Agenda, Drive | A6, A8, A11 | Selon contrat Google Workspace | DPF (Google LLC) | [ ] Vérifier l'acceptation du CDPA dans la console |
 | Fondation OpenStreetMap | Cartes, géocodage | Adresse IP, adresses recherchées | Royaume-Uni | Adéquation | n/a (service public) |

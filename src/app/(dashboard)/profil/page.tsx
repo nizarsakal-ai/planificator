@@ -8,6 +8,7 @@ import { CompanyLogoCard } from "@/components/parametres/CompanyLogoCard"
 import { isManagedLogo } from "@/lib/company-logo"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { LegalLinks } from "@/components/legal/LegalDocumentView"
+import { AccountDataCard } from "@/components/profil/AccountDataCard"
 
 export const metadata: Metadata = { title: "Mon profil" }
 
@@ -50,6 +51,9 @@ export default async function ProfilPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Lot 2b juridique : export des données et suppression du compte (le super-admin n'a pas de suppression). */}
+      {session.user.role !== "SUPER_ADMIN" && <AccountDataCard />}
 
       {/* Lot 2a juridique : informations légales accessibles depuis l'application (exigence des stores). */}
       <LegalLinks className="pt-2" />
