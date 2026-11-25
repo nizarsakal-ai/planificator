@@ -82,7 +82,7 @@ describe("navigation comptabilité", () => {
   it("Sidebar et MobileNav n'ajoutent l'entrée que via la configuration centrale, avec un drapeau calculé côté serveur", () => {
     for (const file of ["src/components/layout/Sidebar.tsx", "src/components/layout/MobileNav.tsx"]) {
       const src = read(file)
-      assert.match(src, /withAccountingNavItem\(getNavItems\(user\.role\), user\.accountingNavVisible === true\)/, file)
+      assert.match(src, /withAccountingNavItem\((?:withImprimerieNavItem\()?getNavItems\(user\.role\)(?:, user\.imprimerieNavVisible === true\))?, user\.accountingNavVisible === true\)/, file)
       assert.doesNotMatch(src, /comptabilite/i, `${file} ne définit aucune route comptable localement`)
       assert.doesNotMatch(src, /ACCOUNTING_MODULE_ENABLED|process\.env/, `${file} ne lit aucun flag`)
     }
