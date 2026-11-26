@@ -1,0 +1,1 @@
+ALTER TYPE "AcquisitionSource" ADD VALUE IF NOT EXISTS 'UPLOAD';

@@ -736,9 +736,10 @@ async function processCandidate(input: {
       version: true,
       contentHashAtExtraction: true,
       extractionSchemaVersion: true,
+      acquisitionMessage: { select: { source: true } },
     },
   })
-  if (!draftRow) {
+  if (!draftRow || draftRow.acquisitionMessage?.source === "UPLOAD") {
     stats.skipped++
     return
   }

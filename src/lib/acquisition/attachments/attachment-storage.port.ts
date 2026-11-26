@@ -1,5 +1,6 @@
 import { v2 as cloudinary } from "cloudinary"
 import type { UploadApiErrorResponse } from "cloudinary"
+import { verifyPrivateAttachment } from "@/lib/acquisition/attachments/verify-private-attachment"
 import { buildAcquisitionAttachmentCloudinaryFolder } from "@/lib/acquisition/attachments/attachment-cloudinary-folder-prefix"
 import type {
   AttachmentStorageDestroyInput,
@@ -7,9 +8,17 @@ import type {
   AttachmentStorageResult,
 } from "@/lib/acquisition/attachments/attachment.types"
 
+type VerifyExistingInput = Omit<AttachmentStorageInput, "buffer"> & {
+  storagePublicId: string
+  sha256: string
+  sizeBytes: number
+}
+
 export interface AttachmentStoragePort {
   store(input: AttachmentStorageInput): Promise<AttachmentStorageResult>
   destroy(input: AttachmentStorageDestroyInput): Promise<void>
+  /** Confirme l’identité, la taille et le SHA-256 d’un objet privé existant. */
+  verifyExisting?(input: VerifyExistingInput): Promise<{ storageUrl: string } | null>
 }
 
 /** Réponse Cloudinary documentée lorsque overwrite:false et le public_id existe déjà. */
@@ -45,27 +54,26 @@ function collisionResult(publicId: string): AttachmentStorageResult {
   return { created: false, storagePublicId: publicId }
 }
 
+function resolveStorageIdentity({ companyId, acquisitionMessageId, attachmentId, generatedFilename }: Pick<
+  AttachmentStorageInput, "companyId" | "acquisitionMessageId" | "attachmentId" | "generatedFilename"
+>) {
+  const folder = buildAcquisitionAttachmentCloudinaryFolder({ companyId, acquisitionMessageId, attachmentId })
+  const publicIdStem = generatedFilename.replace(/\.[^.]+$/, "")
+  return { folder, publicIdStem, deterministicPublicId: `${folder}/${publicIdStem}` }
+}
+
 /**
  * Stockage Cloudinary — dossier tenant isolé, accès authenticated (pas d'URL publique permanente).
  * Chemin logique : {folderPrefix}/{companyId}/acquisition/{messageId}/{attachmentId}/{generatedName}
  * folderPrefix via ACQUISITION_ATTACHMENT_CLOUDINARY_FOLDER_PREFIX (défaut planificator).
  *
- * Objet préexistant : non réutilisé automatiquement (pas de preuve de contenu/hash).
- * Une future réconciliation pourra lire métadonnées Cloudinary, vérifier hash ou marqueur
- * serveur fiable, puis décider de rattacher ou supprimer l'objet.
+ * Un objet préexistant est vérifié en lecture avant rattachement par le LOT-5.
  *
  * destroy() utilise le storagePublicId déjà enregistré — inchangé par le préfixe d'upload.
  */
 export class CloudinaryAttachmentStorageAdapter implements AttachmentStoragePort {
   async store(input: AttachmentStorageInput): Promise<AttachmentStorageResult> {
-    // Une seule résolution/validation du préfixe pour folder + public_id attendu.
-    const folder = buildAcquisitionAttachmentCloudinaryFolder({
-      companyId: input.companyId,
-      acquisitionMessageId: input.acquisitionMessageId,
-      attachmentId: input.attachmentId,
-    })
-    const publicIdStem = input.generatedFilename.replace(/\.[^.]+$/, "")
-    const deterministicPublicId = `${folder}/${publicIdStem}`
+    const { folder, publicIdStem, deterministicPublicId } = resolveStorageIdentity(input)
 
     return new Promise<AttachmentStorageResult>((resolve, reject) => {
       cloudinary.uploader
@@ -140,6 +148,51 @@ export class CloudinaryAttachmentStorageAdapter implements AttachmentStoragePort
         )
         .end(input.buffer)
     })
+  }
+
+  async verifyExisting(input: VerifyExistingInput): Promise<{ storageUrl: string } | null> {
+    const { companyId, acquisitionMessageId, attachmentId, generatedFilename, storagePublicId, sha256, sizeBytes } = input
+    const identity = { companyId, acquisitionMessageId, attachmentId }
+    if (![companyId, acquisitionMessageId, attachmentId, generatedFilename].every(
+      value => /^[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)?$/.test(value),
+    )) return null
+
+    try {
+      const { deterministicPublicId: publicId } = resolveStorageIdentity({ ...identity, generatedFilename })
+      if (storagePublicId !== publicId) return null
+
+      const cloudName = cloudinary.config().cloud_name
+      if (!cloudName || !/^[a-zA-Z0-9_-]+$/.test(cloudName)) return null
+      const metadata = await cloudinary.api.resource(publicId, {
+        resource_type: "raw",
+        type: "authenticated",
+        timeout: 4_000,
+      })
+      if (metadata.public_id !== publicId || metadata.resource_type !== "raw" ||
+          metadata.type !== "authenticated" || metadata.bytes !== sizeBytes ||
+          !Number.isSafeInteger(metadata.version) || metadata.version < 1) return null
+      // La relecture est signée à partir du public_id vérifié, sans utiliser l’URL des métadonnées.
+      const storageUrl = `https://res.cloudinary.com/${cloudName}/raw/authenticated/v${metadata.version}/${publicId}`
+
+      const signedUrl = cloudinary.utils.private_download_url(publicId, "", {
+        resource_type: "raw",
+        type: "authenticated",
+        expires_at: Math.floor(Date.now() / 1000) + 60,
+        attachment: false,
+      })
+      const verified = await verifyPrivateAttachment({
+        expected: { ...identity, publicId, sha256, sizeBytes },
+        candidate: { ...identity, publicId, resourceType: "raw", deliveryType: "authenticated" },
+        signedUrl,
+        allowedOrigin: "https://api.cloudinary.com",
+      }, (url, options) => fetch(url, {
+        ...options,
+        headers: { "Accept-Encoding": "identity" },
+      }))
+      return verified ? { storageUrl } : null
+    } catch {
+      return null
+    }
   }
 
   async destroy(input: AttachmentStorageDestroyInput): Promise<void> {

@@ -193,6 +193,7 @@ enum WeatherCondition {
 
 enum AcquisitionSource {
   GMAIL
+  UPLOAD
 }
 
 enum AcquisitionMessageStatus {
@@ -2170,6 +2171,7 @@ model AcquisitionAttachment {
   // FK composite : même garantie anti inter-tenant que pour les brouillons.
   acquisitionMessage AcquisitionMessage               @relation(fields: [acquisitionMessageId, companyId], references: [id, companyId], onDelete: Cascade)
   accessLogs         AcquisitionAttachmentAccessLog[]
+  uploadSource       AcquisitionAttachmentUploadSource?
 
   @@unique([id, companyId])
   @@unique([acquisitionMessageId, attachmentKey])
@@ -2179,6 +2181,19 @@ model AcquisitionAttachment {
   @@index([status, downloadClaimedAt])
   @@index([companyId, status, downloadNextRetryAt])
   @@map("acquisition_attachments")
+}
+
+/// Réserve privée d’une pièce EML, relisible après la fin de la requête.
+model AcquisitionAttachmentUploadSource {
+  companyId    String
+  attachmentId String
+  bytes        Bytes
+  createdAt    DateTime @default(now())
+
+  attachment AcquisitionAttachment @relation(fields: [attachmentId, companyId], references: [id, companyId], onDelete: Cascade)
+
+  @@id([attachmentId, companyId])
+  @@map("acquisition_attachment_upload_sources")
 }
 
 model AcquisitionAttachmentAccessLog {

@@ -124,7 +124,7 @@ export class AcquisitionAttachmentRepository implements AcquisitionAttachmentRep
       where: { id: attachmentId, companyId },
       include: {
         acquisitionMessage: {
-          select: { id: true, companyId: true, externalMessageId: true, sourceMailboxKey: true },
+          select: { id: true, companyId: true, externalMessageId: true, sourceMailboxKey: true, source: true },
         },
       },
     })
@@ -257,6 +257,9 @@ export class AcquisitionAttachmentRepository implements AcquisitionAttachmentRep
                 storagePublicId: row.storagePublicId,
               },
             })
+          }
+          if (update.releaseUploadSource) {
+            await tx.acquisitionAttachmentUploadSource.deleteMany({ where: { companyId, attachmentId } })
           }
           return { status: "STORED", attachment: mapRecord(row) }
         },

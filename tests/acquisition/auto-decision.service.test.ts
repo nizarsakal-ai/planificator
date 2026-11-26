@@ -32,7 +32,7 @@ type DraftRow = {
   detectionClassification: string | null
   detectionContentHash: string | null
   acquisitionMessageId: string
-  acquisitionMessage: { resolvedPartnerId: string | null; senderDomain: string | null; threadId?: string | null }
+  acquisitionMessage: { source?: "GMAIL" | "UPLOAD"; resolvedPartnerId: string | null; senderDomain: string | null; threadId?: string | null }
 }
 
 function partner(over: Partial<AcquisitionPartnerRecord> = {}): AcquisitionPartnerRecord {
@@ -227,6 +227,19 @@ describe("maybeRunAutoDecisionAfterExtraction R3", () => {
       referenceInstant: opts.referenceInstant ?? REFERENCE_INSTANT,
     }
   }
+
+  it("réserve les messages UPLOAD à la revue humaine", async () => {
+    draft.acquisitionMessage.source = "UPLOAD"
+    await maybeRunAutoDecisionAfterExtraction({
+      companyId: "co1",
+      draftId: "d1",
+      deps: deps({ partner: partner({ autoApproveEnabled: true, autoConvertEnabled: true }) }),
+    })
+    assert.equal(approveCalls, 0)
+    assert.equal(convertCalls, 0)
+    assert.equal(draft.status, "PENDING_REVIEW")
+    assert.equal(journalEntries.length, 0)
+  })
 
   it("partenaire auto OFF → journal HUMAN_REVIEW, aucune mutation", async () => {
     await maybeRunAutoDecisionAfterExtraction({
