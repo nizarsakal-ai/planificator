@@ -54,7 +54,12 @@ describe("migration du lot G", () => {
     ]) assert.match(sql, re)
     assert.doesNotMatch(sql, /ON DELETE CASCADE/)
     assert.ok(schema.includes(MARKER), "marqueur du lot G présent")
-    assert.doesNotMatch(schema.split(MARKER)[1], /onDelete: Cascade/)
+    // Borné aux modèles du lot G : le schéma se poursuit après le marqueur avec d'autres lots, dont les cascades ne concernent pas le Studio.
+    for (const model of ["DocumentTemplate", "DocumentTemplateVersion", "GeneratedDocument"]) {
+      const block = schema.split(MARKER)[1].match(new RegExp(`^model ${model} \\{\\n[\\s\\S]*?^\\}`, "m"))
+      assert.ok(block, `modèle ${model} présent après le marqueur du lot G`)
+      assert.doesNotMatch(block[0], /onDelete: Cascade/, `${model} : aucune cascade`)
+    }
   })
   it("CHECK et déclencheurs : version figée, document né d'une version publiée, validation par un autre utilisateur", () => {
     assert.match(sql, /AND "signatureSha256" IS NOT NULL AND "signatureSha256" ~ '\^\[0-9a-f\]\{64\}\$' AND "approvedById" <> "createdById"\)/)
