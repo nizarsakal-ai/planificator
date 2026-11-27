@@ -7,12 +7,14 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   BAT_STATUS_LABELS,
+  INVOICE_STATUS_LABELS,
   PRODUCTION_STATUS_LABELS,
   readPrintManagerQuote,
 } from "@/lib/imprimerie/print-manager"
 import {
   imprimerieProductionDossier,
   imprimerieProductionMenuVisible,
+  imprimerieTarget,
   PRINT_MANAGER_STUDIO_URL,
 } from "@/lib/imprimerie/production"
 import { prisma } from "@/lib/prisma"
@@ -49,12 +51,18 @@ export default async function ImprimeriePage() {
       await tx.$executeRaw`SET TRANSACTION READ ONLY`
       return tx.worksite.findFirst({
         where: { id: dossier.worksiteId, companyId: dossier.companyId, company: { active: true } },
-        select: { name: true },
+        select: { id: true, name: true },
       })
     })
     : undefined
   const result = dossier && chantier
-    ? await readPrintManagerQuote(dossier.quoteNumber, (await headers()).get("x-vercel-oidc-token") ?? process.env.VERCEL_OIDC_TOKEN)
+    ? await readPrintManagerQuote(
+        dossier.quoteNumber,
+        (await headers()).get("x-vercel-oidc-token") ??
+          (dossier.target === "production" ? process.env.VERCEL_OIDC_TOKEN : undefined),
+        dossier.invoiceRequestScope,
+        dossier.target,
+      )
     : undefined
   const quote = result?.state === "ready" ? result.quote : undefined
   const bat = quote?.bat
@@ -71,9 +79,11 @@ export default async function ImprimeriePage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-slate-900">Imprimerie</h1>
-        <Button asChild variant="outline">
-          <a href={PRINT_MANAGER_STUDIO_URL}>Ouvrir le Studio Graphique</a>
-        </Button>
+        {imprimerieTarget() === "production" && (
+          <Button asChild variant="outline">
+            <a href={PRINT_MANAGER_STUDIO_URL}>Ouvrir le Studio Graphique</a>
+          </Button>
+        )}
       </div>
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0">
@@ -85,7 +95,11 @@ export default async function ImprimeriePage() {
             <dl className="grid gap-4 sm:grid-cols-3">
               <div>
                 <dt className="text-sm text-slate-600">Chantier</dt>
-                <dd className="mt-1 font-medium text-slate-900">{chantier.name}</dd>
+                <dd className="mt-1 font-medium text-slate-900">
+                  <a href={"/chantiers/" + encodeURIComponent(chantier.id)} className="underline underline-offset-4">
+                    {chantier.name}
+                  </a>
+                </dd>
               </div>
               {quote && (
                 <>
@@ -154,6 +168,15 @@ export default async function ImprimeriePage() {
                         : "Suivi de livraison indisponible."}
                     </dd>
                   </div>
+                  {quote.invoice && (
+                    <div className="border-t border-slate-200 pt-4 sm:col-span-3">
+                      <dt className="text-sm text-slate-600">Facture</dt>
+                      <dd className="mt-1 flex flex-wrap items-center gap-2">
+                        <span className="font-medium text-slate-900">{quote.invoice.number}</span>
+                        <Badge variant="outline">{INVOICE_STATUS_LABELS[quote.invoice.status]}</Badge>
+                      </dd>
+                    </div>
+                  )}
                 </>
               )}
             </dl>

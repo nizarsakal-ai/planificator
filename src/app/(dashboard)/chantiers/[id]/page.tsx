@@ -4,6 +4,7 @@ import { redirect, notFound } from "next/navigation"
 import { resolveWorksiteViewer, worksiteAccessWhere } from "@/lib/chantiers/worksite-access"
 import { prisma } from "@/lib/prisma"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { MapPin, Calendar, Clock, Users, HardHat, FileText, Download, Mail, Truck, AlertTriangle } from "lucide-react"
 import { initialRecipientState } from "@/lib/chantiers/photo-recipients"
@@ -21,6 +22,7 @@ import { groupAssignmentBlocks } from "@/lib/chantiers/assignment-blocks"
 import { canShowAffecterEquipeForm } from "@/lib/chantiers/assignment-ui-policy"
 import { assignableTrucksFor, worksiteTeamVehicles, worksiteTourHref } from "@/lib/chantiers/worksite-vehicles"
 import { AssignTruckToTeam } from "@/components/chantiers/AssignTruckToTeam"
+import { imprimerieWorksiteHref } from "@/lib/imprimerie/production"
 import { isVehiclesV3Enabled } from "@/lib/vehicules/v3/v3-feature-flag"
 import Link from "next/link"
 
@@ -74,6 +76,7 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
       },
       include: {
         client: { select: { name: true } },
+        company: { select: { active: true } },
         assignments: {
           include: {
             team: { select: { name: true, color: true } },
@@ -107,6 +110,10 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
   ])
 
   if (!chantier) notFound()
+
+  const imprimerieHref = chantier.company.active
+    ? imprimerieWorksiteHref(session.user, chantier)
+    : undefined
 
   // Destinataires des photos : lus SEULEMENT pour un SUPER_ADMIN confirmé EN BASE (compte actif, rôle global, entreprise
   // active) — une session périmée ne lit aucune adresse ; rien n'est sérialisé vers les autres rôles.
@@ -302,6 +309,11 @@ export default async function ChantierDetailPage({ params }: { params: Promise<{
                   <FileText className="h-4 w-4 shrink-0 mt-0.5 text-slate-400" />
                   <span className="whitespace-pre-wrap">{chantier.description}</span>
                 </div>
+              )}
+              {imprimerieHref && (
+                <Button asChild variant="outline" size="sm">
+                  <a href={imprimerieHref}>Ouvrir le suivi Imprimerie</a>
+                </Button>
               )}
             </CardContent>
           </Card>
