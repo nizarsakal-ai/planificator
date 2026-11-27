@@ -61,6 +61,7 @@ export interface AttachmentMessageContext {
   companyId: string
   externalMessageId: string
   sourceMailboxKey: string
+  source?: "GMAIL" | "UPLOAD"
 }
 
 export interface AttachmentFetchInput {
@@ -102,6 +103,7 @@ export interface AttachmentStorageDestroyInput {
 }
 
 export interface StoredAttachmentUpdate {
+  releaseUploadSource?: boolean
   sha256: string
   storageUrl: string
   storagePublicId: string

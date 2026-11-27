@@ -1,7 +1,8 @@
 {
   "git": {
     "deploymentEnabled": {
-      "feat/lot-c-worksite-budgets": false
+      "feat/lot-c-worksite-budgets": false,
+      "codex/lot5-import-eml": false
     }
   },
   "regions": [

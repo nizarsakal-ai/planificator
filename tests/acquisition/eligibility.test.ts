@@ -45,6 +45,22 @@ describe("validation Zod des entrées", () => {
     assert.equal(registerIncomingMessageSchema.safeParse(base).success, true)
   })
 
+  it("accepte un import UPLOAD identifié par sa connexion", () => {
+    const result = registerIncomingMessageSchema.safeParse({
+      ...base, source: "UPLOAD", sourceMailboxKey: "connexion-upload-1",
+    })
+    assert.equal(result.success, true)
+  })
+
+  it("refuse un import UPLOAD sans identité de connexion", () => {
+    for (const sourceMailboxKey of [undefined, "", " "]) {
+      const result = registerIncomingMessageSchema.safeParse({
+        ...base, source: "UPLOAD", sourceMailboxKey,
+      })
+      assert.equal(result.success, false)
+    }
+  })
+
   it("rejette un identifiant externe vide", () => {
     assert.equal(
       registerIncomingMessageSchema.safeParse({ ...base, externalMessageId: "" }).success,

@@ -1,3 +1,6 @@
+import { resolveCompanyAccess } from "@/lib/company-access"
+import { AcquisitionMessageContentRepository } from "@/lib/acquisition/content/message-content.repository"
+import type { SanitizedMessageContent } from "@/lib/acquisition/content/message-content.types"
 // ─── Assistant Consultations — service d'acquisition (fondation) ─────────────
 // Transforme un email entrant admissible en brouillon de consultation
 // (WorksiteImportDraft), de façon idempotente et strictement multi-tenant.
@@ -34,6 +37,34 @@ export { isAcquisitionEnabled } from "@/lib/acquisition/acquisition-feature-flag
 export type RegisterIncomingMessageDeps = {
   /** Injecté en tests ; défaut = resolver registre sur le même `db`. */
   eligibilityResolver?: PartnerEligibilityResolverPort
+  uploadActorId?: string
+  uploadContent?: SanitizedMessageContent
+  uploadAttachmentBytes?: readonly Uint8Array[]
+}
+
+async function requireUploadCompanyAdmin(
+  db: Pick<PrismaClient, "user">,
+  actorId: string | undefined,
+  companyId: string,
+): Promise<void> {
+  const actor = actorId ? await db.user.findUnique({
+    where: { id: actorId },
+    select: {
+      active: true, role: true, companyId: true,
+      company: { select: { active: true } },
+      employeeProfiles: {
+        select: { companyId: true, role: true, active: true, company: { select: { active: true } } },
+      },
+    },
+  }) : null
+  const access = actor?.active ? resolveCompanyAccess(actor, companyId) : null
+  if (
+    access?.companyId !== companyId ||
+    (access.role !== "ADMIN" && access.role !== "SUPER_ADMIN") ||
+    (actor?.role === "SUPER_ADMIN" && !actor.company?.active)
+  ) {
+    throw new Error("Acteur UPLOAD non autorisé")
+  }
 }
 
 // ─── Enregistrement idempotent d'un message entrant ──────────────────────────
@@ -78,6 +109,20 @@ export async function registerIncomingMessage(
   deps: RegisterIncomingMessageDeps = {}
 ): Promise<RegisterIncomingMessageResult> {
   const data = registerIncomingMessageSchema.parse(input)
+
+  const uploadBytes = deps.uploadAttachmentBytes
+  if (data.source === "UPLOAD" && (
+    (uploadBytes?.length ?? 0) !== data.attachments.length ||
+    uploadBytes?.some((bytes, index) => bytes.byteLength !== data.attachments[index].sizeBytes) ||
+    (uploadBytes?.reduce((sum, bytes) => sum + bytes.byteLength, 0) ?? 0) > 10 * 1024 * 1024
+  )) {
+    throw new Error("Octets des pièces UPLOAD invalides")
+  }
+
+  const uploadActorId = deps.uploadActorId
+  if (data.source === "UPLOAD") {
+    await requireUploadCompanyAdmin(db, uploadActorId, data.companyId)
+  }
 
   const includeDraft = { draft: { select: { id: true } } } as const
 
@@ -193,6 +238,10 @@ export async function registerIncomingMessage(
         }
       }
 
+      if (data.source === "UPLOAD") {
+        await requireUploadCompanyAdmin(tx, uploadActorId, data.companyId)
+      }
+
       const message = await tx.acquisitionMessage.create({
         data: {
           companyId: data.companyId,
@@ -220,18 +269,37 @@ export async function registerIncomingMessage(
       let draftId: string | null = null
       if (eligible) {
         if (data.attachments.length > 0) {
-          await tx.acquisitionAttachment.createMany({
-            data: data.attachments.map((a, index) => ({
-              companyId: data.companyId,
-              acquisitionMessageId: message.id,
-              attachmentKey: buildAttachmentKey(a, index),
-              externalAttachmentId: a.externalAttachmentId ?? null,
-              filename: a.filename,
-              mimeType: a.mimeType,
-              sizeBytes: a.sizeBytes,
-              category: categorizeAttachment(a.mimeType, a.filename),
-              status: "DISCOVERED" as const,
-            })),
+          const attachmentRows = data.attachments.map((attachment, index) => ({
+            companyId: data.companyId,
+            acquisitionMessageId: message.id,
+            attachmentKey: buildAttachmentKey(attachment, index),
+            externalAttachmentId: attachment.externalAttachmentId ?? null,
+            filename: attachment.filename,
+            mimeType: attachment.mimeType,
+            sizeBytes: attachment.sizeBytes,
+            category: categorizeAttachment(attachment.mimeType, attachment.filename),
+            status: "DISCOVERED" as const,
+          }))
+          if (data.source === "UPLOAD" && uploadBytes) {
+            for (const [index, attachment] of attachmentRows.entries()) {
+              await tx.acquisitionAttachment.create({
+                data: {
+                  ...attachment,
+                  uploadSource: { create: { bytes: Buffer.from(uploadBytes[index]) } },
+                },
+              })
+            }
+          } else {
+            await tx.acquisitionAttachment.createMany({ data: attachmentRows })
+          }
+        }
+
+        if (data.source === "UPLOAD" && deps.uploadContent) {
+          await new AcquisitionMessageContentRepository(tx).upsertNormalized({
+            companyId: data.companyId,
+            acquisitionMessageId: message.id,
+            sanitized: deps.uploadContent,
+            fetchedAt: new Date(),
           })
         }
 
@@ -243,6 +311,19 @@ export async function registerIncomingMessage(
           },
         })
         draftId = draft.id
+      }
+
+      if (data.source === "UPLOAD" && uploadActorId) {
+        await tx.historyLog.create({
+          data: {
+            companyId: data.companyId,
+            actorId: uploadActorId,
+            action: "CREATED",
+            entityType: "AcquisitionEmlImport",
+            entityId: message.id,
+            detail: message.status,
+          },
+        })
       }
 
       return {

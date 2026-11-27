@@ -1926,3 +1926,22 @@ describe("PLAN-ACQ-AGENTS-LOT-3E CORRECTION-1", () => {
     assert.equal(payloadOnly.length, 1)
   })
 })
+
+it("ignore un candidat UPLOAD même si la sélection le transmet", async () => {
+  const result = await runAcquisitionAutoDecisionWorker({
+    db: {
+      worksiteImportDraft: {
+        findFirst: async () => ({ status: "PENDING_REVIEW", acquisitionMessage: { source: "UPLOAD" } }),
+      },
+    } as never,
+    selection: { listEligibleCandidates: async () => [{ draftId: "draft-upload", companyId: "co1" }] } as never,
+    isAutoApproveEnabled: () => true,
+    isAutoConvertEnabled: () => true,
+    resolveSystemActor: async () => assert.fail("Aucune décision automatique pour un import"),
+    log: () => {},
+  })
+  assert.equal(result.status, "SUCCESS")
+  assert.equal(result.stats.skipped, 1)
+  assert.equal(result.stats.approved, 0)
+  assert.equal(result.stats.rejected, 0)
+})

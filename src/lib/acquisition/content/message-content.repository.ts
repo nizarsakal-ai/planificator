@@ -37,7 +37,7 @@ export interface UpsertMessageContentInput {
 }
 
 export class AcquisitionMessageContentRepository {
-  constructor(private readonly db: PrismaClient = prisma) {}
+  constructor(private readonly db: Pick<PrismaClient, "acquisitionMessageContent"> = prisma) {}
 
   async findByMessage(
     companyId: string,

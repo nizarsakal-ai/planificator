@@ -289,6 +289,7 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
       acquisitionMessageId: true,
       acquisitionMessage: {
         select: {
+          source: true,
           resolvedPartnerId: true,
           senderDomain: true,
           threadId: true,
@@ -298,6 +299,8 @@ export async function maybeRunAutoDecisionAfterExtraction(input: {
   })
 
   if (!draft || draft.status !== "PENDING_REVIEW") return
+  // Le champ From d’un fichier importé est déclaratif : revue humaine obligatoire.
+  if (draft.acquisitionMessage?.source === "UPLOAD") return
 
   const currentSourceContentHash = await loadCurrentAcquisitionContentHash(
     db,

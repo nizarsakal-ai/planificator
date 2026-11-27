@@ -47,11 +47,11 @@ const rawMetadataSchema = z
 /** Entrée du service d'enregistrement d'un message entrant. */
 export const registerIncomingMessageSchema = z.object({
   companyId: z.string().min(1, "companyId requis"),
-  source: z.enum(["GMAIL"]),
+  source: z.enum(["GMAIL", "UPLOAD"]),
   externalMessageId: z.string().min(1, "Identifiant externe requis").max(255),
   /**
-   * Identité boîte stable (AcquisitionGmailConnection.id).
-   * Défaut "" = legacy mono-boîte.
+   * Identité stable de provenance : boîte Acquisition pour Gmail,
+   * connexion d’intégration pour UPLOAD. La valeur vide reste réservée à Gmail historique.
    */
   sourceMailboxKey: z.string().max(64).default(""),
   /** Gmail thread id (Lot H) — optionnel. */
@@ -66,7 +66,10 @@ export const registerIncomingMessageSchema = z.object({
   receivedAt: z.coerce.date(),
   rawMetadata: rawMetadataSchema.optional(),
   attachments: z.array(acquisitionAttachmentMetadataSchema).max(50).default([]),
-})
+}).refine(
+  (message) => message.source !== "UPLOAD" || message.sourceMailboxKey.trim().length > 0,
+  { path: ["sourceMailboxKey"], message: "Connexion d’import requise" },
+)
 
 export type AcquisitionAttachmentMetadata = z.infer<typeof acquisitionAttachmentMetadataSchema>
 export type RegisterIncomingMessageInput = z.input<typeof registerIncomingMessageSchema>

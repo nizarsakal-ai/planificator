@@ -207,7 +207,7 @@ export async function downloadAcquisitionAttachment(
 ): Promise<AttachmentDownloadResult> {
   const db = deps.db ?? prisma
   const repository = deps.repository ?? acquisitionAttachmentRepository
-  const storage = deps.storage ?? cloudinaryAttachmentStorage
+  const storage: AttachmentStoragePort = deps.storage ?? cloudinaryAttachmentStorage
   const log = deps.log ?? defaultLog
   const now = input.now ?? (() => new Date())
   const random = input.random ?? Math.random
@@ -281,42 +281,60 @@ export async function downloadAcquisitionAttachment(
       log,
     })
 
-  if (!claimed.externalAttachmentId) {
-    await markFail("FAILED", "GMAIL_ATTACHMENT_NOT_FOUND")
-    return failureResult(input.attachmentId, "GMAIL_ATTACHMENT_NOT_FOUND")
-  }
-
-  // Une source injectée (y compris l'ancienne `gmailSource`) ne contourne jamais la résolution :
-  // jamais d'exception ici, donc la pièce réservée n'est jamais laissée en PENDING_DOWNLOAD : boîte d'une autre société
-  // → ARTIFACT_CAPABILITY_UNAVAILABLE (non repris) ; panne de lecture → ARTIFACT_RESOLUTION_FAILED (FAILED + reprise
-  // planifiée). Flag posé : contrôles de capacité en plus.
-  const resolved = await resolveMailArtifactProvider(db, scoped.message, "ARTIFACT_FETCH", {
-    id: claimed.id, externalArtifactId: claimed.externalAttachmentId,
-    filename: claimed.filename || undefined, mimeType: claimed.mimeType || undefined,
-    sizeBytes: claimed.sizeBytes,
-  }, { env: deps.env, log: deps.artifactLog })
-  if (!resolved.ok) {
-    await markFail("FAILED", resolved.code)
-    log("DOWNLOAD_FAILED", { attachmentId: input.attachmentId, errorCode: resolved.code })
-    return failureResult(input.attachmentId, resolved.code)
-  }
-
+  const isUpload = scoped.message.source === "UPLOAD"
   let binary: Buffer
-  try {
-    const source = deps.source ?? deps.gmailSource ?? resolved.provider.attachment
-    const artifact = resolved.artifact
-    const fetched = await source.fetchAttachment({
-      companyId: input.companyId,
-      externalMessageId: scoped.message.externalMessageId,
-      externalAttachmentId: artifact?.externalArtifactId ?? claimed.externalAttachmentId,
-      connectionId: resolved.connectionId,
-    })
-    binary = fetched.data
-  } catch (error) {
-    const code = safeErrorCode(error, "GMAIL_ATTACHMENT_NOT_FOUND")
-    await markFail("FAILED", code)
-    log("DOWNLOAD_FAILED", { attachmentId: input.attachmentId, errorCode: code })
-    return failureResult(input.attachmentId, code)
+  if (isUpload) {
+    try {
+      const staged = await db.acquisitionAttachmentUploadSource.findUnique({
+        where: { attachmentId_companyId: { attachmentId: claimed.id, companyId: input.companyId } },
+        select: { bytes: true },
+      })
+      if (!staged) {
+        await markFail("FAILED", "ARTIFACT_CAPABILITY_UNAVAILABLE")
+        return failureResult(input.attachmentId, "ARTIFACT_CAPABILITY_UNAVAILABLE")
+      }
+      binary = Buffer.from(staged.bytes)
+    } catch {
+      await markFail("FAILED", "ARTIFACT_RESOLUTION_FAILED")
+      return failureResult(input.attachmentId, "ARTIFACT_RESOLUTION_FAILED")
+    }
+  } else {
+    if (!claimed.externalAttachmentId) {
+      await markFail("FAILED", "GMAIL_ATTACHMENT_NOT_FOUND")
+      return failureResult(input.attachmentId, "GMAIL_ATTACHMENT_NOT_FOUND")
+    }
+
+    // Une source injectée (y compris l'ancienne `gmailSource`) ne contourne jamais la résolution :
+    // jamais d'exception ici, donc la pièce réservée n'est jamais laissée en PENDING_DOWNLOAD : boîte d'une autre société
+    // → ARTIFACT_CAPABILITY_UNAVAILABLE (non repris) ; panne de lecture → ARTIFACT_RESOLUTION_FAILED (FAILED + reprise
+    // planifiée). Flag posé : contrôles de capacité en plus.
+    const resolved = await resolveMailArtifactProvider(db, scoped.message, "ARTIFACT_FETCH", {
+      id: claimed.id, externalArtifactId: claimed.externalAttachmentId,
+      filename: claimed.filename || undefined, mimeType: claimed.mimeType || undefined,
+      sizeBytes: claimed.sizeBytes,
+    }, { env: deps.env, log: deps.artifactLog })
+    if (!resolved.ok) {
+      await markFail("FAILED", resolved.code)
+      log("DOWNLOAD_FAILED", { attachmentId: input.attachmentId, errorCode: resolved.code })
+      return failureResult(input.attachmentId, resolved.code)
+    }
+
+    try {
+      const source = deps.source ?? deps.gmailSource ?? resolved.provider.attachment
+      const artifact = resolved.artifact
+      const fetched = await source.fetchAttachment({
+        companyId: input.companyId,
+        externalMessageId: scoped.message.externalMessageId,
+        externalAttachmentId: artifact?.externalArtifactId ?? claimed.externalAttachmentId,
+        connectionId: resolved.connectionId,
+      })
+      binary = fetched.data
+    } catch (error) {
+      const code = safeErrorCode(error, "GMAIL_ATTACHMENT_NOT_FOUND")
+      await markFail("FAILED", code)
+      log("DOWNLOAD_FAILED", { attachmentId: input.attachmentId, errorCode: code })
+      return failureResult(input.attachmentId, code)
+    }
   }
 
   const maxBytes = getAttachmentMaxBytes()
@@ -341,23 +359,33 @@ export async function downloadAcquisitionAttachment(
   const ext = extensionFromFilename(claimed.filename)
   const generatedFilename = generateStorageFilename(claimed.id, sha256, ext)
 
+  const storageContext = {
+    companyId: input.companyId,
+    acquisitionMessageId: scoped.message.id,
+    attachmentId: claimed.id,
+    mimeType: validation.resolvedMimeType,
+    generatedFilename,
+  }
   let stored: AttachmentStorageResult
+  let verifiedExisting = false
   try {
-    stored = await storage.store({
-      companyId: input.companyId,
-      acquisitionMessageId: scoped.message.id,
-      attachmentId: claimed.id,
-      buffer: binary,
-      mimeType: validation.resolvedMimeType,
-      generatedFilename,
-    })
+    stored = await storage.store({ ...storageContext, buffer: binary })
+    if (isUpload && !stored.created && storage.verifyExisting) {
+      const verified = await storage.verifyExisting({
+        ...storageContext, storagePublicId: stored.storagePublicId, sha256, sizeBytes: binary.length,
+      })
+      if (verified?.storageUrl) {
+        verifiedExisting = true
+        stored = { ...stored, storageUrl: verified.storageUrl }
+      }
+    }
   } catch {
     await markFail("FAILED", "ATTACHMENT_STORAGE_FAILED")
     log("STORAGE_FAILED", { attachmentId: input.attachmentId })
     return failureResult(input.attachmentId, "ATTACHMENT_STORAGE_FAILED")
   }
 
-  if (!stored.created) {
+  if (!stored.created && !verifiedExisting) {
     await markFail("FAILED", "ATTACHMENT_STORAGE_COLLISION")
     log("STORAGE_COLLISION", { attachmentId: input.attachmentId })
     return failureResult(input.attachmentId, "ATTACHMENT_STORAGE_COLLISION")
@@ -377,6 +405,10 @@ export async function downloadAcquisitionAttachment(
     storedAt,
     sizeBytes: binary.length,
     mimeType: validation.resolvedMimeType,
+    ...(isUpload ? { releaseUploadSource: true } : {}),
+  }).catch((error: unknown) => {
+    if (!isUpload) throw error
+    return { status: "FAILED" } as const
   })
 
   if (persist.status === "STORED") {
@@ -395,13 +427,35 @@ export async function downloadAcquisitionAttachment(
   }
 
   if (persist.status === "ALREADY_STORED") {
-    await compensateCloudinaryUpload(storage, stored, log, input.attachmentId)
+    if (!isUpload) {
+      await compensateCloudinaryUpload(storage, stored, log, input.attachmentId)
+    }
     return alreadyStoredResult(
       persist.attachment.id,
       persist.attachment.sha256!,
       persist.attachment.storagePublicId!,
       persist.attachment.storedAt
     )
+  }
+
+  if (isUpload) {
+    // Un échec de retour peut suivre un commit réussi. L’objet privé reste disponible
+    // pour la réconciliation et n’est jamais supprimé par cette branche.
+    let latest
+    try {
+      latest = await repository.findAttachmentWithMessage(input.companyId, input.attachmentId)
+    } catch {
+      log("UPLOAD_STORAGE_OUTCOME_UNKNOWN", { attachmentId: input.attachmentId })
+      return failureResult(input.attachmentId, "ATTACHMENT_STORAGE_FAILED")
+    }
+    const attachment = latest?.attachment
+    if (attachment?.status === "STORED" && attachment.storagePublicId === stored.storagePublicId && attachment.sha256 === sha256) {
+      return alreadyStoredResult(attachment.id, sha256, stored.storagePublicId, attachment.storedAt)
+    }
+    if (attachment?.status === "PENDING_DOWNLOAD") {
+      await markFail("FAILED", "ATTACHMENT_STORAGE_FAILED")
+    }
+    return failureResult(input.attachmentId, "ATTACHMENT_STORAGE_FAILED")
   }
 
   await compensateCloudinaryUpload(storage, stored, log, input.attachmentId)

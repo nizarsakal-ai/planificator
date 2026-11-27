@@ -343,3 +343,52 @@ describe("CloudinaryAttachmentStorageAdapter", () => {
     await assert.doesNotReject(async () => adapter.destroy({ storagePublicId: "missing-id" }))
   })
 })
+
+describe("Vérification Cloudinary LOT-5", () => {
+  const adapter = new CloudinaryAttachmentStorageAdapter()
+  const publicId = "planificator/co/acquisition/msg/att/att-abc"
+  const input = {
+    companyId: "co", acquisitionMessageId: "msg", attachmentId: "att",
+    generatedFilename: "att-abc.txt", mimeType: "text/plain",
+    storagePublicId: publicId, sizeBytes: 3,
+    sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+  }
+
+  it("refuse l’objet historique hors du chemin applicatif avant tout appel", async (t) => {
+    const resource = t.mock.method(cloudinary.api, "resource", async () => { throw new Error("appel interdit") })
+    const result = await adapter.verifyExisting({
+      ...input,
+      storagePublicId: "lot5-recette/verify-e990929f-9ef8-489d-abcb-9d8f945324c4.txt",
+    })
+    assert.equal(result, null)
+    assert.equal(resource.mock.callCount(), 0)
+  })
+
+  it("vérifie les octets en demandant identity et refuse gzip ou une empreinte différente", async (t) => {
+    const url = "https://api.cloudinary.com/v1_1/demo/raw/download"
+    const storageUrl = `https://res.cloudinary.com/demo/raw/authenticated/v1/${publicId}`
+    t.mock.method(cloudinary, "config", () => ({ cloud_name: "demo" }))
+    const resource = t.mock.method(cloudinary.api, "resource", async (_id: string, _options: object) => ({
+      public_id: publicId, resource_type: "raw", type: "authenticated",
+      bytes: 3, version: 1, secure_url: "https://invalid.example/url-non-utilisee",
+    }))
+    const sign = t.mock.method(cloudinary.utils, "private_download_url", (_id: string) => url)
+    let encoding = "identity"
+    let body = "abc"
+    const read = t.mock.method(globalThis, "fetch", async (_url: string, _options: { headers?: Record<string, string>; redirect?: string }) => {
+      const response = new Response(body, { headers: { "Content-Encoding": encoding } })
+      Object.defineProperty(response, "url", { value: url })
+      return response
+    })
+    assert.deepEqual(await adapter.verifyExisting(input), { storageUrl })
+    assert.equal(resource.mock.calls[0].arguments[0], publicId)
+    assert.equal(sign.mock.calls[0].arguments[0], publicId)
+    assert.equal(new Headers(read.mock.calls[0].arguments[1]?.headers).get("Accept-Encoding"), "identity")
+    assert.equal(read.mock.calls[0].arguments[1]?.redirect, "error")
+    encoding = "gzip"
+    assert.equal(await adapter.verifyExisting(input), null)
+    encoding = "identity"
+    body = "abd"
+    assert.equal(await adapter.verifyExisting(input), null)
+  })
+})
