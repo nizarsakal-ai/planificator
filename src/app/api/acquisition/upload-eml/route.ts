@@ -6,5 +6,8 @@ export const runtime = "nodejs"
 
 export async function POST(request: Request): Promise<Response> {
   const session = await auth()
-  return handleAdminEmlUpload(request, session?.user ?? null, createUploadEmlAdmission())
+  const admission = createUploadEmlAdmission(undefined, process.env, {
+    allowAttachments: process.env.INTEGRATION_EML_UPLOAD_ATTACHMENTS_ENABLED === "true",
+  })
+  return handleAdminEmlUpload(request, session?.user ?? null, admission)
 }
