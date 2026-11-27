@@ -537,6 +537,13 @@ export function createPrismaAutoDecisionSelectionPort(
               ORDER BY e."updatedAt" ASC, e.id ASC
             ) AS tenant_rank
           FROM eligible e
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM "worksite_import_drafts" d
+            JOIN "acquisition_messages" m
+              ON m.id = d."acquisitionMessageId" AND m."companyId" = d."companyId"
+            WHERE d.id = e.id AND d."companyId" = e."companyId" AND m.source = 'UPLOAD'
+          )
         )
         SELECT
           ranked.id,

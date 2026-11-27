@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { randomUUID } from "node:crypto"
 import { test } from "node:test"
 import { PrismaClient } from "@prisma/client"
+import { createPrismaAutoDecisionSelectionPort } from "@/lib/acquisition/orchestrator/acquisition-auto-decision.worker"
 import { createUploadEmlAdmission } from "@/lib/acquisition/admission/upload-eml-consultations-admission"
 import { handleAdminEmlUpload } from "@/lib/integration/connectors/upload-eml/handle-admin-eml-upload"
 import { InboundSourceIdentityTx } from "@/lib/integration/persistence/inbound-source-identity.tx"
@@ -113,6 +114,55 @@ test("le fichier fictif traverse le normaliseur, le Router et l’admission Post
     assert.ok(audit[0].createdAt instanceof Date)
     const content = await db.acquisitionMessageContent.findFirstOrThrow({ where: { companyId } })
     assert.equal(content.normalizedText, "Texte")
+  } finally {
+    await db.$disconnect()
+  }
+})
+
+test("cinq imports EML plus anciens ne prennent aucune place au brouillon Gmail éligible", async () => {
+  const resolved = resolveIntegrationTestDatabaseUrl()
+  assert.ok(resolved.ok)
+  assertSafeDisposableTestDatabaseUrl(resolved.url)
+  const db = new PrismaClient({ datasources: { db: { url: resolved.url } } })
+
+  try {
+    const { id: companyId } = await db.company.create({
+      data: { name: "Sélection EML fictive", slug: `eml-ranking-${randomUUID()}` },
+    })
+    const sources = ["UPLOAD", "UPLOAD", "UPLOAD", "UPLOAD", "UPLOAD", "GMAIL"] as const
+    let gmailDraftId: string | undefined
+    for (const [index, source] of sources.entries()) {
+      const date = new Date(Date.UTC(2026, 0, index + 1))
+      const message = await db.acquisitionMessage.create({
+        data: {
+          companyId, source, externalMessageId: `message-${index}`,
+          senderEmail: "devis@example.invalid", senderDomain: "example.invalid",
+          subject: "Message fictif", receivedAt: date, status: "DRAFT_CREATED",
+        },
+      })
+      const draft = await db.worksiteImportDraft.create({
+        data: {
+          companyId, acquisitionMessageId: message.id, status: "PENDING_REVIEW",
+          updatedAt: date, version: 1, contentHashAtExtraction: "empreinte-fictive",
+          extractionSchemaVersion: "2",
+        },
+      })
+      await db.acquisitionDecisionJournal.create({
+        data: {
+          companyId, draftId: draft.id, decisionCode: "VALIDATION_PASS",
+          reasons: [], scores: {}, idempotencyKey: `validation-${draft.id}`,
+          metadata: { contentHash: "empreinte-fictive", extractionSchemaVersion: "2", draftVersion: 1 },
+        },
+      })
+      if (source === "GMAIL") gmailDraftId = draft.id
+    }
+    assert.ok(gmailDraftId)
+    const selection = createPrismaAutoDecisionSelectionPort(db)
+    const candidates = await selection.listEligibleCandidates({ limit: 25, now: new Date(), maxPerCompany: 5 })
+    assert.deepEqual(
+      candidates.filter((candidate) => candidate.companyId === companyId).map((candidate) => candidate.draftId),
+      [gmailDraftId],
+    )
   } finally {
     await db.$disconnect()
   }
