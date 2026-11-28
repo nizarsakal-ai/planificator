@@ -30,12 +30,14 @@ let state
 beforeEach(() => {
   Object.assign(process.env, {
     VERCEL_ENV: "production",
+    VERCEL_PROJECT_ID: "prj_06FRa8dOdmHA8dD4QSIAqh0pTE8y",
     IMPRIMERIE_PRODUCTION_ENABLED: "true",
     IMPRIMERIE_MENU_COMPANY_ID: companyId,
     IMPRIMERIE_COMPANY_ID: companyId,
     IMPRIMERIE_WORKSITE_ID: worksiteId,
     IMPRIMERIE_QUOTE_NUMBER: quoteNumber,
   })
+  delete process.env.IMPRIMERIE_RECETTE_ENABLED
   delete process.env.IMPRIMERIE_INVOICE_READ_SCOPE
   delete process.env.VERCEL_OIDC_TOKEN
   state = {
@@ -178,10 +180,35 @@ test("une autre société, un rôle salarié ou une Preview ne peuvent pas ouvri
     await assert.rejects(render, /Page introuvable/)
   }
   state.user = user
+  process.env.VERCEL_PROJECT_ID = "prj_autre"
+  await assert.rejects(render, /Page introuvable/)
+  process.env.VERCEL_PROJECT_ID = "prj_06FRa8dOdmHA8dD4QSIAqh0pTE8y"
   process.env.VERCEL_ENV = "preview"
   await assert.rejects(render, /Page introuvable/)
   assert.equal(state.requests.length, 0)
   assert.equal(state.worksiteReads.length, 0)
+})
+
+test("le projet de recette lit son propre serveur et garde la facture fermée", async () => {
+  process.env.VERCEL_PROJECT_ID = "prj_CRp6XttdXjBjPMjJMSMbsUp6hwVD"
+  process.env.IMPRIMERIE_RECETTE_ENABLED = "true"
+  delete process.env.IMPRIMERIE_PRODUCTION_ENABLED
+  process.env.IMPRIMERIE_INVOICE_READ_SCOPE = scope
+  const html = await render()
+
+  assertQuoteRendered(html)
+  assert.doesNotMatch(html, /FAC-TEST-01|>Facture<\/dt>/)
+  assert.equal(state.requests.length, 1)
+  const [request] = state.requests
+  assert.equal(request.url, "https://printmanager-pr29-recette.onrender.com/api/integrations/imprimerie/devis/" + quoteNumber)
+  assert.equal(request.headers.get("authorization"), "Bearer identite-fictive")
+  assert.equal(request.headers.has("x-imprimerie-invoice-scope"), false)
+
+  // Sans jeton dans la requête, la recette n'utilise pas celui de l'environnement.
+  state.token = null
+  process.env.VERCEL_OIDC_TOKEN = "identite-environnement"
+  assert.match(await render(), /Le suivi Print Manager est temporairement indisponible/)
+  assert.equal(state.requests.length, 1)
 })
 
 test("une identité serveur absente bloque toute requête même avec le droit facture", async () => {
