@@ -9,6 +9,8 @@ import {
 
 const quote = { number: "DEV-2024-0001", status: "DRAFT" }
 const invoiceRequestScope = encodeURIComponent(JSON.stringify(["societe-test", "chantier-test", quote.number]))
+// La cible est passée explicitement, comme le fait la page : sans elle, le lecteur la déduit de l'environnement Vercel.
+const read = (scope?: string) => readPrintManagerQuote(quote.number, "test-token", scope, "production")
 
 test("le suivi conserve seulement le numéro et le statut de la facture", async (t) => {
   for (const status of Object.keys(INVOICE_STATUS_LABELS)) {
@@ -21,7 +23,7 @@ test("le suivi conserve seulement le numéro et le statut de la facture", async 
           ...quote, invoice: { ...invoice, total: 50, pdfUrl: "hors contrat" },
         }))
       })
-      assert.deepEqual(await readPrintManagerQuote(quote.number, "test-token", invoiceRequestScope), {
+      assert.deepEqual(await read(invoiceRequestScope), {
         state: "ready", quote: { ...quote, invoice },
       })
     })
@@ -33,7 +35,7 @@ test("une facture reçue sans demande explicite est ignorée", async (t) => {
     assert.equal(new Headers(options?.headers).get("X-Imprimerie-Invoice-Scope"), null)
     return Promise.resolve(Response.json({ ...quote, invoice: { number: "FAC-TEST-01", status: "PAID" } }))
   })
-  assert.deepEqual(await readPrintManagerQuote(quote.number, "test-token"), { state: "ready", quote })
+  assert.deepEqual(await read(), { state: "ready", quote })
 })
 
 test("une facture absente ou invalide préserve le suivi du devis", async (t) => {
@@ -47,7 +49,7 @@ test("une facture absente ou invalide préserve le suivi du devis", async (t) =>
     const stub = t.mock.method(globalThis, "fetch", () =>
       Promise.resolve(Response.json({ ...quote, invoice })))
     assert.deepEqual(
-      await readPrintManagerQuote(quote.number, "test-token", invoiceRequestScope),
+      await read(invoiceRequestScope),
       { state: "ready", quote },
     )
     stub.mock.restore()
@@ -56,7 +58,7 @@ test("une facture absente ou invalide préserve le suivi du devis", async (t) =>
 
 test("la réponse d’un autre devis est écartée", async (t) => {
   t.mock.method(globalThis, "fetch", () => Promise.resolve(Response.json({ ...quote, number: "DEV-2024-0002" })))
-  assert.deepEqual(await readPrintManagerQuote(quote.number, "test-token"), { state: "unavailable" })
+  assert.deepEqual(await read(), { state: "unavailable" })
 })
 
 test("le BAT associé expose ses quatre statuts métier en lecture seule", async (t) => {
@@ -69,7 +71,7 @@ test("le BAT associé expose ses quatre statuts métier en lecture seule", async
         assert.equal(options?.cache, "no-store")
         return Promise.resolve(Response.json({ ...quote, bat }))
       })
-      assert.deepEqual(await readPrintManagerQuote(quote.number, "test-token"), {
+      assert.deepEqual(await read(), {
         state: "ready",
         quote: { number: quote.number, status: quote.status, bat },
       })
@@ -81,7 +83,7 @@ test("une réponse sans BAT, ancienne ou incomplète garde le devis accessible",
   for (const value of [null, undefined, { number: "BAT-2024-0001", status: "UNKNOWN" }]) {
     await t.test(value === null ? "aucun BAT rattaché" : value === undefined ? "ancien serveur" : "statut inconnu", async (t) => {
       t.mock.method(globalThis, "fetch", () => Promise.resolve(Response.json({ ...quote, bat: value })))
-      const result = await readPrintManagerQuote(quote.number, "test-token")
+      const result = await read()
       assert.equal(result.state, "ready")
       if (result.state === "ready") {
         assert.equal(result.quote.number, quote.number)
@@ -99,7 +101,7 @@ test("les ordres de fabrication conservent leur numéro et leur statut à côté
   }))
   const payload = productionOrders.map((order) => ({ ...order, internalNotes: "hors périmètre" }))
   t.mock.method(globalThis, "fetch", () => Promise.resolve(Response.json({ ...quote, bat, productionOrders: payload })))
-  assert.deepEqual(await readPrintManagerQuote(quote.number, "test-token"), {
+  assert.deepEqual(await read(), {
     state: "ready",
     quote: {
       number: quote.number,
@@ -121,7 +123,7 @@ test("une fabrication vide est distincte d’un suivi absent ou invalide", async
     await t.test(name, async (t) => {
       const bat = { number: "BAT-2024-0001", status: "APPROVED" }
       t.mock.method(globalThis, "fetch", () => Promise.resolve(Response.json({ ...quote, bat, productionOrders: payload })))
-      const result = await readPrintManagerQuote(quote.number, "test-token")
+      const result = await read()
       assert.equal(result.state, "ready")
       assert.equal(result.quote.number, quote.number)
       assert.deepEqual(result.quote.bat, bat)
@@ -140,10 +142,40 @@ test("seule une date ISO valide d’un ordre livré est affichable", async (t) =
     { number: "OF-05", status: "LIVRE" },
   ]
   t.mock.method(globalThis, "fetch", () => Promise.resolve(Response.json({ ...quote, productionOrders: orders })))
-  const result = await readPrintManagerQuote(quote.number, "test-token")
+  const result = await read()
   assert.equal(result.state, "ready")
   assert.deepEqual(result.quote.productionOrders, [
     orders[0],
     ...orders.slice(1).map((order) => ({ ...order, deliveredAt: null })),
   ])
+})
+
+test("sans cible reconnue ou sans identité, aucune requête ne part", async (t) => {
+  const stub = t.mock.method(globalThis, "fetch", () => Promise.resolve(Response.json(quote)))
+  for (const [token, target] of [
+    ["test-token", undefined],
+    ["test-token", "constructor"],
+    [null, "production"],
+    ["", "recette"],
+  ] as const) {
+    assert.deepEqual(
+      // @ts-expect-error une cible inconnue doit être refusée même si elle contourne le typage
+      await readPrintManagerQuote(quote.number, token, invoiceRequestScope, target),
+      { state: "unavailable" },
+    )
+  }
+  assert.equal(stub.mock.callCount(), 0)
+})
+
+test("la recette interroge son propre serveur et ne demande ni ne conserve la facture", async (t) => {
+  const stub = t.mock.method(globalThis, "fetch", (input: string, options?: RequestInit) => {
+    assert.equal(input, "https://printmanager-pr29-recette.onrender.com/api/integrations/imprimerie/devis/" + quote.number)
+    assert.equal(new Headers(options?.headers).get("X-Imprimerie-Invoice-Scope"), null)
+    return Promise.resolve(Response.json({ ...quote, invoice: { number: "FAC-TEST-01", status: "PAID" } }))
+  })
+  assert.deepEqual(
+    await readPrintManagerQuote(quote.number, "test-token", invoiceRequestScope, "recette"),
+    { state: "ready", quote },
+  )
+  assert.equal(stub.mock.callCount(), 1)
 })
