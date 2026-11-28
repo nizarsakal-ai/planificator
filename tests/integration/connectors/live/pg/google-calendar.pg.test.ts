@@ -251,6 +251,21 @@ describe("synchronisation réelle (lecture seule)", () => {
       assert.equal(google.maxInFlight, 1)
     } finally { google.refreshDelayMs = 0 }
   })
+  it("pool à UNE connexion (Vercel + Neon) : rafraîchissements concurrents sans interblocage", async () => {
+    // Régression : la version précédente tenait une transaction pendant que le coffre en ouvrait d'autres ⇒ délai
+    // d'attente du pool dépassé dès que connection_limit=1.
+    const u = new URL(process.env.DATABASE_URL!)
+    u.searchParams.set("connection_limit", "1"); u.searchParams.set("pool_timeout", "5")
+    const single = new PrismaClient({ datasources: { db: { url: u.toString() } } })
+    const c = (await connection())!
+    try {
+      google.refresh = { status: 200, body: { access_token: AT } }
+      const tokens = await Promise.all([1, 2, 3].map(() => googleAccessTokenForSync(single, A, c.id, { post, secrets, env: ENV })))
+      assert.deepEqual(tokens, [AT, AT, AT], "sérialisés sur la même connexion, aucun délai d'attente du pool")
+      const active = await db.integrationCredentialVersion.findMany({ where: { connectionId: c.id, status: "ACTIVE" } })
+      assert.equal(active.length, 1)
+    } finally { await single.$disconnect() }
+  })
   it("autorisation retirée chez Google (invalid_grant) ⇒ échec AUTH_FAILED journalisé, curseur intact", async () => {
     const before = (await svc.readConnectorSetting(db, A, "google_calendar"))!.watermark
     google.validRefresh.delete(RT2)
